@@ -24,6 +24,10 @@ namespace CSWarfront.Game
             {
                 _vehicleByInstance[instanceId] = vid;
             }
+            else
+            {
+                ModConfig.LogError("CreateVehicle failed for instance " + instanceId);
+            }
         }
 
         public static void UpdateMovementAndCleanup(WarState state)
@@ -37,6 +41,14 @@ namespace CSWarfront.Game
                 if (u.State == UnitState.Dead)
                 {
                     vm.ReleaseVehicle(vid);
+                    toRemove.Add(u.InstanceId);
+                    continue;
+                }
+                // 車両IDはCSにより再利用されうる。自Mod関与外(車両自身のAI等)で
+                // 既に消滅している場合、vidは陳腐化しているため位置を読まずに追跡から外す。
+                if ((vm.m_vehicles.m_buffer[vid].m_flags & Vehicle.Flags.Created) == 0)
+                {
+                    ModConfig.LogError("Stale vehicle id for instance " + u.InstanceId + "; dropping representation");
                     toRemove.Add(u.InstanceId);
                     continue;
                 }
