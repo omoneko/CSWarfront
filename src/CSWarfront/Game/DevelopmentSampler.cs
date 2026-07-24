@@ -4,9 +4,19 @@ using CSWarfront.Core;
 using UnityEngine;
 namespace CSWarfront.Game
 {
-    /// <summary>BuildingManagerから発展度サンプルを作る（経済tickの低頻度でのみ呼ぶ）。</summary>
+    /// <summary>
+    /// BuildingManagerから発展度サンプルを作る（経済tickの低頻度でのみ呼ぶ）。
+    /// スレッド注記: このクラスは OnSimTick の経済tick（MilitaryManager.OnSimTick内）から呼ばれ、
+    /// simスレッド上で実行される。BuildingManager.instance.m_buildings.m_buffer の読み取りは
+    /// simスレッドが所有するデータであり、OnAfterSimulationTick相当のタイミング（sim step後）で
+    /// 読むぶんには安全＝メインスレッド専用の制約（車両生成・描画・UI等のCS API）には該当しない。
+    /// </summary>
     public static class DevelopmentSampler
     {
+        /// <summary>
+        /// sim スレッドから呼ばれる想定（MilitaryManager.OnSimTick の経済tick経由）。
+        /// BuildingManager の建物バッファはsim側が所有するデータのため、simスレッドでの読み取りは安全。
+        /// </summary>
         public static List<DevelopmentSample> Sample()
         {
             var list = new List<DevelopmentSample>();

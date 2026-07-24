@@ -11,8 +11,9 @@ namespace CSWarfront.Game.Serialization
         {
             try
             {
-                MilitaryManager.EnsureInitialized();
-                byte[] bytes = WarStateSerializer.Serialize(MilitaryManager.State);
+                // _stateLock を保持したままシリアライズする（OnMainUpdate等によるState.Units変更中の
+                // 「Collection was modified」例外＝セーブ静かに失敗＝データ消失を防ぐ）。
+                byte[] bytes = MilitaryManager.SerializeLocked();
                 serializableDataManager.SaveData(DataId, bytes);
             }
             catch (System.Exception e) { ModConfig.LogError("Save: " + e); }

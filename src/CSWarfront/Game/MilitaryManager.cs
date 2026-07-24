@@ -43,6 +43,21 @@ namespace CSWarfront.Game
         public static void ReplaceState(WarState s) { lock (_stateLock) { State = s; } }
 
         /// <summary>
+        /// セーブ用：_stateLock を保持したまま WarState をシリアライズする。
+        /// OnMainUpdate/OnSimTick が State.Units 等を書き換えている最中の
+        /// 「Collection was modified」例外（＝セーブ静かに失敗＝データ消失）を防ぐ。
+        /// 呼び出し側（OnSaveData）は _stateLock を保持していないこと（再入不可のため）。
+        /// </summary>
+        public static byte[] SerializeLocked()
+        {
+            lock (_stateLock)
+            {
+                if (State == null) EnsureInitialized();
+                return CSWarfront.Core.WarStateSerializer.Serialize(State);
+            }
+        }
+
+        /// <summary>
         /// セーブデータからの復元専用エントリ。State差し替えと、生存ユニットの表現（車両）再生成を
         /// 同一ロック内で行う。これにより ReplaceState 直後に別スレッド（sim/main tick）が
         /// 「State はあるが表現がまだ無い」中間状態を観測することを防ぐ。

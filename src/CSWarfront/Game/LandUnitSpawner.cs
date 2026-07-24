@@ -49,6 +49,10 @@ namespace CSWarfront.Game
                 if ((vm.m_vehicles.m_buffer[vid].m_flags & Vehicle.Flags.Created) == 0)
                 {
                     ModConfig.LogError("Stale vehicle id for instance " + u.InstanceId + "; dropping representation");
+                    // 表現(車両)を失ったユニットをDeadにしない場合、姿を消したまま戦闘/占領計算に
+                    // 永久に関与し続ける「ゴースト」になる。simの死亡掃除(State.Units.RemoveAll)が
+                    // 拾えるようここでStateをDeadにする（本メソッドは_stateLock内で呼ばれるため安全）。
+                    u.State = UnitState.Dead;
                     toRemove.Add(u.InstanceId);
                     continue;
                 }
