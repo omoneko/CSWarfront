@@ -19,6 +19,14 @@ namespace CSWarfront.Game
         private const float EconomyIntervalSeconds = 5f;   // 経済tick間隔
         private const float IncomeRate = 0.01f;
 
+        /// <summary>trueならセーブから復元済み＝実建物は既にCSが復元済みのため新規配置しない（Task16）。</summary>
+        public static bool LoadedFromSave = false;
+        // 新規ゲームでの基地実建物配置が完了したか（全基地成功で true。以後このセッションでは再実行しない）。
+        private static bool _baseBuildingsPlaced;
+        // State.Bases のインデックスごとの配置済みフラグ。BuildingManager未準備等での失敗時、
+        // 次フレームで未配置分のみ再試行するために保持する。
+        private static bool[] _basePlacementDone;
+
         // sim/mainスレッド間で SpawnQueue と State(Units/Bases/faction) の同時アクセスを防ぐ粗粒度ロック。
         // MVP規模（数十ユニット）では単一ロックで十分。Task12でCS API呼び出し（LandUnitSpawner.Spawn等）が
         // 重くなり競合が問題になる場合は、ロック内では値の受け渡しのみに留め、重い処理をロック外に出すこと。
@@ -70,6 +78,9 @@ namespace CSWarfront.Game
             lock (_stateLock)
             {
                 State = restored;
+                // セーブから復元＝実建物はCSが既に復元済み（BaseIdはstable buildingId）。新規配置は行わない。
+                LoadedFromSave = true;
+                _baseBuildingsPlaced = true;
                 foreach (var u in restored.Units)
                 {
                     if (u.State == UnitState.Dead) continue;
@@ -134,6 +145,12 @@ namespace CSWarfront.Game
             if (State == null) return;
             lock (_stateLock)
             {
+                // 新規ゲームの初回のみ：論理基地の座標へ実建物を配置し、BaseId/HomeBaseIdを
+                // 実建物IDへ紐付ける（可視化 Task16）。BuildingManager未準備時は失敗するため、
+                // 全基地成功するまで毎フレーム再試行する。sim/main両方が同一ロックで直列化される
+                // ため、紐付け中に BaseCombatStep/Occupation（simスレッド）が中間状態を読むことはない。
+                if (!LoadedFromSave && !_baseBuildingsPlaced) PlaceBaseBuildingsOnce();
+
                 // まずキューをローカルへ排出（sim側のEnqueueと競合しないようロック内で完結させる）。
                 List<CompletedUnit> toSpawn = null;
                 if (SpawnQueue.Count > 0)
@@ -159,6 +176,44 @@ namespace CSWarfront.Game
                 // 移動更新・撃破表現の撤去（State.Units を読むためロック内で実行）。
                 LandUnitSpawner.UpdateMovementAndCleanup(State);
             }
+        }
+
+        /// <summary>
+        /// 新規ゲームの初回のみ実行：各 MilitaryBase の論理座標へ実建物を配置し、
+        /// 成功した基地について BaseId を実建物IDへ差し替え、旧IDを参照していた
+        /// Faction.HomeBaseId も新IDへ更新する（呼び出し元が _stateLock 保持済み）。
+        /// 一部の基地でBuildingManager等が未準備なら _baseBuildingsPlaced を立てず、
+        /// 未配置分だけ次フレームで再試行する。
+        /// </summary>
+        private static void PlaceBaseBuildingsOnce()
+        {
+            if (_basePlacementDone == null || _basePlacementDone.Length != State.Bases.Count)
+                _basePlacementDone = new bool[State.Bases.Count];
+
+            bool allDone = true;
+            for (int i = 0; i < State.Bases.Count; i++)
+            {
+                if (_basePlacementDone[i]) continue;
+
+                MilitaryBase b = State.Bases[i];
+                ushort newId;
+                if (BaseBuildingPlacer.TryPlace(b.Position, out newId))
+                {
+                    ushort oldId = b.BaseId;
+                    b.BaseId = newId;
+
+                    foreach (var f in State.Factions)
+                        if (f.HomeBaseId.HasValue && f.HomeBaseId.Value == oldId) f.HomeBaseId = newId;
+
+                    _basePlacementDone[i] = true;
+                }
+                else
+                {
+                    allDone = false; // 未準備（BuildingManager等）。次フレームで再試行。
+                }
+            }
+
+            if (allDone) _baseBuildingsPlaced = true;
         }
 
         internal static readonly Queue<CompletedUnit> SpawnQueue = new Queue<CompletedUnit>();
