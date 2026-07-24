@@ -1,5 +1,19 @@
+using System.Collections.Generic;
 namespace CSWarfront.Core
 {
-    // Task 6 で中身を実装する。ここでは WarState.Bases の要素型として先行定義。
-    public partial class MilitaryBase { }
+    public partial class MilitaryBase
+    {
+        public ushort BaseId;
+        public BaseType Type;
+        public byte? OwnerFactionId;
+        public WorldPos Position;
+        public float InfluenceRadius = 500f;
+        public bool IsHeadquarters;
+        public float MaxHP = 500f;
+        public float CurrentHP = 500f;
+        public List<ProductionOrder> Queue = new List<ProductionOrder>();
+
+        public MilitaryBase(ushort baseId, BaseType type, WorldPos pos)
+        { BaseId = baseId; Type = type; Position = pos; }
+    }
 }
