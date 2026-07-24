@@ -71,6 +71,16 @@ namespace CSWarfront.Game
             foreach (var id in toRemove) _vehicleByInstance.Remove(id);
         }
 
+        /// <summary>
+        /// レベルアンロード時にインスタンス→車両IDの対応表をクリアする（Task16レビューImportant）。
+        /// レベルが破棄されればCS側の車両も道連れに消えるため、ここでReleaseVehicleは呼ばない
+        /// （既に無効なvidに対して呼ぶと不正な操作になりうる）。単にマップを空にするだけでよい。
+        /// </summary>
+        public static void ResetAll()
+        {
+            _vehicleByInstance.Clear();
+        }
+
         private static VehicleInfo FindDefaultLandVehicle()
         {
             // MVP: PrefabCollection から適当な地上車両を1つ。実装時にゲーム内に存在する確実な名前へ調整する。

@@ -217,5 +217,27 @@ namespace CSWarfront.Game
         }
 
         internal static readonly Queue<CompletedUnit> SpawnQueue = new Queue<CompletedUnit>();
+
+        /// <summary>
+        /// レベルアンロード時（メインメニューへ戻る等）に全セッション状態を初期化する（Task16レビューImportant）。
+        /// これが無いと、セーブから復元したセッション（LoadedFromSave=true）の後に同一プロセス内で
+        /// 新規ゲームを開始した場合、OnLoadDataがバイト無しで早期returnするためLoadedFromSaveがtrueのまま
+        /// 残り、新規ゲームの基地実建物が永久に配置されない（不可視）。
+        /// 呼び出し元（WarfrontLoadingExtension.OnLevelUnloading）はOnSimTick/OnMainUpdateの外側
+        /// （CSのロードライフサイクル）で呼ばれるため、_stateLock の再入は発生しない。
+        /// </summary>
+        public static void Reset()
+        {
+            lock (_stateLock)
+            {
+                State = null;
+                LoadedFromSave = false;
+                _baseBuildingsPlaced = false;
+                _basePlacementDone = null;
+                SpawnQueue.Clear();
+                _economyAccum = 0f;
+                LandUnitSpawner.ResetAll();
+            }
+        }
     }
 }
