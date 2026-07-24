@@ -56,14 +56,17 @@ namespace CSWarfront.Game
                     toRemove.Add(u.InstanceId);
                     continue;
                 }
-                // 位置をCoreへ反映
-                Vector3 p = vm.m_vehicles.m_buffer[vid].GetLastFramePosition();
-                u.Position = new WorldPos(p.x, p.y, p.z);
-                // 誘導は MVP 簡略：目標方向へ直接テレポート漸進（本格パスファインディングは後日）
-                if (u.OrderTargetPos.HasValue && u.State == UnitState.Moving)
-                {
-                    // NOTE: MVPでは車両AIの目的地設定に置換予定。ここでは位置補間で前進を可視化。
-                }
+                // Task15: Core（MovementStep）がu.Positionを論理的に所有・前進させるようになったため、
+                // 「車両→Position」の読み取りから「Position→車両」の書き込みへ反転する（視覚追従）。
+                // NOTE(視覚ジッター注意): CS車両の自前AI/物理（VehicleAI.SimulationStep等）が
+                // 毎tick自身の位置・速度を再計算し得るため、ここでの直接上書きと競合してカクつく
+                // （teleport風のジッター）可能性がある。現時点ではベストエフォートとし、
+                // 論理ループ（Core）はこの視覚同期の成否に関わらず正しく回り続ける。
+                Vector3 p = ToVec(u.Position);
+                vm.m_vehicles.m_buffer[vid].m_frame0.m_position = p;
+                vm.m_vehicles.m_buffer[vid].m_frame1.m_position = p;
+                vm.m_vehicles.m_buffer[vid].m_frame2.m_position = p;
+                vm.m_vehicles.m_buffer[vid].m_frame3.m_position = p;
             }
             foreach (var id in toRemove) _vehicleByInstance.Remove(id);
         }

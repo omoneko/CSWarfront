@@ -92,13 +92,17 @@ namespace CSWarfront.Game
 
             lock (_stateLock)
             {
-                // 生産 → 完成分をスポーン要求へ
+                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分をスポーン要求へ
+                ProductionPlanning.Advance(State);
                 var completed = ProductionStep.Advance(State, dt);
                 foreach (var c in completed) SpawnQueue.Enqueue(c);
 
                 // AI進軍命令（非プレイヤー勢力）
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id);
+
+                // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進）
+                MovementStep.Advance(State, dt);
 
                 // 戦闘（ユニット同士＋基地攻撃）→ 占領
                 CombatStep.Advance(State, dt);
