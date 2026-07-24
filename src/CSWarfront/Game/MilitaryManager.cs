@@ -36,10 +36,38 @@ namespace CSWarfront.Game
             state.Factions.Add(new Faction(0, "Red"));
             state.Factions.Add(new Faction(1, "Blue"));
             state.Relations.Set(0, 1, Relation.Hostile);
+            BaseBuildingBinder.SeedTwoBaseScenario(state);
             State = state;
         }
 
-        public static void ReplaceState(WarState s) { State = s; }
+        public static void ReplaceState(WarState s) { lock (_stateLock) { State = s; } }
+
+        /// <summary>
+        /// セーブデータからの復元専用エントリ。State差し替えと、生存ユニットの表現（車両）再生成を
+        /// 同一ロック内で行う。これにより ReplaceState 直後に別スレッド（sim/main tick）が
+        /// 「State はあるが表現がまだ無い」中間状態を観測することを防ぐ。
+        /// 表現再生成（LandUnitSpawner.Spawn＝CS車両API呼び出し）はMVP規模の数十体想定であり、
+        /// OnMainUpdate 同様ロック内実行を許容する（重くなる場合は値の受け渡しのみロック内に残し、
+        /// 実処理をロック外に出すこと）。
+        /// </summary>
+        public static void LoadAndRebuild(WarState restored)
+        {
+            lock (_stateLock)
+            {
+                State = restored;
+                foreach (var u in restored.Units)
+                {
+                    if (u.State == UnitState.Dead) continue;
+                    LandUnitSpawner.Spawn(u.InstanceId, new CompletedUnit
+                    {
+                        BaseId = 0,
+                        FactionId = u.FactionId,
+                        TypeKey = u.TypeKey,
+                        SpawnPos = u.Position
+                    });
+                }
+            }
+        }
 
         /// <summary>simスレッド：判断ロジックを回す。</summary>
         public static void OnSimTick()
