@@ -98,6 +98,14 @@ namespace CSWarfront.Game
                 if (_pendingReleased.Count > 0) { released = new List<ushort>(_pendingReleased); _pendingReleased.Clear(); }
             }
 
+            // デバッグ計装（一時的）: 基地登録が一度も走らない不具合の原因切り分けのため、
+            // drain 結果があれば件数をログする。恒久ログにはしない想定。
+            if (created != null || released != null)
+            {
+                ModConfig.Log("BasePlacementWatcher: ProcessPending: drained created=" +
+                    (created != null ? created.Count : 0) + " released=" + (released != null ? released.Count : 0));
+            }
+
             // 解放を先に処理する（重要）: CSは建物IDを再利用するため、プレイヤーが解体→同じIDで
             // 再建築した場合、両イベントが同一バッチに入りうる。作成を先に処理すると、まだ残っている
             // 古い基地との重複判定で新しい基地の登録がスキップされ、その直後に古い基地が削除されて
@@ -108,20 +116,63 @@ namespace CSWarfront.Game
 
         private static void ProcessCreated(WarState state, List<ushort> ids)
         {
-            if (!WarfrontBasePrefab.IsRegistered) return; // マッチ対象のプレハブが無ければ何もできない
+            // デバッグ計装（一時的）: 早期returnも含め、なぜ基地が登録されないかを追えるようにする。
+            if (!WarfrontBasePrefab.IsRegistered) // マッチ対象のプレハブが無ければ何もできない
+            {
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: WarfrontBasePrefab.IsRegistered=False; skipping " + ids.Count + " id(s)");
+                return;
+            }
 
-            if (!Singleton<BuildingManager>.exists) return;
+            if (!Singleton<BuildingManager>.exists)
+            {
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: BuildingManager does not exist; skipping " + ids.Count + " id(s)");
+                return;
+            }
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
 
             foreach (ushort id in ids)
             {
-                if (id >= buf.Length) continue;
-                Building b = buf[id];
-                if ((b.m_flags & Building.Flags.Created) == 0) continue;
-                if (b.Info == null) continue;
-                if (!ReferenceEquals(b.Info, WarfrontBasePrefab.Prefab)) continue; // 自MODの基地建物以外は無視
+                if (id >= buf.Length)
+                {
+                    ModConfig.Log("BasePlacementWatcher: id=" + id + " out of building buffer range (len=" + buf.Length + ") -> skip");
+                    continue;
+                }
 
-                if (FindBase(state, id) != null) continue; // 冪等: セーブロード直後や重複イベント対策
+                Building b = buf[id];
+                bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
+                string infoName = b.Info != null ? b.Info.name : null;
+                string expected = WarfrontBasePrefab.PrefabName;
+
+                // 参照一致 OR 名前一致: ゲームがプレハブを再インスタンス化した場合、参照比較だけでは
+                // 一致しなくなる可能性があるため両方を見る。
+                bool refMatch = b.Info != null && ReferenceEquals(b.Info, WarfrontBasePrefab.Prefab);
+                bool nameMatch = b.Info != null && b.Info.name == WarfrontBasePrefab.PrefabName;
+                bool match = refMatch || nameMatch;
+                string matchedBy = refMatch ? "reference" : (nameMatch ? "name" : "none");
+
+                if (!flagsCreated)
+                {
+                    ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=False info='" + (infoName ?? "null") +
+                        "' expected='" + expected + "' match=" + match + " -> skip (not created)");
+                    continue;
+                }
+                if (!match)
+                {
+                    ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + (infoName ?? "null") +
+                        "' expected='" + expected + "' match=False -> skip (not our prefab)");
+                    continue;
+                }
+
+                bool existing = FindBase(state, id) != null; // 冪等: セーブロード直後や重複イベント対策
+                if (existing)
+                {
+                    ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + infoName +
+                        "' expected='" + expected + "' match=True(" + matchedBy + ") existing=True -> skip (already registered)");
+                    continue;
+                }
+
+                ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + infoName +
+                    "' expected='" + expected + "' match=True(" + matchedBy + ") existing=False -> REGISTERING");
 
                 Vector3 pos = b.m_position;
                 var mb = new MilitaryBase(id, BaseType.Army, new WorldPos(pos.x, pos.y, pos.z));

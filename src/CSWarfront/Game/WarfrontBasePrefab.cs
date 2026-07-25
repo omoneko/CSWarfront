@@ -32,11 +32,19 @@ namespace CSWarfront.Game
                 BuildingInfo source = FindElectricitySource();
                 if (source == null)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab: no BuildingInfo with m_class.m_service == Electricity found among " +
-                        PrefabCollection<BuildingInfo>.LoadedCount() + " loaded prefabs; aborting registration");
+                    ModConfig.LogError("WarfrontBasePrefab: no suitable PowerPlantAI-family Electricity-service BuildingInfo found among " +
+                        PrefabCollection<BuildingInfo>.LoadedCount() + " loaded prefabs (need m_electricityProduction > 0); aborting registration");
                     return;
                 }
-                ModConfig.Log("WarfrontBasePrefab: source prefab chosen = '" + source.name + "' (category='" + SafeCategory(source) + "')");
+                PowerPlantAI sourceAi = source.m_buildingAI as PowerPlantAI;
+                ModConfig.Log("WarfrontBasePrefab: source prefab chosen = '" + source.name + "' (category='" + SafeCategory(source) + "')" +
+                    " aiType=" + (source.m_buildingAI != null ? source.m_buildingAI.GetType().Name : "null") +
+                    " m_electricityProduction=" + (sourceAi != null ? sourceAi.m_electricityProduction.ToString() : "?") +
+                    " m_resourceType=" + (sourceAi != null ? sourceAi.m_resourceType.ToString() : "?") +
+                    " m_resourceConsumption=" + (sourceAi != null ? sourceAi.m_resourceConsumption.ToString() : "?") +
+                    " m_resourceCapacity=" + (sourceAi != null ? sourceAi.m_resourceCapacity.ToString() : "?") +
+                    " m_isRenewable=" + (sourceAi != null ? sourceAi.m_isRenewable.ToString() : "?") +
+                    " workPlaceCountSum=" + (sourceAi != null ? (sourceAi.m_workPlaceCount0 + sourceAi.m_workPlaceCount1 + sourceAi.m_workPlaceCount2 + sourceAi.m_workPlaceCount3).ToString() : "?"));
 
                 GameObject sourceGo = source.gameObject;
                 if (sourceGo == null)
@@ -71,6 +79,8 @@ namespace CSWarfront.Game
                     return;
                 }
 
+                SanitizeClonedPowerPlantAi(clone);
+
                 PrefabCollection<BuildingInfo>.InitializePrefabs(CollectionName, clone, null);
                 ModConfig.Log("WarfrontBasePrefab: InitializePrefabs('" + CollectionName + "', '" + PrefabName + "', null) done");
 
@@ -88,18 +98,105 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>
+        /// 電力（Electricity）サービスのプレハブから複製元を選ぶ。
+        /// 単に最初に見つかった電力系プレハブを使うと、電柱/変電所など PowerPlantAI の数値フィールドが
+        /// 全てゼロの物を拾ってしまい、ゲーム本体の PowerPlantAI.ProduceGoods 内の整数除算が
+        /// DivideByZeroException でクラッシュする（実機ログで確認済み）。
+        /// そのため BuildingAI が PowerPlantAI 系統かつ m_electricityProduction > 0 の物だけを候補とし、
+        /// 中でも再生可能エネルギー（燃料消費の分岐が無い＝m_resourceType==None）を優先する。
+        /// AI参照の取得は reflection で確認した BuildingInfo.m_buildingAI（public フィールド）を使う
+        /// （GetComponent&lt;BuildingAI&gt;() も動作するはずだが、こちらは既にゲームが解決済みの参照であり
+        /// 追加のコンポーネント探索コストが無いため採用）。
+        /// </summary>
         private static BuildingInfo FindElectricitySource()
         {
+            BuildingInfo bestRenewableNoFuel = null;
+            BuildingInfo bestAnyProducing = null;
+
             int count = PrefabCollection<BuildingInfo>.LoadedCount();
             for (uint i = 0; i < (uint)count; i++)
             {
                 BuildingInfo info = PrefabCollection<BuildingInfo>.GetLoaded(i);
-                if (info != null && info.m_class != null && info.m_class.m_service == ItemClass.Service.Electricity)
+                if (info == null || info.m_class == null || info.m_class.m_service != ItemClass.Service.Electricity) continue;
+
+                PowerPlantAI ai = info.m_buildingAI as PowerPlantAI;
+                if (ai == null) continue; // 電柱・変電所など PowerPlantAI を持たない物は除外
+                if (ai.m_electricityProduction <= 0) continue; // 数値フィールドが全ゼロの物（ゼロ割の元）を除外
+
+                if (bestAnyProducing == null) bestAnyProducing = info;
+
+                if (ai.m_isRenewable && ai.m_resourceType == TransferManager.TransferReason.None)
                 {
-                    return info;
+                    bestRenewableNoFuel = info;
+                    break; // 最優先条件が見つかったので探索終了
                 }
             }
-            return null;
+
+            if (bestRenewableNoFuel != null) return bestRenewableNoFuel;
+            return bestAnyProducing; // 見つからなければ null（呼び出し元が中止する）
+        }
+
+        /// <summary>
+        /// 複製後の AI が PowerPlantAI 系統であれば、ゲーム本体の PowerPlantAI.ProduceGoods 等が
+        /// 除算に使う可能性のあるフィールドを、どれが分母に使われても安全なようゼロ回避値に強制する
+        /// （多層防御: FindElectricitySource で健全な複製元を選んでいても、将来複製元の実装が変わる、
+        /// もしくは複製時にUnity側で値が失われるケースに備える）。
+        /// 意図的にクローンは「小さな発電所」として振る舞う（若干の電力を供給する）— MVPとして許容。
+        /// 専用アセットが用意でき次第、置き換え可能。
+        /// </summary>
+        private static void SanitizeClonedPowerPlantAi(BuildingInfo clone)
+        {
+            PowerPlantAI ai = clone.m_buildingAI as PowerPlantAI;
+            if (ai == null) return;
+
+            TransferManager.TransferReason oldResourceType = ai.m_resourceType;
+            if (ai.m_resourceType != TransferManager.TransferReason.None)
+            {
+                ai.m_resourceType = TransferManager.TransferReason.None;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceType " + oldResourceType + " -> None");
+            }
+
+            if (ai.m_electricityProduction <= 0)
+            {
+                int old = ai.m_electricityProduction;
+                ai.m_electricityProduction = 16;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_electricityProduction " + old + " -> 16");
+            }
+
+            if (ai.m_resourceCapacity <= 0)
+            {
+                int old = ai.m_resourceCapacity;
+                ai.m_resourceCapacity = 1;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceCapacity " + old + " -> 1");
+            }
+
+            if (ai.m_resourceConsumption <= 0)
+            {
+                int old = ai.m_resourceConsumption;
+                ai.m_resourceConsumption = 1;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceConsumption " + old + " -> 1");
+            }
+
+            if (ai.m_workPlaceCount0 + ai.m_workPlaceCount1 + ai.m_workPlaceCount2 + ai.m_workPlaceCount3 == 0)
+            {
+                ai.m_workPlaceCount0 = 1;
+                ModConfig.Log("WarfrontBasePrefab: sanitize workPlaceCountSum 0 -> 1 (m_workPlaceCount0=1)");
+            }
+
+            if (ai.m_constructionCost <= 0)
+            {
+                int old = ai.m_constructionCost;
+                ai.m_constructionCost = 1000;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_constructionCost " + old + " -> 1000");
+            }
+
+            if (ai.m_maintenanceCost <= 0)
+            {
+                int old = ai.m_maintenanceCost;
+                ai.m_maintenanceCost = 100;
+                ModConfig.Log("WarfrontBasePrefab: sanitize m_maintenanceCost " + old + " -> 100");
+            }
         }
 
         private static string SafeCategory(BuildingInfo info)
