@@ -1,19 +1,28 @@
+using System.Collections.Generic;
 using CSWarfront.Core;
+using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
     /// Core の各stepを CS の tick で駆動し、結果を表現へ反映する橋渡し（singleton相当の静的）。
-    /// スレッド境界（重要）:
-    ///  - CSの実体（車両/建物）操作（CreateVehicle/CreateBuilding/ReleaseVehicle、
-    ///    m_vehicles.m_buffer[]への書込等）は必ず sim スレッドで行う。これらの配列・空きスロット
-    ///    割当・空間グリッドは sim スレッドが所有し、CSの内部シミュレーションも sim スレッドで
-    ///    駆動される。メインスレッドから同時に触るとバッファが破壊され、CS自身のsimコードが
-    ///    IndexOutOfRangeException（捕捉されないポップアップ）を投げる。
-    ///  - そのためOnSimTick（sim スレッド、ThreadingExtensionBase.OnAfterSimulationTick経由）を
-    ///    唯一のCS実体操作の場所とし、判断ロジック（Core）とCS API呼び出しを同一tick・同一ロックで
-    ///    直列に実行する。メインスレッド（OnUpdate）はCS実体には一切触れない。
+    /// スレッド境界（重要・Task19で変更）:
+    ///  - ユニットはもうCS車両（VehicleManager）を借用しない。CS車両AI（例: FireTruckAI）は
+    ///    TransferManager等サービス系のディスパッチに組み込まれており、TransferReason.None等の
+    ///    無効な文脈で呼ばれるとオファー簿記が配列範囲外アクセスでクラッシュする（実機ログ確認済み、
+    ///    TransferManager.RemoveIncomingOffer）。Task15でCore（MovementStep）がユニット位置を
+    ///    論理的に所有するようになって以降、CS車両AI（パスファインディング等）は一切使われておらず
+    ///    得るものがない。そのためユニットの見た目は素のUnity GameObject（UnitVisuals）とし、
+    ///    車両プレハブからはメッシュ＋マテリアルのみを借用してAIには一切触れない。
+    ///  - sim スレッド（OnSimTick、ThreadingExtensionBase.OnAfterSimulationTick経由）:
+    ///    Core判断ロジック＋CSバッファ読み取り（基地建物・地形サンプリング等）専用。
+    ///    _stateLock を保持したまま直列に実行する。
+    ///  - メインスレッド（OnMainVisualUpdate、ThreadingExtensionBase.OnUpdate経由）:
+    ///    Unityオブジェクト操作（GameObject生成/移動/破棄）専用。CS実体（Vehicle/Building等）には
+    ///    一切触れない。_stateLock はスナップショット構築中のみ保持し、Unity操作はロック解放後に行う
+    ///    （ロック保持中にUnity APIを呼ぶと最悪ケースでsimスレッドを長時間ブロックしうるため）。
     ///  - 注意: ゲームが一時停止中は OnAfterSimulationTick が発火しないため、基地配置やスポーンは
-    ///    停止解除まで待機する（MVPとして許容）。
+    ///    停止解除まで待機する（MVPとして許容）。一方 OnUpdate は一時停止中も動くため、見た目の同期は
+    ///    停止中も続く（意図的：一時停止中も現在の配置を表示し続けるため）。
     ///  - _stateLock は、save/loadスレッド（SerializeLocked/LoadAndRebuild）とsimスレッド(OnSimTick)
     ///    の State への同時アクセスを防ぐために引き続き必要（net35のため
     ///    System.Collections.Concurrent は使用不可）。
@@ -25,9 +34,8 @@ namespace CSWarfront.Game
         private const float EconomyIntervalSeconds = 5f;   // 経済tick間隔
         private const float IncomeRate = 0.01f;
 
-        // セーブロード直後、生存ユニットの表現（車両）をsimスレッドで再生成する必要があることを示す
-        // フラグ（load/saveスレッドからCS車両APIを呼ばないため、実処理はOnSimTickへ委譲する）。
-        private static bool _respawnLoadedUnits;
+        // OnMainVisualUpdate で使い回すスナップショット（GC回避）。メインスレッド専用アクセス。
+        private static readonly List<UnitVisualState> _visualSnapshot = new List<UnitVisualState>();
 
         // save/loadスレッドとsimスレッド間の State への同時アクセスを防ぐ粗粒度ロック。
         // MVP規模（数十ユニット）では単一ロックで十分。
@@ -81,9 +89,9 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// セーブデータからの復元専用エントリ（save/loadスレッドから呼ばれる）。State差し替えのみを
-        /// 行い、生存ユニットの表現（車両）再生成はここでは行わない（LandUnitSpawner.Spawn＝CS車両API
-        /// はsimスレッド専用のため）。代わりに _respawnLoadedUnits フラグを立て、次回以降の
-        /// OnSimTick で表現を再生成させる。
+        /// 行う。生存ユニットの見た目（GameObject）は次回以降の OnMainVisualUpdate が
+        /// State.Units をスナップショットして UnitVisuals.Sync に渡すことで自動的に再生成される
+        /// （宣言的reconcileのため、respawn用の特別なフラグ・処理は不要＝Task19で削除）。
         /// </summary>
         public static void LoadAndRebuild(WarState restored)
         {
@@ -93,19 +101,14 @@ namespace CSWarfront.Game
                 // セーブから復元＝基地建物はCSが既に復元済み（BaseIdはstable buildingId）。
                 // BasePlacementWatcher.ProcessPending は復元済みBaseIdをIdempotencyチェックで
                 // スキップするため、EventBuildingCreated の再発火があっても二重登録はしない。
-                _respawnLoadedUnits = true;
             }
         }
 
         /// <summary>
         /// simスレッド（ThreadingExtensionBase.OnAfterSimulationTick経由）：判断ロジック（Core）と
-        /// CS実体操作（車両/建物の生成・バッファ書込）をこの一箇所に集約する。
-        /// 理由: VehicleManager/BuildingManagerのバッファ・空きスロット割当・空間グリッドは
-        /// simスレッドが所有しているため、これらへの書込（CreateVehicle/CreateBuilding/
-        /// ReleaseVehicle/m_vehicles.m_buffer[]直接書込）を他スレッド（メイン等）から行うと
-        /// simスレッドと競合してバッファが破壊され、CS自身のシミュレーションコードが
-        /// IndexOutOfRangeException（捕捉されないポップアップ）を投げる。
-        /// 注意: ゲームが一時停止中はOnAfterSimulationTickが発火しないため、基地配置・スポーンは
+        /// CS実体操作（建物バッファ読み取り等）をこの一箇所に集約する。
+        /// Task19以降、ユニット自体はCS実体（車両）を持たないため、ここでの車両生成/解放は無い。
+        /// 注意: ゲームが一時停止中はOnAfterSimulationTickが発火しないため、基地配置・生産は
         /// 停止解除まで待機する（MVPとして許容）。
         /// </summary>
         public static void OnSimTick()
@@ -116,32 +119,14 @@ namespace CSWarfront.Game
 
             lock (_stateLock)
             {
-                // セーブロード直後：生存ユニットのうち表現（車両）を持たないものを再生成する。
-                // CreateVehicleはsimスレッド専用APIのため、load完了を示すこのフラグをここで消化する。
-                if (_respawnLoadedUnits)
-                {
-                    foreach (var u in State.Units)
-                    {
-                        if (u.State == UnitState.Dead) continue;
-                        if (LandUnitSpawner.HasRepresentation(u.InstanceId)) continue;
-                        LandUnitSpawner.Spawn(u.InstanceId, new CompletedUnit
-                        {
-                            BaseId = 0,
-                            FactionId = u.FactionId,
-                            TypeKey = u.TypeKey,
-                            SpawnPos = u.Position
-                        });
-                    }
-                    _respawnLoadedUnits = false;
-                }
-
                 // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
                 // （Task18）。CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
                 // この直後のProductionPlanningから同tickで生産対象になる。
                 BasePlacementWatcher.ProcessPending(State);
 
-                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分を直接スポーン（simスレッドのため
-                // キューを介さずその場でCreateVehicleしてよい）。
+                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分をUnitInstanceとして追加するのみ
+                // （Task19：CS車両のCreateVehicleは行わない。見た目はOnMainVisualUpdate側が
+                // State.Unitsから宣言的に再構築する）。
                 ProductionPlanning.Advance(State);
                 var completed = ProductionStep.Advance(State, dt);
                 foreach (var c in completed)
@@ -149,7 +134,6 @@ namespace CSWarfront.Game
                     uint id = State.AllocInstanceId();
                     var type = State.Types.Get(c.TypeKey);
                     State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
-                    LandUnitSpawner.Spawn(id, c);
                 }
 
                 // AI進軍命令（非プレイヤー勢力）
@@ -178,12 +162,44 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // 移動更新・撃破表現の撤去（車両バッファ書込・ReleaseVehicleはsimスレッド専用API）。
-                LandUnitSpawner.UpdateMovementAndCleanup(State);
-
-                // 死亡ユニットの掃除（表現撤去済みのもののみ）
-                State.Units.RemoveAll(u => u.State == UnitState.Dead && !LandUnitSpawner.HasRepresentation(u.InstanceId));
+                // 死亡ユニットの掃除。見た目（GameObject）は表現を持たないためここでの結合は不要
+                // （UnitVisuals.Syncが次回のOnMainVisualUpdateでState.Unitsとの差分から自動的に
+                // 破棄する＝宣言的reconcile）。
+                State.Units.RemoveAll(u => u.State == UnitState.Dead);
             }
+        }
+
+        /// <summary>
+        /// メインスレッド（ThreadingExtensionBase.OnUpdate経由）：ユニットの見た目（Unity GameObject）
+        /// のみを同期する。CS実体（Vehicle/Building等）には一切触れない。
+        /// _stateLock はスナップショットを構築する間だけ保持し、ロックを解放してから
+        /// UnitVisuals.Sync（Unity API呼び出し）を行う（ロック保持中の重い/ブロッキング処理を避け、
+        /// simスレッドを待たせないため）。
+        /// </summary>
+        public static void OnMainVisualUpdate()
+        {
+            if (State == null) return;
+
+            _visualSnapshot.Clear();
+            lock (_stateLock)
+            {
+                for (int i = 0; i < State.Units.Count; i++)
+                {
+                    var u = State.Units[i];
+                    if (u.State == UnitState.Dead) continue;
+                    var type = State.Types.Get(u.TypeKey);
+                    _visualSnapshot.Add(new UnitVisualState
+                    {
+                        InstanceId = u.InstanceId,
+                        TypeKey = u.TypeKey,
+                        FactionId = u.FactionId,
+                        Position = new Vector3(u.Position.X, u.Position.Y, u.Position.Z),
+                        AssetPrefabName = type != null ? type.AssetPrefabName : ""
+                    });
+                }
+            }
+
+            UnitVisuals.Sync(_visualSnapshot);
         }
 
         /// <summary>
@@ -196,12 +212,14 @@ namespace CSWarfront.Game
         /// </summary>
         public static void Reset()
         {
+            // UnitVisuals.DestroyAll はUnity GameObjectを破棄するためメインスレッド専用API。
+            // Reset()自体はCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から
+            // 呼ばれるためここで直接呼んで問題ない（_stateLockはCS実体を持たないState差し替えのみ保護）。
+            UnitVisuals.DestroyAll();
             lock (_stateLock)
             {
                 State = null;
-                _respawnLoadedUnits = false;
                 _economyAccum = 0f;
-                LandUnitSpawner.ResetAll();
                 BasePlacementWatcher.ClearPending();
             }
         }
