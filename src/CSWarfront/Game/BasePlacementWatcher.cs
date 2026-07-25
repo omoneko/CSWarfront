@@ -98,8 +98,12 @@ namespace CSWarfront.Game
                 if (_pendingReleased.Count > 0) { released = new List<ushort>(_pendingReleased); _pendingReleased.Clear(); }
             }
 
-            if (created != null) ProcessCreated(state, created);
+            // 解放を先に処理する（重要）: CSは建物IDを再利用するため、プレイヤーが解体→同じIDで
+            // 再建築した場合、両イベントが同一バッチに入りうる。作成を先に処理すると、まだ残っている
+            // 古い基地との重複判定で新しい基地の登録がスキップされ、その直後に古い基地が削除されて
+            // 「建物はあるが論理基地が無い」状態（以後どのイベントでも復旧しない）になる。
             if (released != null) ProcessReleased(state, released);
+            if (created != null) ProcessCreated(state, created);
         }
 
         private static void ProcessCreated(WarState state, List<ushort> ids)
