@@ -1,16 +1,22 @@
-using System.Collections.Generic;
 using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
     /// Core の各stepを CS の tick で駆動し、結果を表現へ反映する橋渡し（singleton相当の静的）。
     /// スレッド境界（重要）:
-    ///  - OnSimTick は sim スレッドから呼ばれ、State.Units/State.Bases/factionを読み書きし、
-    ///    SpawnQueue へ Enqueue する。
-    ///  - OnMainUpdate は メインスレッドから呼ばれ、SpawnQueue を Dequeue して State.Units へ Add し、
-    ///    LandUnitSpawner（CSの車両APIはメインスレッド専用）を呼ぶ。
-    ///  Queue&lt;T&gt;/List&lt;T&gt; はスレッドセーフではないため、両コールバックの状態接触区間を
-    ///  _stateLock で直列化する（net35のため System.Collections.Concurrent は使用不可）。
+    ///  - CSの実体（車両/建物）操作（CreateVehicle/CreateBuilding/ReleaseVehicle、
+    ///    m_vehicles.m_buffer[]への書込等）は必ず sim スレッドで行う。これらの配列・空きスロット
+    ///    割当・空間グリッドは sim スレッドが所有し、CSの内部シミュレーションも sim スレッドで
+    ///    駆動される。メインスレッドから同時に触るとバッファが破壊され、CS自身のsimコードが
+    ///    IndexOutOfRangeException（捕捉されないポップアップ）を投げる。
+    ///  - そのためOnSimTick（sim スレッド、ThreadingExtensionBase.OnAfterSimulationTick経由）を
+    ///    唯一のCS実体操作の場所とし、判断ロジック（Core）とCS API呼び出しを同一tick・同一ロックで
+    ///    直列に実行する。メインスレッド（OnUpdate）はCS実体には一切触れない。
+    ///  - 注意: ゲームが一時停止中は OnAfterSimulationTick が発火しないため、基地配置やスポーンは
+    ///    停止解除まで待機する（MVPとして許容）。
+    ///  - _stateLock は、save/loadスレッド（SerializeLocked/LoadAndRebuild）とsimスレッド(OnSimTick)
+    ///    の State への同時アクセスを防ぐために引き続き必要（net35のため
+    ///    System.Collections.Concurrent は使用不可）。
     /// </summary>
     public static class MilitaryManager
     {
@@ -26,10 +32,12 @@ namespace CSWarfront.Game
         // State.Bases のインデックスごとの配置済みフラグ。BuildingManager未準備等での失敗時、
         // 次フレームで未配置分のみ再試行するために保持する。
         private static bool[] _basePlacementDone;
+        // セーブロード直後、生存ユニットの表現（車両）をsimスレッドで再生成する必要があることを示す
+        // フラグ（load/saveスレッドからCS車両APIを呼ばないため、実処理はOnSimTickへ委譲する）。
+        private static bool _respawnLoadedUnits;
 
-        // sim/mainスレッド間で SpawnQueue と State(Units/Bases/faction) の同時アクセスを防ぐ粗粒度ロック。
-        // MVP規模（数十ユニット）では単一ロックで十分。Task12でCS API呼び出し（LandUnitSpawner.Spawn等）が
-        // 重くなり競合が問題になる場合は、ロック内では値の受け渡しのみに留め、重い処理をロック外に出すこと。
+        // save/loadスレッドとsimスレッド間の State への同時アクセスを防ぐ粗粒度ロック。
+        // MVP規模（数十ユニット）では単一ロックで十分。
         private static readonly object _stateLock = new object();
 
         public static void EnsureInitialized()
@@ -52,7 +60,7 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// セーブ用：_stateLock を保持したまま WarState をシリアライズする。
-        /// OnMainUpdate/OnSimTick が State.Units 等を書き換えている最中の
+        /// OnSimTick が State.Units 等を書き換えている最中の
         /// 「Collection was modified」例外（＝セーブ静かに失敗＝データ消失）を防ぐ。
         /// 呼び出し側（OnSaveData）は _stateLock を保持していないこと（再入不可のため）。
         /// </summary>
@@ -66,12 +74,10 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// セーブデータからの復元専用エントリ。State差し替えと、生存ユニットの表現（車両）再生成を
-        /// 同一ロック内で行う。これにより ReplaceState 直後に別スレッド（sim/main tick）が
-        /// 「State はあるが表現がまだ無い」中間状態を観測することを防ぐ。
-        /// 表現再生成（LandUnitSpawner.Spawn＝CS車両API呼び出し）はMVP規模の数十体想定であり、
-        /// OnMainUpdate 同様ロック内実行を許容する（重くなる場合は値の受け渡しのみロック内に残し、
-        /// 実処理をロック外に出すこと）。
+        /// セーブデータからの復元専用エントリ（save/loadスレッドから呼ばれる）。State差し替えのみを
+        /// 行い、生存ユニットの表現（車両）再生成はここでは行わない（LandUnitSpawner.Spawn＝CS車両API
+        /// はsimスレッド専用のため）。代わりに _respawnLoadedUnits フラグを立て、次回以降の
+        /// OnSimTick で表現を再生成させる。
         /// </summary>
         public static void LoadAndRebuild(WarState restored)
         {
@@ -81,32 +87,64 @@ namespace CSWarfront.Game
                 // セーブから復元＝実建物はCSが既に復元済み（BaseIdはstable buildingId）。新規配置は行わない。
                 LoadedFromSave = true;
                 _baseBuildingsPlaced = true;
-                foreach (var u in restored.Units)
-                {
-                    if (u.State == UnitState.Dead) continue;
-                    LandUnitSpawner.Spawn(u.InstanceId, new CompletedUnit
-                    {
-                        BaseId = 0,
-                        FactionId = u.FactionId,
-                        TypeKey = u.TypeKey,
-                        SpawnPos = u.Position
-                    });
-                }
+                _respawnLoadedUnits = true;
             }
         }
 
-        /// <summary>simスレッド：判断ロジックを回す。</summary>
+        /// <summary>
+        /// simスレッド（ThreadingExtensionBase.OnAfterSimulationTick経由）：判断ロジック（Core）と
+        /// CS実体操作（車両/建物の生成・バッファ書込）をこの一箇所に集約する。
+        /// 理由: VehicleManager/BuildingManagerのバッファ・空きスロット割当・空間グリッドは
+        /// simスレッドが所有しているため、これらへの書込（CreateVehicle/CreateBuilding/
+        /// ReleaseVehicle/m_vehicles.m_buffer[]直接書込）を他スレッド（メイン等）から行うと
+        /// simスレッドと競合してバッファが破壊され、CS自身のシミュレーションコードが
+        /// IndexOutOfRangeException（捕捉されないポップアップ）を投げる。
+        /// 注意: ゲームが一時停止中はOnAfterSimulationTickが発火しないため、基地配置・スポーンは
+        /// 停止解除まで待機する（MVPとして許容）。
+        /// </summary>
         public static void OnSimTick()
         {
+            EnsureInitialized();
             if (State == null) return;
             float dt = 1f; // 1 sim tick ≈ 固定dt（MVP簡略）
 
             lock (_stateLock)
             {
-                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分をスポーン要求へ
+                // 新規ゲームの初回のみ：論理基地の座標へ実建物を配置し、BaseId/HomeBaseIdを
+                // 実建物IDへ紐付ける（可視化 Task16）。BuildingManager未準備時は失敗するため、
+                // 全基地成功するまで毎tick再試行する。CreateBuildingはsimスレッド専用API。
+                if (!LoadedFromSave && !_baseBuildingsPlaced) PlaceBaseBuildingsOnce();
+
+                // セーブロード直後：生存ユニットのうち表現（車両）を持たないものを再生成する。
+                // CreateVehicleはsimスレッド専用APIのため、load完了を示すこのフラグをここで消化する。
+                if (_respawnLoadedUnits)
+                {
+                    foreach (var u in State.Units)
+                    {
+                        if (u.State == UnitState.Dead) continue;
+                        if (LandUnitSpawner.HasRepresentation(u.InstanceId)) continue;
+                        LandUnitSpawner.Spawn(u.InstanceId, new CompletedUnit
+                        {
+                            BaseId = 0,
+                            FactionId = u.FactionId,
+                            TypeKey = u.TypeKey,
+                            SpawnPos = u.Position
+                        });
+                    }
+                    _respawnLoadedUnits = false;
+                }
+
+                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分を直接スポーン（simスレッドのため
+                // キューを介さずその場でCreateVehicleしてよい）。
                 ProductionPlanning.Advance(State);
                 var completed = ProductionStep.Advance(State, dt);
-                foreach (var c in completed) SpawnQueue.Enqueue(c);
+                foreach (var c in completed)
+                {
+                    uint id = State.AllocInstanceId();
+                    var type = State.Types.Get(c.TypeKey);
+                    State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
+                    LandUnitSpawner.Spawn(id, c);
+                }
 
                 // AI進軍命令（非プレイヤー勢力）
                 foreach (var f in State.Factions)
@@ -134,47 +172,11 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // 死亡ユニットの掃除（表現撤去はメインスレッドで）
-                State.Units.RemoveAll(u => u.State == UnitState.Dead && !LandUnitSpawner.HasRepresentation(u.InstanceId));
-            }
-        }
-
-        /// <summary>メインスレッド：スポーン要求消化・移動・撃破表現の撤去。</summary>
-        public static void OnMainUpdate(float dt)
-        {
-            if (State == null) return;
-            lock (_stateLock)
-            {
-                // 新規ゲームの初回のみ：論理基地の座標へ実建物を配置し、BaseId/HomeBaseIdを
-                // 実建物IDへ紐付ける（可視化 Task16）。BuildingManager未準備時は失敗するため、
-                // 全基地成功するまで毎フレーム再試行する。sim/main両方が同一ロックで直列化される
-                // ため、紐付け中に BaseCombatStep/Occupation（simスレッド）が中間状態を読むことはない。
-                if (!LoadedFromSave && !_baseBuildingsPlaced) PlaceBaseBuildingsOnce();
-
-                // まずキューをローカルへ排出（sim側のEnqueueと競合しないようロック内で完結させる）。
-                List<CompletedUnit> toSpawn = null;
-                if (SpawnQueue.Count > 0)
-                {
-                    toSpawn = new List<CompletedUnit>(SpawnQueue.Count);
-                    while (SpawnQueue.Count > 0) toSpawn.Add(SpawnQueue.Dequeue());
-                }
-
-                if (toSpawn != null)
-                {
-                    foreach (var c in toSpawn)
-                    {
-                        uint id = State.AllocInstanceId();
-                        var type = State.Types.Get(c.TypeKey);
-                        State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
-                        // Task12注記: LandUnitSpawner.Spawn は現状no-opスタブのためロック内で許容。
-                        // 実装後にCS API呼び出しが重くなり競合するようなら、値だけロック内で受け渡し、
-                        // 実際のスポーン処理はロック外に出すこと。
-                        LandUnitSpawner.Spawn(id, c);
-                    }
-                }
-
-                // 移動更新・撃破表現の撤去（State.Units を読むためロック内で実行）。
+                // 移動更新・撃破表現の撤去（車両バッファ書込・ReleaseVehicleはsimスレッド専用API）。
                 LandUnitSpawner.UpdateMovementAndCleanup(State);
+
+                // 死亡ユニットの掃除（表現撤去済みのもののみ）
+                State.Units.RemoveAll(u => u.State == UnitState.Dead && !LandUnitSpawner.HasRepresentation(u.InstanceId));
             }
         }
 
@@ -216,14 +218,12 @@ namespace CSWarfront.Game
             if (allDone) _baseBuildingsPlaced = true;
         }
 
-        internal static readonly Queue<CompletedUnit> SpawnQueue = new Queue<CompletedUnit>();
-
         /// <summary>
         /// レベルアンロード時（メインメニューへ戻る等）に全セッション状態を初期化する（Task16レビューImportant）。
         /// これが無いと、セーブから復元したセッション（LoadedFromSave=true）の後に同一プロセス内で
         /// 新規ゲームを開始した場合、OnLoadDataがバイト無しで早期returnするためLoadedFromSaveがtrueのまま
         /// 残り、新規ゲームの基地実建物が永久に配置されない（不可視）。
-        /// 呼び出し元（WarfrontLoadingExtension.OnLevelUnloading）はOnSimTick/OnMainUpdateの外側
+        /// 呼び出し元（WarfrontLoadingExtension.OnLevelUnloading）はOnSimTickの外側
         /// （CSのロードライフサイクル）で呼ばれるため、_stateLock の再入は発生しない。
         /// </summary>
         public static void Reset()
@@ -234,7 +234,7 @@ namespace CSWarfront.Game
                 LoadedFromSave = false;
                 _baseBuildingsPlaced = false;
                 _basePlacementDone = null;
-                SpawnQueue.Clear();
+                _respawnLoadedUnits = false;
                 _economyAccum = 0f;
                 LandUnitSpawner.ResetAll();
             }

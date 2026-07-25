@@ -3,8 +3,8 @@ namespace CSWarfront.Game
 {
     /// <summary>
     /// MOD情報のみを提供するエントリポイント。ICities.IUserMod にはライフサイクルフックが無いため、
-    /// 実際の初期化（MilitaryManager.EnsureInitialized）は <see cref="WarfrontThreadingExtension"/>.OnUpdate
-    /// （ゲームが assembly をスキャンして自動登録する ThreadingExtensionBase）で行う。
+    /// 実際の初期化（MilitaryManager.EnsureInitialized）は <see cref="WarfrontThreadingExtension"/>.OnAfterSimulationTick
+    /// （ゲームが assembly をスキャンして自動登録する ThreadingExtensionBase、simスレッド）で行う。
     /// </summary>
     public class Mod : IUserMod
     {
