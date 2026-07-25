@@ -12,6 +12,24 @@ namespace CSWarfront.Game
     /// </summary>
     public class WarfrontLoadingExtension : LoadingExtensionBase
     {
+        /// <summary>
+        /// ゲームプレイ可能なモード（NewGame/LoadGame及びシナリオ由来の対応モード）でのみ、
+        /// 電力タブの軍事基地プレハブを登録する（アセット/テーマ/マップエディタ等では不要）。
+        /// LoadMode の各メンバーは ICities.dll から検証済み（research-power-tab-building.md §3）。
+        /// </summary>
+        public override void OnLevelLoaded(LoadMode mode)
+        {
+            try
+            {
+                if (mode == LoadMode.NewGame || mode == LoadMode.LoadGame ||
+                    mode == LoadMode.NewGameFromScenario)
+                {
+                    WarfrontBasePrefab.EnsureRegistered();
+                }
+            }
+            catch (System.Exception e) { ModConfig.LogError("OnLevelLoaded: " + e); }
+        }
+
         public override void OnLevelUnloading()
         {
             try { MilitaryManager.Reset(); }
