@@ -23,6 +23,10 @@ namespace CSWarfront.Core
         /// <summary>この経路が向かう最終目的地。OrderTargetPosが変わったら経路を捨てるための記録。</summary>
         public WorldPos? PathTarget;
 
+        /// <summary>次の経路探索(A*)試行までの残り時間（ゲーム内時間・実行時のみ・非永続化）。
+        /// FindPath失敗時に立て、失敗し続けるユニットが毎tick予算を消費するのを防ぐ（Task23レビュー）。</summary>
+        public float PathRetryCooldown;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;
@@ -36,6 +40,7 @@ namespace CSWarfront.Core
             Path = null;
             PathIndex = 0;
             PathTarget = null;
+            PathRetryCooldown = 0f;
         }
     }
 }

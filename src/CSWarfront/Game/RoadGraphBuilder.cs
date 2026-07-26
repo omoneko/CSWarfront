@@ -23,6 +23,13 @@ namespace CSWarfront.Game
     /// </summary>
     internal static class RoadGraphBuilder
     {
+        // 失敗ログの間引き用（Task23レビューImportant）。呼び出し側（MilitaryManager.OnSimTick）は
+        // 失敗が続く間 State.Roads == null のままRoadGraphBuilder.Buildを繰り返し呼ぶため、
+        // 抑制しないと失敗が続くたびに毎回ログが出てしまう。最初の1回だけ記録し、成功するまで
+        // 再度は出さない。成功したら次に失敗した際にまた1回だけ記録する（抑制状態をリセット）。
+        // simスレッド専用アクセスのためロック不要。
+        private static bool _failureAlreadyLogged;
+
         /// <summary>
         /// NetManagerの道路網からRoadGraphを構築する。失敗時はnullを返す（呼び出し側は既存グラフを維持すること）。
         /// </summary>
@@ -32,7 +39,11 @@ namespace CSWarfront.Game
             {
                 if (!Singleton<NetManager>.exists)
                 {
-                    ModConfig.LogError("RoadGraphBuilder.Build: NetManager not ready; skip");
+                    if (!_failureAlreadyLogged)
+                    {
+                        ModConfig.LogError("RoadGraphBuilder.Build: NetManager not ready; skip");
+                        _failureAlreadyLogged = true;
+                    }
                     return null;
                 }
 
@@ -78,11 +89,16 @@ namespace CSWarfront.Game
                 ModConfig.Log("RoadGraphBuilder: built nodes=" + graph.NodeCount +
                     " segmentsAccepted=" + segmentsAccepted +
                     " segmentsSkippedNonRoad=" + segmentsSkippedNonRoad);
+                _failureAlreadyLogged = false; // 成功したので次の失敗はまた1回だけログする
                 return graph;
             }
             catch (Exception e)
             {
-                ModConfig.LogError("RoadGraphBuilder.Build exception: " + e);
+                if (!_failureAlreadyLogged)
+                {
+                    ModConfig.LogError("RoadGraphBuilder.Build exception: " + e);
+                    _failureAlreadyLogged = true;
+                }
                 return null;
             }
         }

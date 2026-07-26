@@ -43,6 +43,14 @@ namespace CSWarfront.Game
         private static float _roadRebuildAccum;
         private const float RoadRebuildIntervalHours = 12f;
 
+        // 道路グラフ未構築時（State.Roads == null）の再試行間隔（ゲーム内時間）。NetManagerがまだ
+        // 準備できていない等の失敗が続く間、毎tickフルビルドを試みてログを埋め尽くさないため
+        // （Task23レビューImportant）。simスレッドのみが触る。
+        private static float _roadBuildRetryAccum;
+        private const float RoadBuildRetryIntervalHours = 0.25f;
+        // セッション中まだ一度も構築を試みていない場合は初回のみ即座に試行する（上の間隔待ちをしない）。
+        private static bool _hasAttemptedRoadBuild;
+
         // ゲーム内時間ベースのdt計算用（Task21）。simスレッドのみが触る。
         private static DateTime _lastGameTime;
         private static bool _hasLastGameTime;
@@ -176,7 +184,16 @@ namespace CSWarfront.Game
                 // 既存グラフをそのまま維持する（一時的な失敗で経路探索能力を失わないため）。
                 if (State.Roads == null)
                 {
-                    State.Roads = RoadGraphBuilder.Build();
+                    // 失敗が続く間、毎tickフルビルド（＋失敗ログ）を試みないよう間隔を空ける
+                    // （Task23レビューImportant）。セッション初回の試行だけは間隔を待たず即座に行う。
+                    _roadBuildRetryAccum += dt;
+                    if (!_hasAttemptedRoadBuild || _roadBuildRetryAccum >= RoadBuildRetryIntervalHours)
+                    {
+                        _hasAttemptedRoadBuild = true;
+                        _roadBuildRetryAccum -= RoadBuildRetryIntervalHours;
+                        if (_roadBuildRetryAccum < 0f) _roadBuildRetryAccum = 0f;
+                        State.Roads = RoadGraphBuilder.Build();
+                    }
                 }
                 else
                 {
@@ -191,7 +208,7 @@ namespace CSWarfront.Game
 
                 // AI進軍命令（非プレイヤー勢力）
                 foreach (var f in State.Factions)
-                    if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id);
+                    if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id, dt);
 
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進）
                 MovementStep.Advance(State, dt);
@@ -334,6 +351,8 @@ namespace CSWarfront.Game
                 State = null;
                 _economyAccum = 0f;
                 _roadRebuildAccum = 0f;
+                _roadBuildRetryAccum = 0f;
+                _hasAttemptedRoadBuild = false;
                 _hasLastGameTime = false;
                 _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();

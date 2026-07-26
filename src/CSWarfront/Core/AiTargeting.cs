@@ -25,9 +25,14 @@ namespace CSWarfront.Core
         /// <summary>目的地が変わったとみなす閾値（X/Z）。これ未満の差は同一目的地として扱い経路を再利用する。</summary>
         private const float TargetChangeEpsilon = 1f;
 
+        /// <summary>FindPath失敗後、同じユニットで再試行するまでのクールダウン（ゲーム内時間）。
+        /// 到達不能なユニットが毎tickフルA*を再実行して予算を独占するのを防ぐ（Task23レビューImportant）。</summary>
+        public const float PathRetryFailCooldownHours = 2f;
+
         /// <summary>当該勢力の非交戦ユニットに、各自位置から最寄りの敵基地へ進軍命令を与える。
-        /// state.Roadsが供給されていれば道路経路(A*)も計算する（1回の呼び出しでmaxPathComputations件まで）。</summary>
-        public static void AssignAdvance(WarState state, byte factionId, int maxPathComputations = 4)
+        /// state.Roadsが供給されていれば道路経路(A*)も計算する（1回の呼び出しでmaxPathComputations件まで）。
+        /// FindPathに失敗したユニットはPathRetryCooldownが尽きるまで再試行しない（予算を消費しない）。</summary>
+        public static void AssignAdvance(WarState state, byte factionId, float dt, int maxPathComputations = 4)
         {
             int pathComputations = 0;
             for (int i = 0; i < state.Units.Count; i++)
@@ -35,6 +40,10 @@ namespace CSWarfront.Core
                 var u = state.Units[i];
                 if (u.FactionId != factionId || !u.IsAlive) continue;
                 if (u.State == UnitState.Engaging) continue;
+
+                u.PathRetryCooldown -= dt;
+                if (u.PathRetryCooldown < 0f) u.PathRetryCooldown = 0f;
+
                 var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position);
                 if (target == null) continue;
 
@@ -44,7 +53,7 @@ namespace CSWarfront.Core
                 if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value))
                     u.ClearPath();
 
-                if (state.Roads != null && u.Path == null)
+                if (state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
                 {
                     if (pathComputations >= maxPathComputations) continue; // 予算超過。次回に持ち越し
 
@@ -53,6 +62,7 @@ namespace CSWarfront.Core
                     u.Path = path;
                     u.PathIndex = 0;
                     u.PathTarget = u.OrderTargetPos;
+                    u.PathRetryCooldown = path == null ? PathRetryFailCooldownHours : 0f;
                 }
             }
         }
