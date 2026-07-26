@@ -32,18 +32,32 @@ namespace CSWarfront.Game.UI
 
         private const float PanelWidth = 260f;
         private const float Pad = 8f;
+        private const float TitleRowHeight = 22f;
         private const float DropdownHeight = 28f;
         private const float StatusLabelReserveHeight = 76f;
         private const float VanillaGap = 8f;
+        private const float CollapseButtonSize = 20f;
+        private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
+        private const string CollapseGlyphCollapsed = "+";     // + (展開する = クリックすると開く)
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
+        private static UIButton _collapseButton;
+        private static UILabel _factionSectionLabel;
         private static UIDropDown _factionDropdown;
         private static UILabel _statusLabel;
 
         private static ushort _currentBaseId; // 0 = 未表示（CSの建物id 0 は「無し」を意味する）
         private static bool _suppressDropdownEvent;
         private static bool _loggedCreated;
+
+        /// <summary>パネル最小化トグルのUI設定（Task27）。セッション中は選択解除・再選択をまたいで保持する
+        /// （Hide/UpdateVisibilityでは変更しない。Destroy＝レベルアンロード時のみリセット）。</summary>
+        private static bool _collapsed;
+
+        /// <summary>展開時の全体高さ。Build() で一度だけ確定させ、折りたたみ→復元の際にここから正確に戻す
+        /// （縮小後のサイズから再計算すると誤差が積み重なるため、必ずこのキャッシュ値を使う）。</summary>
+        private static float _expandedHeight;
 
         /// <summary>
         /// 冪等。まだ生成していなければ、バニラの建物情報パネル型がライブラリから取得できる状態に
@@ -114,6 +128,7 @@ namespace CSWarfront.Game.UI
             try
             {
                 if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionSelected;
+                if (_collapseButton != null) _collapseButton.eventClick -= OnCollapseClick;
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
             catch (Exception e)
@@ -124,10 +139,14 @@ namespace CSWarfront.Game.UI
             {
                 _panel = null;
                 _titleLabel = null;
+                _collapseButton = null;
+                _factionSectionLabel = null;
                 _factionDropdown = null;
                 _statusLabel = null;
                 _currentBaseId = 0;
                 _suppressDropdownEvent = false;
+                _collapsed = false;
+                _expandedHeight = 0f;
             }
         }
 
@@ -168,9 +187,18 @@ namespace CSWarfront.Game.UI
             _titleLabel.text = TitleText;
             _titleLabel.textScale = 0.9f;
             _titleLabel.relativePosition = new Vector3(Pad, y);
-            y += 22f;
 
-            y = AddSectionLabel("所属勢力", Pad, y);
+            _collapseButton = _panel.AddUIComponent<UIButton>();
+            _collapseButton.size = new Vector2(CollapseButtonSize, CollapseButtonSize);
+            _collapseButton.relativePosition = new Vector3(PanelWidth - Pad - CollapseButtonSize, y);
+            _collapseButton.textScale = 0.8f;
+            _collapseButton.normalBgSprite = "ButtonMenu";
+            _collapseButton.hoveredBgSprite = "ButtonMenuHovered";
+            _collapseButton.pressedBgSprite = "ButtonMenuPressed";
+            _collapseButton.eventClick += OnCollapseClick;
+            y += TitleRowHeight;
+
+            y = AddSectionLabel("所属勢力", Pad, y, out _factionSectionLabel);
             _factionDropdown = BuildFactionDropdown(Pad, y, w);
             y += DropdownHeight + 8f;
 
@@ -184,13 +212,47 @@ namespace CSWarfront.Game.UI
             _statusLabel.relativePosition = new Vector3(Pad, y);
             y += StatusLabelReserveHeight;
 
-            _panel.height = y + Pad;
+            _expandedHeight = y + Pad;
             _panel.isVisible = false;
+            ApplyCollapsedState(); // 展開/折りたたみの初期反映（_collapsedはセッション内で永続、通常は false）
 
             if (!_loggedCreated)
             {
                 _loggedCreated = true;
                 ModConfig.Log("BaseInfoPanel: created");
+            }
+        }
+
+        /// <summary>_collapsed の現在値をUIに反映する（表示/非表示、パネル高さ、ボタン文言）。
+        /// トグルクリック時と、パネル生成直後（永続化された前回の状態を復元）に呼ぶ。</summary>
+        private static void ApplyCollapsedState()
+        {
+            if (_panel == null) return;
+
+            if (_factionSectionLabel != null) _factionSectionLabel.isVisible = !_collapsed;
+            if (_factionDropdown != null) _factionDropdown.isVisible = !_collapsed;
+            if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
+
+            _panel.height = _collapsed ? (Pad + TitleRowHeight + Pad) : _expandedHeight;
+
+            if (_collapseButton != null)
+            {
+                _collapseButton.text = _collapsed ? CollapseGlyphCollapsed : CollapseGlyphExpanded;
+            }
+        }
+
+        /// <summary>最小化トグルボタンのクリックハンドラ。_collapsed を反転してUIに反映するだけで、
+        /// MilitaryManager 側の状態には一切触れない（純粋なUI表示設定）。</summary>
+        private static void OnCollapseClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                _collapsed = !_collapsed;
+                ApplyCollapsedState();
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseInfoPanel.OnCollapseClick error: " + e);
             }
         }
 
@@ -235,9 +297,9 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        private static float AddSectionLabel(string text, float x, float y)
+        private static float AddSectionLabel(string text, float x, float y, out UILabel label)
         {
-            UILabel label = _panel.AddUIComponent<UILabel>();
+            label = _panel.AddUIComponent<UILabel>();
             label.text = text;
             label.textScale = 0.75f;
             label.textColor = new Color32(200, 200, 200, 255);
