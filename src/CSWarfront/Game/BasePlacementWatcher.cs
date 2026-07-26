@@ -177,6 +177,9 @@ namespace CSWarfront.Game
                 Vector3 pos = b.m_position;
                 var mb = new MilitaryBase(id, BaseType.Army, new WorldPos(pos.x, pos.y, pos.z));
                 mb.OwnerFactionId = WarfrontSettings.BuildFactionId;
+                // 新設基地は一定期間占領されない（Task24）：プレイヤーが両陣営の基地を配置し終える前に
+                // 一方的に占領されてしまう不具合の対策。
+                mb.CaptureGraceHours = MilitaryBase.NewBaseGraceHours;
                 state.Bases.Add(mb);
 
                 Faction f = state.FindFaction(WarfrontSettings.BuildFactionId);
@@ -199,6 +202,7 @@ namespace CSWarfront.Game
                 ModConfig.Log("BasePlacementWatcher: base registered id=" + id +
                     " faction=" + WarfrontSettings.BuildFactionId +
                     (isHq ? " (HQ)" : "") +
+                    " grace=" + mb.CaptureGraceHours.ToString("0") + "h" +
                     " pos=(" + pos.x + "," + pos.y + "," + pos.z + ")");
             }
         }
@@ -210,30 +214,88 @@ namespace CSWarfront.Game
                 MilitaryBase mb = FindBase(state, id);
                 if (mb == null) continue;
 
-                state.Bases.Remove(mb);
-
-                // 破壊されたのが所属勢力のHQなら、HomeBaseIdをクリアし、残る所有基地があれば先頭を昇格する。
-                // Eliminatedはここでは設定しない（勢力消滅はCoreのOccupationが決める戦闘結果のため）。
-                if (mb.OwnerFactionId != null)
-                {
-                    Faction f = state.FindFaction(mb.OwnerFactionId.Value);
-                    if (f != null && f.HomeBaseId.HasValue && f.HomeBaseId.Value == id)
-                    {
-                        f.HomeBaseId = null;
-                        foreach (var other in state.Bases)
-                        {
-                            if (other.OwnerFactionId == mb.OwnerFactionId.Value)
-                            {
-                                other.IsHeadquarters = true;
-                                f.HomeBaseId = other.BaseId;
-                                break;
-                            }
-                        }
-                    }
-                }
+                bool wasHq = mb.IsHeadquarters;
+                byte? owner = mb.OwnerFactionId;
+                RemoveBaseAndReassignHq(state, mb);
 
                 ModConfig.Log("BasePlacementWatcher: base removed id=" + id +
-                    " (was HQ=" + mb.IsHeadquarters + ", faction=" + mb.OwnerFactionId + ")");
+                    " (was HQ=" + wasHq + ", faction=" + owner + ")");
+            }
+        }
+
+        /// <summary>
+        /// ロジック基地の建物（BuildingManagerが管理するCS建物実体）が既に存在しない「幽霊基地」を
+        /// 掃除する（Task24）。建物が過去に検知されないまま解体された場合や、古いセーブ由来のケースで、
+        /// 論理基地だけがWarState.Basesに残り続け、生産/攻撃対象であり続けてしまう不具合の対策。
+        /// simスレッド（MilitaryManager.OnSimTick、呼び出し元が既に_stateLock保持済み）から
+        /// スロットル付きで呼ばれる想定。
+        /// </summary>
+        public static void ReconcileBases(WarState state)
+        {
+            if (state == null) return;
+            if (!WarfrontBasePrefab.IsRegistered) return; // マッチ対象のプレハブが無ければ比較できない
+            if (!Singleton<BuildingManager>.exists) return;
+
+            Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+
+            // 削除対象を先に集めてから削除する（列挙中にstate.Basesを変更しないため）。
+            List<MilitaryBase> ghosts = null;
+            for (int i = 0; i < state.Bases.Count; i++)
+            {
+                MilitaryBase mb = state.Bases[i];
+                bool isGhost;
+                if (mb.BaseId >= buf.Length)
+                {
+                    isGhost = true;
+                }
+                else
+                {
+                    Building b = buf[mb.BaseId];
+                    bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
+                    bool match = flagsCreated && b.Info != null && ReferenceEquals(b.Info, WarfrontBasePrefab.Prefab);
+                    isGhost = !match;
+                }
+                if (isGhost)
+                {
+                    if (ghosts == null) ghosts = new List<MilitaryBase>();
+                    ghosts.Add(mb);
+                }
+            }
+
+            if (ghosts == null) return;
+
+            foreach (MilitaryBase mb in ghosts)
+            {
+                bool wasHq = mb.IsHeadquarters;
+                byte? owner = mb.OwnerFactionId;
+                RemoveBaseAndReassignHq(state, mb);
+                ModConfig.Log("BasePlacementWatcher: ReconcileBases: removed ghost base id=" + mb.BaseId +
+                    " (was HQ=" + wasHq + ", faction=" + owner + ")");
+            }
+        }
+
+        /// <summary>
+        /// 基地を論理状態から取り除き、それが所属勢力のHQだった場合はHomeBaseIdをクリアして
+        /// 残る所有基地があれば先頭を昇格する（解体経路・幽霊基地掃除経路の共通処理）。
+        /// Eliminatedはここでは設定しない（勢力消滅はCoreのOccupationが決める戦闘結果のため）。
+        /// </summary>
+        private static void RemoveBaseAndReassignHq(WarState state, MilitaryBase mb)
+        {
+            state.Bases.Remove(mb);
+
+            if (mb.OwnerFactionId == null) return;
+            Faction f = state.FindFaction(mb.OwnerFactionId.Value);
+            if (f == null || !f.HomeBaseId.HasValue || f.HomeBaseId.Value != mb.BaseId) return;
+
+            f.HomeBaseId = null;
+            foreach (var other in state.Bases)
+            {
+                if (other.OwnerFactionId == mb.OwnerFactionId.Value)
+                {
+                    other.IsHeadquarters = true;
+                    f.HomeBaseId = other.BaseId;
+                    break;
+                }
             }
         }
 

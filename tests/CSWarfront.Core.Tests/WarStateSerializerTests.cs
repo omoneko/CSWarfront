@@ -1,3 +1,4 @@
+using System.IO;
 using CSWarfront.Core;
 using Xunit;
 
@@ -52,5 +53,54 @@ public class WarStateSerializerTests
         var r = WarStateSerializer.Deserialize(null, types);
         Assert.NotNull(r);
         Assert.Empty(r.Factions);
+    }
+
+    [Fact]
+    public void Roundtrip_v2_preserves_CaptureGraceHours()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Bases[0].CaptureGraceHours = 17.5f;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.Equal(17.5f, r.Bases[0].CaptureGraceHours, 3);
+    }
+
+    /// <summary>旧形式（v1、基地ブロック末尾にCaptureGraceHoursが無い）を読んでも
+    /// 例外にならず、CaptureGraceHoursが既定値0で復元されることを保証する。</summary>
+    [Fact]
+    public void Deserialize_v1_format_defaults_CaptureGraceHours_to_zero()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(1); // version 1（旧形式）
+            w.Write(0); // factions count
+            for (int a = 0; a < 5; a++)
+                for (int b = 0; b < 5; b++)
+                    w.Write((int)Relation.Neutral);
+            w.Write(1); // bases count
+            w.Write((ushort)200); w.Write((int)BaseType.Army);
+            w.Write(true); w.Write((byte)0); // owner
+            w.Write(40f); w.Write(0f); w.Write(5f); // pos
+            w.Write(500f); w.Write(false); // influence radius, isHq
+            w.Write(500f); w.Write(250f); // maxHp, currentHp
+            w.Write(0); // queue count
+            // 注意: v1にはCaptureGraceHoursが無いのでここで終わり
+            w.Write(0); // units count
+            w.Write((uint)1); // nextInstanceId
+            w.Flush();
+            bytes = ms.ToArray();
+        }
+
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.Equal(0f, r.Bases[0].CaptureGraceHours, 3);
+        Assert.Equal(250f, r.Bases[0].CurrentHP, 3);
     }
 }

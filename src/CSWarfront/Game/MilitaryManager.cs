@@ -51,6 +51,11 @@ namespace CSWarfront.Game
         // セッション中まだ一度も構築を試みていない場合は初回のみ即座に試行する（上の間隔待ちをしない）。
         private static bool _hasAttemptedRoadBuild;
 
+        // 幽霊基地（建物が既に存在しない論理基地）掃除の間引き用（ゲーム内時間）。毎tickフルスキャンは
+        // 無駄なため一定間隔でのみ実行する（Task24）。simスレッドのみが触る。
+        private static float _baseReconcileAccum;
+        private const float BaseReconcileIntervalHours = 6f;
+
         // ゲーム内時間ベースのdt計算用（Task21）。simスレッドのみが触る。
         private static DateTime _lastGameTime;
         private static bool _hasLastGameTime;
@@ -166,6 +171,15 @@ namespace CSWarfront.Game
                 // この直後のProductionPlanningから同tickで生産対象になる。
                 BasePlacementWatcher.ProcessPending(State);
 
+                // 幽霊基地（建物実体が既に無い論理基地）の掃除（Task24）。CS建物バッファの読み取りを
+                // 伴うためsimスレッド専用。毎tickフルスキャンは無駄なので一定間隔でのみ実行する。
+                _baseReconcileAccum += dt;
+                if (_baseReconcileAccum >= BaseReconcileIntervalHours)
+                {
+                    _baseReconcileAccum -= BaseReconcileIntervalHours;
+                    BasePlacementWatcher.ReconcileBases(State);
+                }
+
                 // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分をUnitInstanceとして追加するのみ
                 // （Task19：CS車両のCreateVehicleは行わない。見た目はOnMainVisualUpdate側が
                 // State.Unitsから宣言的に再構築する）。
@@ -258,6 +272,18 @@ namespace CSWarfront.Game
                 var sb = new System.Text.StringBuilder();
                 sb.Append("DIAG dt=").Append(dt.ToString("0.000")).Append("h");
                 sb.Append(" units=").Append(State.Units.Count);
+
+                // 勢力別ユニット数（Task24）：どの勢力にもユニットが存在しない不具合を一目で分かるようにする。
+                var unitsPerFaction = new int[WarfrontSettings.MaxFactions];
+                for (int u = 0; u < State.Units.Count; u++)
+                {
+                    byte fid = State.Units[u].FactionId;
+                    if (fid < unitsPerFaction.Length) unitsPerFaction[fid]++;
+                }
+                sb.Append(" |");
+                for (int f2 = 0; f2 < unitsPerFaction.Length; f2++)
+                    sb.Append(" uf").Append(f2).Append("=").Append(unitsPerFaction[f2]);
+
                 sb.Append(" | roads=").Append(State.Roads != null ? State.Roads.NodeCount : 0);
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
@@ -282,6 +308,7 @@ namespace CSWarfront.Game
                     sb.Append(" | base").Append(b.BaseId)
                       .Append(" own=").Append(b.OwnerFactionId.HasValue ? b.OwnerFactionId.Value.ToString() : "-")
                       .Append(" hp=").Append(b.CurrentHP.ToString("0"))
+                      .Append(" g=").Append(b.CaptureGraceHours.ToString("0"))
                       .Append(" pos=").Append(b.Position.X.ToString("0")).Append(",").Append(b.Position.Z.ToString("0"));
                 }
                 for (int k = 0; k < State.Factions.Count; k++)
@@ -353,6 +380,7 @@ namespace CSWarfront.Game
                 _roadRebuildAccum = 0f;
                 _roadBuildRetryAccum = 0f;
                 _hasAttemptedRoadBuild = false;
+                _baseReconcileAccum = 0f;
                 _hasLastGameTime = false;
                 _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();
