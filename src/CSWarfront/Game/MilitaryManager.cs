@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CSWarfront.Core;
 using UnityEngine;
@@ -34,8 +35,13 @@ namespace CSWarfront.Game
         // 診断ログの間引き用（simスレッドのみが触る）。
         private static int _diagTicks;
         private const int DiagIntervalTicks = 300;
-        private const float EconomyIntervalSeconds = 5f;   // 経済tick間隔
+        private const float EconomyIntervalHours = 6f;      // 経済tick間隔（ゲーム内時間、1日4回）
         private const float IncomeRate = 0.01f;
+
+        // ゲーム内時間ベースのdt計算用（Task21）。simスレッドのみが触る。
+        private static DateTime _lastGameTime;
+        private static bool _hasLastGameTime;
+        private const float MaxHoursPerTick = 1f; // セーブロード直後等の大きな時計ジャンプに対するクランプ上限
 
         // OnMainVisualUpdate で使い回すスナップショット（GC回避）。メインスレッド専用アクセス。
         private static readonly List<UnitVisualState> _visualSnapshot = new List<UnitVisualState>();
@@ -118,7 +124,27 @@ namespace CSWarfront.Game
         {
             EnsureInitialized();
             if (State == null) return;
-            float dt = 1f; // 1 sim tick ≈ 固定dt（MVP簡略）
+
+            // dt = 前回tickからの経過ゲーム内時間（時間単位）。ゲーム速度(1x/2x/3x)・一時停止を
+            // 自動的に反映する（Task21）。SimulationManager.instance.m_currentGameTime は
+            // Assembly-CSharp.dll をリフレクションで確認済みのDateTimeフィールド。
+            DateTime now = SimulationManager.instance.m_currentGameTime;
+            float dt;
+            if (!_hasLastGameTime)
+            {
+                // 初回tick（またはReset()直後）：時刻の基準を取るだけで進行はさせない。
+                _lastGameTime = now;
+                _hasLastGameTime = true;
+                dt = 0f;
+            }
+            else
+            {
+                dt = (float)(now - _lastGameTime).TotalHours;
+                _lastGameTime = now;
+            }
+
+            if (dt <= 0f) return; // 一時停止中・ゲーム内時計未進行：タイムスタンプ更新のみでこのtickは何もしない
+            if (dt > MaxHoursPerTick) dt = MaxHoursPerTick; // セーブロード直後等の巨大ジャンプから保護
 
             lock (_stateLock)
             {
@@ -151,11 +177,12 @@ namespace CSWarfront.Game
                 BaseCombatStep.Advance(State, dt);
                 Occupation.ResolveCaptures(State);
 
-                // 経済（低頻度）
+                // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する
+                // （ゼロクリアだとdtの端数が毎回捨てられ、実質的な頻度が下がってしまうため）。
                 _economyAccum += dt;
-                if (_economyAccum >= EconomyIntervalSeconds)
+                if (_economyAccum >= EconomyIntervalHours)
                 {
-                    _economyAccum = 0f;
+                    _economyAccum -= EconomyIntervalHours;
                     var samples = DevelopmentSampler.Sample(); // Task 12
                     foreach (var b in State.Bases)
                     {
@@ -170,7 +197,7 @@ namespace CSWarfront.Game
                 // 破棄する＝宣言的reconcile）。
                 State.Units.RemoveAll(u => u.State == UnitState.Dead);
 
-                LogDiagnostics();
+                LogDiagnostics(dt);
             }
         }
 
@@ -179,7 +206,7 @@ namespace CSWarfront.Game
         /// ユニットが実際に移動しているか・交戦しているか・基地HPが削れているかを事実として残す。
         /// 呼び出し元が _stateLock を保持していること。
         /// </summary>
-        private static void LogDiagnostics()
+        private static void LogDiagnostics(float dt)
         {
             _diagTicks++;
             if (_diagTicks < DiagIntervalTicks) return;
@@ -188,7 +215,8 @@ namespace CSWarfront.Game
             try
             {
                 var sb = new System.Text.StringBuilder();
-                sb.Append("DIAG units=").Append(State.Units.Count);
+                sb.Append("DIAG dt=").Append(dt.ToString("0.000")).Append("h");
+                sb.Append(" units=").Append(State.Units.Count);
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
                     UnitInstance u = State.Units[i];
@@ -275,6 +303,8 @@ namespace CSWarfront.Game
             {
                 State = null;
                 _economyAccum = 0f;
+                _hasLastGameTime = false;
+                _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();
             }
         }

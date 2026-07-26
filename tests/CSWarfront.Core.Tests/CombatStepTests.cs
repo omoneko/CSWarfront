@@ -21,9 +21,9 @@ public class CombatStepTests
     {
         var s = TwoHostileTanks(50f); // range 60 内
         CombatStep.Advance(s, 1f);
-        // DamagePerHit(25,5)=20 を相互に適用
-        Assert.Equal(80f, s.FindUnit(1).CurrentHP, 3);
-        Assert.Equal(80f, s.FindUnit(2).CurrentHP, 3);
+        // DamagePerHit(40,5)=35 に dt(1時間分)を乗じて相互に適用 → 100-35=65
+        Assert.Equal(65f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(65f, s.FindUnit(2).CurrentHP, 3);
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
@@ -40,8 +40,23 @@ public class CombatStepTests
     public void Unit_dies_when_hp_reaches_zero()
     {
         var s = TwoHostileTanks(50f);
-        s.FindUnit(2).CurrentHP = 15f; // 20ダメージで死亡
+        s.FindUnit(2).CurrentHP = 15f; // 35ダメージ（dt=1）で死亡
         CombatStep.Advance(s, 1f);
         Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
+    }
+
+    [Fact]
+    public void Damage_scales_linearly_with_dt()
+    {
+        var full = TwoHostileTanks(50f);
+        CombatStep.Advance(full, 1f);
+        float fullDmg = 100f - full.FindUnit(1).CurrentHP; // 35
+
+        var half = TwoHostileTanks(50f);
+        CombatStep.Advance(half, 0.5f);
+        float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 17.5
+
+        Assert.Equal(fullDmg / 2f, halfDmg, 3);
+        Assert.Equal(82.5f, half.FindUnit(1).CurrentHP, 3);
     }
 }

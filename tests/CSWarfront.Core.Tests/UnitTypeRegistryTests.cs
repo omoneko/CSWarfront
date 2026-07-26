@@ -11,7 +11,7 @@ public class UnitTypeRegistryTests
         var t = reg.Get("Tank_T1");
         Assert.NotNull(t);
         Assert.Equal(Domain.Land, t.Domain);
-        Assert.Equal(25f, t.Attack, 3);
+        Assert.Equal(40f, t.Attack, 3);
     }
 
     [Fact]

@@ -28,13 +28,15 @@ namespace CSWarfront.Core
         }
     }
 
-    /// <summary>MVPの既定ユニット定義（後日XML外出しに置換予定）。</summary>
+    /// <summary>MVPの既定ユニット定義（後日XML外出しに置換予定）。
+    /// 全レートはゲーム内時間基準（Task21）: Attack=ダメージ/ゲーム内時間、Speed=マップ距離/ゲーム内時間、
+    /// BuildTime=ゲーム内時間。</summary>
     public static class MvpUnitTypes
     {
         public static UnitType Tank_T1()
         {
             return new UnitType("Tank_T1", Domain.Land, UnitCategory.Tank, 1,
-                100f, 25f, 60f, 5f, 8f, 0f, 50f, 10f, "");
+                100f, 40f, 60f, 5f, 250f, 0f, 50f, 8f, "");
         }
     }
 }

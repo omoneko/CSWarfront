@@ -22,7 +22,8 @@ namespace CSWarfront.Core
                 }
                 self.State = UnitState.Engaging;
                 self.TargetId = target.InstanceId;
-                float dmg = CombatMath.DamagePerHit(type.Attack, TypeArmorOf(state, target));
+                // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)に比例する。
+                float dmg = CombatMath.DamagePerHit(type.Attack, TypeArmorOf(state, target)) * dt;
                 target.CurrentHP -= dmg;
             }
             // 2) 死亡判定

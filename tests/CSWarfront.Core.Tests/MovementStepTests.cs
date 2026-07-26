@@ -10,7 +10,7 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
-        u.OrderTargetPos = new WorldPos(100, 0, 0);
+        u.OrderTargetPos = new WorldPos(1000, 0, 0);
         s.Units.Add(u);
         return s;
     }
@@ -20,7 +20,8 @@ public class MovementStepTests
     {
         var s = OneMovingUnit();
         MovementStep.Advance(s, 1f);
-        Assert.Equal(8f, s.Units[0].Position.X, 1);
+        // Speed 250 map units / in-game hour, dt=1h, distance 1000 -> 250 の部分移動
+        Assert.Equal(250f, s.Units[0].Position.X, 1);
         Assert.Equal(0f, s.Units[0].Position.Z, 1);
     }
 

@@ -19,7 +19,8 @@ namespace CSWarfront.Core
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
                     if (state.Relations.Get(u.FactionId, b.OwnerFactionId.Value) != Relation.Hostile) continue;
                     if (u.Position.HorizontalDistanceTo(b.Position) > type.Range) continue;
-                    b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f);
+                    // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)に比例する。
+                    b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt;
                     if (b.CurrentHP < 0f) b.CurrentHP = 0f;
                 }
             }
