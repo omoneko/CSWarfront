@@ -31,6 +31,9 @@ namespace CSWarfront.Game
     {
         public static WarState State { get; private set; }
         private static float _economyAccum;
+        // 診断ログの間引き用（simスレッドのみが触る）。
+        private static int _diagTicks;
+        private const int DiagIntervalTicks = 300;
         private const float EconomyIntervalSeconds = 5f;   // 経済tick間隔
         private const float IncomeRate = 0.01f;
 
@@ -166,6 +169,58 @@ namespace CSWarfront.Game
                 // （UnitVisuals.Syncが次回のOnMainVisualUpdateでState.Unitsとの差分から自動的に
                 // 破棄する＝宣言的reconcile）。
                 State.Units.RemoveAll(u => u.State == UnitState.Dead);
+
+                LogDiagnostics();
+            }
+        }
+
+        /// <summary>
+        /// 一定tickごとに実行時状態を1行で記録する診断ログ（実機でしか再現しない不具合の調査用）。
+        /// ユニットが実際に移動しているか・交戦しているか・基地HPが削れているかを事実として残す。
+        /// 呼び出し元が _stateLock を保持していること。
+        /// </summary>
+        private static void LogDiagnostics()
+        {
+            _diagTicks++;
+            if (_diagTicks < DiagIntervalTicks) return;
+            _diagTicks = 0;
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("DIAG units=").Append(State.Units.Count);
+                for (int i = 0; i < State.Units.Count && i < 2; i++)
+                {
+                    UnitInstance u = State.Units[i];
+                    sb.Append(" | u").Append(u.InstanceId)
+                      .Append(" f=").Append(u.FactionId)
+                      .Append(" st=").Append(u.State)
+                      .Append(" hp=").Append(u.CurrentHP.ToString("0"))
+                      .Append(" pos=").Append(u.Position.X.ToString("0")).Append(",").Append(u.Position.Z.ToString("0"))
+                      .Append(" tgt=").Append(u.OrderTargetPos.HasValue
+                          ? u.OrderTargetPos.Value.X.ToString("0") + "," + u.OrderTargetPos.Value.Z.ToString("0")
+                          : "none");
+                }
+                for (int j = 0; j < State.Bases.Count; j++)
+                {
+                    MilitaryBase b = State.Bases[j];
+                    sb.Append(" | base").Append(b.BaseId)
+                      .Append(" own=").Append(b.OwnerFactionId.HasValue ? b.OwnerFactionId.Value.ToString() : "-")
+                      .Append(" hp=").Append(b.CurrentHP.ToString("0"))
+                      .Append(" pos=").Append(b.Position.X.ToString("0")).Append(",").Append(b.Position.Z.ToString("0"));
+                }
+                for (int k = 0; k < State.Factions.Count; k++)
+                {
+                    Faction f = State.Factions[k];
+                    if (f.Treasury > 0f || f.HomeBaseId.HasValue)
+                        sb.Append(" | f").Append(f.Id).Append(" $").Append(f.Treasury.ToString("0"));
+                }
+                sb.Append(" | visuals=").Append(UnitVisuals.Count);
+                ModConfig.Log(sb.ToString());
+            }
+            catch (System.Exception e)
+            {
+                ModConfig.LogError("LogDiagnostics error: " + e);
             }
         }
 

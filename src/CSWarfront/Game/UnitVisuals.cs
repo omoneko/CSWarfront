@@ -41,6 +41,10 @@ namespace CSWarfront.Game
             public Vector3 LastPosition;
         }
 
+        // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
+        private const float MarkerSize = 8f;
+        private const float MarkerHeight = 5f;
+
         private const float MinMoveDeltaForRotation = 0.01f;
 
         private static readonly Dictionary<uint, VisualEntry> _visuals = new Dictionary<uint, VisualEntry>();
@@ -173,6 +177,11 @@ namespace CSWarfront.Game
                 renderer.sharedMaterial = material;
                 go.transform.position = s.Position;
 
+                // 可視性の保険＆切り分け: CS由来の借用メッシュが環境によって描画されない可能性があるため、
+                // 確実に描画されるプリミティブ（MissileDisasterのフォールバック球と同じ手法）を子に付ける。
+                // これが見えて借用メッシュが見えない場合、原因はメッシュ側だと確定できる。
+                AttachVisibilityMarker(go, material);
+
                 ModConfig.Log("UnitVisuals: created visual for instance " + s.InstanceId + " type=" + s.TypeKey);
 
                 return new VisualEntry { GameObject = go, LastPosition = s.Position };
@@ -181,6 +190,32 @@ namespace CSWarfront.Game
             {
                 ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " error: " + e);
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// ユニットGameObjectに、確実に描画されるプリミティブ立方体を子として付ける（メインスレッド専用）。
+        /// 借用メッシュの描画可否に依存せずユニット位置を視認できるようにするための保険。
+        /// Colliderは不要（当たり判定はCore側の数値計算で行う）なので破棄する。
+        /// </summary>
+        private static void AttachVisibilityMarker(GameObject parent, Material material)
+        {
+            try
+            {
+                GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                Collider col = marker.GetComponent<Collider>();
+                if (col != null) UnityEngine.Object.Destroy(col);
+
+                marker.transform.SetParent(parent.transform, false);
+                marker.transform.localPosition = new Vector3(0f, MarkerHeight, 0f);
+                marker.transform.localScale = new Vector3(MarkerSize, MarkerSize, MarkerSize);
+
+                MeshRenderer markerRenderer = marker.GetComponent<MeshRenderer>();
+                if (markerRenderer != null && material != null) markerRenderer.sharedMaterial = material;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitVisuals.AttachVisibilityMarker error: " + e);
             }
         }
 
