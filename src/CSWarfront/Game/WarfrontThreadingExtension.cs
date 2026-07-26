@@ -30,6 +30,10 @@ namespace CSWarfront.Game
             try { MilitaryManager.OnMainVisualUpdate(); }
             catch (System.Exception e) { ModConfig.LogError("OnMainVisualUpdate: " + e); }
 
+            // SpeedCalibration.InGameHoursPerRealSecond の実機較正診断（Task26）。
+            try { SpeedCalibrationDiagnostics.AccumulateRealSeconds(realTimeDelta); }
+            catch (System.Exception e) { ModConfig.LogError("SpeedCalibrationDiagnostics: " + e); }
+
             try
             {
                 BaseInfoPanel.EnsureCreated();

@@ -244,6 +244,8 @@ namespace CSWarfront.Game
             if (dt <= 0f) return; // 一時停止中・ゲーム内時計未進行：タイムスタンプ更新のみでこのtickは何もしない
             if (dt > MaxHoursPerTick) dt = MaxHoursPerTick; // セーブロード直後等の巨大ジャンプから保護
 
+            SpeedCalibrationDiagnostics.AccumulateGameHours(dt);
+
             lock (_stateLock)
             {
                 // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
@@ -368,6 +370,7 @@ namespace CSWarfront.Game
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
                     UnitInstance u = State.Units[i];
+                    UnitType ut = State.Types.Get(u.TypeKey);
                     sb.Append(" | u").Append(u.InstanceId)
                       .Append(" f=").Append(u.FactionId)
                       .Append(" st=").Append(u.State)
@@ -376,6 +379,9 @@ namespace CSWarfront.Game
                       .Append(" tgt=").Append(u.OrderTargetPos.HasValue
                           ? u.OrderTargetPos.Value.X.ToString("0") + "," + u.OrderTargetPos.Value.Z.ToString("0")
                           : "none");
+                    // Speed（マップ距離/ゲーム内時間）を較正定数（想定値）でkm/hに逆変換して表示する（Task26）。
+                    if (ut != null)
+                        sb.Append(" spd=").Append((ut.Speed * SpeedCalibration.InGameHoursPerRealSecond * 3.6f).ToString("0")).Append("km/h");
                     if (i == 0)
                     {
                         // 最初にサンプルしたユニットについてのみ、道路経路の消化状況を記録する（Task23）。
@@ -465,6 +471,9 @@ namespace CSWarfront.Game
                 _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();
             }
+
+            // 較正診断の積算（Task26）：MilitaryManagerとは別の専用ロックで保護されているため個別にクリアする。
+            SpeedCalibrationDiagnostics.Reset();
 
             // BaseInfoPanel.Destroy はUnity GameObjectを破棄するためメインスレッド専用API。
             // Reset()自体がCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から

@@ -30,13 +30,23 @@ namespace CSWarfront.Core
 
     /// <summary>MVPの既定ユニット定義（後日XML外出しに置換予定）。
     /// 全レートはゲーム内時間基準（Task21）: Attack=ダメージ/ゲーム内時間、Speed=マップ距離/ゲーム内時間、
-    /// BuildTime=ゲーム内時間。</summary>
+    /// BuildTime=ゲーム内時間。
+    /// Speedはkm/h基準で意図し、SpeedCalibration.UnitsPerGameHourFromKmhで変換する（Task26）。</summary>
     public static class MvpUnitTypes
     {
+        /// <summary>「遅い車」相当（ユーザー指定：戦車はスポーツカーではない）＝40km/h基準。</summary>
         public static UnitType Tank_T1()
         {
             return new UnitType("Tank_T1", Domain.Land, UnitCategory.Tank, 1,
-                100f, 40f, 60f, 5f, 250f, 0f, 50f, 8f, "");
+                100f, 40f, 60f, 5f, SpeedCalibration.UnitsPerGameHourFromKmh(40f), 0f, 50f, 8f, "");
+        }
+
+        /// <summary>市民の徒歩速度相当＝5km/h基準（今後の歩兵実装のためのテンプレート、Task26）。
+        /// 注意: まだMilitaryManagerには未登録（ProductionPlanning.MvpUnitKeyは引き続き"Tank_T1"）。</summary>
+        public static UnitType Infantry_T1()
+        {
+            return new UnitType("Infantry_T1", Domain.Land, UnitCategory.Infantry, 1,
+                60f, 20f, 40f, 1f, SpeedCalibration.UnitsPerGameHourFromKmh(5f), 0f, 20f, 4f, "");
         }
     }
 }

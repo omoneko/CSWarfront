@@ -16,13 +16,17 @@ public class MovementStepTests
         return s;
     }
 
+    // Tank_T1のSpeed（Task26でkm/h基準に較正済み、SpeedCalibration参照）:
+    // 40km/h -> (40*1000/3600) / 2.05078125(InGameHoursPerRealSecond) ≈ 5.418 map units / ゲーム内時間。
+    private const float TankSpeedPerHour = 5.418f;
+
     [Fact]
     public void Advance_moves_unit_toward_target()
     {
         var s = OneMovingUnit();
         MovementStep.Advance(s, 1f);
-        // Speed 250 map units / in-game hour, dt=1h, distance 1000 -> 250 の部分移動
-        Assert.Equal(250f, s.Units[0].Position.X, 1);
+        // dt=1h, distance 1000 -> TankSpeedPerHour(≈5.418)ぶんの部分移動
+        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
         Assert.Equal(0f, s.Units[0].Position.Z, 1);
     }
 
@@ -94,7 +98,7 @@ public class MovementStepTests
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
-        s.Types.Register(MvpUnitTypes.Tank_T1()); // Speed 250 map units / in-game hour
+        s.Types.Register(MvpUnitTypes.Tank_T1()); // Speed ≈5.418 map units / in-game hour（Task26較正後、TankSpeedPerHour参照）
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(100, 0, 100);
@@ -109,10 +113,10 @@ public class MovementStepTests
     public void Advance_small_step_moves_toward_first_waypoint_only()
     {
         var s = UnitWithPath();
-        // dt small enough that stepLen (250*dt) doesn't reach waypoint 1 (100 away)
-        MovementStep.Advance(s, 0.1f); // stepLen = 25
+        // dt small enough that stepLen (TankSpeedPerHour*dt ≈ 5.418*0.1 ≈ 0.542) doesn't reach waypoint 1 (100 away)
+        MovementStep.Advance(s, 0.1f); // stepLen ≈ 0.542
         var u = s.Units[0];
-        Assert.Equal(25f, u.Position.X, 1);
+        Assert.Equal(0.542f, u.Position.X, 2);
         Assert.Equal(0f, u.Position.Z, 1);
         Assert.Equal(0, u.PathIndex); // still heading to waypoint 0
     }
@@ -121,8 +125,9 @@ public class MovementStepTests
     public void Advance_large_step_crosses_first_waypoint_and_continues_toward_second()
     {
         var s = UnitWithPath();
-        // stepLen = 250*0.6 = 150 : covers 100 to first waypoint, then 50 more toward second
-        MovementStep.Advance(s, 0.6f);
+        // dt chosen so that stepLen = TankSpeedPerHour*dt = 150 exactly (150/5.418... ≈ 27.6855469h):
+        // covers 100 to first waypoint, then 50 more toward second (同じ幾何、旧テストのSpeed=250, dt=0.6と同じ結果になるよう選定)
+        MovementStep.Advance(s, 27.6855469f);
         var u = s.Units[0];
         Assert.Equal(100f, u.Position.X, 1);
         Assert.Equal(50f, u.Position.Z, 1);
@@ -138,7 +143,8 @@ public class MovementStepTests
         u.Position = new WorldPos(100, 0, 100); // arrived at last waypoint already
         u.OrderTargetPos = new WorldPos(200, 0, 100);
 
-        MovementStep.Advance(s, 1f); // stepLen = 250, plenty to reach 100 away
+        // stepLen = TankSpeedPerHour*20 ≈ 108.4、100離れた目標に到達するには十分（オーバーシュートせず目標でクランプされる）
+        MovementStep.Advance(s, 20f);
 
         Assert.Equal(200f, u.Position.X, 1);
         Assert.Equal(100f, u.Position.Z, 1);
@@ -150,7 +156,7 @@ public class MovementStepTests
         var s = OneMovingUnit();
         s.Units[0].Path = null;
         MovementStep.Advance(s, 1f);
-        Assert.Equal(250f, s.Units[0].Position.X, 1);
+        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
     }
 
     [Fact]
