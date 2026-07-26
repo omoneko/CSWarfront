@@ -4,19 +4,21 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// ユニットの見た目に使うメッシュ＋マテリアルを「名前」で解決する小さなヘルパー。
-    /// VehicleInfo からは m_mesh / m_material だけを借用し、AI（VehicleAI派生）には一切触れない。
+    /// ユニットの見た目に使うメッシュを「名前」で解決する小さなヘルパー。
+    /// VehicleInfo からは m_mesh（無ければ m_lodMesh）だけを借用し、AI（VehicleAI派生）には一切触れない。
     /// これにより借用元は素の乗用車からWorkshopの改造車両まで、どんなAIを積んでいても安全
     /// （AIが一切インスタンス化されないため、車両AI由来の副作用・クラッシュが原理的に起こらない）。
+    /// マテリアルはCS車両のものを借用しない（CS車両マテリアルは専用シェーダーが独自レンダラー由来の
+    /// per-instanceデータを要求するため、素のMeshRendererに割り当てると不可視/黒になる）。
+    /// マテリアルは <see cref="UnitMaterialFactory"/> が自前で生成する。
     /// 解決結果はプレハブ名単位でキャッシュし、スキャン（全プレハブ走査）は最初の1回だけ発生する。
-    /// メインスレッド専用（Material生成・PrefabCollectionアクセスを伴う）。
+    /// メインスレッド専用（PrefabCollectionアクセスを伴う）。
     /// </summary>
     internal static class UnitMeshSource
     {
         private struct Resolved
         {
             public Mesh Mesh;
-            public Material Material;
             public bool Ok;
         }
 
@@ -35,10 +37,9 @@ namespace CSWarfront.Game
         private static bool _loggedSourceOnce;
         private static bool _loggedFailureOnce;
         private static Mesh _fallbackCubeMesh;
-        private static Material _fallbackMaterial;
 
         /// <summary>
-        /// assetPrefabName（空可）からメッシュ・マテリアルを解決する。
+        /// assetPrefabName（空可）からメッシュを解決する。
         /// 解決順: (a) assetPrefabName で FindLoaded → (b) 既定候補名 → 全VehicleInfo走査 →
         /// (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
         ///
@@ -49,7 +50,7 @@ namespace CSWarfront.Game
         /// 永久に解決不能」という誤ったキャッシュが焼き付いてしまい、後でアセットがロードされても
         /// 二度と正しく解決されなくなる（実際に起きていたバグ）。
         /// </summary>
-        public static bool TryResolve(string assetPrefabName, out Mesh mesh, out Material material)
+        public static bool TryResolve(string assetPrefabName, out Mesh mesh)
         {
             string key = assetPrefabName ?? DefaultCacheKey;
 
@@ -57,7 +58,6 @@ namespace CSWarfront.Game
             if (_cache.TryGetValue(key, out cached))
             {
                 mesh = cached.Mesh;
-                material = cached.Material;
                 return cached.Ok;
             }
 
@@ -72,7 +72,6 @@ namespace CSWarfront.Game
             }
 
             mesh = result.Mesh;
-            material = result.Material;
             return result.Ok;
         }
 
@@ -97,32 +96,30 @@ namespace CSWarfront.Game
                 }
 
                 Mesh mesh = null;
-                Material material = null;
                 if (info != null)
                 {
                     mesh = info.m_mesh != null ? info.m_mesh : info.m_lodMesh;
-                    material = info.m_material != null ? info.m_material : info.m_lodMaterial;
                 }
 
-                if (mesh != null && material != null)
+                if (mesh != null)
                 {
                     if (!_loggedSourceOnce)
                     {
                         _loggedSourceOnce = true;
-                        ModConfig.Log("UnitMeshSource: source prefab='" + info.name + "' mesh='" + mesh.name + "' を借用します（AIは使用しません）");
+                        ModConfig.Log("UnitMeshSource: source prefab='" + info.name + "' mesh='" + mesh.name + "' を借用します（AI・マテリアルは使用しません）");
                     }
-                    return new Resolved { Mesh = mesh, Material = material, Ok = true };
+                    return new Resolved { Mesh = mesh, Ok = true };
                 }
 
                 // (c) プリミティブフォールバック。
-                if (TryGetPrimitiveFallback(out mesh, out material))
+                if (TryGetPrimitiveFallback(out mesh))
                 {
                     if (!_loggedSourceOnce)
                     {
                         _loggedSourceOnce = true;
                         ModConfig.Log("UnitMeshSource: 車両プレハブのメッシュが見つからず、プリミティブ(Cube)にフォールバックしました");
                     }
-                    return new Resolved { Mesh = mesh, Material = material, Ok = true };
+                    return new Resolved { Mesh = mesh, Ok = true };
                 }
 
                 if (!_loggedFailureOnce)
@@ -130,34 +127,34 @@ namespace CSWarfront.Game
                     _loggedFailureOnce = true;
                     ModConfig.LogError("UnitMeshSource: メッシュ解決に完全失敗（プレハブ・プリミティブ共に不可）key='" + key + "'");
                 }
-                return new Resolved { Mesh = null, Material = null, Ok = false };
+                return new Resolved { Mesh = null, Ok = false };
             }
             catch (Exception e)
             {
                 ModConfig.LogError("UnitMeshSource.Resolve(" + key + ") error: " + e);
-                return new Resolved { Mesh = null, Material = null, Ok = false };
+                return new Resolved { Mesh = null, Ok = false };
             }
         }
 
-        /// <summary>既定候補名を順に試し、全滅なら全VehicleInfoを走査して mesh/material を持つ最初の1つを返す。</summary>
+        /// <summary>既定候補名を順に試し、全滅なら全VehicleInfoを走査して mesh を持つ最初の1つを返す。</summary>
         private static VehicleInfo FindDefaultPrefab()
         {
             for (int i = 0; i < DefaultCandidateNames.Length; i++)
             {
                 VehicleInfo info = PrefabCollection<VehicleInfo>.FindLoaded(DefaultCandidateNames[i]);
-                if (info != null && info.m_mesh != null && info.m_material != null) return info;
+                if (info != null && (info.m_mesh != null || info.m_lodMesh != null)) return info;
             }
 
             int count = PrefabCollection<VehicleInfo>.LoadedCount();
             for (uint i = 0; i < (uint)count; i++)
             {
                 VehicleInfo info = PrefabCollection<VehicleInfo>.GetLoaded(i);
-                if (info != null && info.m_mesh != null && info.m_material != null) return info;
+                if (info != null && (info.m_mesh != null || info.m_lodMesh != null)) return info;
             }
             return null;
         }
 
-        private static bool TryGetPrimitiveFallback(out Mesh mesh, out Material material)
+        private static bool TryGetPrimitiveFallback(out Mesh mesh)
         {
             try
             {
@@ -168,23 +165,14 @@ namespace CSWarfront.Game
                     _fallbackCubeMesh = filter != null ? filter.sharedMesh : null;
                     UnityEngine.Object.Destroy(temp); // メッシュ自体はUnity組込共有アセットのため破棄されない
                 }
-                if (_fallbackMaterial == null)
-                {
-                    Shader shader = Shader.Find("Diffuse");
-                    if (shader == null) shader = Shader.Find("VertexLit");
-                    if (shader == null) shader = Shader.Find("Standard");
-                    _fallbackMaterial = shader != null ? new Material(shader) : null;
-                }
 
                 mesh = _fallbackCubeMesh;
-                material = _fallbackMaterial;
-                return mesh != null && material != null;
+                return mesh != null;
             }
             catch (Exception e)
             {
                 ModConfig.LogError("UnitMeshSource.TryGetPrimitiveFallback error: " + e);
                 mesh = null;
-                material = null;
                 return false;
             }
         }

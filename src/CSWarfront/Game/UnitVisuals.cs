@@ -19,11 +19,15 @@ namespace CSWarfront.Game
 
     /// <summary>
     /// ユニットの見た目を「本物のCS車両」ではなく、素のUnity GameObjectとして自前描画する。
-    /// 借用するのはメッシュ＋マテリアルのみ（VehicleInfo.m_mesh / m_material）で、AIやTransferManager
+    /// 借用するのはメッシュのみ（VehicleInfo.m_mesh、なければ m_lodMesh）で、AIやTransferManager
     /// 連携は一切引き継がない。これにより FireTruckAI 等サービス車両AI由来のクラッシュ
     /// （TransferManager.RemoveIncomingOffer の配列範囲外アクセス）を根本的に回避する。
     /// 借用元はプレハブ名で解決するため、将来 Workshop カスタムアセットへ差し替えても
     /// （そのアセットがどんなAIを積んでいても）安全に動作する。
+    /// マテリアルはCS車両のものを一切借用しない（<see cref="UnitMaterialFactory"/> 参照）。
+    /// CS車両マテリアルは専用シェーダーがCS自身のレンダラー由来のper-instanceデータを要求するため、
+    /// 素の MeshRenderer に割り当てると不可視/黒になる（実際に発生していた不可視バグの原因）。
+    /// 代わりに自前の標準シェーダーマテリアルを勢力ごとに1つ生成・共有し、勢力を色で判別できるようにする。
     ///
     /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
     /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
@@ -149,10 +153,16 @@ namespace CSWarfront.Game
             try
             {
                 Mesh mesh;
-                Material material;
-                if (!UnitMeshSource.TryResolve(s.AssetPrefabName, out mesh, out material))
+                if (!UnitMeshSource.TryResolve(s.AssetPrefabName, out mesh))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
+                    return null;
+                }
+
+                Material material;
+                if (!UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material))
+                {
+                    ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のマテリアル生成に失敗、表現をスキップ");
                     return null;
                 }
 
