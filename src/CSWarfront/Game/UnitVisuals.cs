@@ -41,9 +41,15 @@ namespace CSWarfront.Game
 
         private static readonly Dictionary<uint, VisualEntry> _visuals = new Dictionary<uint, VisualEntry>();
 
+        // メッシュ解決不能などで生成に失敗した instance id。毎フレームの再試行とログ連発を防ぐため
+        // 一度失敗したidはここに記録し、以後 Sync() でスキップする。スナップショットから消えたら
+        // （死亡・削除等）id再利用に備えて解放する（下の stale 処理で _visuals と同じパスで実施）。
+        private static readonly HashSet<uint> _failedInstances = new HashSet<uint>();
+
         // Sync() 実行毎に使い回すワーク領域（GC回避）。
         private static readonly HashSet<uint> _seenIds = new HashSet<uint>();
         private static readonly List<uint> _staleIds = new List<uint>();
+        private static readonly List<uint> _staleFailedIds = new List<uint>();
 
         public static int Count { get { return _visuals.Count; } }
 
@@ -63,11 +69,21 @@ namespace CSWarfront.Game
 
                 try
                 {
+                    if (_failedInstances.Contains(s.InstanceId))
+                    {
+                        continue; // 生成不能と判明済み。ログ連発・再試行を避けて次のユニットへ。
+                    }
+
                     VisualEntry entry;
                     if (!_visuals.TryGetValue(s.InstanceId, out entry) || entry.GameObject == null)
                     {
                         entry = CreateVisual(s);
-                        if (entry == null) continue; // 生成失敗はログ済み、次のユニットへ
+                        if (entry == null)
+                        {
+                            // CreateVisual内でログ済み（1回のみ）。以後このidはSyncの先頭でスキップされる。
+                            _failedInstances.Add(s.InstanceId);
+                            continue;
+                        }
                         _visuals[s.InstanceId] = entry;
                     }
                     else
@@ -91,6 +107,17 @@ namespace CSWarfront.Game
             {
                 DestroyVisual(_staleIds[i]);
             }
+
+            // スナップショットに無い失敗済みidも解放する（id再利用時に永久ブロックされないように）。
+            _staleFailedIds.Clear();
+            foreach (var failedId in _failedInstances)
+            {
+                if (!_seenIds.Contains(failedId)) _staleFailedIds.Add(failedId);
+            }
+            for (int i = 0; i < _staleFailedIds.Count; i++)
+            {
+                _failedInstances.Remove(_staleFailedIds[i]);
+            }
         }
 
         /// <summary>追跡中の全ビジュアルを破棄する（レベルアンロード時、メインスレッド専用）。</summary>
@@ -113,6 +140,7 @@ namespace CSWarfront.Game
             finally
             {
                 _visuals.Clear();
+                _failedInstances.Clear();
             }
         }
 

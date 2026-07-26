@@ -29,14 +29,29 @@ namespace CSWarfront.Game
 
             try
             {
-                BuildingInfo source = FindElectricitySource();
+                SourceSearchStats stats;
+                BuildingInfo source = FindElectricitySource(out stats);
+
+                int rejectedTotal = stats.RejectedZeroProduction + stats.RejectedDam + stats.RejectedSubBuildings + stats.RejectedWaterPlacement;
+                ModConfig.Log("WarfrontBasePrefab: candidate scan complete: considered=" + stats.Considered +
+                    " rejected=" + rejectedTotal +
+                    " (zero-production=" + stats.RejectedZeroProduction +
+                    ", dam=" + stats.RejectedDam +
+                    ", sub-buildings=" + stats.RejectedSubBuildings +
+                    ", water-placement=" + stats.RejectedWaterPlacement + ")");
+
                 if (source == null)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab: no suitable PowerPlantAI-family Electricity-service BuildingInfo found among " +
-                        PrefabCollection<BuildingInfo>.LoadedCount() + " loaded prefabs (need m_electricityProduction > 0); aborting registration");
+                    ModConfig.LogError("WarfrontBasePrefab: no suitable land-placeable single-part PowerPlantAI-family Electricity-service BuildingInfo found among " +
+                        PrefabCollection<BuildingInfo>.LoadedCount() + " loaded prefabs (considered=" + stats.Considered +
+                        ", rejected zero-production=" + stats.RejectedZeroProduction +
+                        ", dam=" + stats.RejectedDam +
+                        ", sub-buildings=" + stats.RejectedSubBuildings +
+                        ", water-placement=" + stats.RejectedWaterPlacement + "); aborting registration");
                     return;
                 }
                 PowerPlantAI sourceAi = source.m_buildingAI as PowerPlantAI;
+                int sourceSubBuildingCount = source.m_subBuildings != null ? source.m_subBuildings.Length : 0;
                 ModConfig.Log("WarfrontBasePrefab: source prefab chosen = '" + source.name + "' (category='" + SafeCategory(source) + "')" +
                     " aiType=" + (source.m_buildingAI != null ? source.m_buildingAI.GetType().Name : "null") +
                     " m_electricityProduction=" + (sourceAi != null ? sourceAi.m_electricityProduction.ToString() : "?") +
@@ -44,7 +59,9 @@ namespace CSWarfront.Game
                     " m_resourceConsumption=" + (sourceAi != null ? sourceAi.m_resourceConsumption.ToString() : "?") +
                     " m_resourceCapacity=" + (sourceAi != null ? sourceAi.m_resourceCapacity.ToString() : "?") +
                     " m_isRenewable=" + (sourceAi != null ? sourceAi.m_isRenewable.ToString() : "?") +
-                    " workPlaceCountSum=" + (sourceAi != null ? (sourceAi.m_workPlaceCount0 + sourceAi.m_workPlaceCount1 + sourceAi.m_workPlaceCount2 + sourceAi.m_workPlaceCount3).ToString() : "?"));
+                    " workPlaceCountSum=" + (sourceAi != null ? (sourceAi.m_workPlaceCount0 + sourceAi.m_workPlaceCount1 + sourceAi.m_workPlaceCount2 + sourceAi.m_workPlaceCount3).ToString() : "?") +
+                    " subBuildingCount=" + sourceSubBuildingCount +
+                    " placementMode=" + source.m_placementMode);
 
                 GameObject sourceGo = source.gameObject;
                 if (sourceGo == null)
@@ -98,21 +115,49 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>候補走査の集計（ログ出力・abort判断用）。</summary>
+        private struct SourceSearchStats
+        {
+            public int Considered;             // Electricityサービス かつ PowerPlantAI系統を持つ数
+            public int RejectedZeroProduction;  // m_electricityProduction <= 0
+            public int RejectedDam;             // DamPowerHouseAI（河川必須）
+            public int RejectedSubBuildings;    // m_subBuildings 非空（オフショア随伴施設等の多部品プラント）
+            public int RejectedWaterPlacement;  // m_placementMode が水上/岸辺必須
+        }
+
         /// <summary>
         /// 電力（Electricity）サービスのプレハブから複製元を選ぶ。
         /// 単に最初に見つかった電力系プレハブを使うと、電柱/変電所など PowerPlantAI の数値フィールドが
         /// 全てゼロの物を拾ってしまい、ゲーム本体の PowerPlantAI.ProduceGoods 内の整数除算が
         /// DivideByZeroException でクラッシュする（実機ログで確認済み）。
-        /// そのため BuildingAI が PowerPlantAI 系統かつ m_electricityProduction > 0 の物だけを候補とし、
-        /// 中でも再生可能エネルギー（燃料消費の分岐が無い＝m_resourceType==None）を優先する。
+        /// そのため BuildingAI が PowerPlantAI 系統かつ m_electricityProduction > 0 の物だけを候補とする。
+        ///
+        /// 加えて実機ログで「Ocean Thermal Energy Conversion Plant」（m_isRenewable=True,
+        /// m_resourceType=None）が選ばれ、随伴するオフショア専用の子施設
+        /// 'Ocean Thermal Energy Conversion Plant Offshore' が生成される事象を確認した。
+        /// OTECは水上専用・複数パーツ構成のプラントであり、陸上の単体軍事基地の複製元として不適切。
+        /// そのため「再生可能＝優先」という単純基準をやめ、以下を必須条件として追加する:
+        ///   - m_subBuildings が空（随伴子施設を持たない単体施設）
+        ///   - m_placementMode が水上/岸辺必須（Shoreline / OnWater / ShorelineOrGround）ではない
+        ///   - DamPowerHouseAI（河川必須）は無条件で除外
+        /// 上記を満たす候補の中で、AIの型により以下の優先順位で選ぶ:
+        ///   WindTurbineAI &gt; SolarPowerPlantAI &gt; FusionPowerPlantAI &gt; PowerPlantAI（無印）
+        /// （DamPowerHouseAI, FusionPowerPlantAI, SolarPowerPlantAI, WindTurbineAI が
+        /// ゲーム本体に存在する PowerPlantAI の全サブクラスであることを reflection で確認済み。
+        /// BuildingInfo.m_subBuildings / m_placementMode は public フィールドのためコンパイル時に
+        /// 直接参照できる。フィールド名・enum値は Assembly-CSharp.dll を reflection で走査して確認した
+        /// （m_subBuildings: BuildingInfo.SubInfo[]、m_placementMode: BuildingInfo.PlacementMode
+        /// { Roadside, Shoreline, OnWater, OnGround, OnSurface, OnTerrain, ShorelineOrGround,
+        /// PathsideOrGround, Concourse, PitLane }）。
         /// AI参照の取得は reflection で確認した BuildingInfo.m_buildingAI（public フィールド）を使う
         /// （GetComponent&lt;BuildingAI&gt;() も動作するはずだが、こちらは既にゲームが解決済みの参照であり
         /// 追加のコンポーネント探索コストが無いため採用）。
         /// </summary>
-        private static BuildingInfo FindElectricitySource()
+        private static BuildingInfo FindElectricitySource(out SourceSearchStats stats)
         {
-            BuildingInfo bestRenewableNoFuel = null;
-            BuildingInfo bestAnyProducing = null;
+            stats = new SourceSearchStats();
+            BuildingInfo best = null;
+            int bestTier = int.MaxValue;
 
             int count = PrefabCollection<BuildingInfo>.LoadedCount();
             for (uint i = 0; i < (uint)count; i++)
@@ -122,19 +167,55 @@ namespace CSWarfront.Game
 
                 PowerPlantAI ai = info.m_buildingAI as PowerPlantAI;
                 if (ai == null) continue; // 電柱・変電所など PowerPlantAI を持たない物は除外
-                if (ai.m_electricityProduction <= 0) continue; // 数値フィールドが全ゼロの物（ゼロ割の元）を除外
 
-                if (bestAnyProducing == null) bestAnyProducing = info;
+                stats.Considered++;
 
-                if (ai.m_isRenewable && ai.m_resourceType == TransferManager.TransferReason.None)
+                if (ai.m_electricityProduction <= 0)
                 {
-                    bestRenewableNoFuel = info;
-                    break; // 最優先条件が見つかったので探索終了
+                    stats.RejectedZeroProduction++; // 数値フィールドが全ゼロの物（ゼロ割の元）を除外
+                    continue;
+                }
+                if (ai is DamPowerHouseAI)
+                {
+                    stats.RejectedDam++; // 河川必須。陸上単体基地の複製元として不適切
+                    continue;
+                }
+                int subBuildingCount = info.m_subBuildings != null ? info.m_subBuildings.Length : 0;
+                if (subBuildingCount > 0)
+                {
+                    stats.RejectedSubBuildings++; // OTEC等の随伴子施設付き多部品プラントを除外
+                    continue;
+                }
+                if (info.m_placementMode == BuildingInfo.PlacementMode.Shoreline ||
+                    info.m_placementMode == BuildingInfo.PlacementMode.OnWater ||
+                    info.m_placementMode == BuildingInfo.PlacementMode.ShorelineOrGround)
+                {
+                    stats.RejectedWaterPlacement++; // 水上/岸辺必須の配置は陸上基地に不適切
+                    continue;
+                }
+
+                int tier = SourcePriorityTier(ai);
+                if (tier < bestTier)
+                {
+                    bestTier = tier;
+                    best = info;
                 }
             }
 
-            if (bestRenewableNoFuel != null) return bestRenewableNoFuel;
-            return bestAnyProducing; // 見つからなければ null（呼び出し元が中止する）
+            return best; // 見つからなければ null（呼び出し元が中止する）
+        }
+
+        /// <summary>
+        /// PowerPlantAI系統内での複製元優先順位。数値が小さいほど優先。
+        /// WindTurbineAI &gt; SolarPowerPlantAI &gt; FusionPowerPlantAI &gt; PowerPlantAI（無印/その他）。
+        /// DamPowerHouseAI は呼び出し元で無条件除外済みのためここには到達しない。
+        /// </summary>
+        private static int SourcePriorityTier(PowerPlantAI ai)
+        {
+            if (ai is WindTurbineAI) return 0;
+            if (ai is SolarPowerPlantAI) return 1;
+            if (ai is FusionPowerPlantAI) return 2;
+            return 3; // 無印 PowerPlantAI、または将来追加される未分類サブクラス
         }
 
         /// <summary>

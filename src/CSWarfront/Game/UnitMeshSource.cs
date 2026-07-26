@@ -29,6 +29,9 @@ namespace CSWarfront.Game
         private const string DefaultCacheKey = ""; // AssetPrefabName が空の全ユニット共通キー
 
         private static readonly Dictionary<string, Resolved> _cache = new Dictionary<string, Resolved>();
+        // FindLoaded(name) が見つからず既定へフォールバックした名前を、警告ログの重複を避けるためだけに記録する
+        // （キャッシュには入れない＝次回呼び出しで必ず FindLoaded を再試行させる。詳細は TryResolve 参照）。
+        private static readonly HashSet<string> _warnedMissingNames = new HashSet<string>();
         private static bool _loggedSourceOnce;
         private static bool _loggedFailureOnce;
         private static Mesh _fallbackCubeMesh;
@@ -38,6 +41,13 @@ namespace CSWarfront.Game
         /// assetPrefabName（空可）からメッシュ・マテリアルを解決する。
         /// 解決順: (a) assetPrefabName で FindLoaded → (b) 既定候補名 → 全VehicleInfo走査 →
         /// (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
+        ///
+        /// キャッシュ方針: assetPrefabName 指定時、直接の FindLoaded(name) が「成功」した結果のみを
+        /// そのキーで永続キャッシュする。直接ヒットせず既定プレハブへフォールバックした場合は、
+        /// その回の呼び出し結果としては既定を返すが named-key ではキャッシュしない。
+        /// こうしないと、Workshopアセットがまだロードされていない一瞬に呼ばれただけで「そのアセット名は
+        /// 永久に解決不能」という誤ったキャッシュが焼き付いてしまい、後でアセットがロードされても
+        /// 二度と正しく解決されなくなる（実際に起きていたバグ）。
         /// </summary>
         public static bool TryResolve(string assetPrefabName, out Mesh mesh, out Material material)
         {
@@ -51,24 +61,38 @@ namespace CSWarfront.Game
                 return cached.Ok;
             }
 
-            Resolved result = Resolve(key);
-            _cache[key] = result;
+            bool namedLookupSucceeded;
+            Resolved result = Resolve(key, out namedLookupSucceeded);
+
+            // 既定キー（名前未指定）は常にキャッシュ。名前指定キーは直接ヒット時のみキャッシュし、
+            // ミス時は毎回 FindLoaded を再試行できるようにキャッシュへ書き込まない。
+            if (string.IsNullOrEmpty(key) || namedLookupSucceeded)
+            {
+                _cache[key] = result;
+            }
+
             mesh = result.Mesh;
             material = result.Material;
             return result.Ok;
         }
 
-        private static Resolved Resolve(string key)
+        private static Resolved Resolve(string key, out bool namedLookupSucceeded)
         {
+            namedLookupSucceeded = false;
             try
             {
                 VehicleInfo info = null;
                 if (!string.IsNullOrEmpty(key))
                 {
                     info = PrefabCollection<VehicleInfo>.FindLoaded(key);
+                    if (info != null) namedLookupSucceeded = true;
                 }
                 if (info == null)
                 {
+                    if (!string.IsNullOrEmpty(key) && _warnedMissingNames.Add(key))
+                    {
+                        ModConfig.Log("UnitMeshSource: named asset '" + key + "' not found yet (FindLoaded miss); using default prefab for now, will retry this name on future calls");
+                    }
                     info = FindDefaultPrefab();
                 }
 
