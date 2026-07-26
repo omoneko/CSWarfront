@@ -1,4 +1,5 @@
 using ICities;
+using CSWarfront.Game.UI;
 namespace CSWarfront.Game
 {
     /// <summary>
@@ -19,11 +20,22 @@ namespace CSWarfront.Game
             catch (System.Exception e) { ModConfig.LogError("OnSimTick: " + e); }
         }
 
-        /// <summary>メインスレッド。ユニット見た目の同期のみ（CS実体操作は行わない）。一時停止中も動く。</summary>
+        /// <summary>
+        /// メインスレッド。ユニット見た目の同期に加え（Task25）、基地情報パネル（Game/UI/BaseInfoPanel）の
+        /// 生成・表示更新もここから駆動する。BaseInfoPanel の各メソッドは内部で例外を必ず握るため、
+        /// ここでの try/catch は他の main-thread 処理と同様の多重防御。一時停止中も動く。
+        /// </summary>
         public override void OnUpdate(float realTimeDelta, float simulationTimeDelta)
         {
             try { MilitaryManager.OnMainVisualUpdate(); }
             catch (System.Exception e) { ModConfig.LogError("OnMainVisualUpdate: " + e); }
+
+            try
+            {
+                BaseInfoPanel.EnsureCreated();
+                BaseInfoPanel.UpdateVisibility();
+            }
+            catch (System.Exception e) { ModConfig.LogError("BaseInfoPanel update: " + e); }
         }
     }
 }

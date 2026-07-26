@@ -100,6 +100,86 @@ namespace CSWarfront.Game
         public static void ReplaceState(WarState s) { lock (_stateLock) { State = s; } }
 
         /// <summary>
+        /// 基地情報パネル（Game/UI/BaseInfoPanel）から呼ばれる、基地の所属勢力変更（Task25）。
+        /// メインスレッドから呼ばれる想定だが、simスレッド（OnSimTick）も同じ _stateLock を取るため
+        /// 排他は保証される。HQ整合性は BasePlacementWatcher.ReassignHqIfCleared を共有利用する
+        /// （解体経路と重複させないため）。
+        /// </summary>
+        /// <returns>baseId の基地または factionId の勢力が見つからない場合は false。</returns>
+        public static bool TrySetBaseOwner(ushort baseId, byte factionId)
+        {
+            lock (_stateLock)
+            {
+                if (State == null) return false;
+
+                MilitaryBase mb = null;
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    if (State.Bases[i].BaseId == baseId) { mb = State.Bases[i]; break; }
+                }
+                if (mb == null) return false;
+
+                Faction newFaction = State.FindFaction(factionId);
+                if (newFaction == null) return false;
+
+                byte? oldOwner = mb.OwnerFactionId;
+                if (oldOwner.HasValue && oldOwner.Value == factionId) return true; // 変更なし
+
+                bool wasHq = mb.IsHeadquarters;
+                mb.OwnerFactionId = factionId;
+                mb.IsHeadquarters = false;
+
+                // 旧所有勢力のHQだった場合はクリアして、その勢力が他に持つ基地があれば昇格する。
+                if (oldOwner.HasValue && wasHq)
+                {
+                    BasePlacementWatcher.ReassignHqIfCleared(State, oldOwner.Value, baseId);
+                }
+
+                // 新所有勢力がまだHQを持たない場合、この基地をHQにする。
+                if (!newFaction.HomeBaseId.HasValue)
+                {
+                    newFaction.HomeBaseId = baseId;
+                    mb.IsHeadquarters = true;
+                }
+
+                ModConfig.Log("MilitaryManager: base " + baseId + " owner changed " +
+                    (oldOwner.HasValue ? oldOwner.Value.ToString() : "none") + " -> " + factionId +
+                    (mb.IsHeadquarters ? " (new HQ)" : ""));
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 基地情報パネル表示用の値をロック内でコピーして返す（UIが WarState へ直接触れないため、Task25）。
+        /// </summary>
+        public static bool TryGetBaseSnapshot(ushort baseId, out BaseUiSnapshot snapshot)
+        {
+            lock (_stateLock)
+            {
+                snapshot = default(BaseUiSnapshot);
+                if (State == null) return false;
+
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    MilitaryBase mb = State.Bases[i];
+                    if (mb.BaseId != baseId) continue;
+
+                    snapshot = new BaseUiSnapshot
+                    {
+                        OwnerFactionId = mb.OwnerFactionId,
+                        CurrentHP = mb.CurrentHP,
+                        MaxHP = mb.MaxHP,
+                        CaptureGraceHours = mb.CaptureGraceHours,
+                        QueueCount = mb.Queue.Count,
+                        IsHeadquarters = mb.IsHeadquarters
+                    };
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
         /// セーブ用：_stateLock を保持したまま WarState をシリアライズする。
         /// OnSimTick が State.Units 等を書き換えている最中の
         /// 「Collection was modified」例外（＝セーブ静かに失敗＝データ消失）を防ぐ。
@@ -385,6 +465,25 @@ namespace CSWarfront.Game
                 _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();
             }
+
+            // BaseInfoPanel.Destroy はUnity GameObjectを破棄するためメインスレッド専用API。
+            // Reset()自体がCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から
+            // 呼ばれる点は上の UnitVisuals.DestroyAll と同じ前提のため、ここで直接呼んで問題ない。
+            UI.BaseInfoPanel.Destroy();
         }
+    }
+
+    /// <summary>
+    /// 基地情報パネル（Game/UI/BaseInfoPanel）向けの読み取り専用スナップショット（Task25）。
+    /// UIが WarState / MilitaryBase へ直接触れずに済むよう、_stateLock 内で値をコピーして渡す。
+    /// </summary>
+    public struct BaseUiSnapshot
+    {
+        public byte? OwnerFactionId;
+        public float CurrentHP;
+        public float MaxHP;
+        public float CaptureGraceHours;
+        public int QueueCount;
+        public bool IsHeadquarters;
     }
 }

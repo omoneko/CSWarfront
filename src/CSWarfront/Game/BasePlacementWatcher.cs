@@ -284,13 +284,25 @@ namespace CSWarfront.Game
             state.Bases.Remove(mb);
 
             if (mb.OwnerFactionId == null) return;
-            Faction f = state.FindFaction(mb.OwnerFactionId.Value);
-            if (f == null || !f.HomeBaseId.HasValue || f.HomeBaseId.Value != mb.BaseId) return;
+            ReassignHqIfCleared(state, mb.OwnerFactionId.Value, mb.BaseId);
+        }
+
+        /// <summary>
+        /// factionId の HomeBaseId が baseId を指している場合にそれをクリアし、その勢力がまだ
+        /// 所有する他の基地があれば先頭を新HQへ昇格する。指していなければ何もしない（no-op）。
+        /// 基地の削除（RemoveBaseAndReassignHq）・所属変更（MilitaryManager.TrySetBaseOwner）の
+        /// 両方から共有される、HQ整合性維持の唯一の実装（Task25：ロジック重複を避けるため internal 公開）。
+        /// 呼び出し元が _stateLock を保持していること。
+        /// </summary>
+        internal static void ReassignHqIfCleared(WarState state, byte factionId, ushort baseId)
+        {
+            Faction f = state.FindFaction(factionId);
+            if (f == null || !f.HomeBaseId.HasValue || f.HomeBaseId.Value != baseId) return;
 
             f.HomeBaseId = null;
             foreach (var other in state.Bases)
             {
-                if (other.OwnerFactionId == mb.OwnerFactionId.Value)
+                if (other.BaseId != baseId && other.OwnerFactionId == factionId)
                 {
                     other.IsHeadquarters = true;
                     f.HomeBaseId = other.BaseId;
