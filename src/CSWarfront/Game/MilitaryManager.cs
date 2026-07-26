@@ -38,6 +38,11 @@ namespace CSWarfront.Game
         private const float EconomyIntervalHours = 6f;      // 経済tick間隔（ゲーム内時間、1日4回）
         private const float IncomeRate = 0.01f;
 
+        // 道路グラフの再構築間隔（ゲーム内時間）。プレイヤーが道路を敷設/破壊し続けるため定期的に作り直す
+        // （Task23）。simスレッドのみが触る。
+        private static float _roadRebuildAccum;
+        private const float RoadRebuildIntervalHours = 12f;
+
         // ゲーム内時間ベースのdt計算用（Task21）。simスレッドのみが触る。
         private static DateTime _lastGameTime;
         private static bool _hasLastGameTime;
@@ -165,6 +170,25 @@ namespace CSWarfront.Game
                     State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
                 }
 
+                // 道路網（State.Roads）の構築/再構築。InvasionOrdersが同tickで経路計算できるよう、
+                // 進軍命令より先に済ませる（Task23）。未供給ならここで即座に構築し、供給済みなら
+                // プレイヤーの道路建設/破壊を反映するため一定間隔で作り直す。ビルド失敗（null）時は
+                // 既存グラフをそのまま維持する（一時的な失敗で経路探索能力を失わないため）。
+                if (State.Roads == null)
+                {
+                    State.Roads = RoadGraphBuilder.Build();
+                }
+                else
+                {
+                    _roadRebuildAccum += dt;
+                    if (_roadRebuildAccum >= RoadRebuildIntervalHours)
+                    {
+                        _roadRebuildAccum -= RoadRebuildIntervalHours;
+                        var rebuilt = RoadGraphBuilder.Build();
+                        if (rebuilt != null) State.Roads = rebuilt;
+                    }
+                }
+
                 // AI進軍命令（非プレイヤー勢力）
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id);
@@ -217,6 +241,7 @@ namespace CSWarfront.Game
                 var sb = new System.Text.StringBuilder();
                 sb.Append("DIAG dt=").Append(dt.ToString("0.000")).Append("h");
                 sb.Append(" units=").Append(State.Units.Count);
+                sb.Append(" | roads=").Append(State.Roads != null ? State.Roads.NodeCount : 0);
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
                     UnitInstance u = State.Units[i];
@@ -228,6 +253,11 @@ namespace CSWarfront.Game
                       .Append(" tgt=").Append(u.OrderTargetPos.HasValue
                           ? u.OrderTargetPos.Value.X.ToString("0") + "," + u.OrderTargetPos.Value.Z.ToString("0")
                           : "none");
+                    if (i == 0)
+                    {
+                        // 最初にサンプルしたユニットについてのみ、道路経路の消化状況を記録する（Task23）。
+                        sb.Append(" path=").Append(u.Path != null ? u.PathIndex + "/" + u.Path.Count : "none");
+                    }
                 }
                 for (int j = 0; j < State.Bases.Count; j++)
                 {
@@ -303,6 +333,7 @@ namespace CSWarfront.Game
             {
                 State = null;
                 _economyAccum = 0f;
+                _roadRebuildAccum = 0f;
                 _hasLastGameTime = false;
                 _lastGameTime = default(DateTime);
                 BasePlacementWatcher.ClearPending();
