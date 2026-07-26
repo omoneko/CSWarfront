@@ -43,4 +43,99 @@ public class AiTargetingTests
         Assert.True(s.FindUnit(1).OrderTargetPos.HasValue);
         Assert.Equal(100f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // near基地へ
     }
+
+    private static RoadGraph SimpleRoadToNearBase()
+    {
+        // A(0,0,0) - B(100,0,0), matching "near" base position exactly.
+        var g = new RoadGraph();
+        g.AddNode(1, new WorldPos(0, 0, 0));
+        g.AddNode(2, new WorldPos(100, 0, 0));
+        g.AddEdge(1, 2);
+        return g;
+    }
+
+    [Fact]
+    public void AssignAdvance_with_roads_computes_path_and_records_target()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Roads = SimpleRoadToNearBase();
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0);
+
+        var u = s.FindUnit(1);
+        Assert.NotNull(u.Path);
+        Assert.NotEmpty(u.Path);
+        Assert.True(u.PathTarget.HasValue);
+        Assert.Equal(u.OrderTargetPos.Value.X, u.PathTarget.Value.X, 3);
+    }
+
+    [Fact]
+    public void AssignAdvance_without_roads_leaves_path_null()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Roads = null;
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.True(u.OrderTargetPos.HasValue);
+        Assert.Null(u.Path);
+    }
+
+    [Fact]
+    public void AssignAdvance_clears_stale_path_when_target_base_changes()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Roads = SimpleRoadToNearBase();
+        var unit = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        s.Units.Add(unit);
+
+        InvasionOrders.AssignAdvance(s, 0);
+        var firstPath = unit.Path;
+        Assert.NotNull(firstPath);
+
+        // Simulate the near base falling / no longer being the nearest target:
+        // remove it so the unit must now aim at the far base instead.
+        s.Bases.RemoveAll(b => b.BaseId == 10);
+        // Extend the road graph so the far base (500,0,0) is reachable and would
+        // differ from the stale PathTarget, forcing a recompute.
+        s.Roads.AddNode(3, new WorldPos(500, 0, 0));
+        s.Roads.AddEdge(2, 3);
+
+        InvasionOrders.AssignAdvance(s, 0);
+
+        Assert.Equal(500f, unit.OrderTargetPos.Value.X, 3);
+        Assert.Equal(500f, unit.PathTarget.Value.X, 3);
+    }
+
+    [Fact]
+    public void AssignAdvance_maxPathComputations_throttles_new_path_computation()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Roads = SimpleRoadToNearBase();
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+        s.Units.Add(new UnitInstance(3, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, maxPathComputations: 1);
+
+        int withPath = 0;
+        foreach (var u in s.Units)
+            if (u.Path != null) withPath++;
+
+        Assert.Equal(1, withPath);
+        // all units still receive orders/state even if path computation was throttled
+        foreach (var u in s.Units)
+        {
+            Assert.Equal(UnitState.Moving, u.State);
+            Assert.True(u.OrderTargetPos.HasValue);
+        }
+    }
 }

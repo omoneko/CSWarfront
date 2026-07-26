@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace CSWarfront.Core
 {
     public enum UnitState { Idle, Moving, Engaging, Dead }
@@ -14,6 +16,13 @@ namespace CSWarfront.Core
         public uint? TargetId;
         public WorldPos? OrderTargetPos;
 
+        /// <summary>道路経路の残り（実行時のみ・非永続化）。null/空なら直線移動へフォールバック。</summary>
+        public List<WorldPos> Path;
+        /// <summary>次に目指す Path の要素番号。</summary>
+        public int PathIndex;
+        /// <summary>この経路が向かう最終目的地。OrderTargetPosが変わったら経路を捨てるための記録。</summary>
+        public WorldPos? PathTarget;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;
@@ -21,5 +30,12 @@ namespace CSWarfront.Core
         }
 
         public bool IsAlive => State != UnitState.Dead && CurrentHP > 0f;
+
+        public void ClearPath()
+        {
+            Path = null;
+            PathIndex = 0;
+            PathTarget = null;
+        }
     }
 }

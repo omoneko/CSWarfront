@@ -12,6 +12,9 @@ namespace CSWarfront.Core
         public UnitTypeRegistry Types = new UnitTypeRegistry();
         public uint NextInstanceId = 1;
 
+        /// <summary>Game層から供給される道路網（実行時のみ・非永続化）。未供給ならnull。</summary>
+        public RoadGraph Roads;
+
         public uint AllocInstanceId() { return NextInstanceId++; }
 
         public UnitInstance FindUnit(uint id)
