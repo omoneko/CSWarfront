@@ -29,6 +29,12 @@ namespace CSWarfront.Game
     /// 素の MeshRenderer に割り当てると不可視/黒になる（実際に発生していた不可視バグの原因）。
     /// 代わりに自前の標準シェーダーマテリアルを勢力ごとに1つ生成・共有し、勢力を色で判別できるようにする。
     ///
+    /// Task37: 上記の可視性マーカー立方体・勢力色は「割り当て済みプロップが無いユニット」専用の見た目に
+    /// 縮小した。TypeKeyにプロップが割り当てられている場合（UnitMeshSource.TryResolveのfromAssignedProp）は
+    /// マーカーを出さず、マテリアルもプロップ自身の見た目（<see cref="UnitMaterialFactory.TryGetPropMaterial"/>）
+    /// を使う。クリック選択の当たり判定はマーカーのBoxColliderに代わってルートGameObject自身のBoxColliderで
+    /// 提供する（CreateVisual/AttachPropCollider参照）。
+    ///
     /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
     /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
     /// sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと。
@@ -42,8 +48,13 @@ namespace CSWarfront.Game
         }
 
         // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
+        // Task37: 割り当て済みプロップがある場合はもう使わない（AttachVisibilityMarkerのfromAssignedProp分岐参照）。
         private const float MarkerSize = 8f;
         private const float MarkerHeight = 5f;
+
+        // Task37: 割り当て済みプロップ（マーカー無し）のクリック当たり判定用BoxColliderの最小サイズ。
+        // 極小プロップでもクリックできるようにするための下限。
+        private const float MinPropColliderSize = 4f;
 
         private const float MinMoveDeltaForRotation = 0.01f;
 
@@ -194,14 +205,21 @@ namespace CSWarfront.Game
             try
             {
                 Mesh mesh;
-                if (!UnitMeshSource.TryResolve(s.TypeKey, s.AssetPrefabName, out mesh))
+                bool fromAssignedProp;
+                string resolvedPropName;
+                if (!UnitMeshSource.TryResolve(s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedPropName))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;
                 }
 
+                // Task37: 割り当て済みプロップがある場合はプロップ自身の見た目（テクスチャ）を維持し、
+                // 勢力色で塗らない。割り当てが無い場合のみ、従来通り勢力色マテリアルを使う。
                 Material material;
-                if (!UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material))
+                bool materialOk = fromAssignedProp
+                    ? UnitMaterialFactory.TryGetPropMaterial(resolvedPropName, out material)
+                    : UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material);
+                if (!materialOk)
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のマテリアル生成に失敗、表現をスキップ");
                     return null;
@@ -214,16 +232,34 @@ namespace CSWarfront.Game
                 UnitVisualTag tag = go.AddComponent<UnitVisualTag>();
                 tag.InstanceId = s.InstanceId;
 
-                MeshFilter filter = go.AddComponent<MeshFilter>();
+                // Task37: メッシュのピボットが底面にない場合、モデルが路面に半分埋まって見えることがある。
+                // ルートのtransform.position自体はユニットの論理座標そのもの（垂直オフセットを一切加えない）
+                // に保つため、メッシュ描画専用の子("Model")にだけこのオフセットを載せる。
+                float pivotOffsetY = -mesh.bounds.min.y;
+
+                GameObject model = new GameObject("Model");
+                model.transform.SetParent(go.transform, false);
+                model.transform.localPosition = new Vector3(0f, pivotOffsetY, 0f);
+                MeshFilter filter = model.AddComponent<MeshFilter>();
                 filter.sharedMesh = mesh;
-                MeshRenderer renderer = go.AddComponent<MeshRenderer>();
+                MeshRenderer renderer = model.AddComponent<MeshRenderer>();
                 renderer.sharedMaterial = material;
+
                 go.transform.position = s.Position;
 
-                // 可視性の保険＆切り分け: CS由来の借用メッシュが環境によって描画されない可能性があるため、
-                // 確実に描画されるプリミティブ（MissileDisasterのフォールバック球と同じ手法）を子に付ける。
-                // これが見えて借用メッシュが見えない場合、原因はメッシュ側だと確定できる。
-                AttachVisibilityMarker(go, material);
+                if (fromAssignedProp)
+                {
+                    // 要件1: プロップ割り当てがある場合は可視性マーカー立方体を出さない。
+                    // クリック選択の当たり判定は代わりにルートへ直接付ける（マーカーが無いため）。
+                    AttachPropCollider(go, mesh, pivotOffsetY);
+                }
+                else
+                {
+                    // 可視性の保険＆切り分け: CS由来の借用メッシュが環境によって描画されない可能性があるため、
+                    // 確実に描画されるプリミティブ（MissileDisasterのフォールバック球と同じ手法）を子に付ける。
+                    // これが見えて借用メッシュが見えない場合、原因はメッシュ側だと確定できる。
+                    AttachVisibilityMarker(go, material);
+                }
 
                 ModConfig.Log("UnitVisuals: created visual for instance " + s.InstanceId + " type=" + s.TypeKey);
 
@@ -237,8 +273,40 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
+        /// Task37: 割り当て済みプロップ（マーカー無し）用に、ルートGameObjectへ直接BoxColliderを付ける。
+        /// マーカー立方体が無くなったため、クリック選択の当たり判定はこれが唯一の手段になる。
+        /// メッシュのbounds（"Model"子への pivotOffsetY 適用後のルート相対座標に変換したもの）を元に
+        /// サイズ・中心を決め、極小プロップでもクリックできるよう各軸最小 <see cref="MinPropColliderSize"/>
+        /// を保証する。isTriggerはfalseのまま、GameObjectのlayerは変更しない（AttachVisibilityMarkerと同じ理由）。
+        /// </summary>
+        private static void AttachPropCollider(GameObject root, Mesh mesh, float pivotOffsetY)
+        {
+            try
+            {
+                BoxCollider col = root.AddComponent<BoxCollider>();
+                col.isTrigger = false;
+
+                Vector3 size = mesh.bounds.size;
+                size.x = Mathf.Max(size.x, MinPropColliderSize);
+                size.y = Mathf.Max(size.y, MinPropColliderSize);
+                size.z = Mathf.Max(size.z, MinPropColliderSize);
+                col.size = size;
+
+                Vector3 center = mesh.bounds.center;
+                center.y += pivotOffsetY; // "Model"子と同じオフセットをルート相対座標に反映
+                col.center = center;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitVisuals.AttachPropCollider error: " + e);
+            }
+        }
+
+        /// <summary>
         /// ユニットGameObjectに、確実に描画されるプリミティブ立方体を子として付ける（メインスレッド専用）。
         /// 借用メッシュの描画可否に依存せずユニット位置を視認できるようにするための保険。
+        /// Task37: 割り当て済みプロップがある場合（fromAssignedProp）はもう呼ばれない
+        /// （AttachPropColliderで当たり判定のみ用意する）。既定/未割り当てユニットの見た目保険として残す。
         /// Task31: このマーカーが生成時に持つBoxColliderは破棄せず、そのままクリック選択の当たり判定
         /// として流用する（isTriggerはfalseのまま＝Physics.Raycastで検出可能）。GameObjectのlayerは
         /// 変更しない（layerを変えるとCS側カメラのカリング/レイヤーマスクに影響し、既に解決済みの

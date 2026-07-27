@@ -53,9 +53,18 @@ namespace CSWarfront.Game
         /// （破棄された見た目は次回Syncで必ずCreateVisual→この解決を再実行する）ため、ここで
         /// 名前単位キャッシュを持つと変更が反映されない/古い結果が残るリスクの方が大きい。
         /// (b)/(c) の既存キャッシュ方針は変更していない（下記オーバーロード参照）。
+        ///
+        /// Task37: メッシュが (a) の「割り当て済みプロップ」経由で解決できたかどうかを
+        /// <paramref name="fromAssignedProp"/> で報告する。呼び出し側（UnitVisuals）はこれを使って、
+        /// 割り当て済みプロップがある場合は可視性マーカー立方体や勢力色を出さない判断をする。
+        /// <paramref name="resolvedPropName"/> は fromAssignedProp=true の時のみプロップ名を返す
+        /// （UnitMaterialFactory.TryGetPropMaterial に渡すため）。
         /// </summary>
-        public static bool TryResolve(string typeKey, string assetPrefabName, out Mesh mesh)
+        public static bool TryResolve(string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out string resolvedPropName)
         {
+            fromAssignedProp = false;
+            resolvedPropName = null;
+
             try
             {
                 if (!string.IsNullOrEmpty(typeKey))
@@ -67,6 +76,8 @@ namespace CSWarfront.Game
                         if (PropCatalog.TryGetMesh(propName, out propMesh))
                         {
                             mesh = propMesh;
+                            fromAssignedProp = true;
+                            resolvedPropName = propName;
                             return true;
                         }
 

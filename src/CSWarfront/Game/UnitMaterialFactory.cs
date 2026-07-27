@@ -13,6 +13,14 @@ namespace CSWarfront.Game
     /// マテリアルは勢力id単位（最大 <see cref="WarfrontSettings.MaxFactions"/> 種）でキャッシュ・共有し、
     /// sharedMaterial として割り当てる（per-instance化してリークさせない）。
     /// メインスレッド専用（Material/Shader生成を伴う）。
+    ///
+    /// Task37: 割り当て済みプロップについては勢力色で塗らず、プロップ自身の見た目
+    /// （テクスチャ）を維持する。ただしCS側の Material オブジェクトそのものは
+    /// （上記と同じ理由で）借用しない — <see cref="TryGetPropMaterial"/> は
+    /// PropInfo.m_material.mainTexture だけを読み取り、自前の標準シェーダーMaterialに
+    /// 貼り直す（Material.mainTexture / Material(Shader) は UnityEngine.dll をリフレクションで
+    /// 検証済み。PropInfo.m_material は Assembly-CSharp.dll をリフレクションで検証済み、
+    /// Task36 task-36-report.md 参照）。
     /// </summary>
     internal static class UnitMaterialFactory
     {
@@ -25,6 +33,9 @@ namespace CSWarfront.Game
         private static readonly Color FallbackColor = Color.white;
 
         private static readonly Dictionary<byte, Material> _cache = new Dictionary<byte, Material>();
+
+        // プロップ名単位のマテリアルキャッシュ（Task37）。TryGetPropMaterial専用。
+        private static readonly Dictionary<string, Material> _propCache = new Dictionary<string, Material>();
 
         private static Shader _shader;
         private static bool _shaderResolved;
@@ -63,6 +74,72 @@ namespace CSWarfront.Game
                 ModConfig.LogError("UnitMaterialFactory.TryGetFactionMaterial(" + factionId + ") error: " + e);
                 material = null;
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Task37: 割り当て済みプロップ用のマテリアルを取得する（無ければ生成してキャッシュ、プロップ名単位）。
+        /// 自前の標準シェーダーMaterialを作り、色は白（tintしない＝勢力色で塗らない）のまま、
+        /// mainTextureだけプロップ自身のマテリアル（PropInfo.m_material）から借用する。
+        /// CSの Material オブジェクトそのものは一切割り当てない（TryGetFactionMaterialと同じ理由）。
+        /// テクスチャが取得できない場合は白一色の標準マテリアルへフォールバックする
+        /// （勢力色にはフォールバックしない＝要件2「勢力色で塗るのをやめる」を守る）。
+        /// </summary>
+        public static bool TryGetPropMaterial(string propName, out Material material)
+        {
+            if (string.IsNullOrEmpty(propName))
+            {
+                material = null;
+                return false;
+            }
+
+            Material cached;
+            if (_propCache.TryGetValue(propName, out cached) && cached != null)
+            {
+                material = cached;
+                return true;
+            }
+
+            Shader shader = ResolveShader();
+            if (shader == null)
+            {
+                material = null;
+                return false;
+            }
+
+            try
+            {
+                Texture mainTexture = TryGetPropMainTexture(propName);
+
+                Material mat = new Material(shader);
+                mat.color = Color.white; // tintしない。プロップ自身の見た目を維持する。
+                if (mainTexture != null) mat.mainTexture = mainTexture;
+
+                _propCache[propName] = mat;
+                material = mat;
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitMaterialFactory.TryGetPropMaterial(" + propName + ") error: " + e);
+                material = null;
+                return false;
+            }
+        }
+
+        /// <summary>PropInfo.m_material.mainTexture を安全に読み取る（見つからない/null時はnullを返す）。</summary>
+        private static Texture TryGetPropMainTexture(string propName)
+        {
+            try
+            {
+                PropInfo info = PrefabCollection<PropInfo>.FindLoaded(propName);
+                if (info == null || info.m_material == null) return null;
+                return info.m_material.mainTexture;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitMaterialFactory.TryGetPropMainTexture(" + propName + ") error: " + e);
+                return null;
             }
         }
 

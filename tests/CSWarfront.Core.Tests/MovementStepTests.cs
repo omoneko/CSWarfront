@@ -78,8 +78,13 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.X, 1);
     }
 
+    // Task37: 旧仕様は「移動中もYは常に維持する」だった（テスト名 Advance_preserves_y_coordinate、
+    // 期待値は開始Yの42のまま）。これは道路の勾配を無視して水平飛行する「路面から浮く」バグの原因だった
+    // ため、新仕様では X/Z と同じ補間係数でYも目標へ向けて補間する。以下はその新仕様を検証する
+    // （start Y=42, target Y=0, dist=100, stepLen≈TankSpeedPerHour(≈5.418) -> t≈0.05418,
+    //  Y = 42 + (0-42)*t ≈ 39.72）。
     [Fact]
-    public void Advance_preserves_y_coordinate()
+    public void Advance_interpolates_y_toward_target_in_straight_line_fallback()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -91,7 +96,27 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(42f, s.Units[0].Position.Y, 1);
+        Assert.Equal(39.7f, s.Units[0].Position.Y, 1);
+    }
+
+    // Task37: 直線フォールバック（Path無し/消化済み）でも、到達時はtargetのYへ完全収束すること
+    // （オーバーシュートせず、丸め誤差もなく厳密にtargetのYになる）を確認する。
+    [Fact]
+    public void Advance_converges_exactly_to_target_y_on_arrival_in_straight_line_fallback()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(5, 20, 0); // dist=5 << stepLen(≈5.418) -> 1ステップで到達
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(5f, s.Units[0].Position.X, 1);
+        Assert.Equal(20f, s.Units[0].Position.Y, 4); // targetのYへ厳密に収束（スナップ）
+        Assert.Equal(0f, s.Units[0].Position.Z, 1);
     }
 
     private static WarState UnitWithPath()
@@ -159,12 +184,69 @@ public class MovementStepTests
         Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
     }
 
+    // Task37: 旧仕様は「Pathに沿って移動中もYは常に維持する」だった（テスト名
+    // Advance_preserves_y_while_following_path、期待値は開始Yの42のまま）。これは道路の勾配（橋・坂）を
+    // 無視して水平飛行してしまう「路面から浮く」バグの原因だったため、新仕様ではウェイポイントへ向かう
+    // 間もX/Zと同じ補間係数でYを補間する。UnitWithPath()のウェイポイントはY=0なので、42から0へ向けて
+    // 補間されるはず（dist=100, stepLen≈3.2508 -> t≈0.032508, Y=42+(0-42)*t≈40.63）。
     [Fact]
-    public void Advance_preserves_y_while_following_path()
+    public void Advance_interpolates_y_toward_waypoint_while_following_path()
     {
         var s = UnitWithPath();
         s.Units[0].Position = new WorldPos(0, 42, 0);
         MovementStep.Advance(s, 0.6f);
-        Assert.Equal(42f, s.Units[0].Position.Y, 1);
+        Assert.Equal(40.6f, s.Units[0].Position.Y, 1);
+    }
+
+    // Task37: ウェイポイントへ到達した瞬間は、丸め誤差なくそのウェイポイントのYへ厳密にスナップすること
+    // （坂の上/橋の上で「ちょうど乗った」状態を保証する）。
+    [Fact]
+    public void Advance_snaps_exactly_to_waypoint_y_on_arrival()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(10, 7, 0);
+        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // 坂の上、Y=7
+        u.PathIndex = 0;
+        u.PathTarget = u.OrderTargetPos;
+        s.Units.Add(u);
+
+        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達しウェイポイントのYへスナップ
+        MovementStep.Advance(s, 2f);
+
+        Assert.Equal(10f, s.Units[0].Position.X, 1);
+        Assert.Equal(7f, s.Units[0].Position.Y, 4); // 厳密にウェイポイントのYへスナップ
+        Assert.Equal(1, s.Units[0].PathIndex);
+    }
+
+    // Task37: 複数ウェイポイントを跨ぐ大きなステップでも、最後に到達したウェイポイントのYを基準に
+    // 次のウェイポイントへ向けて正しく補間されること（橋を渡るように0->10->20と高さが上がる想定）。
+    [Fact]
+    public void Advance_large_step_crosses_waypoint_and_interpolates_y_from_last_reached_waypoint()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(100, 20, 100);
+        u.Path = new List<WorldPos> { new WorldPos(100, 10, 0), new WorldPos(100, 20, 100) };
+        u.PathIndex = 0;
+        u.PathTarget = u.OrderTargetPos;
+        s.Units.Add(u);
+
+        // stepLen≈150（Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt）:
+        // 最初のウェイポイントまで100ぶん到達（Y=10へスナップ）→残り50を2番目(dist100)へ向けて進む
+        // (t=0.5) -> Y = 10 + (20-10)*0.5 = 15。
+        MovementStep.Advance(s, 27.6855469f);
+        var pos = s.Units[0].Position;
+
+        Assert.Equal(100f, pos.X, 1);
+        Assert.Equal(50f, pos.Z, 1);
+        Assert.Equal(15f, pos.Y, 1);
+        Assert.Equal(1, s.Units[0].PathIndex);
     }
 }
