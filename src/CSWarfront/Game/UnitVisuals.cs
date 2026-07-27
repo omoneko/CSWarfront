@@ -207,7 +207,7 @@ namespace CSWarfront.Game
                 Mesh mesh;
                 bool fromAssignedProp;
                 string resolvedPropName;
-                if (!UnitMeshSource.TryResolve(s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedPropName))
+                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedPropName))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;

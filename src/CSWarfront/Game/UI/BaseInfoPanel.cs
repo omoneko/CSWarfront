@@ -41,13 +41,11 @@ namespace CSWarfront.Game.UI
         private const float TitleRowHeight = 22f;
         private const float DropdownHeight = 28f;
         private const float VanillaGap = 8f;
-        private const float CollapseButtonSize = 20f;
-        private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
-        private const string CollapseGlyphCollapsed = "+";     // + (展開する = クリックすると開く)
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
         private static UIButton _collapseButton;
+        private static PanelChrome.Handles _chrome; // Task40: タイトル行の最小化ボタン+ドラッグハンドル
         private static UILabel _factionSectionLabel;
         private static UIDropDown _factionDropdown;
         private static UILabel _statusLabel;
@@ -55,6 +53,12 @@ namespace CSWarfront.Game.UI
         private static ushort _currentBaseId; // 0 = 未表示（CSの建物id 0 は「無し」を意味する）
         private static bool _suppressDropdownEvent;
         private static bool _loggedCreated;
+
+        /// <summary>Task40: ユーザーがタイトル行をドラッグした後は true になり、その間は
+        /// PositionNextToVanilla による毎フレームの自動追従を止める（ドラッグ位置を維持するため）。
+        /// パネルが「閉じる」（バニラパネルが閉じる/建物選択解除等、Hide()経由）と false に戻り、
+        /// 次に選択した基地には通常どおり追従する。</summary>
+        private static bool _detachedFromVanilla;
 
         /// <summary>RefreshContents で毎フレーム再利用するバッファ（Task30: 文字列連結の毎フレーム
         /// アロケーションを避けるため、StringBuilder.Clear() で使い回す）。</summary>
@@ -127,7 +131,9 @@ namespace CSWarfront.Game.UI
                 // Task33: 位置決め（画面下端クランプ含む）はこのフレームの高さ確定後に行う。
                 // 旧実装ではRefreshContentsより先に位置決めしていたため、内容が増えて高さが変わった
                 // フレームでは1フレーム古い高さでクランプされるズレがあった。
-                PositionNextToVanilla(vanilla);
+                // Task40: ユーザーがドラッグ済み（_detachedFromVanilla）の間はここをスキップし、
+                // ドラッグ後の位置を維持する（毎フレームの自動追従とドラッグ操作が競合しないように）。
+                if (!_detachedFromVanilla) PositionNextToVanilla(vanilla);
                 if (!_panel.isVisible) _panel.Show();
                 _panel.BringToFront();
             }
@@ -143,7 +149,8 @@ namespace CSWarfront.Game.UI
             try
             {
                 if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionSelected;
-                if (_collapseButton != null) _collapseButton.eventClick -= OnCollapseClick;
+                PanelChrome.Unsubscribe(_chrome, OnCollapseClick); // Task40
+                if (_chrome != null && _chrome.DragHandle != null) _chrome.DragHandle.eventMouseDown -= OnTitleBarMouseDown;
                 DestroyModelButtonSection(); // Task36: イベント購読解除＋フィールドのリセット
                 DestroyProductionSection(); // Task34: イベント購読解除＋フィールドのリセット
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
@@ -157,6 +164,7 @@ namespace CSWarfront.Game.UI
                 _panel = null;
                 _titleLabel = null;
                 _collapseButton = null;
+                _chrome = null;
                 _factionSectionLabel = null;
                 _factionDropdown = null;
                 _statusLabel = null;
@@ -164,6 +172,7 @@ namespace CSWarfront.Game.UI
                 _suppressDropdownEvent = false;
                 _collapsed = false;
                 _expandedHeight = 0f;
+                _detachedFromVanilla = false;
             }
         }
 
@@ -171,6 +180,10 @@ namespace CSWarfront.Game.UI
         {
             if (_panel != null && _panel.isVisible) _panel.Hide();
             _currentBaseId = 0;
+            // Task40: 「閉じる」（バニラパネルが閉じる/建物選択解除等）扱いのため、次回選択では
+            // 通常の自動追従へ戻す。UpdateTrackingPosition内の一時的な非表示経路はここを通らない
+            // （PositionNextToVanilla自体はHide()を呼ばないため、ドラッグ中に誤ってリセットされない）。
+            _detachedFromVanilla = false;
         }
 
         private static CityServiceWorldInfoPanel TryGetVanillaPanel()
@@ -200,19 +213,17 @@ namespace CSWarfront.Game.UI
             float w = PanelWidth - Pad * 2f;
             float y = Pad;
 
+            // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
+            // タイトルラベル(非対話的、クリックを素通しする)と最小化ボタン(対話的)を重ねる。
+            // ボタンが後から追加されるため、ボタンのクリックはドラッグハンドルに横取りされない。
+            _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
+            _chrome.DragHandle.eventMouseDown += OnTitleBarMouseDown;
+            _collapseButton = _chrome.CollapseButton;
+
             _titleLabel = _panel.AddUIComponent<UILabel>();
             _titleLabel.text = TitleText;
             _titleLabel.textScale = 0.9f;
             _titleLabel.relativePosition = new Vector3(Pad, y);
-
-            _collapseButton = _panel.AddUIComponent<UIButton>();
-            _collapseButton.size = new Vector2(CollapseButtonSize, CollapseButtonSize);
-            _collapseButton.relativePosition = new Vector3(PanelWidth - Pad - CollapseButtonSize, y);
-            _collapseButton.textScale = 0.8f;
-            _collapseButton.normalBgSprite = "ButtonMenu";
-            _collapseButton.hoveredBgSprite = "ButtonMenuHovered";
-            _collapseButton.pressedBgSprite = "ButtonMenuPressed";
-            _collapseButton.eventClick += OnCollapseClick;
             y += TitleRowHeight;
 
             y = AddSectionLabel("所属勢力", Pad, y, out _factionSectionLabel);
@@ -266,7 +277,7 @@ namespace CSWarfront.Game.UI
 
             if (_collapseButton != null)
             {
-                _collapseButton.text = _collapsed ? CollapseGlyphCollapsed : CollapseGlyphExpanded;
+                _collapseButton.text = PanelChrome.CollapseGlyph(_collapsed);
             }
         }
 
@@ -460,23 +471,5 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>バニラパネルの絶対位置の右（画面外なら左）に自前パネルを追従させる。画面下端もクランプする。</summary>
-        private static void PositionNextToVanilla(CityServiceWorldInfoPanel vanilla)
-        {
-            UIComponent vc = vanilla.component;
-            UIView view = UIView.GetAView();
-            if (vc == null || _panel == null || view == null) return;
-
-            Vector3 abs = vc.absolutePosition;
-            float x = abs.x + vc.width + VanillaGap;
-            float y = abs.y;
-
-            Vector2 res = view.GetScreenResolution();
-            if (x + _panel.width > res.x) x = Mathf.Max(0f, abs.x - _panel.width - VanillaGap);
-            if (y + _panel.height > res.y) y = Mathf.Max(0f, res.y - _panel.height);
-            if (y < 0f) y = 0f;
-
-            _panel.relativePosition = new Vector3(x, y);
-        }
     }
 }

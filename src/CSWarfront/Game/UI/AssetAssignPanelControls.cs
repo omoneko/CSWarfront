@@ -110,15 +110,18 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>Task40: ラベルは現在選択中の勢力(SelectedFactionId)の割り当てを表示する
+        /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。</summary>
         private static string[] BuildDropdownLabels()
         {
             if (_typeKeys == null) return new string[0];
 
+            byte factionId = SelectedFactionId;
             string[] labels = new string[_typeKeys.Length];
             for (int i = 0; i < _typeKeys.Length; i++)
             {
                 string propName;
-                string suffix = UnitAssetBindings.TryGet(_typeKeys[i], out propName) ? propName : "(既定)";
+                string suffix = UnitAssetBindings.TryGet(factionId, _typeKeys[i], out propName) ? propName : "(既定)";
                 labels[i] = _typeKeys[i] + " → " + suffix;
             }
             return labels;
@@ -137,6 +140,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>Task40: 現在選択中の(勢力, TypeKey)の割り当てを表示し、サムネイルもそれに合わせて
+        /// 更新する（一覧選択とは独立: ここは「今適用されている」プロップのプレビュー）。</summary>
         private static void RefreshCurrentBindingLabel()
         {
             if (_currentBindingLabel == null || _typeKeyDropdown == null || _typeKeys == null) return;
@@ -145,12 +150,14 @@ namespace CSWarfront.Game.UI
             if (idx < 0 || idx >= _typeKeys.Length)
             {
                 _currentBindingLabel.text = "";
+                RefreshThumbnail(null);
                 return;
             }
 
             string propName;
-            string current = UnitAssetBindings.TryGet(_typeKeys[idx], out propName) ? propName : "(既定のモデル)";
-            _currentBindingLabel.text = "現在の割り当て: " + current;
+            bool bound = UnitAssetBindings.TryGet(SelectedFactionId, _typeKeys[idx], out propName);
+            _currentBindingLabel.text = "現在の割り当て: " + (bound ? propName : "(既定のモデル)");
+            RefreshThumbnail(bound ? propName : null);
         }
 
         private static void OnSearchTextChanged(UIComponent component, string value)
@@ -188,10 +195,27 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>Task40: 一覧選択が変わるたびにサムネイルを更新する（要件3）。選択解除（-1、
+        /// RefreshPropListによるリセット等）の場合は、現在適用中のプロップのサムネイルへ戻す。</summary>
         private static void OnPropSelected(UIComponent component, int value)
         {
-            // 選択自体は _propListBox.selectedIndex を都度読めば十分なため、ここでは何もしない
-            // （適用ボタン押下時にまとめて読む）。将来プレビュー等を足す場合の拡張点として残す。
+            try
+            {
+                if (_suppressEvents) return;
+
+                if (value >= 0 && value < _filteredProps.Count)
+                {
+                    RefreshThumbnail(_filteredProps[value]);
+                }
+                else
+                {
+                    RefreshCurrentBindingLabel(); // 内部でRefreshThumbnail(既定/現在の割り当て)も更新する
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("AssetAssignPanel.OnPropSelected error: " + e);
+            }
         }
 
         /// <summary>検索文字列・サブスクライブ済みのみトグルに基づき一覧を再構築する。
@@ -246,7 +270,7 @@ namespace CSWarfront.Game.UI
                 string typeKey = _typeKeys[typeIdx];
                 string propName = _filteredProps[propIdx];
 
-                UnitAssetBindings.Set(typeKey, propName);
+                UnitAssetBindings.Set(SelectedFactionId, typeKey, propName);
                 ApplyBindingChange(typeIdx);
             }
             catch (Exception e)
@@ -264,7 +288,7 @@ namespace CSWarfront.Game.UI
                 int typeIdx = _typeKeyDropdown.selectedIndex;
                 if (typeIdx < 0 || typeIdx >= _typeKeys.Length) return;
 
-                UnitAssetBindings.Clear(_typeKeys[typeIdx]);
+                UnitAssetBindings.Clear(SelectedFactionId, _typeKeys[typeIdx]);
                 ApplyBindingChange(typeIdx);
             }
             catch (Exception e)

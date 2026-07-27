@@ -6,19 +6,21 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// 「モデル設定」パネル（Task36）。ユニット種別（TypeKey）ごとに、現在サブスクライブしている
-    /// プロップ（Workshopアセット含む）を見た目のモデルとして割り当てるUI。BaseInfoPanel の
-    /// 「モデル設定」ボタン（Game/UI/BaseInfoPanelModelButton.cs）から開く、独立した常設パネル
-    /// （UnitInfoPanel/BaseInfoPanelと同じ「UIView直下に1枚だけ生成し、isVisibleで出し入れする」方式）。
-    /// 画面中央固定配置（ドラッグ追従は本タスクの要件外）。
+    /// 「モデル設定」パネル（Task36、Task40で勢力別割り当て・サムネイル・最小化・ドラッグに対応）。
+    /// ユニット種別（TypeKey）×勢力（factionId）ごとに、現在サブスクライブしているプロップ（Workshop
+    /// アセット含む）を見た目のモデルとして割り当てるUI。BaseInfoPanel の「モデル設定」ボタン
+    /// （Game/UI/BaseInfoPanelModelButton.cs）、および Mod Options 画面（Game/Mod.cs.OnSettingsUI、Task40）
+    /// の両方から開ける、独立した常設パネル（UnitInfoPanel/BaseInfoPanelと同じ「UIView直下に1枚だけ生成し、
+    /// isVisibleで出し入れする」方式）。初期位置は画面中央固定だが、Task40でドラッグ移動に対応した。
     ///
-    /// 500行制限のため、ドロップダウン/検索/一覧/適用ボタンまわりの構築とイベントハンドラは
-    /// AssetAssignPanelControls.cs（同じ partial class）に分離している（BaseInfoPanel/
-    /// BaseInfoPanelProduction と同じ方針）。このファイルはパネルの生成・破棄・骨格レイアウトのみを持つ。
+    /// 500行制限のため、以下のように分割している（BaseInfoPanel/BaseInfoPanelProduction と同じ方針）:
+    ///   - このファイル: パネルの生成・破棄・骨格レイアウト・最小化状態の管理。
+    ///   - AssetAssignPanelControls.cs: ユニット種別ドロップダウン/検索/一覧/適用・既定に戻す・閉じるボタン。
+    ///   - AssetAssignPanelFaction.cs: 勢力ドロップダウン・サムネイル表示（Task40で新設）。
     ///
     /// スレッド注記: このクラスの public メソッドは全てメインスレッド専用（Unity UI API呼び出しのため）。
     /// WarState/MilitaryManagerへは一切触れない。読み書きするのは UnitAssetBindings（割り当ての永続化）と
-    /// PropCatalog（プロップ列挙・メッシュ解決）のみで、いずれもCS実体を持たない。
+    /// PropCatalog（プロップ列挙・メッシュ解決・サムネイル解決）のみで、いずれもCS実体を持たない。
     /// 割り当てを変更した際は UnitVisuals.DestroyAll() を呼び、既存の見た目を破棄することで次回Syncで
     /// 新しい割り当てが反映されるようにする（UnitMeshSource.TryResolve のキャッシュ方針を参照）。
     /// </summary>
@@ -36,11 +38,18 @@ namespace CSWarfront.Game.UI
         internal const float ListHeight = 220f;
         internal const float ButtonRowHeight = 26f;
         internal const float SectionGap = 6f;
+        internal const float ThumbnailSize = 64f;
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
+        private static UIButton _collapseButton;
+        private static PanelChrome.Handles _chrome; // Task40: タイトル行の最小化ボタン+ドラッグハンドル
+        private static UILabel _typeKeySectionLabel; // Task40: 折りたたみ時の表示切り替え対象として保持
         private static UIDropDown _typeKeyDropdown;
         private static UILabel _currentBindingLabel;
+        private static UISprite _thumbnailSprite; // Task40
+        private static bool _hasThumbnail; // Task40: 直近のRefreshThumbnailが有効なサムネイルを見つけたか
+        private static UILabel _searchSectionLabel; // Task40: 折りたたみ時の表示切り替え対象として保持
         private static UITextField _searchField;
         private static UIButton _customOnlyToggle;
         private static UIListBox _propListBox;
@@ -60,6 +69,16 @@ namespace CSWarfront.Game.UI
         private static bool _customOnly = true; // 既定ON（Task36指定）
         private static bool _suppressEvents;
         private static bool _loggedCreated;
+
+        /// <summary>Task40: 折りたたみ状態。BaseInfoPanel/UnitInfoPanelと同じくセッション中は保持する。</summary>
+        private static bool _collapsed;
+
+        /// <summary>Task40: 展開時の全体高さキャッシュ（BaseInfoPanel._expandedHeightと同じ役割）。</summary>
+        private static float _expandedHeight;
+
+        /// <summary>パネルが生成済みかどうか。Mod Options（Game/Mod.cs、Task40）がゲーム外
+        /// （メインメニュー等でUIView自体が使えない極端なケース）を検出するために使う。</summary>
+        public static bool IsCreated { get { return _panel != null; } }
 
         /// <summary>冪等。まだ生成していなければ UIView が準備できた時点で構築する（他パネルと同じ方式）。</summary>
         public static void EnsureCreated()
@@ -93,7 +112,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        private static void Show()
+        /// <summary>Task40: Mod Options（Game/Mod.cs）から呼ばれる。既に開いていても閉じない
+        /// （Toggleと違い、Optionsから何度押しても常に開いた状態にする方が分かりやすいため）。
+        /// EnsureCreated() が既に呼ばれ _panel が非nullであることを呼び出し側が確認済みの前提。</summary>
+        internal static void Show()
         {
             if (_panel == null) return;
 
@@ -119,7 +141,9 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                PanelChrome.Unsubscribe(_chrome, OnCollapseClick); // Task40
                 if (_typeKeyDropdown != null) _typeKeyDropdown.eventSelectedIndexChanged -= OnTypeKeyChanged;
+                DestroyFactionSection(); // Task40: イベント購読解除＋フィールドのリセット
                 if (_searchField != null) _searchField.eventTextChanged -= OnSearchTextChanged;
                 if (_customOnlyToggle != null) _customOnlyToggle.eventClick -= OnCustomOnlyClick;
                 if (_propListBox != null) _propListBox.eventSelectedIndexChanged -= OnPropSelected;
@@ -136,8 +160,14 @@ namespace CSWarfront.Game.UI
             {
                 _panel = null;
                 _titleLabel = null;
+                _collapseButton = null;
+                _chrome = null;
+                _typeKeySectionLabel = null;
                 _typeKeyDropdown = null;
                 _currentBindingLabel = null;
+                _thumbnailSprite = null;
+                _hasThumbnail = false;
+                _searchSectionLabel = null;
                 _searchField = null;
                 _customOnlyToggle = null;
                 _propListBox = null;
@@ -149,6 +179,8 @@ namespace CSWarfront.Game.UI
                 _filteredProps.Clear();
                 _customOnly = true;
                 _suppressEvents = false;
+                _collapsed = false;
+                _expandedHeight = 0f;
             }
         }
 
@@ -171,28 +203,43 @@ namespace CSWarfront.Game.UI
             float w = PanelWidth - Pad * 2f;
             float y = Pad;
 
+            // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
+            // タイトルラベル(非対話的)・最小化ボタン(対話的)を重ねる（BaseInfoPanelと同じ方式）。
+            _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
+            _collapseButton = _chrome.CollapseButton;
+
             _titleLabel = _panel.AddUIComponent<UILabel>();
             _titleLabel.text = TitleText;
             _titleLabel.textScale = 0.9f;
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += RowHeight;
 
-            y = AddSectionLabel("ユニット種別", y);
+            y = AddSectionLabel("勢力", y, out _factionSectionLabel); // フィールドはAssetAssignPanelFaction.cs側で宣言
+            BuildFactionDropdown(Pad, y, w); // AssetAssignPanelFaction.cs
+            y += DropdownHeight + SectionGap;
+
+            y = AddSectionLabel("ユニット種別", y, out _typeKeySectionLabel);
             BuildTypeKeys();
             _typeKeyDropdown = BuildTypeKeyDropdown(Pad, y, w);
             y += DropdownHeight + SectionGap;
 
+            // Task40: 「現在の割り当て」ラベル（左）とサムネイル（右、64x64）を同じ行に並べる。
+            float bindingLabelWidth = w - ThumbnailSize - SectionGap;
             _currentBindingLabel = _panel.AddUIComponent<UILabel>();
             _currentBindingLabel.textScale = 0.75f;
             _currentBindingLabel.textColor = new Color32(200, 200, 200, 255);
-            _currentBindingLabel.wordWrap = false;
+            _currentBindingLabel.wordWrap = true;
             _currentBindingLabel.autoSize = false;
-            _currentBindingLabel.width = w;
+            _currentBindingLabel.autoHeight = false;
+            _currentBindingLabel.width = bindingLabelWidth;
+            _currentBindingLabel.height = ThumbnailSize;
             _currentBindingLabel.text = "";
             _currentBindingLabel.relativePosition = new Vector3(Pad, y);
-            y += 18f + SectionGap;
 
-            y = AddSectionLabel("検索（部分一致）", y);
+            BuildThumbnailSprite(Pad + bindingLabelWidth + SectionGap, y); // AssetAssignPanelFaction.cs
+            y += ThumbnailSize + SectionGap;
+
+            y = AddSectionLabel("検索（部分一致）", y, out _searchSectionLabel);
             _searchField = BuildSearchField(Pad, y, w);
             y += RowHeight + SectionGap;
 
@@ -234,11 +281,13 @@ namespace CSWarfront.Game.UI
             _closeButton = BuildButton("閉じる", Pad + (buttonWidth + SectionGap) * 2f, y, buttonWidth, OnCloseClick);
             y += ButtonRowHeight + Pad;
 
+            _expandedHeight = y;
             _panel.height = y;
             CenterOnScreen(view);
 
             UpdateCustomOnlyLabel();
             RefreshCurrentBindingLabel();
+            ApplyCollapsedState(); // 展開/折りたたみの初期反映（BaseInfoPanel.Buildと同じ方式）
 
             if (!_loggedCreated)
             {
@@ -256,9 +305,11 @@ namespace CSWarfront.Game.UI
             _panel.relativePosition = new Vector3(x, y);
         }
 
-        private static float AddSectionLabel(string text, float y)
+        /// <summary>Task40: 呼び出し側にラベル参照を返すようにした（折りたたみ時にisVisibleを
+        /// 一括切り替えるため、SetSectionVisible/ApplyCollapsedStateから使う）。</summary>
+        private static float AddSectionLabel(string text, float y, out UILabel label)
         {
-            UILabel label = _panel.AddUIComponent<UILabel>();
+            label = _panel.AddUIComponent<UILabel>();
             label.text = text;
             label.textScale = 0.75f;
             label.textColor = new Color32(200, 200, 200, 255);
@@ -278,6 +329,55 @@ namespace CSWarfront.Game.UI
             btn.pressedBgSprite = "ButtonMenuPressed";
             btn.eventClick += handler;
             return btn;
+        }
+
+        /// <summary>Task40: _collapsed の現在値をUIに反映する（BaseInfoPanel.ApplyCollapsedStateと同じ方式）。
+        /// タイトル行以外の全コントロールをまとめて表示/非表示にする。</summary>
+        private static void ApplyCollapsedState()
+        {
+            if (_panel == null) return;
+
+            SetSectionVisible(!_collapsed);
+            _panel.height = _collapsed ? (Pad + PanelChrome.TitleRowHeight + Pad) : _expandedHeight;
+
+            if (_collapseButton != null)
+            {
+                _collapseButton.text = PanelChrome.CollapseGlyph(_collapsed);
+            }
+        }
+
+        private static void OnCollapseClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                _collapsed = !_collapsed;
+                ApplyCollapsedState();
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("AssetAssignPanel.OnCollapseClick error: " + e);
+            }
+        }
+
+        /// <summary>タイトル行(タイトルラベル・最小化ボタン・ドラッグハンドル)以外の全コントロールの
+        /// isVisibleを一括切り替える。サムネイルは「展開中かつ有効なサムネイルが見つかっている」
+        /// 場合のみ表示する（_hasThumbnail、AssetAssignPanelFaction.cs の RefreshThumbnail が更新）。</summary>
+        private static void SetSectionVisible(bool visible)
+        {
+            if (_factionSectionLabel != null) _factionSectionLabel.isVisible = visible;
+            if (_factionDropdown != null) _factionDropdown.isVisible = visible;
+            if (_typeKeySectionLabel != null) _typeKeySectionLabel.isVisible = visible;
+            if (_typeKeyDropdown != null) _typeKeyDropdown.isVisible = visible;
+            if (_currentBindingLabel != null) _currentBindingLabel.isVisible = visible;
+            if (_thumbnailSprite != null) _thumbnailSprite.isVisible = visible && _hasThumbnail;
+            if (_searchSectionLabel != null) _searchSectionLabel.isVisible = visible;
+            if (_searchField != null) _searchField.isVisible = visible;
+            if (_customOnlyToggle != null) _customOnlyToggle.isVisible = visible;
+            if (_propListBox != null) _propListBox.isVisible = visible;
+            if (_truncatedLabel != null) _truncatedLabel.isVisible = visible;
+            if (_applyButton != null) _applyButton.isVisible = visible;
+            if (_resetButton != null) _resetButton.isVisible = visible;
+            if (_closeButton != null) _closeButton.isVisible = visible;
         }
     }
 }

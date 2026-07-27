@@ -35,6 +35,7 @@ namespace CSWarfront.Game.UI
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
         private const float CloseButtonSize = 20f;
+        private const float ButtonGap = 4f;
 
         /// <summary>
         /// Task32: パネルをユニットの真上に置くための、ワールド座標での上方オフセット。
@@ -46,8 +47,25 @@ namespace CSWarfront.Game.UI
         private static UIPanel _panel;
         private static UILabel _titleLabel;
         private static UIButton _closeButton;
+        private static UIButton _collapseButton;
+        private static PanelChrome.Handles _chrome; // Task40: タイトル行の最小化ボタン+ドラッグハンドル
         private static UILabel _statusLabel;
         private static bool _loggedCreated;
+
+        /// <summary>Task40: このパネルには元々最小化機能が無かったため新設。BaseInfoPanel.ApplyCollapsedState
+        /// と同じ考え方（タイトル行だけを残して畳む）。セッション中は選択解除・再選択をまたいで保持する。</summary>
+        private static bool _collapsed;
+
+        /// <summary>Task40: 展開時の全体高さキャッシュ（BaseInfoPanel._expandedHeightと同じ役割）。</summary>
+        private static float _expandedHeight;
+
+        /// <summary>
+        /// Task40: ユーザーがタイトル行をドラッグした後は true になり、その間は UpdateTrackingPosition
+        /// による毎フレームのユニット追従を止める（ドラッグ位置を維持するため）。パネルが「閉じる」
+        /// （選択解除・×ボタン・対象ユニット消失）と false に戻り、次に選択したユニットには
+        /// 通常どおり追従する。
+        /// </summary>
+        private static bool _detached;
 
         /// <summary>RefreshContents で毎フレーム再利用するバッファ（BaseInfoPanelと同じ理由：
         /// 文字列連結の毎フレームアロケーションを避けるため、StringBuilder.Clear() で使い回す）。</summary>
@@ -98,7 +116,8 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                RefreshContents(snapshot);
+                // Task40: 折りたたみ中はタイトル行しか見えないため再構築は無駄（BaseInfoPanelと同じ最適化）。
+                if (!_collapsed) RefreshContents(snapshot);
                 UpdateTrackingPosition(selected);
             }
             catch (Exception e)
@@ -113,6 +132,8 @@ namespace CSWarfront.Game.UI
             try
             {
                 if (_closeButton != null) _closeButton.eventClick -= OnCloseClick;
+                PanelChrome.Unsubscribe(_chrome, OnCollapseClick); // Task40
+                if (_chrome != null && _chrome.DragHandle != null) _chrome.DragHandle.eventMouseDown -= OnTitleBarMouseDown;
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
             catch (Exception e)
@@ -124,13 +145,23 @@ namespace CSWarfront.Game.UI
                 _panel = null;
                 _titleLabel = null;
                 _closeButton = null;
+                _collapseButton = null;
+                _chrome = null;
                 _statusLabel = null;
+                _collapsed = false;
+                _expandedHeight = 0f;
+                _detached = false;
             }
         }
 
+        /// <summary>パネルを隠す。Task40: 「閉じる」（選択解除・×ボタン・対象ユニット消失）相当のため、
+        /// 切り離しモードも解除し次の選択には通常どおり追従させる。UpdateTrackingPosition内の
+        /// 一時的な非表示経路（可視表現未生成/カメラ後方等）は、_detached=true の間は別枝で早期returnし
+        /// ここを通らないため、ドラッグ中に誤ってリセットされる心配はない。</summary>
         private static void Hide()
         {
             if (_panel != null && _panel.isVisible) _panel.Hide();
+            _detached = false;
         }
 
         private static void Build(UIView view)
@@ -151,10 +182,22 @@ namespace CSWarfront.Game.UI
             float w = PanelWidth - Pad * 2f;
             float y = Pad;
 
+            // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
+            // タイトルラベル(非対話的)・最小化ボタン・×(閉じる)ボタン(いずれも対話的)を重ねる。
+            // 後から追加したコンポーネントが前面に来るため、ボタンのクリックはドラッグハンドルに
+            // 横取りされない（BaseInfoPanelと同じ方式、PanelChrome.AddTitleBarChrome参照）。
+            _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
+            _chrome.DragHandle.eventMouseDown += OnTitleBarMouseDown;
+            _collapseButton = _chrome.CollapseButton;
+            // ×ボタンの左に並べるため、最小化ボタンをさらに左へ動かす（AddTitleBarChromeの既定位置は
+            // パネル右端＝×ボタンと同じ場所のため、ここで詰め直す）。
+            _collapseButton.relativePosition = new Vector3(
+                PanelWidth - Pad - CloseButtonSize - ButtonGap - PanelChrome.CollapseButtonSize, y);
+
             _titleLabel = _panel.AddUIComponent<UILabel>();
             _titleLabel.text = "";
             _titleLabel.textScale = 0.9f;
-            _titleLabel.width = w - CloseButtonSize - 4f;
+            _titleLabel.width = w - CloseButtonSize - PanelChrome.CollapseButtonSize - ButtonGap * 2f;
             _titleLabel.relativePosition = new Vector3(Pad, y);
 
             _closeButton = _panel.AddUIComponent<UIButton>();
@@ -184,6 +227,7 @@ namespace CSWarfront.Game.UI
 
             RecomputePanelHeight();
             _panel.isVisible = false;
+            ApplyCollapsedState(); // Task40: 展開/折りたたみの初期反映（BaseInfoPanel.Buildと同じ方式）
 
             if (!_loggedCreated)
             {
@@ -204,6 +248,44 @@ namespace CSWarfront.Game.UI
             {
                 ModConfig.LogError("UnitInfoPanel.OnCloseClick error: " + e);
             }
+        }
+
+        /// <summary>Task40: _collapsed の現在値をUIに反映する（BaseInfoPanel.ApplyCollapsedStateと同じ方式）。
+        /// このパネルには折りたたみ対象のセクションがステータスラベル1つしか無いため単純。</summary>
+        private static void ApplyCollapsedState()
+        {
+            if (_panel == null) return;
+
+            if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
+            _panel.height = _collapsed ? (Pad + TitleRowHeight + Pad) : _expandedHeight;
+
+            if (_collapseButton != null)
+            {
+                _collapseButton.text = PanelChrome.CollapseGlyph(_collapsed);
+            }
+        }
+
+        /// <summary>最小化トグルボタンのクリックハンドラ（BaseInfoPanel.OnCollapseClickと同じ方式）。</summary>
+        private static void OnCollapseClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                _collapsed = !_collapsed;
+                ApplyCollapsedState();
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitInfoPanel.OnCollapseClick error: " + e);
+            }
+        }
+
+        /// <summary>Task40: タイトル行(ドラッグハンドル)への最初のマウスダウンで「切り離し」モードに入る。
+        /// 以降はUpdateTrackingPositionによる自動追従を止め、UIDragHandle自身がパネルを自由に動かせる
+        /// ようにする（毎フレームの位置上書きとドラッグ操作の競合を避けるため）。Hide()（選択解除・
+        /// ×ボタン・対象ユニット消失）で false に戻る。</summary>
+        private static void OnTitleBarMouseDown(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            _detached = true;
         }
 
         /// <summary>タイトル・ステータスラベルの文言を、ロック内でコピー済みのスナップショットから更新する。</summary>
@@ -240,17 +322,23 @@ namespace CSWarfront.Game.UI
         /// <summary>
         /// Task33: ステータスラベル（autoHeight有効）の実際の高さからパネル全体高さを算出し、
         /// 変化があった場合のみ書き換える（毎フレームの無駄なレイアウト再計算を避ける）。
-        /// UnitInfoPanelには折りたたみ機能が無いため、BaseInfoPanel.RecomputeExpandedHeightと異なり
-        /// キャッシュせず _panel.height へ直接反映するだけでよい。
+        /// Task40: 最小化機能の追加により、展開時の高さを _expandedHeight にキャッシュするようになった
+        /// （BaseInfoPanel.RecomputeExpandedHeightと同じ方式。このメソッドは _collapsed==false の時にだけ
+        /// RefreshContents経由で呼ばれるため、常に「展開時の高さ」を計算している前提で問題ない）。
         /// </summary>
         private static void RecomputePanelHeight()
         {
             if (_statusLabel == null || _panel == null) return;
 
             float newHeight = _statusLabel.relativePosition.y + _statusLabel.height + Pad;
-            if (Mathf.Abs(_panel.height - newHeight) > 0.01f)
+            if (Mathf.Abs(newHeight - _expandedHeight) > 0.01f)
             {
-                _panel.height = newHeight;
+                _expandedHeight = newHeight;
+            }
+
+            if (!_collapsed && Mathf.Abs(_panel.height - _expandedHeight) > 0.01f)
+            {
+                _panel.height = _expandedHeight;
             }
         }
 
@@ -289,6 +377,17 @@ namespace CSWarfront.Game.UI
         private static void UpdateTrackingPosition(uint instanceId)
         {
             if (_panel == null) return;
+
+            // Task40: ユーザーがタイトル行をドラッグ済み（切り離しモード）の間は、ここで完全に
+            // スキップして毎フレームの位置上書きを止める（UIDragHandle自身が動かした位置を維持する）。
+            // 世界座標・カメラ・UIViewが今フレーム揃わない場合の一時非表示（下記のHide()呼び出し群）も
+            // 併せて不要になる：追従自体をしないので、それらの前提が無くても表示を維持してよい。
+            if (_detached)
+            {
+                if (!_panel.isVisible) _panel.Show();
+                _panel.BringToFront();
+                return;
+            }
 
             Vector3 unitPos;
             if (!UnitVisuals.TryGetPosition(instanceId, out unitPos))

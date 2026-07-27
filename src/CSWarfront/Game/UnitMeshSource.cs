@@ -44,7 +44,9 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// Task36: typeKey（空可）とassetPrefabName（空可）からメッシュを解決する。
-        /// 解決順: (a) typeKey に対する UnitAssetBindings の割り当て → PropCatalog でプロップのメッシュを解決
+        /// Task40: 割り当ての解決を勢力別（factionId）にした。
+        /// 解決順: (a) (factionId, typeKey) に対する UnitAssetBindings の割り当て（勢力別 → 全勢力共通の順、
+        ///        UnitAssetBindings.TryGet内部で解決） → PropCatalog でプロップのメッシュを解決
         ///        → (b) assetPrefabName で FindLoaded → 既定候補名 → 全VehicleInfo走査
         ///        → (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
         ///
@@ -52,7 +54,10 @@ namespace CSWarfront.Game
         /// による割り当て変更は UnitVisuals.DestroyAll() で既存の見た目を破棄させることで反映される
         /// （破棄された見た目は次回Syncで必ずCreateVisual→この解決を再実行する）ため、ここで
         /// 名前単位キャッシュを持つと変更が反映されない/古い結果が残るリスクの方が大きい。
-        /// (b)/(c) の既存キャッシュ方針は変更していない（下記オーバーロード参照）。
+        /// キャッシュが無いため「勢力IDをキャッシュキーに含める」問題はそもそも発生しない
+        /// （Task40要件: 勢力間でキャッシュが漏れないこと）。
+        /// (b)/(c) の既存キャッシュ（下記オーバーロード）は assetPrefabName 単位のみで勢力に依存しない
+        /// （AssetPrefabNameはUnitType側の固定値で勢力によって変わらないため、勢力IDを混ぜる必要が無い）。
         ///
         /// Task37: メッシュが (a) の「割り当て済みプロップ」経由で解決できたかどうかを
         /// <paramref name="fromAssignedProp"/> で報告する。呼び出し側（UnitVisuals）はこれを使って、
@@ -60,7 +65,7 @@ namespace CSWarfront.Game
         /// <paramref name="resolvedPropName"/> は fromAssignedProp=true の時のみプロップ名を返す
         /// （UnitMaterialFactory.TryGetPropMaterial に渡すため）。
         /// </summary>
-        public static bool TryResolve(string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out string resolvedPropName)
+        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out string resolvedPropName)
         {
             fromAssignedProp = false;
             resolvedPropName = null;
@@ -70,7 +75,7 @@ namespace CSWarfront.Game
                 if (!string.IsNullOrEmpty(typeKey))
                 {
                     string propName;
-                    if (UnitAssetBindings.TryGet(typeKey, out propName))
+                    if (UnitAssetBindings.TryGet(factionId, typeKey, out propName))
                     {
                         Mesh propMesh;
                         if (PropCatalog.TryGetMesh(propName, out propMesh))
@@ -81,10 +86,10 @@ namespace CSWarfront.Game
                             return true;
                         }
 
-                        string warnKey = typeKey + "=" + propName;
+                        string warnKey = factionId + "|" + typeKey + "=" + propName;
                         if (_warnedMissingBindings.Add(warnKey))
                         {
-                            ModConfig.Log("UnitMeshSource: '" + typeKey + "' に割り当て済みのプロップ '" + propName +
+                            ModConfig.Log("UnitMeshSource: faction=" + factionId + " '" + typeKey + "' に割り当て済みのプロップ '" + propName +
                                 "' が見つかりません（未ロード等）。assetPrefabName/既定へフォールバックします");
                         }
                     }
@@ -92,7 +97,7 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                ModConfig.LogError("UnitMeshSource.TryResolve(typeKey=" + typeKey + ") binding lookup error: " + e);
+                ModConfig.LogError("UnitMeshSource.TryResolve(faction=" + factionId + ", typeKey=" + typeKey + ") binding lookup error: " + e);
             }
 
             return TryResolve(assetPrefabName, out mesh);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ColossalFramework.UI;
 using UnityEngine;
 
 namespace CSWarfront.Game
@@ -77,6 +78,38 @@ namespace CSWarfront.Game
             {
                 ModConfig.LogError("PropCatalog.TryGetMesh(" + propName + ") error: " + e);
                 mesh = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Task40: プロップのサムネイル（PrefabInfo.m_Atlas / m_Thumbnail、Assembly-CSharp.dllをリフレクション
+        /// で検証済み。両方 public field、m_Atlas: UITextureAtlas、m_Thumbnail: String）を解決する。
+        /// 多くのアセットはサムネイルを持たない（m_Atlas==null または m_Thumbnail が空）ため、その場合は
+        /// false を返す。呼び出し側（AssetAssignPanel）はfalse時にサムネイル用UISpriteを隠すこと。
+        /// 走査キャッシュ（_all）には依存せず、TryGetMeshと同様に都度FindLoadedする単発の名前引き。
+        /// </summary>
+        public static bool TryGetThumbnail(string propName, out UITextureAtlas atlas, out string spriteName)
+        {
+            atlas = null;
+            spriteName = null;
+            if (string.IsNullOrEmpty(propName)) return false;
+
+            try
+            {
+                PropInfo info = PrefabCollection<PropInfo>.FindLoaded(propName);
+                if (info == null) return false;
+                if (info.m_Atlas == null || string.IsNullOrEmpty(info.m_Thumbnail)) return false;
+
+                atlas = info.m_Atlas;
+                spriteName = info.m_Thumbnail;
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("PropCatalog.TryGetThumbnail(" + propName + ") error: " + e);
+                atlas = null;
+                spriteName = null;
                 return false;
             }
         }
