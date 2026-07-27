@@ -42,6 +42,11 @@ namespace CSWarfront.Core
         public float DefenseAttack = DefaultDefenseAttack;
         public float DefenseRange = DefaultDefenseRange;
 
+        /// <summary>拠点の自衛射撃の命中率（Task38）。固定値でユニット側のTierScaling/CombatSynergyとは
+        /// 独立している（基地は据え置きの設備であり、Tierやドローン観測支援の対象ではないため）。
+        /// BaseDefenseStepがDefenseAttackから算出したダメージへこれを乗じる。</summary>
+        public const float DefenseAccuracy = 0.7f;
+
         /// <summary>直近の経済tickでこの基地から実際に加算された収入（Task35、ゲーム内EconomyIntervalHours
         /// あたりの額）。UIがCSバッファ/WarStateへ直接触れずに済むよう、MilitaryManager.OnSimTickが
         /// TerritoryIncome.ForBaseの計算結果をここへキャッシュする。ランタイムのみ・非永続化

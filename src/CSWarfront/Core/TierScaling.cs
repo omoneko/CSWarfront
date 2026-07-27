@@ -34,6 +34,15 @@ namespace CSWarfront.Core
         private const float CostPerTier = 0.60f;
         private const float BuildTimePerTier = 0.30f;
 
+        /// <summary>命中率のTierあたり増分（Task38: base値の+6%/Tier）。他パラメータと同じ線形成長式
+        /// value(tier) = baseValue * (1 + 0.06 * (tier-1)) を使うが、命中率だけは0.95で上限クランプする
+        /// （上位Tierほど狙いは良くなるが、絶対に外さない完璧な命中率にはしない、という意図的な上限）。</summary>
+        private const float AccuracyPerTier = 0.06f;
+
+        /// <summary>命中率の絶対上限（Task38）。ドローン観測支援バフ適用後の値もこの上限でクランプされる
+        /// （CombatSynergy.AccuracyFor参照）。</summary>
+        public const float AccuracyMax = 0.95f;
+
         /// <summary>tierを1..5へクランプする（1未満は1、5超は5）。</summary>
         private static byte ClampTier(byte tier)
         {
@@ -55,5 +64,14 @@ namespace CSWarfront.Core
         public static float SpeedKmh(float baseValue, byte tier) { return Scale(baseValue, tier, SpeedPerTier); }
         public static float Cost(float baseValue, byte tier) { return Scale(baseValue, tier, CostPerTier); }
         public static float BuildTime(float baseValue, byte tier) { return Scale(baseValue, tier, BuildTimePerTier); }
+
+        /// <summary>命中率のTier成長。Tier1はbaseValueそのまま、以降は+6%/Tierで伸びるが、
+        /// AccuracyMax(0.95)を超えない（tier=1のときの丸め誤差を避けるため、baseValue自体が
+        /// AccuracyMaxを超えている場合でもクランプする）。</summary>
+        public static float Accuracy(float baseValue, byte tier)
+        {
+            float scaled = Scale(baseValue, tier, AccuracyPerTier);
+            return scaled > AccuracyMax ? AccuracyMax : scaled;
+        }
     }
 }

@@ -187,7 +187,7 @@ namespace CSWarfront.Game
                 if (unit == null || unit.State == UnitState.Dead) return false;
 
                 UnitType type = State.Types.Get(unit.TypeKey);
-                snapshot = UnitUiSnapshotBuilder.Build(unit, type);
+                snapshot = UnitUiSnapshotBuilder.Build(State, unit, type);
                 return true;
             }
         }

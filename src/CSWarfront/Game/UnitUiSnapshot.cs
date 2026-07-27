@@ -21,6 +21,13 @@ namespace CSWarfront.Game
         /// <summary>UnitType.Speed（マップ距離/ゲーム内時間）をSpeedCalibration.KmhFromUnitsPerGameHourで
         /// km/hへ逆変換した値（Task26の較正定数を利用、表示専用）。</summary>
         public float SpeedKmh;
+        /// <summary>実効命中率（Task38）。UnitType.Accuracyそのものではなく、CombatSynergy.AccuracyFor
+        /// を通した「ドローン観測支援バフ適用後」の値。プレイヤーがドローン観測支援の効果を
+        /// UI上で確認できるようにするため。</summary>
+        public float Accuracy;
+        /// <summary>Accuracy が CombatSynergy（ドローン観測支援）によって素の値から引き上げられているか
+        /// （Task38）。UnitInfoPanelが「命中: 85%（観測支援）」の注記を出すかどうかの判定に使う。</summary>
+        public bool AccuracyBoosted;
         public UnitState State;
         public uint? TargetId;
         /// <summary>Path内の次要素番号。Path未設定（直線移動フォールバック）なら0。</summary>
@@ -36,9 +43,11 @@ namespace CSWarfront.Game
     /// </summary>
     internal static class UnitUiSnapshotBuilder
     {
-        /// <summary>type が null（型未登録等の異常系）でも例外を投げず0埋めで返す。</summary>
-        public static UnitUiSnapshot Build(UnitInstance unit, UnitType type)
+        /// <summary>type が null（型未登録等の異常系）でも例外を投げず0埋めで返す。
+        /// state は Accuracy（Task38、CombatSynergy.AccuracyFor経由の実効命中率）の算出に使う。</summary>
+        public static UnitUiSnapshot Build(WarState state, UnitInstance unit, UnitType type)
         {
+            float effectiveAccuracy = type != null ? CombatSynergy.AccuracyFor(state, unit, type) : 0f;
             return new UnitUiSnapshot
             {
                 TypeKey = unit.TypeKey,
@@ -50,6 +59,10 @@ namespace CSWarfront.Game
                 Range = type != null ? type.Range : 0f,
                 Armor = type != null ? type.Armor : 0f,
                 SpeedKmh = type != null ? SpeedCalibration.KmhFromUnitsPerGameHour(type.Speed) : 0f,
+                Accuracy = effectiveAccuracy,
+                // 素の命中率(type.Accuracy)より高ければ、CombatSynergy(ドローン観測支援)が効いている
+                // ことを意味する（AccuracyForは非該当の場合、type.Accuracyをそのまま返す規約のため）。
+                AccuracyBoosted = type != null && effectiveAccuracy > type.Accuracy,
                 State = unit.State,
                 TargetId = unit.TargetId,
                 PathIndex = unit.PathIndex,

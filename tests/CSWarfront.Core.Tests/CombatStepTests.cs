@@ -21,10 +21,12 @@ public class CombatStepTests
     {
         var s = TwoHostileTanks(50f); // range 60 内
         CombatStep.Advance(s, 1f);
-        // Task28: Tank_T1.Armor is now 10 (was 5). DamagePerHit(40,10)=30 に dt(1時間分)を乗じて
-        // 相互に適用 → 100-30=70 (old arithmetic was DamagePerHit(40,5)=35 -> 100-35=65)
-        Assert.Equal(70f, s.FindUnit(1).CurrentHP, 3);
-        Assert.Equal(70f, s.FindUnit(2).CurrentHP, 3);
+        // Task28: Tank_T1.Armor is now 10 (was 5). DamagePerHit(40,10)=30.
+        // Task38: Tank_T1.Accuracy=0.70 (no drone synergy applies to non-Artillery), matchup Tank->Tank=1.0.
+        // dmg = 30 * dt(1) * matchup(1.0) * accuracy(0.70) = 21 -> 100-21=79
+        // (old arithmetic, pre-accuracy: 100-30=70)
+        Assert.Equal(79f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(79f, s.FindUnit(2).CurrentHP, 3);
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
@@ -41,7 +43,8 @@ public class CombatStepTests
     public void Unit_dies_when_hp_reaches_zero()
     {
         var s = TwoHostileTanks(50f);
-        s.FindUnit(2).CurrentHP = 15f; // 35ダメージ（dt=1）で死亡
+        // Task38: dmg = DamagePerHit(40,10)=30 * matchup(1.0) * accuracy(0.70) = 21 (dt=1) で死亡させる。
+        s.FindUnit(2).CurrentHP = 15f;
         CombatStep.Advance(s, 1f);
         Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
     }
@@ -52,7 +55,8 @@ public class CombatStepTests
     public void Killing_a_unit_awards_research_points_to_the_killers_faction()
     {
         var s = TwoHostileTanks(50f);
-        s.FindUnit(2).CurrentHP = 15f; // dies this tick (DamagePerHit(40,10)=30 >= 15)
+        // Task38: dies this tick (dmg = DamagePerHit(40,10)=30 * accuracy(0.70) = 21 >= 15)
+        s.FindUnit(2).CurrentHP = 15f;
         CombatStep.Advance(s, 1f);
 
         // Tank_T1.Cost = 60, KillRewardRate = 0.5 -> 30
@@ -75,15 +79,17 @@ public class CombatStepTests
     {
         var full = TwoHostileTanks(50f);
         CombatStep.Advance(full, 1f);
-        float fullDmg = 100f - full.FindUnit(1).CurrentHP; // Task28: DamagePerHit(40,10)=30 (was 35)
+        // Task38: DamagePerHit(40,10)=30 * matchup(1.0) * accuracy(0.70) = 21 (dt=1)
+        // (old arithmetic, pre-accuracy: 30)
+        float fullDmg = 100f - full.FindUnit(1).CurrentHP;
 
         var half = TwoHostileTanks(50f);
         CombatStep.Advance(half, 0.5f);
-        float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 15 (was 17.5)
+        float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 10.5 (old arithmetic, pre-accuracy: 15)
 
         Assert.Equal(fullDmg / 2f, halfDmg, 3);
-        // 100 - 30*0.5 = 85 (old arithmetic was 100 - 35*0.5 = 82.5, before Tank_T1.Armor changed 5->10)
-        Assert.Equal(85f, half.FindUnit(1).CurrentHP, 3);
+        // 100 - 30*0.70*0.5 = 89.5 (old arithmetic, pre-accuracy: 100 - 30*0.5 = 85)
+        Assert.Equal(89.5f, half.FindUnit(1).CurrentHP, 3);
     }
 
     // --- Task29: CombatMatchup適用 ---
@@ -104,8 +110,10 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // DamagePerHit(Drone.Attack=30, Tank.Armor=10) = 20, × CombatMatchup(Drone->Tank)=2.0 × dt(1) = 40
-        Assert.Equal(160f, s.FindUnit(2).CurrentHP, 3);
+        // DamagePerHit(Drone.Attack=30, Tank.Armor=10) = 20, × CombatMatchup(Drone->Tank)=2.0 × dt(1)
+        // × DroneInfantry.Accuracy(0.85, Task38; DroneInfantry is not Artillery so gets no synergy bonus,
+        //   just its own base accuracy) = 34 -> 200-34=166 (old arithmetic, pre-accuracy: 200-40=160)
+        Assert.Equal(166f, s.FindUnit(2).CurrentHP, 3);
     }
 
     [Fact]
@@ -123,8 +131,9 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // DamagePerHit(Infantry.Attack=20, Tank.Armor=10) = 10, × CombatMatchup(Infantry->Tank)=0.4 × dt(1) = 4
-        Assert.Equal(196f, s.FindUnit(2).CurrentHP, 3);
+        // DamagePerHit(Infantry.Attack=20, Tank.Armor=10) = 10, × CombatMatchup(Infantry->Tank)=0.4 × dt(1)
+        // × Infantry.Accuracy(0.75, Task38) = 3 -> 200-3=197 (old arithmetic, pre-accuracy: 200-4=196)
+        Assert.Equal(197f, s.FindUnit(2).CurrentHP, 3);
     }
 
     [Fact]
@@ -141,7 +150,55 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 0.5f);
 
-        // DamagePerHit(30,10)=20 × 2.0 × dt(0.5) = 20
-        Assert.Equal(180f, s.FindUnit(2).CurrentHP, 3);
+        // DamagePerHit(30,10)=20 × 2.0 × dt(0.5) × accuracy(0.85, Task38) = 17
+        // (old arithmetic, pre-accuracy: 200-20=180)
+        Assert.Equal(183f, s.FindUnit(2).CurrentHP, 3);
+    }
+
+    // --- Task38: 命中率(Accuracy)の適用、ドローン観測支援シナジー ---
+
+    [Fact]
+    public void Artillery_alone_deals_reduced_expected_damage_due_to_low_accuracy()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Artillery, 1)); // Attack=50, Range=120, Accuracy=0.35
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));     // Armor=10
+        s.Units.Add(new UnitInstance(1, "Artillery_T1", 0, 200f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(100f, 0f, 0f))); // out of Tank's range(60), only Artillery fires
+
+        CombatStep.Advance(s, 1f);
+
+        // DamagePerHit(Artillery.Attack=50, Tank.Armor=10) = 40, × CombatMatchup(Artillery->Tank)=0.7
+        // × dt(1) × Artillery.Accuracy(0.35, no drone nearby) = 9.8 -> 200-9.8=190.2
+        Assert.Equal(190.2f, s.FindUnit(2).CurrentHP, 2);
+    }
+
+    [Fact]
+    public void Artillery_with_nearby_friendly_drone_deals_much_more_expected_damage()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Artillery, 1));
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.DroneInfantry, 1));
+        s.Units.Add(new UnitInstance(1, "Artillery_T1", 0, 200f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(100f, 0f, 0f)));
+        // Friendly DroneInfantry within CombatSynergy.DroneSpotterRadius(150) of the Artillery (id1),
+        // but placed at x=5 so it is itself out of its own attack range (90) of the Tank (distance 95)
+        // and out of the Tank's range (60) too — it purely spots, it does not also join the fight
+        // (which would otherwise add its own Drone->Tank damage on top and confound this assertion).
+        s.Units.Add(new UnitInstance(3, "DroneInfantry_T1", 0, 100f, new WorldPos(5f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        // effective accuracy = min(0.95, 0.35 + DroneSpotterAccuracyBonus(0.5)) = 0.85
+        // DamagePerHit(50,10)=40 × matchup(0.7) × dt(1) × 0.85 = 23.8 -> 200-23.8=176.2
+        // (versus 190.2 without the drone above: the synergy visibly raises artillery damage)
+        Assert.Equal(176.2f, s.FindUnit(2).CurrentHP, 2);
     }
 }

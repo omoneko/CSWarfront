@@ -25,8 +25,9 @@ public class BaseDefenseStepTests
     {
         var s = BaseWithHostileUnit(50f); // range既定120内
         BaseDefenseStep.Advance(s, 1f);
-        // DamagePerHit(DefaultDefenseAttack=35, Infantry.Armor=1) = 34, dt=1 -> 34ダメージ
-        Assert.Equal(66f, s.FindUnit(1).CurrentHP, 3);
+        // Task38: DamagePerHit(DefaultDefenseAttack=35, Infantry.Armor=1) = 34, dt=1,
+        // × MilitaryBase.DefenseAccuracy(0.7) = 23.8ダメージ -> 100-23.8=76.2 (old: 100-34=66)
+        Assert.Equal(76.2f, s.FindUnit(1).CurrentHP, 2);
     }
 
     [Fact]
@@ -72,9 +73,10 @@ public class BaseDefenseStepTests
     public void Unit_reduced_to_zero_hp_by_base_defense_ends_up_dead()
     {
         var s = BaseWithHostileUnit(50f);
-        s.FindUnit(1).CurrentHP = 34f; // DamagePerHit(35,1)=34 でちょうど0に到達
+        // Task38: DamagePerHit(35,1)=34 × DefenseAccuracy(0.7) = 23.8 でちょうど0に到達
+        s.FindUnit(1).CurrentHP = 23.8f;
         BaseDefenseStep.Advance(s, 1f);
-        Assert.Equal(0f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(0f, s.FindUnit(1).CurrentHP, 2);
         Assert.Equal(UnitState.Dead, s.FindUnit(1).State);
     }
 
@@ -84,7 +86,7 @@ public class BaseDefenseStepTests
     public void Base_kill_awards_research_points_to_the_bases_owner()
     {
         var s = BaseWithHostileUnit(50f);
-        s.FindUnit(1).CurrentHP = 34f; // dies this tick (see test above)
+        s.FindUnit(1).CurrentHP = 23.8f; // dies this tick (see test above, Task38)
         BaseDefenseStep.Advance(s, 1f);
 
         // Infantry_T1.Cost = 20, KillRewardRate = 0.5 -> 10
@@ -106,8 +108,8 @@ public class BaseDefenseStepTests
     {
         var s = BaseWithHostileUnit(50f);
         BaseDefenseStep.Advance(s, 0.5f);
-        // DamagePerHit(35,1)=34 × dt(0.5) = 17
-        Assert.Equal(83f, s.FindUnit(1).CurrentHP, 3);
+        // Task38: DamagePerHit(35,1)=34 × dt(0.5) × DefenseAccuracy(0.7) = 11.9 -> 100-11.9=88.1 (old: 83)
+        Assert.Equal(88.1f, s.FindUnit(1).CurrentHP, 2);
     }
 
     [Fact]
@@ -129,7 +131,22 @@ public class BaseDefenseStepTests
 
         BaseDefenseStep.Advance(s, 1f);
 
-        Assert.Equal(66f, s.FindUnit(1).CurrentHP, 3); // 小さいInstanceIdが優先して狙われる
+        // Task38: dmg = 34 × DefenseAccuracy(0.7) = 23.8 -> 100-23.8=76.2 (old: 66)
+        Assert.Equal(76.2f, s.FindUnit(1).CurrentHP, 2); // 小さいInstanceIdが優先して狙われる
         Assert.Equal(100f, s.FindUnit(2).CurrentHP, 3);
+    }
+
+    // --- Task38: 拠点の固定命中率(DefenseAccuracy)の適用 ---
+
+    [Fact]
+    public void Base_damage_is_multiplied_by_DefenseAccuracy_constant()
+    {
+        var s = BaseWithHostileUnit(50f);
+        BaseDefenseStep.Advance(s, 1f);
+
+        float rawDamage = CombatMath.DamagePerHit(MilitaryBase.DefaultDefenseAttack, 1f); // Infantry.Armor=1 -> 34
+        float expectedHp = 100f - rawDamage * MilitaryBase.DefenseAccuracy;
+        Assert.Equal(0.7f, MilitaryBase.DefenseAccuracy, 3);
+        Assert.Equal(expectedHp, s.FindUnit(1).CurrentHP, 2);
     }
 }

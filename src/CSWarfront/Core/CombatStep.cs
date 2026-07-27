@@ -30,8 +30,10 @@ namespace CSWarfront.Core
                     ? CombatMatchup.Multiplier(type.Category, targetType.Category)
                     : 1.0f;
                 // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
-                // 兵科相性倍率(CombatMatchup、Task29)に比例する。
-                float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup;
+                // 兵科相性倍率(CombatMatchup、Task29)、命中率(CombatSynergy.AccuracyFor、Task38)に比例する。
+                // 命中率は乱数抽選ではなく期待値ダメージ倍率として適用する（決定的シミュレーションを保つため）。
+                float accuracy = CombatSynergy.AccuracyFor(state, self, type);
+                float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup * accuracy;
                 // 撃破報酬（Task35）: このダメージでHPが初めて0以下へ落ちた瞬間だけ、攻撃側(self)の勢力へ
                 // Research.KillReward を与える。wasAlive フラグで「このダメージがとどめだったか」を判定し、
                 // 同tick内で同じ的へ複数回ダメージが入っても二重付与しない。

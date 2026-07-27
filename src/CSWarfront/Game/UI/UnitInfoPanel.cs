@@ -226,6 +226,8 @@ namespace CSWarfront.Game.UI
                 sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
                 sb.Append("\n攻撃: ").Append(snapshot.Attack.ToString("0")).Append("/h  射程: ").Append(snapshot.Range.ToString("0"));
                 sb.Append("\n装甲: ").Append(snapshot.Armor.ToString("0")).Append("    速度: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
+                sb.Append("\n命中: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
+                if (snapshot.AccuracyBoosted) sb.Append("（観測支援）");
                 sb.Append("\n状態: ").Append(StateLabel(snapshot.State));
                 sb.Append("\n目標: ").Append(snapshot.TargetId.HasValue ? "ユニット#" + snapshot.TargetId.Value : "なし");
                 sb.Append("\n経路: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "直進");

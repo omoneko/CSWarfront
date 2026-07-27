@@ -45,7 +45,39 @@ public class LandUnitRosterTests
         Assert.Equal(0f, t.SplashRadius, 3);
         Assert.Equal(60f, t.Cost, 3);
         Assert.Equal(8f, t.BuildTime, 3);
+        Assert.Equal(0.70f, t.Accuracy, 3); // Task38: Tank Tier1 base accuracy
         Assert.Equal(SpeedCalibration.UnitsPerGameHourFromKmh(40f), t.Speed, 5);
+    }
+
+    // --- Task38: 命中率(Accuracy)の基礎値テーブル ---
+
+    [Theory]
+    [InlineData(UnitCategory.Infantry, 0.75f)]
+    [InlineData(UnitCategory.MechInfantry, 0.75f)]
+    [InlineData(UnitCategory.Apc, 0.70f)]
+    [InlineData(UnitCategory.Tank, 0.70f)]
+    [InlineData(UnitCategory.Artillery, 0.35f)]
+    [InlineData(UnitCategory.DroneInfantry, 0.85f)]
+    [InlineData(UnitCategory.AntiAir, 0.60f)]
+    public void Tier1_accuracy_matches_design_table(UnitCategory category, float expectedAccuracy)
+    {
+        UnitType t = LandUnitRoster.Get(category, 1);
+        Assert.Equal(expectedAccuracy, t.Accuracy, 3);
+    }
+
+    [Fact]
+    public void Artillery_T1_rebalanced_range_and_attack_are_lower_than_the_old_values()
+    {
+        // Task38: Artillery Tier1 Range 160->120, Attack 55->50 (nerf; accuracy 0.35 is the compensating buff).
+        UnitType t = LandUnitRoster.Get(UnitCategory.Artillery, 1);
+        Assert.Equal(120f, t.Range, 3);
+        Assert.Equal(50f, t.Attack, 3);
+        // HP/Armor/Speed/Splash/Cost/BuildTime stay as before (unaffected by the rebalance).
+        Assert.Equal(70f, t.MaxHP, 3);
+        Assert.Equal(2f, t.Armor, 3);
+        Assert.Equal(30f, t.SplashRadius, 3);
+        Assert.Equal(70f, t.Cost, 3);
+        Assert.Equal(9f, t.BuildTime, 3);
     }
 
     [Fact]
