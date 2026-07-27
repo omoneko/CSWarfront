@@ -75,7 +75,7 @@ namespace CSWarfront.Game
             // こうすることで OnSimTick の `if (State == null) return;` が
             // 初期化途中の半端な状態を観測することがない。
             var state = new WarState();
-            state.Types.Register(MvpUnitTypes.Tank_T1());
+            LandUnitRoster.RegisterAll(state.Types); // 陸上7兵種×Tier1〜5（Task28）
 
             // 全5勢力を生成する（電力タブの勢力ドロップダウンはどの選択も有効な値を指すようにするため）。
             // 基地はもうここではシードしない（Task18）：プレイヤーが電力タブから基地建物を配置した瞬間に
@@ -372,6 +372,7 @@ namespace CSWarfront.Game
                     UnitInstance u = State.Units[i];
                     UnitType ut = State.Types.Get(u.TypeKey);
                     sb.Append(" | u").Append(u.InstanceId)
+                      .Append(" type=").Append(u.TypeKey)
                       .Append(" f=").Append(u.FactionId)
                       .Append(" st=").Append(u.State)
                       .Append(" hp=").Append(u.CurrentHP.ToString("0"))

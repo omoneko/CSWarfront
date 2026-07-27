@@ -4,7 +4,6 @@ namespace CSWarfront.Core
     public static class ProductionPlanning
     {
         public const int QueueCap = 2;             // 1基地あたり最大キュー長
-        public const string MvpUnitKey = "Tank_T1";
 
         public static void Advance(WarState state)
         {
@@ -12,16 +11,53 @@ namespace CSWarfront.Core
             {
                 Faction f = state.Factions[fi];
                 if (f.Eliminated) continue;
-                UnitType type = state.Types.Get(MvpUnitKey);
-                if (type == null) continue;
                 for (int bi = 0; bi < state.Bases.Count; bi++)
                 {
                     MilitaryBase b = state.Bases[bi];
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
-                    while (b.Queue.Count < QueueCap && f.TrySpend(type.Cost))
+
+                    // 空きスロットができるたびに選び直す：購入のたびに軍資金が減るため、
+                    // 同じtick内でも「もう最強は買えない」場合は次点が選ばれる（決定的）。
+                    while (b.Queue.Count < QueueCap)
+                    {
+                        string key = ChooseUnitKey(state, f, b);
+                        if (key == null) break; // 何も買えない
+                        UnitType type = state.Types.Get(key);
+                        if (type == null) break;
+                        if (!f.TrySpend(type.Cost)) break;
                         b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// 勢力が今払える範囲で最も強力（＝最もCostが高い）陸上ユニットを選ぶ（Task28）。
+        /// 同点はTierが高い方、さらに同点ならTypeKeyの序数（Ordinal）比較で決める（完全決定的）。
+        /// 何も買えなければnullを返す（現行の「TrySpend失敗時は何も積まない」挙動を維持）。
+        /// bは現状未使用（基地種別ごとの生産制限など将来の絞り込み用に予約）。
+        /// </summary>
+        public static string ChooseUnitKey(WarState state, Faction faction, MilitaryBase b)
+        {
+            UnitType best = null;
+            foreach (UnitType t in state.Types.All())
+            {
+                if (t.Domain != Domain.Land) continue;
+                // AntiAirは今のところ対空できる相手（空ユニット）が存在しないため除外する。
+                // 空ユニットのロスターが実装されたらこの除外を外すこと。
+                if (t.Category == UnitCategory.AntiAir) continue;
+                if (t.Cost > faction.Treasury) continue;
+
+                if (best == null || IsBetter(t, best)) best = t;
+            }
+            return best != null ? best.TypeKey : null;
+        }
+
+        private static bool IsBetter(UnitType candidate, UnitType current)
+        {
+            if (candidate.Cost != current.Cost) return candidate.Cost > current.Cost;
+            if (candidate.Tier != current.Tier) return candidate.Tier > current.Tier;
+            return string.CompareOrdinal(candidate.TypeKey, current.TypeKey) < 0;
         }
     }
 }

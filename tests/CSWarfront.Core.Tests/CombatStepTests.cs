@@ -21,9 +21,10 @@ public class CombatStepTests
     {
         var s = TwoHostileTanks(50f); // range 60 内
         CombatStep.Advance(s, 1f);
-        // DamagePerHit(40,5)=35 に dt(1時間分)を乗じて相互に適用 → 100-35=65
-        Assert.Equal(65f, s.FindUnit(1).CurrentHP, 3);
-        Assert.Equal(65f, s.FindUnit(2).CurrentHP, 3);
+        // Task28: Tank_T1.Armor is now 10 (was 5). DamagePerHit(40,10)=30 に dt(1時間分)を乗じて
+        // 相互に適用 → 100-30=70 (old arithmetic was DamagePerHit(40,5)=35 -> 100-35=65)
+        Assert.Equal(70f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(70f, s.FindUnit(2).CurrentHP, 3);
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
@@ -50,13 +51,14 @@ public class CombatStepTests
     {
         var full = TwoHostileTanks(50f);
         CombatStep.Advance(full, 1f);
-        float fullDmg = 100f - full.FindUnit(1).CurrentHP; // 35
+        float fullDmg = 100f - full.FindUnit(1).CurrentHP; // Task28: DamagePerHit(40,10)=30 (was 35)
 
         var half = TwoHostileTanks(50f);
         CombatStep.Advance(half, 0.5f);
-        float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 17.5
+        float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 15 (was 17.5)
 
         Assert.Equal(fullDmg / 2f, halfDmg, 3);
-        Assert.Equal(82.5f, half.FindUnit(1).CurrentHP, 3);
+        // 100 - 30*0.5 = 85 (old arithmetic was 100 - 35*0.5 = 82.5, before Tank_T1.Armor changed 5->10)
+        Assert.Equal(85f, half.FindUnit(1).CurrentHP, 3);
     }
 }

@@ -12,12 +12,14 @@ public class MvpUnitTypesTests
         Assert.Equal(UnitCategory.Tank, t.Category);
         // 40km/h -> 11.111... m/s -> / 2.05078125 (InGameHoursPerRealSecond) ≈ 5.418 units/ゲーム内時間
         Assert.Equal(5.418f, t.Speed, 2);
-        // 他のステータスは変更されていないこと。
-        Assert.Equal(100f, t.MaxHP, 3);
+        // Task28: MvpUnitTypes.Tank_T1()はLandUnitRoster.Get(Tank, 1)の薄いラッパーに置き換わった。
+        // 新しいTier1基礎値（LandUnitRosterのTankの行）: HP140, Attack40, Range60, Armor10, Cost60, BuildTime8。
+        // Attack/Range/BuildTime/Speedは旧値と一致（意図的に据え置き）。HP/Armor/Costは新テーブルの値へ変更。
+        Assert.Equal(140f, t.MaxHP, 3);
         Assert.Equal(40f, t.Attack, 3);
         Assert.Equal(60f, t.Range, 3);
-        Assert.Equal(5f, t.Armor, 3);
-        Assert.Equal(50f, t.Cost, 3);
+        Assert.Equal(10f, t.Armor, 3);
+        Assert.Equal(60f, t.Cost, 3);
         Assert.Equal(8f, t.BuildTime, 3);
     }
 

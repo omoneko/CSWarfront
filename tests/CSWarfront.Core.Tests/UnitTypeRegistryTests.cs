@@ -20,4 +20,19 @@ public class UnitTypeRegistryTests
         var reg = new UnitTypeRegistry();
         Assert.Null(reg.Get("NoSuch"));
     }
+
+    [Fact]
+    public void All_enumerates_every_registered_type()
+    {
+        var reg = new UnitTypeRegistry();
+        reg.Register(MvpUnitTypes.Tank_T1());
+        reg.Register(MvpUnitTypes.Infantry_T1());
+
+        var keys = new System.Collections.Generic.List<string>();
+        foreach (var t in reg.All()) keys.Add(t.TypeKey);
+
+        Assert.Contains("Tank_T1", keys);
+        Assert.Contains("Infantry_T1", keys);
+        Assert.Equal(2, keys.Count);
+    }
 }
