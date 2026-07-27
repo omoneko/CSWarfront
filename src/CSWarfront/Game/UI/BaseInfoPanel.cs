@@ -34,7 +34,10 @@ namespace CSWarfront.Game.UI
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
         private const float DropdownHeight = 28f;
-        private const float StatusLabelReserveHeight = 76f;
+        // ステータス表示行数が増えた（Task30: 所属/体力/防衛/軍資金/部隊数/生産中/待機/占領猶予 最大8行）ため
+        // 1行あたり約12pxで見積もった予約高さ。実際の行数は可変（待機0件・猶予0hなら省略）だが、
+        // ラベルの wordWrap 前提で最大行数ぶんの領域を固定確保しておけば十分。
+        private const float StatusLabelReserveHeight = 150f;
         private const float VanillaGap = 8f;
         private const float CollapseButtonSize = 20f;
         private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
@@ -50,6 +53,10 @@ namespace CSWarfront.Game.UI
         private static ushort _currentBaseId; // 0 = 未表示（CSの建物id 0 は「無し」を意味する）
         private static bool _suppressDropdownEvent;
         private static bool _loggedCreated;
+
+        /// <summary>RefreshContents で毎フレーム再利用するバッファ（Task30: 文字列連結の毎フレーム
+        /// アロケーションを避けるため、StringBuilder.Clear() で使い回す）。</summary>
+        private static readonly StringBuilder _statusBuilder = new StringBuilder(256);
 
         /// <summary>パネル最小化トグルのUI設定（Task27）。セッション中は選択解除・再選択をまたいで保持する
         /// （Hide/UpdateVisibilityでは変更しない。Destroy＝レベルアンロード時のみリセット）。</summary>
@@ -112,7 +119,10 @@ namespace CSWarfront.Game.UI
 
                 _currentBaseId = buildingId;
                 PositionNextToVanilla(vanilla);
-                RefreshContents(snapshot);
+                // 折りたたみ中はタイトル行しか見えないため、ドロップダウン/ステータスの再構築は無駄
+                // （Task30: 毎フレーム呼ばれるのでここで確実にスキップする）。展開された瞬間に
+                // 正しい内容が出るよう、_currentBaseId とスナップショット自体は毎フレーム更新しておく。
+                if (!_collapsed) RefreshContents(snapshot);
                 if (!_panel.isVisible) _panel.Show();
                 _panel.BringToFront();
             }
@@ -348,14 +358,38 @@ namespace CSWarfront.Game.UI
                 string[] names = WarfrontSettings.FactionNames;
                 string ownerName = (snapshot.OwnerFactionId.HasValue && snapshot.OwnerFactionId.Value < names.Length)
                     ? names[snapshot.OwnerFactionId.Value]
-                    : "なし";
+                    : "未所属";
 
-                var sb = new StringBuilder();
+                StringBuilder sb = _statusBuilder;
+                sb.Length = 0;
+
                 sb.Append("所属: ").Append(ownerName);
                 if (snapshot.IsHeadquarters) sb.Append(" (HQ)");
-                sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\n占領猶予: ").Append(snapshot.CaptureGraceHours.ToString("0")).Append("h");
-                sb.Append("\n生産キュー: ").Append(snapshot.QueueCount);
+
+                sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
+                sb.Append("\n防衛: 攻撃").Append(snapshot.DefenseAttack.ToString("0")).Append("/h 射程").Append(snapshot.DefenseRange.ToString("0"));
+                sb.Append("\n軍資金: ").Append(snapshot.OwnerTreasury.ToString("0"));
+                sb.Append("\n部隊数: ").Append(snapshot.OwnerUnitCount);
+
+                if (string.IsNullOrEmpty(snapshot.ProducingTypeKey))
+                {
+                    sb.Append("\n生産中: なし");
+                }
+                else
+                {
+                    float pct = Mathf.Clamp01(snapshot.ProducingProgress) * 100f;
+                    float remainHours = (1f - Mathf.Clamp01(snapshot.ProducingProgress)) * snapshot.ProducingBuildTime;
+                    if (remainHours < 0f) remainHours = 0f;
+                    sb.Append("\n生産中: ").Append(snapshot.ProducingTypeKey).Append("  ").Append(pct.ToString("0")).Append("%")
+                      .Append("  (残り ").Append(remainHours.ToString("0.0")).Append("h)");
+                }
+
+                int waiting = snapshot.QueueCount - (string.IsNullOrEmpty(snapshot.ProducingTypeKey) ? 0 : 1);
+                if (waiting > 0) sb.Append("\n待機: ").Append(waiting).Append(" 件");
+
+                if (snapshot.CaptureGraceHours > 0f)
+                    sb.Append("\n占領猶予: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
+
                 _statusLabel.text = sb.ToString();
             }
         }

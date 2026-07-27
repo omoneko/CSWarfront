@@ -164,15 +164,7 @@ namespace CSWarfront.Game
                     MilitaryBase mb = State.Bases[i];
                     if (mb.BaseId != baseId) continue;
 
-                    snapshot = new BaseUiSnapshot
-                    {
-                        OwnerFactionId = mb.OwnerFactionId,
-                        CurrentHP = mb.CurrentHP,
-                        MaxHP = mb.MaxHP,
-                        CaptureGraceHours = mb.CaptureGraceHours,
-                        QueueCount = mb.Queue.Count,
-                        IsHeadquarters = mb.IsHeadquarters
-                    };
+                    snapshot = BaseUiSnapshotBuilder.Build(mb, State);
                     return true;
                 }
                 return false;
@@ -482,19 +474,5 @@ namespace CSWarfront.Game
             // 呼ばれる点は上の UnitVisuals.DestroyAll と同じ前提のため、ここで直接呼んで問題ない。
             UI.BaseInfoPanel.Destroy();
         }
-    }
-
-    /// <summary>
-    /// 基地情報パネル（Game/UI/BaseInfoPanel）向けの読み取り専用スナップショット（Task25）。
-    /// UIが WarState / MilitaryBase へ直接触れずに済むよう、_stateLock 内で値をコピーして渡す。
-    /// </summary>
-    public struct BaseUiSnapshot
-    {
-        public byte? OwnerFactionId;
-        public float CurrentHP;
-        public float MaxHP;
-        public float CaptureGraceHours;
-        public int QueueCount;
-        public bool IsHeadquarters;
     }
 }
