@@ -194,7 +194,7 @@ namespace CSWarfront.Game
             try
             {
                 Mesh mesh;
-                if (!UnitMeshSource.TryResolve(s.AssetPrefabName, out mesh))
+                if (!UnitMeshSource.TryResolve(s.TypeKey, s.AssetPrefabName, out mesh))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;

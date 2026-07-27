@@ -1,3 +1,6 @@
+using System.Reflection;
+using ColossalFramework;
+using ColossalFramework.Plugins;
 using ICities;
 namespace CSWarfront.Game
 {
@@ -26,6 +29,7 @@ namespace CSWarfront.Game
                 {
                     WarfrontBasePrefab.EnsureRegistered();
                     BasePlacementWatcher.Subscribe();
+                    LoadUnitAssetBindings(); // Task36: サブスクライブ済みプロップのユニットモデル割り当て
                 }
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelLoaded: " + e); }
@@ -41,6 +45,32 @@ namespace CSWarfront.Game
                 MilitaryManager.Reset();
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelUnloading: " + e); }
+        }
+
+        /// <summary>
+        /// Task36: UnitAssetBindings（TypeKey→サブスクライブ済みプロップ名の割り当て）をMODディレクトリから
+        /// 読み込む。Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
+        /// 本クラスが既に WarfrontBasePrefab.EnsureRegistered() と同じタイミング（ゲームプレイ可能な
+        /// LoadModeでのOnLevelLoaded）でプレハブ登録を行っており、割り当て読み込みも同じタイミングで
+        /// 十分だからである。modPath が取得できない場合はログのみで継続し、UnitAssetBindings側は
+        /// メモリ内のみで動作する（割り当ては保存されないが、ロード自体は止めない）。
+        /// </summary>
+        private static void LoadUnitAssetBindings()
+        {
+            try
+            {
+                PluginManager.PluginInfo info =
+                    Singleton<PluginManager>.instance.FindPluginInfo(Assembly.GetExecutingAssembly());
+                if (info == null || string.IsNullOrEmpty(info.modPath))
+                {
+                    ModConfig.LogError("LoadUnitAssetBindings: PluginManager から modPath を取得できませんでした（メモリ内のみで動作）");
+                }
+                UnitAssetBindings.Load(info != null ? info.modPath : null);
+            }
+            catch (System.Exception e)
+            {
+                ModConfig.LogError("LoadUnitAssetBindings error: " + e);
+            }
         }
     }
 }

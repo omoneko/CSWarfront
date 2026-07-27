@@ -496,6 +496,7 @@ namespace CSWarfront.Game
             // ここで直接呼んで問題ない。UnitSelection.Clear は次セッションへ選択IDを持ち越さないため（Task31）。
             UI.BaseInfoPanel.Destroy();
             UI.UnitInfoPanel.Destroy();
+            UI.AssetAssignPanel.Destroy(); // Task36
             UI.UnitSelection.Clear();
         }
     }

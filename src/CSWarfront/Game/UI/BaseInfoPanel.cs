@@ -144,6 +144,7 @@ namespace CSWarfront.Game.UI
             {
                 if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionSelected;
                 if (_collapseButton != null) _collapseButton.eventClick -= OnCollapseClick;
+                DestroyModelButtonSection(); // Task36: イベント購読解除＋フィールドのリセット
                 DestroyProductionSection(); // Task34: イベント購読解除＋フィールドのリセット
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
@@ -218,6 +219,8 @@ namespace CSWarfront.Game.UI
             _factionDropdown = BuildFactionDropdown(Pad, y, w);
             y += DropdownHeight + 8f;
 
+            y = BuildModelButtonSection(Pad, y, w); // Task36: サブスクライブ済みプロップのモデル割り当てUIを開く
+
             y += 4f;
             _statusLabel = _panel.AddUIComponent<UILabel>();
             _statusLabel.textScale = 0.75f;
@@ -255,6 +258,7 @@ namespace CSWarfront.Game.UI
 
             if (_factionSectionLabel != null) _factionSectionLabel.isVisible = !_collapsed;
             if (_factionDropdown != null) _factionDropdown.isVisible = !_collapsed;
+            ApplyModelButtonCollapsedState(_collapsed); // Task36
             if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
             ApplyProductionCollapsedState(_collapsed); // Task34
 

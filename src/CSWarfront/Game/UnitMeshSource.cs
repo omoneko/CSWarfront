@@ -34,9 +34,58 @@ namespace CSWarfront.Game
         // FindLoaded(name) が見つからず既定へフォールバックした名前を、警告ログの重複を避けるためだけに記録する
         // （キャッシュには入れない＝次回呼び出しで必ず FindLoaded を再試行させる。詳細は TryResolve 参照）。
         private static readonly HashSet<string> _warnedMissingNames = new HashSet<string>();
+        // Task36: バインド済みだがそのプロップがまだ見つからない（未ロード等）警告の重複防止専用
+        // （"typeKey=propName" 単位。UnitAssetBindings/PropCatalog由来の結果は下記TryResolveの通り
+        // 意図的にキャッシュしないため、この集合は毎回のFindLoaded再試行そのものは妨げない）。
+        private static readonly HashSet<string> _warnedMissingBindings = new HashSet<string>();
         private static bool _loggedSourceOnce;
         private static bool _loggedFailureOnce;
         private static Mesh _fallbackCubeMesh;
+
+        /// <summary>
+        /// Task36: typeKey（空可）とassetPrefabName（空可）からメッシュを解決する。
+        /// 解決順: (a) typeKey に対する UnitAssetBindings の割り当て → PropCatalog でプロップのメッシュを解決
+        ///        → (b) assetPrefabName で FindLoaded → 既定候補名 → 全VehicleInfo走査
+        ///        → (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
+        ///
+        /// (a) の結果は意図的にキャッシュしない（PropCatalog.TryGetMeshも同様）。UnitAssetBindings.Set/Clear
+        /// による割り当て変更は UnitVisuals.DestroyAll() で既存の見た目を破棄させることで反映される
+        /// （破棄された見た目は次回Syncで必ずCreateVisual→この解決を再実行する）ため、ここで
+        /// 名前単位キャッシュを持つと変更が反映されない/古い結果が残るリスクの方が大きい。
+        /// (b)/(c) の既存キャッシュ方針は変更していない（下記オーバーロード参照）。
+        /// </summary>
+        public static bool TryResolve(string typeKey, string assetPrefabName, out Mesh mesh)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(typeKey))
+                {
+                    string propName;
+                    if (UnitAssetBindings.TryGet(typeKey, out propName))
+                    {
+                        Mesh propMesh;
+                        if (PropCatalog.TryGetMesh(propName, out propMesh))
+                        {
+                            mesh = propMesh;
+                            return true;
+                        }
+
+                        string warnKey = typeKey + "=" + propName;
+                        if (_warnedMissingBindings.Add(warnKey))
+                        {
+                            ModConfig.Log("UnitMeshSource: '" + typeKey + "' に割り当て済みのプロップ '" + propName +
+                                "' が見つかりません（未ロード等）。assetPrefabName/既定へフォールバックします");
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitMeshSource.TryResolve(typeKey=" + typeKey + ") binding lookup error: " + e);
+            }
+
+            return TryResolve(assetPrefabName, out mesh);
+        }
 
         /// <summary>
         /// assetPrefabName（空可）からメッシュを解決する。
