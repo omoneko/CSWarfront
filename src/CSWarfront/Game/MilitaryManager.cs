@@ -28,7 +28,7 @@ namespace CSWarfront.Game
     ///    の State への同時アクセスを防ぐために引き続き必要（net35のため
     ///    System.Collections.Concurrent は使用不可）。
     /// </summary>
-    public static class MilitaryManager
+    public static partial class MilitaryManager
     {
         public static WarState State { get; private set; }
         private static float _economyAccum;

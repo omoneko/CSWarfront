@@ -24,7 +24,7 @@ namespace CSWarfront.Game.UI
     /// MilitaryManager.TryGetBaseSnapshot / TrySetBaseOwner 経由でのみ読み書きする（_stateLock は
     /// それらの内部で短時間だけ取られ、ここでは保持しない）。
     /// </summary>
-    internal static class BaseInfoPanel
+    internal static partial class BaseInfoPanel
     {
         private const string PanelName = "CSWarfrontBaseInfoPanel";
         private const string VanillaPanelName = "CityServiceWorldInfoPanel";
@@ -144,6 +144,7 @@ namespace CSWarfront.Game.UI
             {
                 if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionSelected;
                 if (_collapseButton != null) _collapseButton.eventClick -= OnCollapseClick;
+                DestroyProductionSection(); // Task34: イベント購読解除＋フィールドのリセット
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
             catch (Exception e)
@@ -233,6 +234,8 @@ namespace CSWarfront.Game.UI
             _statusLabel.text = "";
             _statusLabel.relativePosition = new Vector3(Pad, y);
 
+            BuildProductionSection(w); // Task34: 自動生産切替・発注・取消UI。BaseInfoPanelProduction.cs に分離。
+
             RecomputeExpandedHeight();
             _panel.isVisible = false;
             ApplyCollapsedState(); // 展開/折りたたみの初期反映（_collapsedはセッション内で永続、通常は false）
@@ -253,6 +256,7 @@ namespace CSWarfront.Game.UI
             if (_factionSectionLabel != null) _factionSectionLabel.isVisible = !_collapsed;
             if (_factionDropdown != null) _factionDropdown.isVisible = !_collapsed;
             if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
+            ApplyProductionCollapsedState(_collapsed); // Task34
 
             _panel.height = _collapsed ? (Pad + TitleRowHeight + Pad) : _expandedHeight;
 
@@ -402,6 +406,7 @@ namespace CSWarfront.Game.UI
                     sb.Append("\n占領猶予: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
 
                 _statusLabel.text = sb.ToString();
+                RefreshProductionSection(snapshot); // Task34: ステータス行の下に生産セクションを再配置
                 RecomputeExpandedHeight();
             }
         }
@@ -417,7 +422,13 @@ namespace CSWarfront.Game.UI
         {
             if (_statusLabel == null || _panel == null) return;
 
-            float newExpandedHeight = _statusLabel.relativePosition.y + _statusLabel.height + Pad;
+            // Task34: 生産セクションが構築済みなら、その最下端（_productionBottomY、
+            // RefreshProductionSection/BuildProductionSectionが更新）を基準にする。
+            // 未構築（理論上は起きないが防御的に）ならステータスラベルの下端にフォールバックする。
+            float contentBottom = _productionBottomY > 0f
+                ? _productionBottomY
+                : _statusLabel.relativePosition.y + _statusLabel.height;
+            float newExpandedHeight = contentBottom + Pad;
             if (Mathf.Abs(newExpandedHeight - _expandedHeight) > 0.01f)
             {
                 _expandedHeight = newExpandedHeight;

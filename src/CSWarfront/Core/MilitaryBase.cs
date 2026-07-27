@@ -13,6 +13,15 @@ namespace CSWarfront.Core
         public float CurrentHP = 500f;
         public List<ProductionOrder> Queue = new List<ProductionOrder>();
 
+        /// <summary>trueならAI（ProductionPlanning.Advance）がこの基地のキューを自動補充する。
+        /// falseの場合はプレイヤーが手動でしか発注できない（Task34：指揮モード第一歩）。
+        /// 既定はtrue（既存の全自動挙動を維持）。</summary>
+        public bool AutoProduce = true;
+
+        /// <summary>プレイヤーが手動発注する際のキュー上限（Task34）。AI自動生産の上限
+        /// ProductionPlanning.QueueCap（2）より大きく、プレイヤーはまとめて複数発注できる。</summary>
+        public const int ManualQueueCap = 5;
+
         /// <summary>新設基地の占領猶予（ゲーム内時間、残り時間）。0なら保護なし。
         /// 通常のコンストラクタでは0（既存の挙動・テストへの影響なし）。Game層がプレイヤー配置基地の
         /// 登録時に NewBaseGraceHours を設定する。</summary>

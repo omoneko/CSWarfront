@@ -161,4 +161,30 @@ public class ProductionPlanningTests
         Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
         Assert.Equal(2f, s.Factions[0].Treasury, 3);
     }
+
+    // --- Task34: AutoProduce=false opts a base out of AI auto-fill ---
+
+    [Fact]
+    public void Advance_skips_base_with_AutoProduce_false_while_other_bases_still_fill()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions[0].AddTreasury(200f);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+
+        var playerControlled = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
+        playerControlled.OwnerFactionId = 0;
+        playerControlled.AutoProduce = false;
+        s.Bases.Add(playerControlled);
+
+        var aiControlled = new MilitaryBase(101, BaseType.Army, new WorldPos(10, 0, 0));
+        aiControlled.OwnerFactionId = 0;
+        s.Bases.Add(aiControlled);
+
+        ProductionPlanning.Advance(s);
+
+        Assert.Empty(playerControlled.Queue);
+        Assert.Equal(2, aiControlled.Queue.Count);
+        Assert.Equal(80f, s.Factions[0].Treasury, 3); // 200 - 2*60, spent only on the AI base
+    }
 }

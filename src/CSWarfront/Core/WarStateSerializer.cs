@@ -5,8 +5,9 @@ namespace CSWarfront.Core
     public static class WarStateSerializer
     {
         // v1 -> v2: 基地ブロック末尾に CaptureGraceHours (float) を追加（Task24）。
+        // v2 -> v3: 基地ブロックのさらに末尾に AutoProduce (bool) を追加（Task34）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 2;
+        private const int Version = 3;
 
         public static byte[] Serialize(WarState s)
         {
@@ -39,6 +40,7 @@ namespace CSWarfront.Core
                     w.Write(b.Queue.Count);
                     foreach (var o in b.Queue) { w.Write(o.TypeKey ?? ""); w.Write(o.Cost); w.Write(o.BuildTime); w.Write(o.Progress); }
                     w.Write(b.CaptureGraceHours); // v2で追加。位置依存フォーマットのためブロック末尾に追記。
+                    w.Write(b.AutoProduce); // v3で追加（Task34）。同じ理由でさらに末尾に追記。
                 }
                 // units
                 w.Write(s.Units.Count);
@@ -64,7 +66,7 @@ namespace CSWarfront.Core
             using (var ms = new MemoryStream(bytes))
             using (var r = new BinaryReader(ms))
             {
-                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）
+                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）
                 int fcount = r.ReadInt32();
                 for (int i = 0; i < fcount; i++)
                 {
@@ -95,6 +97,7 @@ namespace CSWarfront.Core
                         o.Progress = r.ReadSingle(); b.Queue.Add(o);
                     }
                     b.CaptureGraceHours = version >= 2 ? r.ReadSingle() : 0f;
+                    b.AutoProduce = version >= 3 ? r.ReadBoolean() : true; // v2以前は既定値true（従来の全自動挙動）
                     s.Bases.Add(b);
                 }
                 int ucount = r.ReadInt32();

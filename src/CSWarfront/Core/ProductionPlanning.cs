@@ -15,6 +15,7 @@ namespace CSWarfront.Core
                 {
                     MilitaryBase b = state.Bases[bi];
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
+                    if (!b.AutoProduce) continue; // Task34: プレイヤーが手動管理を選んだ基地はAIが触らない
 
                     // 空きスロットができるたびに選び直す：購入のたびに軍資金が減るため、
                     // 同じtick内でも「もう最強は買えない」場合は次点が選ばれる（決定的）。

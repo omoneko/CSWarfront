@@ -30,6 +30,14 @@ namespace CSWarfront.Game
         public float DefenseAttack;
         /// <summary>拠点の自衛射撃射程（Task29で追加されたMilitaryBase.DefenseRange）。</summary>
         public float DefenseRange;
+
+        /// <summary>trueならAIがこの基地のキューを自動補充する（Task34、MilitaryBase.AutoProduceの写し）。</summary>
+        public bool AutoProduce;
+
+        /// <summary>現在のキュー内容をTypeKeyだけの配列にした表示用コピー（Task34）。
+        /// index 0 == 生産中（ProducingTypeKeyと同じ内容）。選択中の1基地分のみ構築するため
+        /// 毎tickのホットパスではない（TryGetBaseSnapshot呼び出し時のみ）。</summary>
+        public string[] QueuedTypeKeys;
     }
 
     /// <summary>
@@ -67,6 +75,10 @@ namespace CSWarfront.Game
                 }
             }
 
+            // Task34: 選択中の1基地分のみ、キューのTypeKeyだけをUI表示用にコピーする。
+            var queuedTypeKeys = new string[mb.Queue.Count];
+            for (int q = 0; q < mb.Queue.Count; q++) queuedTypeKeys[q] = mb.Queue[q].TypeKey;
+
             return new BaseUiSnapshot
             {
                 OwnerFactionId = mb.OwnerFactionId,
@@ -81,7 +93,9 @@ namespace CSWarfront.Game
                 OwnerTreasury = ownerTreasury,
                 OwnerUnitCount = ownerUnitCount,
                 DefenseAttack = mb.DefenseAttack,
-                DefenseRange = mb.DefenseRange
+                DefenseRange = mb.DefenseRange,
+                AutoProduce = mb.AutoProduce,
+                QueuedTypeKeys = queuedTypeKeys
             };
         }
     }

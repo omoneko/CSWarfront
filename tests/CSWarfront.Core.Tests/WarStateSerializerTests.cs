@@ -102,5 +102,71 @@ public class WarStateSerializerTests
         Assert.Single(r.Bases);
         Assert.Equal(0f, r.Bases[0].CaptureGraceHours, 3);
         Assert.Equal(250f, r.Bases[0].CurrentHP, 3);
+        Assert.True(r.Bases[0].AutoProduce); // v1 has no AutoProduce byte either -> default true
+    }
+
+    // --- Task34: v2 -> v3, AutoProduce appended at the end of the per-base block ---
+
+    [Fact]
+    public void Roundtrip_v3_preserves_AutoProduce_false()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Bases[0].AutoProduce = false;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.False(r.Bases[0].AutoProduce);
+    }
+
+    [Fact]
+    public void Roundtrip_v3_preserves_AutoProduce_true()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Bases[0].AutoProduce = true;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.True(r.Bases[0].AutoProduce);
+    }
+
+    /// <summary>旧形式（v2、基地ブロック末尾にAutoProduceが無い）を読んでも例外にならず、
+    /// AutoProduceが既定値true（AI自動生産の従来動作を維持）で復元されることを保証する。</summary>
+    [Fact]
+    public void Deserialize_v2_format_defaults_AutoProduce_to_true()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(2); // version 2（AutoProduce導入前）
+            w.Write(0); // factions count
+            for (int a = 0; a < 5; a++)
+                for (int b = 0; b < 5; b++)
+                    w.Write((int)Relation.Neutral);
+            w.Write(1); // bases count
+            w.Write((ushort)200); w.Write((int)BaseType.Army);
+            w.Write(true); w.Write((byte)0); // owner
+            w.Write(40f); w.Write(0f); w.Write(5f); // pos
+            w.Write(500f); w.Write(false); // influence radius, isHq
+            w.Write(500f); w.Write(250f); // maxHp, currentHp
+            w.Write(0); // queue count
+            w.Write(3.5f); // CaptureGraceHours (v2 field)
+            // 注意: v2にはAutoProduceが無いのでここで終わり
+            w.Write(0); // units count
+            w.Write((uint)1); // nextInstanceId
+            w.Flush();
+            bytes = ms.ToArray();
+        }
+
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.Equal(3.5f, r.Bases[0].CaptureGraceHours, 3);
+        Assert.True(r.Bases[0].AutoProduce);
     }
 }
