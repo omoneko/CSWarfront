@@ -30,14 +30,16 @@ namespace CSWarfront.Game.UI
         private const string VanillaPanelName = "CityServiceWorldInfoPanel";
         private const string TitleText = "CSWarfront 軍事基地";
 
-        private const float PanelWidth = 260f;
+        // Task33: 旧260pxではステータス行（特に「生産中: MechInfantry_T5  62%  (残り 3.0h)」のような
+        // 長い1行）が wordWrap 前提の幅に収まらず、実機で単語単位の折り返し→パネルからのはみ出しが
+        // 発生していた。ラベル側は wordWrap=false に固定して1行を必ず1行のまま描画する方針に変え、
+        // パネル側はその最長行がtextScale=0.75で収まる幅まで拡張する（文字幅は全角≈16px/半角≈9px @
+        // scale1.0 の概算に安全マージンを加えた見積り。最長行「生産中: ...」で概算約269px、
+        // 実測フォントとの誤差に備え340px（内側幅324px）を確保）。
+        private const float PanelWidth = 340f;
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
         private const float DropdownHeight = 28f;
-        // ステータス表示行数が増えた（Task30: 所属/体力/防衛/軍資金/部隊数/生産中/待機/占領猶予 最大8行）ため
-        // 1行あたり約12pxで見積もった予約高さ。実際の行数は可変（待機0件・猶予0hなら省略）だが、
-        // ラベルの wordWrap 前提で最大行数ぶんの領域を固定確保しておけば十分。
-        private const float StatusLabelReserveHeight = 150f;
         private const float VanillaGap = 8f;
         private const float CollapseButtonSize = 20f;
         private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
@@ -118,11 +120,14 @@ namespace CSWarfront.Game.UI
                 }
 
                 _currentBaseId = buildingId;
-                PositionNextToVanilla(vanilla);
                 // 折りたたみ中はタイトル行しか見えないため、ドロップダウン/ステータスの再構築は無駄
                 // （Task30: 毎フレーム呼ばれるのでここで確実にスキップする）。展開された瞬間に
                 // 正しい内容が出るよう、_currentBaseId とスナップショット自体は毎フレーム更新しておく。
                 if (!_collapsed) RefreshContents(snapshot);
+                // Task33: 位置決め（画面下端クランプ含む）はこのフレームの高さ確定後に行う。
+                // 旧実装ではRefreshContentsより先に位置決めしていたため、内容が増えて高さが変わった
+                // フレームでは1フレーム古い高さでクランプされるズレがあった。
+                PositionNextToVanilla(vanilla);
                 if (!_panel.isVisible) _panel.Show();
                 _panel.BringToFront();
             }
@@ -216,13 +221,19 @@ namespace CSWarfront.Game.UI
             _statusLabel = _panel.AddUIComponent<UILabel>();
             _statusLabel.textScale = 0.75f;
             _statusLabel.textColor = new Color32(220, 220, 220, 255);
-            _statusLabel.wordWrap = true;
+            // Task33: autoSize(既定true)とwordWrapの組み合わせがラベル幅を単語単位で縮めてしまい、
+            // 「所属: Blue (HQ)」のような短い1行までもが単語ごとに改行されてパネル外へはみ出す不具合の
+            // 直接の原因だったため、autoSize=false・wordWrap=false に固定して幅wを維持する。
+            // 代わりに autoHeight=true でラベル自身の高さを実際の行数（"\n"の数）に追従させ、
+            // RecomputeExpandedHeight() でパネル全体の高さをそこから算出する。
+            _statusLabel.wordWrap = false;
+            _statusLabel.autoSize = false;
+            _statusLabel.autoHeight = true;
             _statusLabel.width = w;
             _statusLabel.text = "";
             _statusLabel.relativePosition = new Vector3(Pad, y);
-            y += StatusLabelReserveHeight;
 
-            _expandedHeight = y + Pad;
+            RecomputeExpandedHeight();
             _panel.isVisible = false;
             ApplyCollapsedState(); // 展開/折りたたみの初期反映（_collapsedはセッション内で永続、通常は false）
 
@@ -391,6 +402,30 @@ namespace CSWarfront.Game.UI
                     sb.Append("\n占領猶予: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
 
                 _statusLabel.text = sb.ToString();
+                RecomputeExpandedHeight();
+            }
+        }
+
+        /// <summary>
+        /// Task33: ステータスラベル（autoHeight有効）の実際の高さから展開時の全体パネル高さを算出し、
+        /// _expandedHeight キャッシュを更新する。折りたたみ→再展開時にここで求めた最新値へ正確に戻せる
+        /// よう、ハードコードされた定数ではなくこの計算を毎回の内容更新のたびにやり直す。
+        /// 値が変化した場合のみ _panel.height / _expandedHeight を書き換える（毎フレームの無駄な
+        /// レイアウト再計算・スレッド跨ぎではないが不要な再描画コストを避けるため）。
+        /// </summary>
+        private static void RecomputeExpandedHeight()
+        {
+            if (_statusLabel == null || _panel == null) return;
+
+            float newExpandedHeight = _statusLabel.relativePosition.y + _statusLabel.height + Pad;
+            if (Mathf.Abs(newExpandedHeight - _expandedHeight) > 0.01f)
+            {
+                _expandedHeight = newExpandedHeight;
+            }
+
+            if (!_collapsed && Mathf.Abs(_panel.height - _expandedHeight) > 0.01f)
+            {
+                _panel.height = _expandedHeight;
             }
         }
 

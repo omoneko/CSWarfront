@@ -1,4 +1,7 @@
 using System;
+using System.Reflection;
+using ColossalFramework;
+using ColossalFramework.Globalization;
 using UnityEngine;
 
 namespace CSWarfront.Game
@@ -9,11 +12,21 @@ namespace CSWarfront.Game
     /// setter非公開の m_UICategory 等の private フィールドを一切のリフレクション無しで引き継ぐ
     /// （.superpowers/sdd/research-power-tab-building.md §6 で検証済みの経路）。
     /// Task18でこのプレハブの配置をロジック上の基地（MilitaryBase）に紐付ける。本タスクではプレハブ登録のみ。
+    /// Task33でこのプレハブ名に対するロケール文字列（建物名/説明）の登録を追加した。
     /// </summary>
     public static class WarfrontBasePrefab
     {
         public const string PrefabName = "CSWarfront Military Base";
         private const string CollectionName = "CSWarfront";
+
+        // Task33: バニラ建物情報パネル（CityServiceWorldInfoPanel）が参照するロケール識別子。
+        // Assembly-CSharp.dll の文字列テーブルをスキャンして実在を確認済み（BUILDING_TITLE /
+        // BUILDING_DESC / BUILDING_SHORT_DESC）。
+        private const string LocaleTitleId = "BUILDING_TITLE";
+        private const string LocaleDescId = "BUILDING_DESC";
+        private const string LocaleShortDescId = "BUILDING_SHORT_DESC";
+        private const string LocaleTitleText = "CSWarfront 軍事基地";
+        private const string LocaleDescText = "勢力の軍事拠点。部隊を生産し、勢力圏から軍資金を得る。";
 
         public static BuildingInfo Prefab { get; private set; }
         public static bool IsRegistered { get { return Prefab != null; } }
@@ -107,6 +120,7 @@ namespace CSWarfront.Game
                 RefreshPanels();
 
                 Prefab = clone;
+                RegisterLocalizedStrings();
                 ModConfig.Log("WarfrontBasePrefab: registration COMPLETE, Prefab.name='" + Prefab.name + "'");
             }
             catch (Exception e)
@@ -277,6 +291,73 @@ namespace CSWarfront.Game
                 int old = ai.m_maintenanceCost;
                 ai.m_maintenanceCost = 100;
                 ModConfig.Log("WarfrontBasePrefab: sanitize m_maintenanceCost " + old + " -> 100");
+            }
+        }
+
+        /// <summary>
+        /// Task33: バニラの建物情報パネル（CityServiceWorldInfoPanel）は BuildingInfo.name をキーに
+        /// BUILDING_TITLE / BUILDING_SHORT_DESC のロケール文字列を検索して表示する。クローンした
+        /// プレハブ名（PrefabName）に対応するエントリが存在しないと、そのまま
+        /// "BUILDING_TITLE[CSWarfront Military Base]:0" のような生キーが画面に出てしまう（実機で確認済み）。
+        ///
+        /// ロケールAPI（ColossalManaged.dll をリフレクション/IL検証済み、Task33）:
+        ///   - ColossalFramework.SingletonLite&lt;LocaleManager&gt;.instance : public static プロパティ。
+        ///     リフレクション不要で取得可能。
+        ///   - LocaleManager.m_Locale : フィールドの実際のアクセシビリティは Assembly（internal）
+        ///     （FieldInfo.Attributes で確認済み。IsPublic/IsPrivate は共にfalse）のため、
+        ///     別アセンブリの本Modからは直接参照できずリフレクションが必須。型は
+        ///     ColossalFramework.Globalization.Locale。
+        ///   - Locale.Key : 値型（struct）。public フィールド m_Identifier(string) / m_Key(string) /
+        ///     m_Index(int)、いずれも書き込み可（IsInitOnly=false）。専用コンストラクタは
+        ///     ctor(string id) の1つのみで用途が異なるため使わず、オブジェクト初期化子で組み立てる。
+        ///   - Locale.Exists(Locale.Key id) : public インスタンスメソッド、bool を返す
+        ///     （Locale には Exists(string) 等 static オーバーロードも別途あるが、ここで使うのは
+        ///     インスタンスメソッドの Key 版）。
+        ///   - Locale.AddLocalizedString(Locale.Key k, string v) : public インスタンスメソッド、void。
+        ///
+        /// EnsureRegistered は冪等（Prefab != null なら即return）なので、このメソッドも実質セッション中
+        /// 一度しか呼ばれない。ロケール切り替え（言語変更）時の再登録は本タスクのスコープ外
+        /// （既知の制約。切り替え後は再びロケールキーが空になり得るが、ゲームクラッシュ等は起きない）。
+        /// 失敗しても Prefab 自体の登録（建物として配置可能な状態）には影響させず、ログのみで継続する。
+        /// </summary>
+        private static void RegisterLocalizedStrings()
+        {
+            try
+            {
+                LocaleManager manager = SingletonLite<LocaleManager>.instance;
+                if (manager == null)
+                {
+                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: LocaleManager.instance is null; skip (raw locale key will show)");
+                    return;
+                }
+
+                FieldInfo localeField = typeof(LocaleManager).GetField("m_Locale", BindingFlags.NonPublic | BindingFlags.Instance);
+                Locale locale = localeField != null ? localeField.GetValue(manager) as Locale : null;
+                if (locale == null)
+                {
+                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: could not reflect LocaleManager.m_Locale; skip (raw locale key will show)");
+                    return;
+                }
+
+                AddIfMissing(locale, LocaleTitleId, LocaleTitleText);
+                AddIfMissing(locale, LocaleDescId, LocaleDescText);
+                AddIfMissing(locale, LocaleShortDescId, LocaleDescText);
+
+                ModConfig.Log("WarfrontBasePrefab: localized strings registered for '" + PrefabName + "'");
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings error (raw locale key will show): " + e);
+            }
+        }
+
+        /// <summary>既に同じ Key が登録済みなら上書きしない（Exists→AddLocalizedStringの手順はタスク仕様通り）。</summary>
+        private static void AddIfMissing(Locale locale, string identifier, string value)
+        {
+            Locale.Key key = new Locale.Key { m_Identifier = identifier, m_Key = PrefabName, m_Index = 0 };
+            if (!locale.Exists(key))
+            {
+                locale.AddLocalizedString(key, value);
             }
         }
 

@@ -26,13 +26,15 @@ namespace CSWarfront.Game.UI
     {
         private const string PanelName = "CSWarfrontUnitInfoPanel";
 
-        private const float PanelWidth = 240f;
+        // Task33: 旧240pxではステータス行が wordWrap 前提の幅に収まらず、単語単位の折り返しで
+        // 「状態」「目標」「経路」がパネル外/下にはみ出していた。ラベルは wordWrap=false に固定し、
+        // パネル幅は最長行（「装甲: 100    速度: 50km/h」「目標: ユニット#<uint>」等）がtextScale=0.75
+        // で収まる幅まで拡張する（全角≈16px/半角≈9px @ scale1.0 の概算＋安全マージンで最長行は約163px、
+        // 実測フォントとの誤差に備え260px（内側幅244px）を確保）。
+        private const float PanelWidth = 260f;
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
         private const float CloseButtonSize = 20f;
-        // ステータス表示（所属/体力/攻撃・射程/装甲・速度/状態/目標/経路の最大7行）を
-        // 1行あたり約16pxで見積もった予約高さ。
-        private const float StatusLabelReserveHeight = 120f;
 
         /// <summary>
         /// Task32: パネルをユニットの真上に置くための、ワールド座標での上方オフセット。
@@ -169,13 +171,18 @@ namespace CSWarfront.Game.UI
             _statusLabel = _panel.AddUIComponent<UILabel>();
             _statusLabel.textScale = 0.75f;
             _statusLabel.textColor = new Color32(220, 220, 220, 255);
-            _statusLabel.wordWrap = true;
+            // Task33: autoSize(既定true)とwordWrapの組み合わせがラベル幅を単語単位で縮めてしまう不具合の
+            // 直接原因だったため、autoSize=false・wordWrap=false に固定して幅wを維持する。
+            // 代わりに autoHeight=true でラベル自身の高さを実際の行数（"\n"の数）に追従させ、
+            // RecomputePanelHeight() でパネル全体の高さをそこから毎更新算出する。
+            _statusLabel.wordWrap = false;
+            _statusLabel.autoSize = false;
+            _statusLabel.autoHeight = true;
             _statusLabel.width = w;
             _statusLabel.text = "";
             _statusLabel.relativePosition = new Vector3(Pad, y);
-            y += StatusLabelReserveHeight;
 
-            _panel.height = y + Pad;
+            RecomputePanelHeight();
             _panel.isVisible = false;
 
             if (!_loggedCreated)
@@ -224,6 +231,24 @@ namespace CSWarfront.Game.UI
                 sb.Append("\n経路: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "直進");
 
                 _statusLabel.text = sb.ToString();
+                RecomputePanelHeight();
+            }
+        }
+
+        /// <summary>
+        /// Task33: ステータスラベル（autoHeight有効）の実際の高さからパネル全体高さを算出し、
+        /// 変化があった場合のみ書き換える（毎フレームの無駄なレイアウト再計算を避ける）。
+        /// UnitInfoPanelには折りたたみ機能が無いため、BaseInfoPanel.RecomputeExpandedHeightと異なり
+        /// キャッシュせず _panel.height へ直接反映するだけでよい。
+        /// </summary>
+        private static void RecomputePanelHeight()
+        {
+            if (_statusLabel == null || _panel == null) return;
+
+            float newHeight = _statusLabel.relativePosition.y + _statusLabel.height + Pad;
+            if (Mathf.Abs(_panel.height - newHeight) > 0.01f)
+            {
+                _panel.height = newHeight;
             }
         }
 
