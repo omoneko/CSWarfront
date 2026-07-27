@@ -309,9 +309,10 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進）
                 MovementStep.Advance(State, dt);
 
-                // 戦闘（ユニット同士＋基地攻撃）→ 占領
+                // 戦闘（ユニット同士＋基地攻撃）→ 拠点の自衛射撃 → 占領（Task29でBaseDefenseStepを追加）
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
+                BaseDefenseStep.Advance(State, dt);
                 Occupation.ResolveCaptures(State);
 
                 // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する

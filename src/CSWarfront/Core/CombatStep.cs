@@ -13,6 +13,8 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(self.TypeKey);
                 if (type == null) continue;
 
+                // ターゲット選定は依然として単純な「射程内最近接の敵」（TargetSearch）。
+                // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
                 var target = TargetSearch.FindNearestHostile(self, state.Units, state.Relations, type.Range);
                 if (target == null)
                 {
@@ -22,8 +24,14 @@ namespace CSWarfront.Core
                 }
                 self.State = UnitState.Engaging;
                 self.TargetId = target.InstanceId;
-                // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)に比例する。
-                float dmg = CombatMath.DamagePerHit(type.Attack, TypeArmorOf(state, target)) * dt;
+                var targetType = state.Types.Get(target.TypeKey);
+                float targetArmor = targetType != null ? targetType.Armor : 0f;
+                float matchup = targetType != null
+                    ? CombatMatchup.Multiplier(type.Category, targetType.Category)
+                    : 1.0f;
+                // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
+                // 兵科相性倍率(CombatMatchup、Task29)に比例する。
+                float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup;
                 target.CurrentHP -= dmg;
             }
             // 2) 死亡判定
@@ -32,12 +40,6 @@ namespace CSWarfront.Core
                 var u = state.Units[i];
                 if (u.State != UnitState.Dead && u.CurrentHP <= 0f) u.State = UnitState.Dead;
             }
-        }
-
-        private static float TypeArmorOf(WarState state, UnitInstance u)
-        {
-            var t = state.Types.Get(u.TypeKey);
-            return t != null ? t.Armor : 0f;
         }
     }
 }

@@ -61,4 +61,63 @@ public class CombatStepTests
         // 100 - 30*0.5 = 85 (old arithmetic was 100 - 35*0.5 = 82.5, before Tank_T1.Armor changed 5->10)
         Assert.Equal(85f, half.FindUnit(1).CurrentHP, 3);
     }
+
+    // --- Task29: CombatMatchup適用 ---
+
+    [Fact]
+    public void DroneInfantry_deals_double_damage_against_tank()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.DroneInfantry, 1)); // Attack=30, Range=90
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));          // Armor=10, Range=60
+        // Drone(id1) attacks Tank(id2). distance=50: within Drone's range(90) and Tank's range(60),
+        // so both engage each other this tick.
+        s.Units.Add(new UnitInstance(1, "DroneInfantry_T1", 0, 200f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(50f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        // DamagePerHit(Drone.Attack=30, Tank.Armor=10) = 20, × CombatMatchup(Drone->Tank)=2.0 × dt(1) = 40
+        Assert.Equal(160f, s.FindUnit(2).CurrentHP, 3);
+    }
+
+    [Fact]
+    public void Infantry_deals_reduced_damage_against_tank()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Infantry, 1)); // Attack=20, Range=40
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));     // Armor=10, Range=60
+        // Infantry(id1) attacks Tank(id2). distance=30: within Infantry's range(40) and Tank's range(60).
+        s.Units.Add(new UnitInstance(1, "Infantry_T1", 0, 200f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(30f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        // DamagePerHit(Infantry.Attack=20, Tank.Armor=10) = 10, × CombatMatchup(Infantry->Tank)=0.4 × dt(1) = 4
+        Assert.Equal(196f, s.FindUnit(2).CurrentHP, 3);
+    }
+
+    [Fact]
+    public void Matchup_damage_scales_with_dt()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.DroneInfantry, 1));
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));
+        s.Units.Add(new UnitInstance(1, "DroneInfantry_T1", 0, 200f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(50f, 0f, 0f)));
+
+        CombatStep.Advance(s, 0.5f);
+
+        // DamagePerHit(30,10)=20 × 2.0 × dt(0.5) = 20
+        Assert.Equal(180f, s.FindUnit(2).CurrentHP, 3);
+    }
 }
