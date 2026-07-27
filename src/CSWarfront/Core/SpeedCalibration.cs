@@ -66,5 +66,16 @@ namespace CSWarfront.Core
             float metresPerRealSecond = kmh * 1000f / 3600f;
             return metresPerRealSecond / InGameHoursPerRealSecond;
         }
+
+        /// <summary>
+        /// UnitsPerGameHourFromKmh の逆変換（Task31: ユニット情報パネルにUnitType.Speedをkm/h表示するため）。
+        /// Game/MilitaryManager.cs の診断ログ（LogDiagnostics）や
+        /// Game/SpeedCalibrationDiagnostics.TryLog で既に同じ式（speed * InGameHoursPerRealSecond * 3.6）が
+        /// インライン展開されていたものを、再利用可能な形でCoreへ切り出したもの。
+        /// </summary>
+        public static float KmhFromUnitsPerGameHour(float unitsPerGameHour)
+        {
+            return unitsPerGameHour * InGameHoursPerRealSecond * 3.6f;
+        }
     }
 }

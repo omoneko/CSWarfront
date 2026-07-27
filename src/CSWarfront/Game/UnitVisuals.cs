@@ -62,6 +62,24 @@ namespace CSWarfront.Game
         public static int Count { get { return _visuals.Count; } }
 
         /// <summary>
+        /// raycastヒット先GameObject（子の可視性マーカーである場合を含む）から、それが属する論理ユニットの
+        /// InstanceIdを解決する（Task31: Game/UI/UnitSelectionから使用）。本MODのユニット表現に
+        /// 属さないヒット（バニラの建物・地形・道路等）はfalseを返す — 呼び出し側はその場合、選択状態を
+        /// 変えずバニラのクリック挙動へそのまま委ねること。
+        /// </summary>
+        public static bool TryGetInstanceId(GameObject go, out uint instanceId)
+        {
+            instanceId = 0;
+            if (go == null) return false;
+
+            UnitVisualTag tag = go.GetComponentInParent<UnitVisualTag>();
+            if (tag == null) return false;
+
+            instanceId = tag.InstanceId;
+            return true;
+        }
+
+        /// <summary>
         /// スナップショットに基づき、生成/移動/破棄を宣言的に反映する（メインスレッド専用）。
         /// スナップショットに存在しないid（死亡・削除・未ロード含む）はここで破棄される。
         /// </summary>
@@ -171,6 +189,12 @@ namespace CSWarfront.Game
                 }
 
                 var go = new GameObject("CSWarfrontUnit_" + s.InstanceId);
+
+                // Task31: クリック選択(UnitSelection)がraycastヒット先から論理ユニットを逆引きできるよう、
+                // ルートGameObjectに識別タグを付ける（GameObject→InstanceIdの別辞書は持たない）。
+                UnitVisualTag tag = go.AddComponent<UnitVisualTag>();
+                tag.InstanceId = s.InstanceId;
+
                 MeshFilter filter = go.AddComponent<MeshFilter>();
                 filter.sharedMesh = mesh;
                 MeshRenderer renderer = go.AddComponent<MeshRenderer>();
@@ -196,15 +220,18 @@ namespace CSWarfront.Game
         /// <summary>
         /// ユニットGameObjectに、確実に描画されるプリミティブ立方体を子として付ける（メインスレッド専用）。
         /// 借用メッシュの描画可否に依存せずユニット位置を視認できるようにするための保険。
-        /// Colliderは不要（当たり判定はCore側の数値計算で行う）なので破棄する。
+        /// Task31: このマーカーが生成時に持つBoxColliderは破棄せず、そのままクリック選択の当たり判定
+        /// として流用する（isTriggerはfalseのまま＝Physics.Raycastで検出可能）。GameObjectのlayerは
+        /// 変更しない（layerを変えるとCS側カメラのカリング/レイヤーマスクに影響し、既に解決済みの
+        /// 不可視バグを再発させるリスクがあるため）。
         /// </summary>
         private static void AttachVisibilityMarker(GameObject parent, Material material)
         {
             try
             {
                 GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                Collider col = marker.GetComponent<Collider>();
-                if (col != null) UnityEngine.Object.Destroy(col);
+                BoxCollider col = marker.GetComponent<BoxCollider>();
+                if (col != null) col.isTrigger = false;
 
                 marker.transform.SetParent(parent.transform, false);
                 marker.transform.localPosition = new Vector3(0f, MarkerHeight, 0f);

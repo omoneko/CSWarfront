@@ -40,6 +40,16 @@ namespace CSWarfront.Game
                 BaseInfoPanel.UpdateVisibility();
             }
             catch (System.Exception e) { ModConfig.LogError("BaseInfoPanel update: " + e); }
+
+            // ユニットのクリック選択とステータスパネル（Task31）。位置同期（OnMainVisualUpdate、上）の
+            // 後に行うことで、raycastが今フレームの最新位置に配置済みの当たり判定と一致する。
+            try
+            {
+                UnitSelection.Update();
+                UnitInfoPanel.EnsureCreated();
+                UnitInfoPanel.UpdateVisibility();
+            }
+            catch (System.Exception e) { ModConfig.LogError("UnitInfoPanel update: " + e); }
         }
     }
 }

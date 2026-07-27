@@ -171,6 +171,24 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>ユニット情報パネル表示用の値をロック内でコピーして返す（Task31。TryGetBaseSnapshotと
+        /// 同じパターン）。死亡済みはまだ残っている可能性があるため見つからない扱いにする。</summary>
+        public static bool TryGetUnitSnapshot(uint instanceId, out UnitUiSnapshot snapshot)
+        {
+            lock (_stateLock)
+            {
+                snapshot = default(UnitUiSnapshot);
+                if (State == null) return false;
+
+                UnitInstance unit = State.FindUnit(instanceId);
+                if (unit == null || unit.State == UnitState.Dead) return false;
+
+                UnitType type = State.Types.Get(unit.TypeKey);
+                snapshot = UnitUiSnapshotBuilder.Build(unit, type);
+                return true;
+            }
+        }
+
         /// <summary>
         /// セーブ用：_stateLock を保持したまま WarState をシリアライズする。
         /// OnSimTick が State.Units 等を書き換えている最中の
@@ -469,10 +487,12 @@ namespace CSWarfront.Game
             // 較正診断の積算（Task26）：MilitaryManagerとは別の専用ロックで保護されているため個別にクリアする。
             SpeedCalibrationDiagnostics.Reset();
 
-            // BaseInfoPanel.Destroy はUnity GameObjectを破棄するためメインスレッド専用API。
-            // Reset()自体がCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から
-            // 呼ばれる点は上の UnitVisuals.DestroyAll と同じ前提のため、ここで直接呼んで問題ない。
+            // *Panel.Destroy はUnity GameObjectを破棄するためメインスレッド専用API。Reset()自体が
+            // CSのロードライフサイクルから呼ばれる点は上の UnitVisuals.DestroyAll と同じ前提のため、
+            // ここで直接呼んで問題ない。UnitSelection.Clear は次セッションへ選択IDを持ち越さないため（Task31）。
             UI.BaseInfoPanel.Destroy();
+            UI.UnitInfoPanel.Destroy();
+            UI.UnitSelection.Clear();
         }
     }
 }
