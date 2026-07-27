@@ -29,6 +29,12 @@ namespace CSWarfront.Core
         /// 到達不能なユニットが毎tickフルA*を再実行して予算を独占するのを防ぐ（Task23レビューImportant）。</summary>
         public const float PathRetryFailCooldownHours = 2f;
 
+        /// <summary>経路探索の辺コストに掛けるジッタの最大割合（0.35 = 各辺が最大35%長く見える場合がある）。
+        /// ユニットごとに(seed=InstanceId)決定的に導かれるため、全員が同一の最短経路に密集せず、
+        /// 一部は並行する別路を「好み」として選ぶようになる。値を上げるほど遠回りが大きくなる
+        /// （0.35は「並行する別路を選ぶ程度」を狙ったチューニング値。上げすぎると不合理な大回りになる）。</summary>
+        public const float PathJitter = 0.35f;
+
         /// <summary>当該勢力の非交戦ユニットに、各自位置から最寄りの敵基地へ進軍命令を与える。
         /// state.Roadsが供給されていれば道路経路(A*)も計算する（1回の呼び出しでmaxPathComputations件まで）。
         /// FindPathに失敗したユニットはPathRetryCooldownが尽きるまで再試行しない（予算を消費しない）。</summary>
@@ -58,7 +64,10 @@ namespace CSWarfront.Core
                     if (pathComputations >= maxPathComputations) continue; // 予算超過。次回に持ち越し
 
                     pathComputations++;
-                    var path = state.Roads.FindPath(u.Position, u.OrderTargetPos.Value, PathSnapRadius);
+                    // InstanceIdをseedにすることでユニットごとに安定した「好みの遠回り」を持たせる。
+                    // InstanceIdは一意かつユニットの生存中不変なので、同じユニットが再試行しても
+                    // 同じ経路を選び続け、フリップフロップ（毎回別の経路を選び直す）が起きない。
+                    var path = state.Roads.FindPath(u.Position, u.OrderTargetPos.Value, PathSnapRadius, u.InstanceId, PathJitter);
                     u.Path = path;
                     u.PathIndex = 0;
                     u.PathTarget = u.OrderTargetPos;

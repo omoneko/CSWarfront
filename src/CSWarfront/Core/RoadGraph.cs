@@ -57,15 +57,33 @@ namespace CSWarfront.Core
         /// from/to を snapRadius 以内の最近傍ノードへスナップし、A*で経路を求める。
         /// 戻り値は開始ノードの「次」から目的ノードまでのWorldPosの並び。
         /// スナップ失敗・経路なしはnull。開始ノード==目的ノードは空リスト。
+        /// ジッタなし（seed=0, jitter=0）で下のオーバーロードへ委譲する。
         /// </summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius)
+        {
+            return FindPath(from, to, snapRadius, 0u, 0f);
+        }
+
+        /// <summary>
+        /// FindPathのジッタ付き版。ユニットごとに異なる「決定的な好みの遠回り」を選ばせ、
+        /// 全ユニットが常に同一の最短経路を通る問題（う回路が選ばれない）を解消する。
+        /// seed==0 または jitter&lt;=0 のときは上の3引数オーバーロードと完全に同じ挙動（最短経路のみ）になる。
+        /// それ以外は各辺のコストを (seed, nodeA, nodeB) から決定的に導いた係数分だけ最大jitter割合まで
+        /// 引き上げる：cost * (1 + jitter * f)、f∈[0,1)。辺コストは常に増加方向のみに動く。
+        /// ヒューリスティックは常に無加重の水平距離のまま（jitterしない）：三角不等式により
+        /// heuristic（直線距離）は増加後の実コストの総和以下であり続けるため、A*のadmissibility
+        /// （ヒューリスティックが真のコストを超えない）は保たれる。同じ理由で、経路そのものの
+        /// 到達可能性はjitterで変化しない（辺の存在／非存在は変えない。コストの相対順序が変わるだけ）。
+        /// </summary>
+        public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius, uint seed, float jitter)
         {
             if (!TryFindNearestNode(from, snapRadius, out ushort startId)) return null;
             if (!TryFindNearestNode(to, snapRadius, out ushort goalId)) return null;
 
             if (startId == goalId) return new List<WorldPos>();
 
-            List<ushort> route = AStar(startId, goalId);
+            bool useJitter = seed != 0 && jitter > 0f;
+            List<ushort> route = AStar(startId, goalId, useJitter ? seed : 0u, useJitter ? jitter : 0f);
             if (route == null) return null;
 
             var result = new List<WorldPos>(route.Count - 1);
@@ -74,7 +92,7 @@ namespace CSWarfront.Core
             return result;
         }
 
-        private List<ushort> AStar(ushort startId, ushort goalId)
+        private List<ushort> AStar(ushort startId, ushort goalId, uint seed, float jitter)
         {
             var goalPos = _nodes[goalId].Position;
 
@@ -100,7 +118,10 @@ namespace CSWarfront.Core
                 {
                     if (closed.Contains(neighborId)) continue;
 
-                    float tentativeG = currentG + currentNode.Position.HorizontalDistanceTo(_nodes[neighborId].Position);
+                    float edgeCost = currentNode.Position.HorizontalDistanceTo(_nodes[neighborId].Position);
+                    if (jitter > 0f)
+                        edgeCost *= 1f + jitter * EdgeJitterFactor(seed, current, neighborId);
+                    float tentativeG = currentG + edgeCost;
 
                     bool inOpen = gScore.TryGetValue(neighborId, out float existingG);
                     if (!inOpen || tentativeG < existingG)
@@ -115,6 +136,32 @@ namespace CSWarfront.Core
             }
 
             return null; // 到達不能
+        }
+
+        /// <summary>
+        /// (seed, nodeA, nodeB) から決定的に [0,1) の係数を導く。a/bの小さい方・大きい方で正規化するため、
+        /// 辺をどちら向きに辿っても同じ係数になる（順序無依存）。System.Randomは使わず純粋な整数演算のみ。
+        /// </summary>
+        private static float EdgeJitterFactor(uint seed, ushort nodeA, ushort nodeB)
+        {
+            uint lo = nodeA < nodeB ? nodeA : nodeB;
+            uint hi = nodeA < nodeB ? nodeB : nodeA;
+            uint h = Mix(seed ^ lo);
+            h = Mix(h ^ hi);
+            // 上位24bitを使い [0, 1) に正規化する。
+            return (h >> 8) / (float)(1u << 24);
+        }
+
+        /// <summary>xorshift風の整数アバランチミックス（32bit）。単純な決定的ハッシュで、
+        /// 同じ入力からは常に同じ出力を返す。System.Random等の非決定的/シード付き乱数は使わない。</summary>
+        private static uint Mix(uint x)
+        {
+            x ^= x >> 16;
+            x *= 0x7feb352dU;
+            x ^= x >> 15;
+            x *= 0x846ca68bU;
+            x ^= x >> 16;
+            return x;
         }
 
         private float Heuristic(ushort nodeId, WorldPos goalPos)
