@@ -7,9 +7,10 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、ユニット種別ドロップダウン/検索/サブスク済みトグル/プロップ一覧/
-    /// 適用・既定に戻す・閉じるボタンの構築とイベントハンドラだけを分離した partial class
-    /// （AssetAssignPanel.cs 側の500行制限のため。BaseInfoPanel/BaseInfoPanelProduction と同じ方針）。
+    /// AssetAssignPanel のうち、ユニット種別ドロップダウンと適用・既定に戻す・閉じるボタンの構築と
+    /// イベントハンドラだけを分離した partial class（AssetAssignPanel.cs 側の500行制限のため。
+    /// BaseInfoPanel/BaseInfoPanelProduction と同じ方針）。検索欄・アセット種別ドロップダウン・
+    /// サブスク済みトグル・一覧は Task41 で AssetAssignPanelAssetList.cs へ分離した。
     /// フィールドは全て AssetAssignPanel.cs 側で宣言されている（partial class は private メンバーも
     /// 全パーツで共有するため問題ない）。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
     /// </summary>
@@ -32,15 +33,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 22;
+            dd.itemHeight = 44; // 旧22
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
-            dd.listHeight = 200;
+            dd.listHeight = 400; // 旧200
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.75f;
-            dd.textFieldPadding = new RectOffset(8, 8, 6, 0);
-            dd.itemPadding = new RectOffset(8, 0, 3, 0);
+            dd.textScale = 1.5f; // 旧0.75f
+            dd.textFieldPadding = new RectOffset(16, 16, 12, 0); // 旧(8,8,6,0)
+            dd.itemPadding = new RectOffset(16, 0, 6, 0); // 旧(8,0,3,0)
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -52,9 +53,9 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 0.7f;
-            trigger.size = new Vector2(24f, DropdownHeight);
-            trigger.relativePosition = new Vector3(width - 24f, 0f);
+            trigger.textScale = 1.4f; // 旧0.7f
+            trigger.size = new Vector2(48f, DropdownHeight); // 旧24f
+            trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
             trigger.hoveredBgSprite = "ButtonMenuHovered";
             trigger.pressedBgSprite = "ButtonMenuPressed";
@@ -62,31 +63,6 @@ namespace CSWarfront.Game.UI
 
             dd.eventSelectedIndexChanged += OnTypeKeyChanged;
             return dd;
-        }
-
-        private static UITextField BuildSearchField(float x, float y, float width)
-        {
-            UITextField tf = _panel.AddUIComponent<UITextField>();
-            tf.size = new Vector2(width, RowHeight);
-            tf.relativePosition = new Vector3(x, y);
-            tf.padding = new RectOffset(6, 6, 6, 6);
-            tf.builtinKeyNavigation = true;
-            tf.isInteractive = true;
-            tf.readOnly = false;
-            tf.selectOnFocus = true;
-            tf.horizontalAlignment = UIHorizontalAlignment.Left;
-            tf.normalBgSprite = "TextFieldPanel";
-            tf.hoveredBgSprite = "TextFieldPanelHovered";
-            tf.focusedBgSprite = "TextFieldPanelFocused";
-            tf.disabledBgSprite = "TextFieldPanel";
-            tf.textColor = new Color32(0, 0, 0, 255);
-            tf.textScale = 0.8f;
-            tf.cursorWidth = 1;
-            tf.cursorBlinkTime = 0.45f;
-            tf.selectionSprite = "EmptySprite";
-            tf.text = "";
-            tf.eventTextChanged += OnSearchTextChanged;
-            return tf;
         }
 
         /// <summary>"TypeKey → 現在の割り当て（無ければ (既定)）" の35件ラベルを再構築し、選択位置を
@@ -111,7 +87,9 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>Task40: ラベルは現在選択中の勢力(SelectedFactionId)の割り当てを表示する
-        /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。</summary>
+        /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。
+        /// Task41: プロップ以外の種類が割り当てられている場合は "[建物]MyBuilding" のように種類タグを
+        /// 付ける（AssetKindUtil.Describe）。</summary>
         private static string[] BuildDropdownLabels()
         {
             if (_typeKeys == null) return new string[0];
@@ -120,8 +98,11 @@ namespace CSWarfront.Game.UI
             string[] labels = new string[_typeKeys.Length];
             for (int i = 0; i < _typeKeys.Length; i++)
             {
-                string propName;
-                string suffix = UnitAssetBindings.TryGet(factionId, _typeKeys[i], out propName) ? propName : "(既定)";
+                AssetKind kind;
+                string name;
+                string suffix = UnitAssetBindings.TryGet(factionId, _typeKeys[i], out kind, out name)
+                    ? AssetKindUtil.Describe(kind, name)
+                    : "(既定)";
                 labels[i] = _typeKeys[i] + " → " + suffix;
             }
             return labels;
@@ -141,7 +122,8 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>Task40: 現在選択中の(勢力, TypeKey)の割り当てを表示し、サムネイルもそれに合わせて
-        /// 更新する（一覧選択とは独立: ここは「今適用されている」プロップのプレビュー）。</summary>
+        /// 更新する（一覧選択とは独立: ここは「今適用されている」アセットのプレビュー）。
+        /// Task41: 割り当ての種類(AssetKind)もあわせて解決し、サムネイル・ラベル表示に使う。</summary>
         private static void RefreshCurrentBindingLabel()
         {
             if (_currentBindingLabel == null || _typeKeyDropdown == null || _typeKeys == null) return;
@@ -150,105 +132,15 @@ namespace CSWarfront.Game.UI
             if (idx < 0 || idx >= _typeKeys.Length)
             {
                 _currentBindingLabel.text = "";
-                RefreshThumbnail(null);
+                RefreshThumbnail(AssetKind.Prop, null);
                 return;
             }
 
-            string propName;
-            bool bound = UnitAssetBindings.TryGet(SelectedFactionId, _typeKeys[idx], out propName);
-            _currentBindingLabel.text = "現在の割り当て: " + (bound ? propName : "(既定のモデル)");
-            RefreshThumbnail(bound ? propName : null);
-        }
-
-        private static void OnSearchTextChanged(UIComponent component, string value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-                RefreshPropList();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("AssetAssignPanel.OnSearchTextChanged error: " + e);
-            }
-        }
-
-        private static void OnCustomOnlyClick(UIComponent component, UIMouseEventParameter eventParam)
-        {
-            try
-            {
-                _customOnly = !_customOnly;
-                UpdateCustomOnlyLabel();
-                RefreshPropList();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("AssetAssignPanel.OnCustomOnlyClick error: " + e);
-            }
-        }
-
-        private static void UpdateCustomOnlyLabel()
-        {
-            if (_customOnlyToggle != null)
-            {
-                _customOnlyToggle.text = "サブスクライブ済みのみ: " + (_customOnly ? "ON" : "OFF");
-            }
-        }
-
-        /// <summary>Task40: 一覧選択が変わるたびにサムネイルを更新する（要件3）。選択解除（-1、
-        /// RefreshPropListによるリセット等）の場合は、現在適用中のプロップのサムネイルへ戻す。</summary>
-        private static void OnPropSelected(UIComponent component, int value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-
-                if (value >= 0 && value < _filteredProps.Count)
-                {
-                    RefreshThumbnail(_filteredProps[value]);
-                }
-                else
-                {
-                    RefreshCurrentBindingLabel(); // 内部でRefreshThumbnail(既定/現在の割り当て)も更新する
-                }
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("AssetAssignPanel.OnPropSelected error: " + e);
-            }
-        }
-
-        /// <summary>検索文字列・サブスクライブ済みのみトグルに基づき一覧を再構築する。
-        /// MaxListItems件を超える場合は打ち切り、その旨を _truncatedLabel に表示する。</summary>
-        private static void RefreshPropList()
-        {
-            if (_propListBox == null) return;
-
-            string filter = _searchField != null ? _searchField.text : null;
-            List<string> names = PropCatalog.GetNames(_customOnly, filter);
-
-            _filteredProps.Clear();
-            bool truncated = names.Count > MaxListItems;
-            int count = truncated ? MaxListItems : names.Count;
-            for (int i = 0; i < count; i++) _filteredProps.Add(names[i]);
-
-            _suppressEvents = true;
-            try
-            {
-                _propListBox.items = _filteredProps.ToArray();
-                _propListBox.selectedIndex = -1;
-            }
-            finally
-            {
-                _suppressEvents = false;
-            }
-
-            if (_truncatedLabel != null)
-            {
-                _truncatedLabel.text = truncated
-                    ? "※ " + names.Count + " 件中 " + MaxListItems + " 件のみ表示（検索で絞り込んでください）"
-                    : names.Count + " 件";
-            }
+            AssetKind kind;
+            string name;
+            bool bound = UnitAssetBindings.TryGet(SelectedFactionId, _typeKeys[idx], out kind, out name);
+            _currentBindingLabel.text = "現在の割り当て: " + (bound ? AssetKindUtil.Describe(kind, name) : "(既定のモデル)");
+            RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
 
         private static void OnApplyClick(UIComponent component, UIMouseEventParameter eventParam)
@@ -260,17 +152,18 @@ namespace CSWarfront.Game.UI
                 int typeIdx = _typeKeyDropdown.selectedIndex;
                 if (typeIdx < 0 || typeIdx >= _typeKeys.Length) return;
 
-                int propIdx = _propListBox.selectedIndex;
-                if (propIdx < 0 || propIdx >= _filteredProps.Count)
+                int assetIdx = _propListBox.selectedIndex;
+                if (assetIdx < 0 || assetIdx >= _filteredAssetNames.Count)
                 {
-                    ModConfig.Log("AssetAssignPanel: 適用スキップ（プロップが未選択）");
+                    ModConfig.Log("AssetAssignPanel: 適用スキップ（アセットが未選択）");
                     return;
                 }
 
                 string typeKey = _typeKeys[typeIdx];
-                string propName = _filteredProps[propIdx];
+                string assetName = _filteredAssetNames[assetIdx];
+                AssetKind kind = SelectedAssetKind;
 
-                UnitAssetBindings.Set(SelectedFactionId, typeKey, propName);
+                UnitAssetBindings.Set(SelectedFactionId, typeKey, kind, assetName);
                 ApplyBindingChange(typeIdx);
             }
             catch (Exception e)
@@ -299,7 +192,7 @@ namespace CSWarfront.Game.UI
 
         /// <summary>割り当て変更（Apply/Reset共通）の反映処理。ドロップダウンのラベルと現在割り当て表示を
         /// 更新した上で、既存の見た目を全破棄する（Task36要件: 即座に反映、次回SyncでCreateVisualが
-        /// UnitMeshSource経由の新しい割り当てを解決し直す）。</summary>
+        /// UnitMeshSource経由の新しい割り当て(種類込み、Task41)を解決し直す）。</summary>
         private static void ApplyBindingChange(int typeIdx)
         {
             RefreshDropdownLabels(typeIdx);

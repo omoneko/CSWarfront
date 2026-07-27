@@ -23,14 +23,21 @@ namespace CSWarfront.Game.UI
             get { return _factionDropdown != null ? (byte)_factionDropdown.selectedIndex : (byte)0; }
         }
 
-        /// <summary>Task40: 現在ロードされているプロップが1件以上あるか（走査は強制的にRescan()する）。
-        /// Mod Options（Game/Mod.cs）がメインメニュー等で機能が実質使えない状況を検出するために使う。</summary>
+        /// <summary>Task40: 現在ロードされているアセットが1件以上あるか（4種類全てを対象、走査は
+        /// 強制的にRescan()する）。Mod Options（Game/Mod.cs）がメインメニュー等で機能が実質使えない
+        /// 状況を検出するために使う。Task41: プロップだけでなく建物/車両/樹木も対象に含めた
+        /// （例えばメインメニューでは4種類とも0件のはずだが、レベルロード後はどれか1種類でも
+        /// 1件あれば「使える」と判定してよいため）。</summary>
         internal static bool HasAnyProps()
         {
             try
             {
-                PropCatalog.Rescan();
-                return PropCatalog.GetNames(false, null).Count > 0;
+                AssetCatalog.Rescan();
+                for (int i = 0; i < AssetKindUtil.All.Length; i++)
+                {
+                    if (AssetCatalog.GetNames(AssetKindUtil.All[i], false, null).Count > 0) return true;
+                }
+                return false;
             }
             catch (Exception e)
             {
@@ -48,15 +55,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 22;
+            dd.itemHeight = 44; // 旧22
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
-            dd.listHeight = 200;
+            dd.listHeight = 400; // 旧200
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.8f;
-            dd.textFieldPadding = new RectOffset(8, 8, 6, 0);
-            dd.itemPadding = new RectOffset(8, 0, 3, 0);
+            dd.textScale = 1.6f; // 旧0.8f
+            dd.textFieldPadding = new RectOffset(16, 16, 12, 0); // 旧(8,8,6,0)
+            dd.itemPadding = new RectOffset(16, 0, 6, 0); // 旧(8,0,3,0)
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -68,9 +75,9 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 0.7f;
-            trigger.size = new Vector2(24f, DropdownHeight);
-            trigger.relativePosition = new Vector3(width - 24f, 0f);
+            trigger.textScale = 1.4f; // 旧0.7f
+            trigger.size = new Vector2(48f, DropdownHeight); // 旧24f
+            trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
             trigger.hoveredBgSprite = "ButtonMenuHovered";
             trigger.pressedBgSprite = "ButtonMenuPressed";
@@ -96,10 +103,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: 「現在の割り当て」ラベルの右にサムネイル画像を表示するための64x64 UISprite。
-        /// UISprite.atlas(UITextureAtlas)/spriteName(String) と PropInfo.m_Atlas/m_Thumbnail は
-        /// Assembly-CSharp.dll/ColossalManaged.dllをリフレクションで検証済み（両方public、フィールド/プロパティ）。
-        /// 既定では非表示（有効なサムネイルが見つかった時だけ RefreshThumbnail が表示する）。</summary>
+        /// <summary>Task40: 「現在の割り当て」ラベルの右にサムネイル画像を表示するための128x128
+        /// （旧64x64、Task41で2倍化） UISprite。UISprite.atlas(UITextureAtlas)/spriteName(String) と
+        /// PrefabInfo.m_Atlas/m_Thumbnail は Assembly-CSharp.dll/ColossalManaged.dllをリフレクションで
+        /// 検証済み（両方public、フィールド/プロパティ）。既定では非表示（有効なサムネイルが見つかった時
+        /// だけ RefreshThumbnail が表示する）。</summary>
         private static void BuildThumbnailSprite(float x, float y)
         {
             UISprite sprite = _panel.AddUIComponent<UISprite>();
@@ -109,18 +117,19 @@ namespace CSWarfront.Game.UI
             _thumbnailSprite = sprite;
         }
 
-        /// <summary>指定プロップのサムネイルを解決してUISpriteへ反映する。多くのアセットはサムネイルを
-        /// 持たない（PropCatalog.TryGetThumbnailがfalseを返す）ため、その場合はスプライトを隠す
-        /// （要件: サムネイル無し/未選択時はサムネイル領域を非表示にする）。呼び出し元:
-        /// OnPropSelected（一覧選択変更時）、RefreshCurrentBindingLabel（勢力/種別切り替え時、
-        /// 現在の割り当て済みプロップのプレビューとして）。</summary>
-        private static void RefreshThumbnail(string propName)
+        /// <summary>指定種類・名前のアセットのサムネイルを解決してUISpriteへ反映する。多くのアセットは
+        /// サムネイルを持たない（AssetCatalog.TryGetThumbnailがfalseを返す）ため、その場合はスプライトを
+        /// 隠す（要件: サムネイル無し/未選択時はサムネイル領域を非表示にする）。呼び出し元:
+        /// OnAssetSelected（一覧選択変更時）、RefreshCurrentBindingLabel（勢力/種別切り替え時、
+        /// 現在の割り当て済みアセットのプレビューとして）。Task41: 種類(AssetKind)を引数に追加した
+        /// （建物/車両/樹木のサムネイルもプロップと同じ経路で解決できる、AssetCatalog.TryGetThumbnail参照）。</summary>
+        private static void RefreshThumbnail(AssetKind kind, string assetName)
         {
             if (_thumbnailSprite == null) return;
 
             UITextureAtlas atlas;
             string spriteName;
-            if (!string.IsNullOrEmpty(propName) && PropCatalog.TryGetThumbnail(propName, out atlas, out spriteName))
+            if (!string.IsNullOrEmpty(assetName) && AssetCatalog.TryGetThumbnail(kind, assetName, out atlas, out spriteName))
             {
                 _thumbnailSprite.atlas = atlas;
                 _thumbnailSprite.spriteName = spriteName;

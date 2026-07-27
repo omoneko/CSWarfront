@@ -14,13 +14,20 @@ namespace CSWarfront.Game
     /// sharedMaterial として割り当てる（per-instance化してリークさせない）。
     /// メインスレッド専用（Material/Shader生成を伴う）。
     ///
-    /// Task37: 割り当て済みプロップについては勢力色で塗らず、プロップ自身の見た目
+    /// Task37: 割り当て済みアセットについては勢力色で塗らず、アセット自身の見た目
     /// （テクスチャ）を維持する。ただしCS側の Material オブジェクトそのものは
-    /// （上記と同じ理由で）借用しない — <see cref="TryGetPropMaterial"/> は
-    /// PropInfo.m_material.mainTexture だけを読み取り、自前の標準シェーダーMaterialに
-    /// 貼り直す（Material.mainTexture / Material(Shader) は UnityEngine.dll をリフレクションで
-    /// 検証済み。PropInfo.m_material は Assembly-CSharp.dll をリフレクションで検証済み、
-    /// Task36 task-36-report.md 参照）。
+    /// （上記と同じ理由で）借用しない。<see cref="TryGetAssetMaterial"/> は
+    /// AssetCatalog.TryGetTexture（内部で PropInfo/BuildingInfo/VehicleInfo/TreeInfo の
+    /// m_material.mainTexture を読む）だけを使い、自前の標準シェーダーMaterialに貼り直す
+    /// （Material.mainTexture / Material(Shader) は UnityEngine.dll をリフレクションで
+    /// 検証済み。各アセット型の m_material は Assembly-CSharp.dll をリフレクションで検証済み、
+    /// Task36 task-36-report.md / Task41 task-41-report.md 参照）。
+    ///
+    /// Task41: マテリアルキャッシュのキーを名前(string)単独から (AssetKind, name) の組へ拡張した。
+    /// 名前だけをキーにすると、例えば同名の建物とプロップが両方ロードされている場合に片方の
+    /// テクスチャがもう片方へ誤って使い回されてしまう（PrefabCollectionは種類ごとに独立した名前空間の
+    /// ため、名前の一致は種類をまたいでは何も保証しない）。AssetKey で種類込みの複合キーにすることで
+    /// これを防ぐ。
     /// </summary>
     internal static class UnitMaterialFactory
     {
@@ -34,8 +41,33 @@ namespace CSWarfront.Game
 
         private static readonly Dictionary<byte, Material> _cache = new Dictionary<byte, Material>();
 
-        // プロップ名単位のマテリアルキャッシュ（Task37）。TryGetPropMaterial専用。
-        private static readonly Dictionary<string, Material> _propCache = new Dictionary<string, Material>();
+        /// <summary>Task41: (種類, 名前) の複合キー。同名でも種類が違えば別エントリとして扱う。</summary>
+        private struct AssetKey : IEquatable<AssetKey>
+        {
+            public AssetKind Kind;
+            public string Name;
+
+            public bool Equals(AssetKey other)
+            {
+                return Kind == other.Kind && string.Equals(Name, other.Name, StringComparison.Ordinal);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is AssetKey && Equals((AssetKey)obj);
+            }
+
+            public override int GetHashCode()
+            {
+                int hash = (int)Kind;
+                if (Name != null) hash = (hash * 397) ^ Name.GetHashCode();
+                return hash;
+            }
+        }
+
+        // (種類, 名前) 単位のマテリアルキャッシュ（Task37で導入、Task41で種類込みのキーへ拡張）。
+        // TryGetAssetMaterial専用。
+        private static readonly Dictionary<AssetKey, Material> _assetCache = new Dictionary<AssetKey, Material>();
 
         private static Shader _shader;
         private static bool _shaderResolved;
@@ -78,23 +110,26 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task37: 割り当て済みプロップ用のマテリアルを取得する（無ければ生成してキャッシュ、プロップ名単位）。
+        /// Task37: 割り当て済みアセット用のマテリアルを取得する（無ければ生成してキャッシュ）。
+        /// Task41: 対象をプロップ以外（建物/車両/樹木）にも拡張し、キャッシュキーを (kind, name) にした。
         /// 自前の標準シェーダーMaterialを作り、色は白（tintしない＝勢力色で塗らない）のまま、
-        /// mainTextureだけプロップ自身のマテリアル（PropInfo.m_material）から借用する。
+        /// mainTextureだけアセット自身のマテリアル（AssetCatalog.TryGetTexture経由）から借用する。
         /// CSの Material オブジェクトそのものは一切割り当てない（TryGetFactionMaterialと同じ理由）。
         /// テクスチャが取得できない場合は白一色の標準マテリアルへフォールバックする
         /// （勢力色にはフォールバックしない＝要件2「勢力色で塗るのをやめる」を守る）。
         /// </summary>
-        public static bool TryGetPropMaterial(string propName, out Material material)
+        public static bool TryGetAssetMaterial(AssetKind kind, string assetName, out Material material)
         {
-            if (string.IsNullOrEmpty(propName))
+            if (string.IsNullOrEmpty(assetName))
             {
                 material = null;
                 return false;
             }
 
+            AssetKey key = new AssetKey { Kind = kind, Name = assetName };
+
             Material cached;
-            if (_propCache.TryGetValue(propName, out cached) && cached != null)
+            if (_assetCache.TryGetValue(key, out cached) && cached != null)
             {
                 material = cached;
                 return true;
@@ -109,37 +144,22 @@ namespace CSWarfront.Game
 
             try
             {
-                Texture mainTexture = TryGetPropMainTexture(propName);
+                Texture mainTexture;
+                AssetCatalog.TryGetTexture(kind, assetName, out mainTexture);
 
                 Material mat = new Material(shader);
-                mat.color = Color.white; // tintしない。プロップ自身の見た目を維持する。
+                mat.color = Color.white; // tintしない。アセット自身の見た目を維持する。
                 if (mainTexture != null) mat.mainTexture = mainTexture;
 
-                _propCache[propName] = mat;
+                _assetCache[key] = mat;
                 material = mat;
                 return true;
             }
             catch (Exception e)
             {
-                ModConfig.LogError("UnitMaterialFactory.TryGetPropMaterial(" + propName + ") error: " + e);
+                ModConfig.LogError("UnitMaterialFactory.TryGetAssetMaterial(" + kind + "," + assetName + ") error: " + e);
                 material = null;
                 return false;
-            }
-        }
-
-        /// <summary>PropInfo.m_material.mainTexture を安全に読み取る（見つからない/null時はnullを返す）。</summary>
-        private static Texture TryGetPropMainTexture(string propName)
-        {
-            try
-            {
-                PropInfo info = PrefabCollection<PropInfo>.FindLoaded(propName);
-                if (info == null || info.m_material == null) return null;
-                return info.m_material.mainTexture;
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("UnitMaterialFactory.TryGetPropMainTexture(" + propName + ") error: " + e);
-                return null;
             }
         }
 

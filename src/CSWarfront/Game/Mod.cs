@@ -74,15 +74,16 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task40: 「モデル割り当てを開く」ボタンのクリックハンドラ。想定される3つの文脈:
-        ///   (1) ゲーム内（マップ読み込み後）: 通常通りパネルが開き、サブスクライブ済みプロップが
+        /// Task40: 「モデル割り当てを開く」ボタンのクリックハンドラ。Task41でプロップ以外（建物/車両/樹木）
+        /// にも対応した。想定される3つの文脈:
+        ///   (1) ゲーム内（マップ読み込み後）: 通常通りパネルが開き、サブスクライブ済みアセットが
         ///       一覧に表示される（WarfrontThreadingExtension.OnUpdateが毎フレームEnsureCreated()して
         ///       いるため、ここでのEnsureCreated()は何もしない冪等呼び出しになる）。
         ///   (2) メインメニュー（マップ未ロード）でUIView自体は存在する場合: AssetAssignPanel.Build()は
         ///       UIView.GetAView()にだけ依存するため成功し、パネル自体は開く。ただしPrefabCollection
-        ///       <PropInfo> はレベルロード時にしか populate されないため、一覧は0件になる
-        ///       （PropCatalog.GetNamesは走査結果が0件のリストを返すだけで例外にはならない）。
-        ///       この場合はパネルを開いた上で、0件である旨をヒントラベルに表示する。
+        ///       &lt;PropInfo/BuildingInfo/VehicleInfo/TreeInfo&gt; はレベルロード時にしか populate
+        ///       されないため、一覧は0件になる（AssetCatalog.GetNamesは走査結果が0件のリストを返すだけで
+        ///       例外にはならない）。この場合はパネルを開いた上で、0件である旨をヒントラベルに表示する。
         ///   (3) UIView自体が取得できない極端なケース（理論上、通常は起きない）: EnsureCreated()後も
         ///       AssetAssignPanel.IsCreated が false のままなので、パネルを開かずヒントラベルと
         ///       ログ（1回だけ）で「ゲーム内で開いてください」と案内する。
@@ -109,7 +110,7 @@ namespace CSWarfront.Game
 
                 SetHint(AssetAssignPanel.HasAnyProps()
                     ? ""
-                    : "現在利用可能なプロップが0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みのプロップが一覧に表示されます。");
+                    : "現在利用可能なアセット（プロップ/建物/車両/樹木）が0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みのアセットが一覧に表示されます。");
             }
             catch (Exception e)
             {

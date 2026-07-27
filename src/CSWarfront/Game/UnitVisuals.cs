@@ -29,11 +29,11 @@ namespace CSWarfront.Game
     /// 素の MeshRenderer に割り当てると不可視/黒になる（実際に発生していた不可視バグの原因）。
     /// 代わりに自前の標準シェーダーマテリアルを勢力ごとに1つ生成・共有し、勢力を色で判別できるようにする。
     ///
-    /// Task37: 上記の可視性マーカー立方体・勢力色は「割り当て済みプロップが無いユニット」専用の見た目に
-    /// 縮小した。TypeKeyにプロップが割り当てられている場合（UnitMeshSource.TryResolveのfromAssignedProp）は
-    /// マーカーを出さず、マテリアルもプロップ自身の見た目（<see cref="UnitMaterialFactory.TryGetPropMaterial"/>）
+    /// Task37: 上記の可視性マーカー立方体・勢力色は「割り当て済みアセットが無いユニット」専用の見た目に
+    /// 縮小した。TypeKeyにアセットが割り当てられている場合（UnitMeshSource.TryResolveのfromAssignedProp）は
+    /// マーカーを出さず、マテリアルもアセット自身の見た目（<see cref="UnitMaterialFactory.TryGetAssetMaterial"/>）
     /// を使う。クリック選択の当たり判定はマーカーのBoxColliderに代わってルートGameObject自身のBoxColliderで
-    /// 提供する（CreateVisual/AttachPropCollider参照）。
+    /// 提供する（CreateVisual/AttachPropCollider参照）。Task41でプロップ以外（建物/車両/樹木）にも対応した。
     ///
     /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
     /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
@@ -206,18 +206,20 @@ namespace CSWarfront.Game
             {
                 Mesh mesh;
                 bool fromAssignedProp;
-                string resolvedPropName;
-                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedPropName))
+                AssetKind resolvedKind;
+                string resolvedAssetName;
+                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedKind, out resolvedAssetName))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;
                 }
 
-                // Task37: 割り当て済みプロップがある場合はプロップ自身の見た目（テクスチャ）を維持し、
-                // 勢力色で塗らない。割り当てが無い場合のみ、従来通り勢力色マテリアルを使う。
+                // Task37: 割り当て済みアセット（プロップ/建物/車両/樹木、Task41で拡張）がある場合は
+                // アセット自身の見た目（テクスチャ）を維持し、勢力色で塗らない。
+                // 割り当てが無い場合のみ、従来通り勢力色マテリアルを使う。
                 Material material;
                 bool materialOk = fromAssignedProp
-                    ? UnitMaterialFactory.TryGetPropMaterial(resolvedPropName, out material)
+                    ? UnitMaterialFactory.TryGetAssetMaterial(resolvedKind, resolvedAssetName, out material)
                     : UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material);
                 if (!materialOk)
                 {

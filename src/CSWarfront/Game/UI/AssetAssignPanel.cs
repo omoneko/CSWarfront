@@ -6,21 +6,29 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// 「モデル設定」パネル（Task36、Task40で勢力別割り当て・サムネイル・最小化・ドラッグに対応）。
-    /// ユニット種別（TypeKey）×勢力（factionId）ごとに、現在サブスクライブしているプロップ（Workshop
-    /// アセット含む）を見た目のモデルとして割り当てるUI。BaseInfoPanel の「モデル設定」ボタン
+    /// 「モデル設定」パネル（Task36、Task40で勢力別割り当て・サムネイル・最小化・ドラッグに対応、
+    /// Task41でパネルを2倍スケール化・検索欄/一覧の可読性改善・プロップ以外の種類にも対応）。
+    /// ユニット種別（TypeKey）×勢力（factionId）ごとに、現在サブスクライブしている種類（プロップ/建物/
+    /// 車両/樹木）×アセットを見た目のモデルとして割り当てるUI。BaseInfoPanel の「モデル設定」ボタン
     /// （Game/UI/BaseInfoPanelModelButton.cs）、および Mod Options 画面（Game/Mod.cs.OnSettingsUI、Task40）
     /// の両方から開ける、独立した常設パネル（UnitInfoPanel/BaseInfoPanelと同じ「UIView直下に1枚だけ生成し、
     /// isVisibleで出し入れする」方式）。初期位置は画面中央固定だが、Task40でドラッグ移動に対応した。
     ///
+    /// Task41: パネル全体の寸法・コントロール高さ・テキストスケールを一律 <see cref="UiScale"/>(2倍)した
+    /// （下記の各定数がTask40時点の値の2倍になっている）。共有ヘルパー <see cref="PanelChrome"/> の
+    /// タイトル行の高さ・最小化ボタンの大きさ（BaseInfoPanel/UnitInfoPanelと共有）はここでは変更しない
+    /// （このパネルだけを2倍にする要求であり、他の2パネルへ影響させないため）。
+    ///
     /// 500行制限のため、以下のように分割している（BaseInfoPanel/BaseInfoPanelProduction と同じ方針）:
     ///   - このファイル: パネルの生成・破棄・骨格レイアウト・最小化状態の管理。
-    ///   - AssetAssignPanelControls.cs: ユニット種別ドロップダウン/検索/一覧/適用・既定に戻す・閉じるボタン。
+    ///   - AssetAssignPanelControls.cs: ユニット種別ドロップダウン/適用・既定に戻す・閉じるボタン。
     ///   - AssetAssignPanelFaction.cs: 勢力ドロップダウン・サムネイル表示（Task40で新設）。
+    ///   - AssetAssignPanelAssetList.cs: 種類ドロップダウン/検索/サブスク済みトグル/一覧（Task41で新設、
+    ///     旧AssetAssignPanelControls.csから分離）。
     ///
     /// スレッド注記: このクラスの public メソッドは全てメインスレッド専用（Unity UI API呼び出しのため）。
     /// WarState/MilitaryManagerへは一切触れない。読み書きするのは UnitAssetBindings（割り当ての永続化）と
-    /// PropCatalog（プロップ列挙・メッシュ解決・サムネイル解決）のみで、いずれもCS実体を持たない。
+    /// AssetCatalog（アセット列挙・メッシュ解決・サムネイル解決）のみで、いずれもCS実体を持たない。
     /// 割り当てを変更した際は UnitVisuals.DestroyAll() を呼び、既存の見た目を破棄することで次回Syncで
     /// 新しい割り当てが反映されるようにする（UnitMeshSource.TryResolve のキャッシュ方針を参照）。
     /// </summary>
@@ -29,16 +37,22 @@ namespace CSWarfront.Game.UI
         private const string PanelName = "CSWarfrontAssetAssignPanel";
         private const string TitleText = "モデル設定";
 
-        internal const int MaxListItems = 300;
+        internal const int MaxListItems = 300; // アイテム件数の上限。パネルの寸法とは無関係のため2倍しない。
 
-        internal const float PanelWidth = 380f;
-        internal const float Pad = 8f;
-        internal const float RowHeight = 24f;
-        internal const float DropdownHeight = 26f;
-        internal const float ListHeight = 220f;
-        internal const float ButtonRowHeight = 26f;
-        internal const float SectionGap = 6f;
-        internal const float ThumbnailSize = 64f;
+        // Task41: パネル全体を2倍スケール化。以下の値は全てTask40時点の値×2（コメントに旧値を残す）。
+        internal const float UiScale = 2f;
+
+        internal const float PanelWidth = 760f;      // 旧380f
+        internal const float Pad = 16f;               // 旧8f
+        internal const float RowHeight = 48f;         // 旧24f
+        internal const float DropdownHeight = 52f;    // 旧26f
+        internal const float ListHeight = 440f;       // 旧220f（itemHeightも2倍のため可視行数は約11で変わらず）
+        internal const float ButtonRowHeight = 52f;   // 旧26f
+        internal const float SectionGap = 12f;        // 旧6f
+        internal const float ThumbnailSize = 128f;    // 旧64f
+
+        // Task41: 検索欄の右に並べる「アセット種別」ドロップダウンの幅。
+        internal const float AssetKindDropdownWidth = 220f;
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
@@ -51,6 +65,7 @@ namespace CSWarfront.Game.UI
         private static bool _hasThumbnail; // Task40: 直近のRefreshThumbnailが有効なサムネイルを見つけたか
         private static UILabel _searchSectionLabel; // Task40: 折りたたみ時の表示切り替え対象として保持
         private static UITextField _searchField;
+        private static UIDropDown _assetKindDropdown; // Task41: プロップ/建物/車両/樹木の切り替え
         private static UIButton _customOnlyToggle;
         private static UIListBox _propListBox;
         private static UILabel _truncatedLabel;
@@ -62,9 +77,9 @@ namespace CSWarfront.Game.UI
         // 表示ラベル（"Tank_T3 → (既定)" 等）と選択インデックスを対応付けるために使う。
         private static string[] _typeKeys;
 
-        // _propListBox.items と同じ並び（フィルタ後・MaxListItems件で打ち切り済み）のプロップ名。
+        // _propListBox.items と同じ並び（フィルタ後・MaxListItems件で打ち切り済み）のアセット名。
         // 適用ボタンはこの配列から選択中インデックスの名前を取り出す。
-        private static readonly List<string> _filteredProps = new List<string>();
+        private static readonly List<string> _filteredAssetNames = new List<string>();
 
         private static bool _customOnly = true; // 既定ON（Task36指定）
         private static bool _suppressEvents;
@@ -120,11 +135,11 @@ namespace CSWarfront.Game.UI
             if (_panel == null) return;
 
             // 開くたびに再走査する（"on demand" 方針）。全プレハブ走査は高コストなため毎フレームは行わず、
-            // ユーザーがこのパネルを開いた瞬間だけ「今サブスクライブしているプロップ」に更新する。
-            PropCatalog.Rescan();
+            // ユーザーがこのパネルを開いた瞬間だけ「今サブスクライブしているアセット」（4種類とも）に更新する。
+            AssetCatalog.Rescan();
 
             RefreshDropdownLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);
-            RefreshPropList();
+            RefreshAssetList();
             RefreshCurrentBindingLabel();
 
             _panel.isVisible = true;
@@ -145,8 +160,9 @@ namespace CSWarfront.Game.UI
                 if (_typeKeyDropdown != null) _typeKeyDropdown.eventSelectedIndexChanged -= OnTypeKeyChanged;
                 DestroyFactionSection(); // Task40: イベント購読解除＋フィールドのリセット
                 if (_searchField != null) _searchField.eventTextChanged -= OnSearchTextChanged;
+                if (_assetKindDropdown != null) _assetKindDropdown.eventSelectedIndexChanged -= OnAssetKindChanged;
                 if (_customOnlyToggle != null) _customOnlyToggle.eventClick -= OnCustomOnlyClick;
-                if (_propListBox != null) _propListBox.eventSelectedIndexChanged -= OnPropSelected;
+                if (_propListBox != null) _propListBox.eventSelectedIndexChanged -= OnAssetSelected;
                 if (_applyButton != null) _applyButton.eventClick -= OnApplyClick;
                 if (_resetButton != null) _resetButton.eventClick -= OnResetClick;
                 if (_closeButton != null) _closeButton.eventClick -= OnCloseClick;
@@ -169,6 +185,7 @@ namespace CSWarfront.Game.UI
                 _hasThumbnail = false;
                 _searchSectionLabel = null;
                 _searchField = null;
+                _assetKindDropdown = null;
                 _customOnlyToggle = null;
                 _propListBox = null;
                 _truncatedLabel = null;
@@ -176,7 +193,7 @@ namespace CSWarfront.Game.UI
                 _resetButton = null;
                 _closeButton = null;
                 _typeKeys = null;
-                _filteredProps.Clear();
+                _filteredAssetNames.Clear();
                 _customOnly = true;
                 _suppressEvents = false;
                 _collapsed = false;
@@ -205,12 +222,14 @@ namespace CSWarfront.Game.UI
 
             // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
             // タイトルラベル(非対話的)・最小化ボタン(対話的)を重ねる（BaseInfoPanelと同じ方式）。
+            // PanelChrome側のタイトル行高さ・ボタンサイズは他2パネルと共有のため2倍化しない
+            // （このパネル固有の要求であり、共有ヘルパーを変えると他パネルにも影響するため）。
             _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
             _collapseButton = _chrome.CollapseButton;
 
             _titleLabel = _panel.AddUIComponent<UILabel>();
             _titleLabel.text = TitleText;
-            _titleLabel.textScale = 0.9f;
+            _titleLabel.textScale = 1.8f; // 旧0.9f
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += RowHeight;
 
@@ -223,10 +242,10 @@ namespace CSWarfront.Game.UI
             _typeKeyDropdown = BuildTypeKeyDropdown(Pad, y, w);
             y += DropdownHeight + SectionGap;
 
-            // Task40: 「現在の割り当て」ラベル（左）とサムネイル（右、64x64）を同じ行に並べる。
+            // Task40: 「現在の割り当て」ラベル（左）とサムネイル（右、128x128）を同じ行に並べる。
             float bindingLabelWidth = w - ThumbnailSize - SectionGap;
             _currentBindingLabel = _panel.AddUIComponent<UILabel>();
-            _currentBindingLabel.textScale = 0.75f;
+            _currentBindingLabel.textScale = 1.5f; // 旧0.75f
             _currentBindingLabel.textColor = new Color32(200, 200, 200, 255);
             _currentBindingLabel.wordWrap = true;
             _currentBindingLabel.autoSize = false;
@@ -239,12 +258,16 @@ namespace CSWarfront.Game.UI
             BuildThumbnailSprite(Pad + bindingLabelWidth + SectionGap, y); // AssetAssignPanelFaction.cs
             y += ThumbnailSize + SectionGap;
 
-            y = AddSectionLabel("検索（部分一致）", y, out _searchSectionLabel);
-            _searchField = BuildSearchField(Pad, y, w);
+            y = AddSectionLabel("検索（部分一致） / アセット種別", y, out _searchSectionLabel);
+
+            // Task41: 検索欄（左）とアセット種別ドロップダウン（右、プロップ/建物/車両/樹木）を同じ行に並べる。
+            float searchWidth = w - AssetKindDropdownWidth - SectionGap;
+            _searchField = BuildSearchField(Pad, y, searchWidth); // AssetAssignPanelAssetList.cs
+            _assetKindDropdown = BuildAssetKindDropdown(Pad + searchWidth + SectionGap, y, AssetKindDropdownWidth); // AssetAssignPanelAssetList.cs
             y += RowHeight + SectionGap;
 
             _customOnlyToggle = _panel.AddUIComponent<UIButton>();
-            _customOnlyToggle.textScale = 0.75f;
+            _customOnlyToggle.textScale = 1.5f; // 旧0.75f
             _customOnlyToggle.size = new Vector2(w, RowHeight);
             _customOnlyToggle.relativePosition = new Vector3(Pad, y);
             _customOnlyToggle.normalBgSprite = "ButtonMenu";
@@ -257,23 +280,28 @@ namespace CSWarfront.Game.UI
             _propListBox.size = new Vector2(w, ListHeight);
             _propListBox.relativePosition = new Vector3(Pad, y);
             _propListBox.normalBgSprite = "GenericPanelLight";
-            _propListBox.itemHeight = 20;
+            _propListBox.itemHeight = 40; // 旧20
             _propListBox.itemHover = "ListItemHover";
             _propListBox.itemHighlight = "ListItemHighlight";
-            _propListBox.textScale = 0.75f;
+            _propListBox.textScale = 1.5f; // 旧0.75f
+            // Task41: GenericPanelLight（明るい背景）に対しては itemTextColor（各行の実際の文字色）を
+            // 濃色にしないと可読性が無い。旧実装は textColor のみ設定していたが、UIListBox の行描画は
+            // itemTextColor（ColossalManaged.dllをリフレクションで存在確認済み、Color32プロパティ）が
+            // 支配的なため、こちらを明示的に設定する（textColorは互換のため残す）。
             _propListBox.textColor = new Color32(230, 230, 230, 255);
-            _propListBox.eventSelectedIndexChanged += OnPropSelected;
+            _propListBox.itemTextColor = new Color32(20, 20, 24, 255);
+            _propListBox.eventSelectedIndexChanged += OnAssetSelected;
             y += ListHeight + SectionGap;
 
             _truncatedLabel = _panel.AddUIComponent<UILabel>();
-            _truncatedLabel.textScale = 0.65f;
+            _truncatedLabel.textScale = 1.3f; // 旧0.65f
             _truncatedLabel.textColor = new Color32(255, 190, 120, 255);
             _truncatedLabel.wordWrap = false;
             _truncatedLabel.autoSize = false;
             _truncatedLabel.width = w;
             _truncatedLabel.text = "";
             _truncatedLabel.relativePosition = new Vector3(Pad, y);
-            y += 16f + SectionGap;
+            y += 32f + SectionGap; // 旧16f
 
             float buttonWidth = (w - SectionGap * 2f) / 3f;
             _applyButton = BuildButton("適用", Pad, y, buttonWidth, OnApplyClick);
@@ -311,17 +339,17 @@ namespace CSWarfront.Game.UI
         {
             label = _panel.AddUIComponent<UILabel>();
             label.text = text;
-            label.textScale = 0.75f;
+            label.textScale = 1.5f; // 旧0.75f
             label.textColor = new Color32(200, 200, 200, 255);
             label.relativePosition = new Vector3(Pad, y);
-            return y + 18f;
+            return y + 36f; // 旧18f
         }
 
         private static UIButton BuildButton(string text, float x, float y, float width, MouseEventHandler handler)
         {
             UIButton btn = _panel.AddUIComponent<UIButton>();
             btn.text = text;
-            btn.textScale = 0.8f;
+            btn.textScale = 1.6f; // 旧0.8f
             btn.size = new Vector2(width, ButtonRowHeight);
             btn.relativePosition = new Vector3(x, y);
             btn.normalBgSprite = "ButtonMenu";
@@ -360,7 +388,7 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>タイトル行(タイトルラベル・最小化ボタン・ドラッグハンドル)以外の全コントロールの
-        /// isVisibleを一括切り替える。サムネイルは「展開中かつ有効なサムネイルが見つかっている」
+        /// isVisibleを一括切り替えする。サムネイルは「展開中かつ有効なサムネイルが見つかっている」
         /// 場合のみ表示する（_hasThumbnail、AssetAssignPanelFaction.cs の RefreshThumbnail が更新）。</summary>
         private static void SetSectionVisible(bool visible)
         {
@@ -372,6 +400,7 @@ namespace CSWarfront.Game.UI
             if (_thumbnailSprite != null) _thumbnailSprite.isVisible = visible && _hasThumbnail;
             if (_searchSectionLabel != null) _searchSectionLabel.isVisible = visible;
             if (_searchField != null) _searchField.isVisible = visible;
+            if (_assetKindDropdown != null) _assetKindDropdown.isVisible = visible;
             if (_customOnlyToggle != null) _customOnlyToggle.isVisible = visible;
             if (_propListBox != null) _propListBox.isVisible = visible;
             if (_truncatedLabel != null) _truncatedLabel.isVisible = visible;

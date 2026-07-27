@@ -34,9 +34,10 @@ namespace CSWarfront.Game
         // FindLoaded(name) が見つからず既定へフォールバックした名前を、警告ログの重複を避けるためだけに記録する
         // （キャッシュには入れない＝次回呼び出しで必ず FindLoaded を再試行させる。詳細は TryResolve 参照）。
         private static readonly HashSet<string> _warnedMissingNames = new HashSet<string>();
-        // Task36: バインド済みだがそのプロップがまだ見つからない（未ロード等）警告の重複防止専用
-        // （"typeKey=propName" 単位。UnitAssetBindings/PropCatalog由来の結果は下記TryResolveの通り
-        // 意図的にキャッシュしないため、この集合は毎回のFindLoaded再試行そのものは妨げない）。
+        // Task36: バインド済みだがそのアセットがまだ見つからない（未ロード等）警告の重複防止専用
+        // （"faction|typeKey=kind:assetName" 単位、Task41で種類も含めた。UnitAssetBindings/AssetCatalog
+        // 由来の結果は下記TryResolveの通り意図的にキャッシュしないため、この集合は毎回のFindLoaded
+        // 再試行そのものは妨げない）。
         private static readonly HashSet<string> _warnedMissingBindings = new HashSet<string>();
         private static bool _loggedSourceOnce;
         private static bool _loggedFailureOnce;
@@ -45,51 +46,62 @@ namespace CSWarfront.Game
         /// <summary>
         /// Task36: typeKey（空可）とassetPrefabName（空可）からメッシュを解決する。
         /// Task40: 割り当ての解決を勢力別（factionId）にした。
+        /// Task41: 割り当て済みアセットの種類（プロップ以外に建物/車両/樹木も）に対応した。
         /// 解決順: (a) (factionId, typeKey) に対する UnitAssetBindings の割り当て（勢力別 → 全勢力共通の順、
-        ///        UnitAssetBindings.TryGet内部で解決） → PropCatalog でプロップのメッシュを解決
+        ///        UnitAssetBindings.TryGet内部で解決、種類(AssetKind)込みで返る）
+        ///        → AssetCatalog でそのアセットのメッシュを解決
         ///        → (b) assetPrefabName で FindLoaded → 既定候補名 → 全VehicleInfo走査
         ///        → (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
         ///
-        /// (a) の結果は意図的にキャッシュしない（PropCatalog.TryGetMeshも同様）。UnitAssetBindings.Set/Clear
-        /// による割り当て変更は UnitVisuals.DestroyAll() で既存の見た目を破棄させることで反映される
-        /// （破棄された見た目は次回Syncで必ずCreateVisual→この解決を再実行する）ため、ここで
-        /// 名前単位キャッシュを持つと変更が反映されない/古い結果が残るリスクの方が大きい。
-        /// キャッシュが無いため「勢力IDをキャッシュキーに含める」問題はそもそも発生しない
-        /// （Task40要件: 勢力間でキャッシュが漏れないこと）。
-        /// (b)/(c) の既存キャッシュ（下記オーバーロード）は assetPrefabName 単位のみで勢力に依存しない
-        /// （AssetPrefabNameはUnitType側の固定値で勢力によって変わらないため、勢力IDを混ぜる必要が無い）。
+        /// (a) の結果は意図的にキャッシュしない（AssetCatalog.TryGetMeshも同様、PropCatalog時代からの
+        /// 方針を踏襲）。UnitAssetBindings.Set/Clear による割り当て変更は UnitVisuals.DestroyAll() で
+        /// 既存の見た目を破棄させることで反映される（破棄された見た目は次回Syncで必ずCreateVisual→
+        /// この解決を再実行する）ため、ここで名前単位キャッシュを持つと変更が反映されない/古い結果が
+        /// 残るリスクの方が大きい。キャッシュが無いため「(勢力ID, 種類, 名前) をキャッシュキーに含める」
+        /// 問題はそもそも発生しない（Task40/Task41要件: 勢力間・種類間でキャッシュが漏れないこと）。
+        /// (b)/(c) の既存キャッシュ（下記オーバーロード）は assetPrefabName 単位のみで勢力にも種類にも
+        /// 依存しない（このパスは常にVehicleInfoのみを扱う既定フォールバックであり、AssetKindの概念自体が
+        /// 関与しないため）。
         ///
-        /// Task37: メッシュが (a) の「割り当て済みプロップ」経由で解決できたかどうかを
+        /// 一方 <see cref="UnitMaterialFactory"/> はテクスチャを (kind, name) 単位で永続キャッシュする
+        /// （マテリアルはユニットのビジュアル破棄・再生成のたびに毎回生成し直すのはコストが大きいため）。
+        /// キャッシュキーに種類を含めることで、例えば同名の建物とプロップが両方存在しても互いの
+        /// テクスチャを取り違えない（Task41要件）。
+        ///
+        /// Task37: メッシュが (a) の「割り当て済みアセット」経由で解決できたかどうかを
         /// <paramref name="fromAssignedProp"/> で報告する。呼び出し側（UnitVisuals）はこれを使って、
-        /// 割り当て済みプロップがある場合は可視性マーカー立方体や勢力色を出さない判断をする。
-        /// <paramref name="resolvedPropName"/> は fromAssignedProp=true の時のみプロップ名を返す
-        /// （UnitMaterialFactory.TryGetPropMaterial に渡すため）。
+        /// 割り当て済みアセットがある場合は可視性マーカー立方体や勢力色を出さない判断をする。
+        /// <paramref name="resolvedKind"/>/<paramref name="resolvedAssetName"/> は fromAssignedProp=true
+        /// の時のみ意味のある値を返す（UnitMaterialFactory.TryGetAssetMaterial に渡すため）。
         /// </summary>
-        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out string resolvedPropName)
+        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out AssetKind resolvedKind, out string resolvedAssetName)
         {
             fromAssignedProp = false;
-            resolvedPropName = null;
+            resolvedKind = AssetKind.Prop;
+            resolvedAssetName = null;
 
             try
             {
                 if (!string.IsNullOrEmpty(typeKey))
                 {
-                    string propName;
-                    if (UnitAssetBindings.TryGet(factionId, typeKey, out propName))
+                    AssetKind boundKind;
+                    string boundName;
+                    if (UnitAssetBindings.TryGet(factionId, typeKey, out boundKind, out boundName))
                     {
-                        Mesh propMesh;
-                        if (PropCatalog.TryGetMesh(propName, out propMesh))
+                        Mesh assetMesh;
+                        if (AssetCatalog.TryGetMesh(boundKind, boundName, out assetMesh))
                         {
-                            mesh = propMesh;
+                            mesh = assetMesh;
                             fromAssignedProp = true;
-                            resolvedPropName = propName;
+                            resolvedKind = boundKind;
+                            resolvedAssetName = boundName;
                             return true;
                         }
 
-                        string warnKey = factionId + "|" + typeKey + "=" + propName;
+                        string warnKey = factionId + "|" + typeKey + "=" + boundKind + ":" + boundName;
                         if (_warnedMissingBindings.Add(warnKey))
                         {
-                            ModConfig.Log("UnitMeshSource: faction=" + factionId + " '" + typeKey + "' に割り当て済みのプロップ '" + propName +
+                            ModConfig.Log("UnitMeshSource: faction=" + factionId + " '" + typeKey + "' に割り当て済みの" + boundKind + " '" + boundName +
                                 "' が見つかりません（未ロード等）。assetPrefabName/既定へフォールバックします");
                         }
                     }
