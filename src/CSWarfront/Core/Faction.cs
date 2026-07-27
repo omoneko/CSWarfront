@@ -9,9 +9,21 @@ namespace CSWarfront.Core
         public bool IsPlayer { get; set; }
         public bool Eliminated { get; set; }
 
-        public Faction(byte id, string name) { Id = id; Name = name; }
+        /// <summary>研究点。撃破報酬（Research.KillReward）や資金投資（Research.TryInvest）で加算され、
+        /// Research.TryUnlockNext がTier解禁のコストとして消費する（Task35）。</summary>
+        public float ResearchPoints;
+
+        /// <summary>解禁済みの最大生産Tier（1..5）。既定は1（陸上ロスターの最低Tier）。
+        /// ProductionPlanning.ChooseUnitKey / ManualProduction.TryEnqueue はこれを超えるTierのユニットを
+        /// 選択/発注できない（Task35）。</summary>
+        public byte UnlockedTier = 1;
+
+        public Faction(byte id, string name) { Id = id; Name = name; UnlockedTier = 1; }
 
         public void AddTreasury(float amount) { if (amount > 0f) Treasury += amount; }
+
+        /// <summary>研究点を加算する。非正の値は無視する（AddTreasuryと同じ規約、Task35）。</summary>
+        public void AddResearchPoints(float amount) { if (amount > 0f) ResearchPoints += amount; }
 
         public bool TrySpend(float amount)
         {

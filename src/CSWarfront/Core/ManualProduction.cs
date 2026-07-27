@@ -10,7 +10,9 @@ namespace CSWarfront.Core
         UnknownType,
         QueueFull,
         NotAffordable,
-        NoOwner
+        NoOwner,
+        /// <summary>発注しようとしたUnitType.TierがFaction.UnlockedTierを超えている（Task35：研究未解禁）。</summary>
+        TierLocked
     }
 
     /// <summary>
@@ -24,8 +26,10 @@ namespace CSWarfront.Core
         ///  1. baseId の基地が存在するか -> BaseNotFound
         ///  2. その基地に所有勢力がいるか -> NoOwner
         ///  3. typeKey が state.Types に登録されているか -> UnknownType
-        ///  4. Queue.Count が MilitaryBase.ManualQueueCap 未満か -> QueueFull
-        ///  5. 所有勢力が type.Cost を払えるか（Faction.TrySpend。成功した場合のみ実際に控除する） -> NotAffordable
+        ///  4. 所有勢力の Faction が見つかるか -> NoOwner（整合性が崩れている場合の防御）
+        ///  5. type.Tier が owner.UnlockedTier 以下か（Task35） -> TierLocked
+        ///  6. Queue.Count が MilitaryBase.ManualQueueCap 未満か -> QueueFull
+        ///  7. 所有勢力が type.Cost を払えるか（Faction.TrySpend。成功した場合のみ実際に控除する） -> NotAffordable
         /// 全て通れば ProductionOrder(typeKey, type.Cost, type.BuildTime) をQueue末尾に追加し Ok を返す。
         /// 決定的・RNG不使用。
         /// </summary>
@@ -38,10 +42,12 @@ namespace CSWarfront.Core
             UnitType type = state.Types.Get(typeKey);
             if (type == null) return QueueResult.UnknownType;
 
-            if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
-
             Faction owner = state.FindFaction(b.OwnerFactionId.Value);
             if (owner == null) return QueueResult.NoOwner; // 整合性が崩れている場合の防御（通常は起きない）
+
+            if (type.Tier > owner.UnlockedTier) return QueueResult.TierLocked; // Task35: 未解禁Tier
+
+            if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
 
             if (!owner.TrySpend(type.Cost)) return QueueResult.NotAffordable;
 
@@ -50,19 +56,16 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// キューの末尾（最後に積まれた注文）を取り消し、その Cost を所有勢力へ AddTreasury で全額払い戻す。
+        /// キューの末尾（最後に積まれた注文）を取り消す（Task35で仕様変更：進行中＝index0の注文も、
+        /// それが唯一の注文であっても常に取消可能にした。旧仕様「唯一の注文でProgress&gt;0なら取消不可」は
+        /// プレイヤーから見て「取消ボタンが理由なく効かないバグ」だったため撤廃）。
         ///
-        /// 取消可否の正確なルール:
-        ///  - Queue.Count == 0: 取り消せる注文が無い -> 失敗（QueueFull を「取消不能」の意味で流用して返す。
-        ///    TryEnqueueでの「満杯で入らない」とは逆方向の状況だが、「キューの現在状態がこの操作を妨げている」
-        ///    という共通点でこの値を再利用する。専用のenum値を増やさない設計判断）。
-        ///  - Queue.Count == 1: 唯一の注文はindex0＝生産中スロットだが、その Progress == 0f
-        ///    （＝実際にはまだ1ミリも進捗していない）場合に限り取消可能。Progress > 0f なら「進行中の注文は
-        ///    取り消せない」ため失敗（QueueFull）を返す。
-        ///  - Queue.Count >= 2: 常に最後のインデックス（Queue.Count - 1）を取り消す。このインデックスは
-        ///    index0（進行中）と一致し得ないため、常に安全に取消できる。
+        /// 払い戻しは全額ではなく Cost * (1f - Progress) の部分返金にする（Task35）。ほとんど進んでいない
+        /// 注文はほぼ全額、完成間際の注文はほぼ0しか返ってこない。結果を [0, order.Cost] へクランプする
+        /// （Progressが理論上の範囲0..1を外れていても払い戻しが負値や超過にならないための防御）。
         ///
-        /// 判定順序: 基地存在(BaseNotFound) -> 所有者あり(NoOwner) -> 上記の取消可否(QueueFull) -> Ok。
+        /// 判定順序: 基地存在(BaseNotFound) -> 所有者あり(NoOwner) -> キューが空でないか(QueueFull、
+        /// 「取消可能な注文が無い」の意味でTryEnqueueの「満杯で入らない」と同じ値を再利用) -> Ok。
         /// 決定的・RNG不使用。
         /// </summary>
         public static QueueResult TryCancelLast(WarState state, ushort baseId)
@@ -72,15 +75,18 @@ namespace CSWarfront.Core
             if (b.OwnerFactionId == null) return QueueResult.NoOwner;
 
             if (b.Queue.Count == 0) return QueueResult.QueueFull;
-            if (b.Queue.Count == 1 && b.Queue[0].Progress > 0f) return QueueResult.QueueFull;
 
             Faction owner = state.FindFaction(b.OwnerFactionId.Value);
             if (owner == null) return QueueResult.NoOwner; // 整合性が崩れている場合の防御（通常は起きない）
 
             int idx = b.Queue.Count - 1;
             ProductionOrder order = b.Queue[idx];
+            float refund = order.Cost * (1f - order.Progress);
+            if (refund < 0f) refund = 0f;
+            if (refund > order.Cost) refund = order.Cost;
+
             b.Queue.RemoveAt(idx);
-            owner.AddTreasury(order.Cost);
+            owner.AddTreasury(refund);
             return QueueResult.Ok;
         }
 

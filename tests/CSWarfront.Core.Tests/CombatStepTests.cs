@@ -46,6 +46,30 @@ public class CombatStepTests
         Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
     }
 
+    // --- Task35: 撃破報酬（Research.KillReward）の付与 ---
+
+    [Fact]
+    public void Killing_a_unit_awards_research_points_to_the_killers_faction()
+    {
+        var s = TwoHostileTanks(50f);
+        s.FindUnit(2).CurrentHP = 15f; // dies this tick (DamagePerHit(40,10)=30 >= 15)
+        CombatStep.Advance(s, 1f);
+
+        // Tank_T1.Cost = 60, KillRewardRate = 0.5 -> 30
+        Assert.Equal(30f, s.FindFaction(0).ResearchPoints, 3); // unit 1 (Red) got the kill
+        Assert.Equal(0f, s.FindFaction(1).ResearchPoints, 3);  // Blue lost its unit, no reward
+    }
+
+    [Fact]
+    public void Killing_a_unit_does_not_award_research_points_when_target_survives()
+    {
+        var s = TwoHostileTanks(50f); // both survive this tick
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.FindFaction(0).ResearchPoints, 3);
+        Assert.Equal(0f, s.FindFaction(1).ResearchPoints, 3);
+    }
+
     [Fact]
     public void Damage_scales_linearly_with_dt()
     {

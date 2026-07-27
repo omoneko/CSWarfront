@@ -42,6 +42,12 @@ namespace CSWarfront.Core
         public float DefenseAttack = DefaultDefenseAttack;
         public float DefenseRange = DefaultDefenseRange;
 
+        /// <summary>直近の経済tickでこの基地から実際に加算された収入（Task35、ゲーム内EconomyIntervalHours
+        /// あたりの額）。UIがCSバッファ/WarStateへ直接触れずに済むよう、MilitaryManager.OnSimTickが
+        /// TerritoryIncome.ForBaseの計算結果をここへキャッシュする。ランタイムのみ・非永続化
+        /// （WarStateSerializerには追加しない）。</summary>
+        public float LastIncome;
+
         public MilitaryBase(ushort baseId, BaseType type, WorldPos pos)
         { BaseId = baseId; Type = type; Position = pos; }
     }

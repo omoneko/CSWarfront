@@ -30,7 +30,15 @@ namespace CSWarfront.Core
                 float targetArmor = targetType != null ? targetType.Armor : 0f;
                 // DefenseAttack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは
                 // 経過ゲーム内時間(dt)に比例する（CombatStep/BaseCombatStepと同じ規約）。
+                // 撃破報酬（Task35）: CombatStepと同じ「wasAlive」パターンで、拠点の反撃がとどめを刺した
+                // 瞬間だけ基地の所有者へ Research.KillReward を与える。
+                bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= CombatMath.DamagePerHit(b.DefenseAttack, targetArmor) * dt;
+                if (wasAlive && target.CurrentHP <= 0f && targetType != null)
+                {
+                    Faction owner = state.FindFaction(b.OwnerFactionId.Value);
+                    if (owner != null) owner.AddResearchPoints(Research.KillReward(targetType));
+                }
             }
 
             // 死亡判定：拠点の反撃で0HP以下になったユニットをこのステップ内で確定させる。

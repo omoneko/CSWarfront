@@ -78,6 +78,29 @@ public class BaseDefenseStepTests
         Assert.Equal(UnitState.Dead, s.FindUnit(1).State);
     }
 
+    // --- Task35: 撃破報酬（Research.KillReward）の付与 ---
+
+    [Fact]
+    public void Base_kill_awards_research_points_to_the_bases_owner()
+    {
+        var s = BaseWithHostileUnit(50f);
+        s.FindUnit(1).CurrentHP = 34f; // dies this tick (see test above)
+        BaseDefenseStep.Advance(s, 1f);
+
+        // Infantry_T1.Cost = 20, KillRewardRate = 0.5 -> 10
+        Assert.Equal(10f, s.FindFaction(0).ResearchPoints, 3); // base owner (Red)
+        Assert.Equal(0f, s.FindFaction(1).ResearchPoints, 3);  // victim's own faction
+    }
+
+    [Fact]
+    public void Base_defense_does_not_award_research_points_when_target_survives()
+    {
+        var s = BaseWithHostileUnit(50f); // 100 HP, survives this tick's 34 damage
+        BaseDefenseStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.FindFaction(0).ResearchPoints, 3);
+    }
+
     [Fact]
     public void Damage_scales_with_dt()
     {

@@ -77,12 +77,17 @@ public class ProductionPlanningTests
 
     // --- ChooseUnitKey (Task28: 陸上ロスター全体からの決定的な選択) ---
 
-    private static WarState WithFullRoster(float treasury)
+    // Task35: unlockedTier defaults to 5 (fully unlocked) so pre-existing tests below, which were
+    // written before Tier gating existed and assert the globally strongest/cheapest pick across all
+    // Tiers, keep exercising cost-based selection unaffected by the new gate. Tests that specifically
+    // exercise the gate pass unlockedTier explicitly (see the "Tier gating" section below).
+    private static WarState WithFullRoster(float treasury, byte unlockedTier = 5)
     {
         var s = new WarState();
         LandUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(treasury);
+        f.UnlockedTier = unlockedTier;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
         b.OwnerFactionId = 0;
@@ -160,6 +165,44 @@ public class ProductionPlanningTests
         Assert.Equal("Artillery_T5", s.Bases[0].Queue[0].TypeKey);
         Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
         Assert.Equal(2f, s.Factions[0].Treasury, 3);
+    }
+
+    // --- Task35: Tier gating (研究で解禁したTierまでしか自動生産は選ばない) ---
+
+    [Fact]
+    public void ChooseUnitKey_never_picks_above_UnlockedTier_even_with_huge_treasury()
+    {
+        var s = WithFullRoster(10000f, unlockedTier: 1);
+        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
+        UnitType chosen = s.Types.Get(key);
+        Assert.NotNull(chosen);
+        Assert.Equal((byte)1, chosen.Tier);
+    }
+
+    [Fact]
+    public void ChooseUnitKey_picks_best_within_a_partially_unlocked_tier_range()
+    {
+        // Unlocked through Tier3: the globally strongest unit at or below Tier3 should be picked
+        // even though Tier4/5 units would be more expensive/stronger and are affordable.
+        var s = WithFullRoster(10000f, unlockedTier: 3);
+        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
+        UnitType chosen = s.Types.Get(key);
+        Assert.NotNull(chosen);
+        Assert.True(chosen.Tier <= 3);
+    }
+
+    [Fact]
+    public void Advance_with_full_roster_and_UnlockedTier1_never_queues_above_tier1()
+    {
+        var s = WithFullRoster(10000f, unlockedTier: 1);
+        ProductionPlanning.Advance(s);
+
+        Assert.NotEmpty(s.Bases[0].Queue);
+        foreach (var order in s.Bases[0].Queue)
+        {
+            UnitType t = s.Types.Get(order.TypeKey);
+            Assert.Equal((byte)1, t.Tier);
+        }
     }
 
     // --- Task34: AutoProduce=false opts a base out of AI auto-fill ---

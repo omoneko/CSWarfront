@@ -38,6 +38,20 @@ namespace CSWarfront.Game
         /// index 0 == 生産中（ProducingTypeKeyと同じ内容）。選択中の1基地分のみ構築するため
         /// 毎tickのホットパスではない（TryGetBaseSnapshot呼び出し時のみ）。</summary>
         public string[] QueuedTypeKeys;
+
+        /// <summary>直近の経済tickでこの基地から実際に加算された収入（Task35。MilitaryBase.LastIncomeの
+        /// 写し）。未所属でも0として表示できるよう常に埋める。</summary>
+        public float LastIncome;
+
+        /// <summary>所属勢力の研究点（Task35）。未所属なら0。</summary>
+        public float OwnerResearchPoints;
+
+        /// <summary>所属勢力が解禁済みの最大生産Tier（1..5、Task35）。未所属なら1（Faction既定値）。</summary>
+        public byte OwnerUnlockedTier;
+
+        /// <summary>次のTier解禁に必要な研究点（Research.CostToUnlock(OwnerUnlockedTier+1)、Task35）。
+        /// 既に最大Tier（5）または未所属なら0。</summary>
+        public float OwnerNextTierCost;
     }
 
     /// <summary>
@@ -62,11 +76,23 @@ namespace CSWarfront.Game
 
             float ownerTreasury = 0f;
             int ownerUnitCount = 0;
+            float ownerResearchPoints = 0f;
+            byte ownerUnlockedTier = 1;
+            float ownerNextTierCost = 0f;
             if (mb.OwnerFactionId.HasValue)
             {
                 byte owner = mb.OwnerFactionId.Value;
                 Faction f = state.FindFaction(owner);
-                if (f != null) ownerTreasury = f.Treasury;
+                if (f != null)
+                {
+                    ownerTreasury = f.Treasury;
+                    // Task35: 研究点・解禁Tier・次のTierまでのコストをUI表示用に写す。
+                    ownerResearchPoints = f.ResearchPoints;
+                    ownerUnlockedTier = f.UnlockedTier;
+                    ownerNextTierCost = f.UnlockedTier < 5
+                        ? Research.CostToUnlock((byte)(f.UnlockedTier + 1))
+                        : 0f;
+                }
 
                 for (int u = 0; u < state.Units.Count; u++)
                 {
@@ -95,7 +121,11 @@ namespace CSWarfront.Game
                 DefenseAttack = mb.DefenseAttack,
                 DefenseRange = mb.DefenseRange,
                 AutoProduce = mb.AutoProduce,
-                QueuedTypeKeys = queuedTypeKeys
+                QueuedTypeKeys = queuedTypeKeys,
+                LastIncome = mb.LastIncome,
+                OwnerResearchPoints = ownerResearchPoints,
+                OwnerUnlockedTier = ownerUnlockedTier,
+                OwnerNextTierCost = ownerNextTierCost
             };
         }
     }

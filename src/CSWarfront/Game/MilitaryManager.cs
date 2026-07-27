@@ -36,7 +36,10 @@ namespace CSWarfront.Game
         private static int _diagTicks;
         private const int DiagIntervalTicks = 300;
         private const float EconomyIntervalHours = 6f;      // 経済tick間隔（ゲーム内時間、1日4回）
-        private const float IncomeRate = 0.01f;
+        // Task35: 0.01fだと収入額が小さすぎてUI上ほぼ0にしか見えず「収入が実装されていない」という
+        // 誤解の原因になっていた。0.04fはゲームバランス調整用の値（バランスノブ）であり、
+        // プレイテストの結果次第で今後さらに調整してよい。
+        private const float IncomeRate = 0.04f;
 
         // 道路グラフの再構築間隔（ゲーム内時間）。プレイヤーが道路を敷設/破壊し続けるため定期的に作り直す
         // （Task23）。simスレッドのみが触る。
@@ -337,6 +340,7 @@ namespace CSWarfront.Game
                         if (b.OwnerFactionId == null) continue;
                         float inc = TerritoryIncome.ForBase(b, samples, IncomeRate);
                         State.FindFaction(b.OwnerFactionId.Value)?.AddTreasury(inc);
+                        b.LastIncome = inc; // Task35: UIが基地パネルへ表示するためのキャッシュ（非永続化）
                     }
                 }
 

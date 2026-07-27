@@ -384,6 +384,22 @@ namespace CSWarfront.Game.UI
                 sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
                 sb.Append("\n防衛: 攻撃").Append(snapshot.DefenseAttack.ToString("0")).Append("/h 射程").Append(snapshot.DefenseRange.ToString("0"));
                 sb.Append("\n軍資金: ").Append(snapshot.OwnerTreasury.ToString("0"));
+
+                // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切
+                // 出ていなかったため「未実装」に見えていた。0のときも表示することでその事実を伝える。
+                sb.Append("\n収入: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");
+
+                sb.Append("\n技術: Tier ").Append(snapshot.OwnerUnlockedTier);
+                if (snapshot.OwnerUnlockedTier >= 5)
+                {
+                    sb.Append("  (最大)");
+                }
+                else
+                {
+                    sb.Append("  (研究点 ").Append(snapshot.OwnerResearchPoints.ToString("0"))
+                      .Append(" / 次まで ").Append(snapshot.OwnerNextTierCost.ToString("0")).Append(")");
+                }
+
                 sb.Append("\n部隊数: ").Append(snapshot.OwnerUnitCount);
 
                 if (string.IsNullOrEmpty(snapshot.ProducingTypeKey))

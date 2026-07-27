@@ -169,4 +169,58 @@ public class WarStateSerializerTests
         Assert.Equal(3.5f, r.Bases[0].CaptureGraceHours, 3);
         Assert.True(r.Bases[0].AutoProduce);
     }
+
+    // --- Task35: v3 -> v4, ResearchPoints/UnlockedTier appended at the end of the per-faction block ---
+
+    [Fact]
+    public void Roundtrip_v4_preserves_ResearchPoints_and_UnlockedTier()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Factions[0].AddResearchPoints(340f);
+        s.Factions[0].UnlockedTier = 3;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Equal(340f, r.FindFaction(0).ResearchPoints, 3);
+        Assert.Equal((byte)3, r.FindFaction(0).UnlockedTier);
+        // second faction, never touched, keeps its defaults
+        Assert.Equal(0f, r.FindFaction(1).ResearchPoints, 3);
+        Assert.Equal((byte)1, r.FindFaction(1).UnlockedTier);
+    }
+
+    /// <summary>旧形式（v3、勢力ブロック末尾にResearchPoints/UnlockedTierが無い）を読んでも例外にならず、
+    /// ResearchPointsが0f・UnlockedTierが1（従来のTier1のみ解禁）で復元されることを保証する。</summary>
+    [Fact]
+    public void Deserialize_v3_format_defaults_ResearchPoints_to_zero_and_UnlockedTier_to_one()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(3); // version 3（ResearchPoints/UnlockedTier導入前）
+            w.Write(1); // factions count
+            w.Write((byte)0); w.Write("Red");
+            w.Write(50f); // treasury
+            w.Write(false); w.Write((ushort)0); // no home base
+            w.Write(true); w.Write(false); // isPlayer, eliminated
+            // 注意: v3にはResearchPoints/UnlockedTierが無いのでここで終わり
+            for (int a = 0; a < 5; a++)
+                for (int b = 0; b < 5; b++)
+                    w.Write((int)Relation.Neutral);
+            w.Write(0); // bases count
+            w.Write(0); // units count
+            w.Write((uint)1); // nextInstanceId
+            w.Flush();
+            bytes = ms.ToArray();
+        }
+
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Factions);
+        Assert.Equal(50f, r.FindFaction(0).Treasury, 3);
+        Assert.Equal(0f, r.FindFaction(0).ResearchPoints, 3);
+        Assert.Equal((byte)1, r.FindFaction(0).UnlockedTier);
+    }
 }

@@ -87,6 +87,31 @@ public class ManualProductionTests
         Assert.Equal(MilitaryBase.ManualQueueCap, s.Bases[0].Queue.Count);
     }
 
+    // --- Task35: TryEnqueue TierLocked ---
+
+    [Fact]
+    public void TryEnqueue_TierLocked_when_type_tier_exceeds_UnlockedTier()
+    {
+        var s = WithBase(10000f); // new Faction defaults to UnlockedTier = 1
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "Tank_T4");
+
+        Assert.Equal(QueueResult.TierLocked, r);
+        Assert.Empty(s.Bases[0].Queue);
+        Assert.Equal(10000f, s.Factions[0].Treasury, 3); // untouched, nothing was spent
+    }
+
+    [Fact]
+    public void TryEnqueue_succeeds_when_UnlockedTier_covers_the_types_tier()
+    {
+        var s = WithBase(10000f);
+        s.Factions[0].UnlockedTier = 4;
+
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "Tank_T4");
+
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Single(s.Bases[0].Queue);
+    }
+
     // --- TryCancelLast ---
 
     [Fact]
@@ -131,17 +156,48 @@ public class ManualProductionTests
         Assert.Equal(1000f, s.Factions[0].Treasury, 3);
     }
 
+    // --- Task35: in-progress orders can now be cancelled with a partial refund ---
+
     [Fact]
-    public void TryCancelLast_cannot_cancel_sole_order_that_is_already_in_progress()
+    public void TryCancelLast_can_cancel_sole_order_already_in_progress_with_partial_refund()
+    {
+        var s = WithBase(1000f);
+        s.Bases[0].Queue.Add(new ProductionOrder("Tank_T1", 60f, 8f) { Progress = 0.5f });
+
+        QueueResult r = ManualProduction.TryCancelLast(s, 100);
+
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Empty(s.Bases[0].Queue);
+        // refund = Cost * (1 - Progress) = 60 * 0.5 = 30
+        Assert.Equal(1030f, s.Factions[0].Treasury, 3);
+    }
+
+    [Fact]
+    public void TryCancelLast_barely_started_order_refunds_almost_the_full_cost()
     {
         var s = WithBase(1000f);
         s.Bases[0].Queue.Add(new ProductionOrder("Tank_T1", 60f, 8f) { Progress = 0.1f });
 
         QueueResult r = ManualProduction.TryCancelLast(s, 100);
 
-        Assert.Equal(QueueResult.QueueFull, r);
-        Assert.Single(s.Bases[0].Queue); // untouched, refund did not happen
-        Assert.Equal(1000f, s.Factions[0].Treasury, 3);
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Empty(s.Bases[0].Queue);
+        // refund = 60 * (1 - 0.1) = 54
+        Assert.Equal(1054f, s.Factions[0].Treasury, 3);
+    }
+
+    [Fact]
+    public void TryCancelLast_nearly_finished_order_refunds_almost_nothing()
+    {
+        var s = WithBase(1000f);
+        s.Bases[0].Queue.Add(new ProductionOrder("Tank_T1", 60f, 8f) { Progress = 0.95f });
+
+        QueueResult r = ManualProduction.TryCancelLast(s, 100);
+
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Empty(s.Bases[0].Queue);
+        // refund = 60 * (1 - 0.95) = 3
+        Assert.Equal(1003f, s.Factions[0].Treasury, 3);
     }
 
     [Fact]

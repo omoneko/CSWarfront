@@ -32,7 +32,12 @@ namespace CSWarfront.Core
                 // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
                 // 兵科相性倍率(CombatMatchup、Task29)に比例する。
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup;
+                // 撃破報酬（Task35）: このダメージでHPが初めて0以下へ落ちた瞬間だけ、攻撃側(self)の勢力へ
+                // Research.KillReward を与える。wasAlive フラグで「このダメージがとどめだったか」を判定し、
+                // 同tick内で同じ的へ複数回ダメージが入っても二重付与しない。
+                bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= dmg;
+                if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
             }
             // 2) 死亡判定
             for (int i = 0; i < state.Units.Count; i++)
@@ -40,6 +45,16 @@ namespace CSWarfront.Core
                 var u = state.Units[i];
                 if (u.State != UnitState.Dead && u.CurrentHP <= 0f) u.State = UnitState.Dead;
             }
+        }
+
+        /// <summary>撃破報酬（Task35）を killerFactionId の勢力へ加算する。victimType/勢力が見つからなければ
+        /// 何もしない（防御的：整合性が崩れているケースで例外にしないため）。</summary>
+        private static void AwardKillReward(WarState state, byte killerFactionId, UnitType victimType)
+        {
+            if (victimType == null) return;
+            Faction killer = state.FindFaction(killerFactionId);
+            if (killer == null) return;
+            killer.AddResearchPoints(Research.KillReward(victimType));
         }
     }
 }

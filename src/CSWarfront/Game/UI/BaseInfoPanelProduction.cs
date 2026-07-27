@@ -28,11 +28,16 @@ namespace CSWarfront.Game.UI
         /// <summary>キュー表示で先頭以降を何件まで並べるか。それ以上は「…」で省略する（Task34仕様）。</summary>
         private const int QueueDisplayMax = 3;
 
+        /// <summary>「研究投資」ボタン1クリックあたりの投資額（Task35）。</summary>
+        private const float ResearchInvestAmount = 50f;
+
         private static UIButton _autoProduceButton;
         private static UILabel _autoProduceHintLabel;
         private static UIDropDown _unitDropdown;
         private static UIButton _queueButton;
         private static UIButton _cancelButton;
+        private static UIButton _investButton;
+        private static UIButton _unlockButton;
         private static UILabel _productionMessageLabel;
         private static UILabel _queueLabel;
 
@@ -40,14 +45,27 @@ namespace CSWarfront.Game.UI
         /// （TryEnqueue等と違いUI側は現在値を保持していないと即座にトグルできないため）。</summary>
         private static bool _lastAutoProduce = true;
 
+        /// <summary>直近のスナップショットの所属勢力ID（Task35）。研究投資/Tier解禁ボタンのクリック時に
+        /// MilitaryManagerへ渡すfactionIdとして使う（BaseUiSnapshotはOwnerFactionIdだけでなく研究値も
+        /// 持つが、ボタンのクリックハンドラはスナップショット全体を保持しないためここに覚えておく）。</summary>
+        private static byte? _lastOwnerFactionId;
+
+        /// <summary>直近のスナップショットの所属勢力UnlockedTier（Task35）。Tier解禁ボタンの失敗理由
+        /// （研究点不足 か 既に最大Tier か）を判定するために覚えておく。</summary>
+        private static byte _lastOwnerUnlockedTier = 1;
+
         /// <summary>生産セクションの最下端Y（RecomputeExpandedHeightが全体パネル高さの算出に使う）。</summary>
         private static float _productionBottomY;
 
-        /// <summary>ドロップダウン表示用テキスト（例: "Tank_T3  (¥153)"）。LandUnitRosterはランタイムで
-        /// 変化しないため、一度だけ構築して使い回す（BuildProductionSectionから呼ばれる）。</summary>
+        /// <summary>ドロップダウン表示用テキスト（例: "Tank_T3  (¥153)" / 未解禁なら
+        /// "Tank_T4  (¥168) [未解禁]"、Task35）。所属勢力のUnlockedTierに依存するため、値が変わった
+        /// ときだけ再構築する（_lastUnitDropdownUnlockedTierで判定）。</summary>
         private static string[] _unitDropdownItems;
         /// <summary>_unitDropdownItems と同じ並びのTypeKey（実際の発注に使う値）。</summary>
         private static string[] _unitDropdownTypeKeys;
+        /// <summary>_unitDropdownItemsを最後に構築したときのUnlockedTier。0は「まだ構築していない」
+        /// を表すセンチネル（有効なTierは1..5のため衝突しない、Task35）。</summary>
+        private static byte _lastUnitDropdownUnlockedTier;
 
         private static readonly StringBuilder _queueBuilder = new StringBuilder(128);
 
@@ -58,7 +76,7 @@ namespace CSWarfront.Game.UI
         {
             if (_panel == null) return;
 
-            EnsureUnitDropdownItemsBuilt();
+            EnsureUnitDropdownItemsBuilt(1); // 初期表示は未所属/UnlockedTier既定値(1)相当。実値は初回RefreshContentsで反映される。
 
             _autoProduceButton = _panel.AddUIComponent<UIButton>();
             _autoProduceButton.size = new Vector2(ToggleButtonWidth, ToggleButtonHeight);
@@ -101,6 +119,27 @@ namespace CSWarfront.Game.UI
             _cancelButton.pressedBgSprite = "ButtonMenuPressed";
             _cancelButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, 0f);
             _cancelButton.eventClick += OnCancelClick;
+
+            // Task35: 資金→研究点への投資、および研究点によるTier解禁。
+            _investButton = _panel.AddUIComponent<UIButton>();
+            _investButton.text = "研究投資 (¥" + ResearchInvestAmount.ToString("0") + ")";
+            _investButton.textScale = 0.8f;
+            _investButton.size = new Vector2(halfWidth, ProductionButtonHeight);
+            _investButton.normalBgSprite = "ButtonMenu";
+            _investButton.hoveredBgSprite = "ButtonMenuHovered";
+            _investButton.pressedBgSprite = "ButtonMenuPressed";
+            _investButton.relativePosition = new Vector3(Pad, 0f);
+            _investButton.eventClick += OnInvestClick;
+
+            _unlockButton = _panel.AddUIComponent<UIButton>();
+            _unlockButton.text = "Tier解禁";
+            _unlockButton.textScale = 0.8f;
+            _unlockButton.size = new Vector2(halfWidth, ProductionButtonHeight);
+            _unlockButton.normalBgSprite = "ButtonMenu";
+            _unlockButton.hoveredBgSprite = "ButtonMenuHovered";
+            _unlockButton.pressedBgSprite = "ButtonMenuPressed";
+            _unlockButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, 0f);
+            _unlockButton.eventClick += OnUnlockClick;
 
             _productionMessageLabel = _panel.AddUIComponent<UILabel>();
             _productionMessageLabel.textScale = 0.7f;
@@ -162,20 +201,34 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>陸上ユニットロスター全体（LandUnitRoster、カテゴリ宣言順→Tier1〜5の順）から
-        /// ドロップダウンの表示テキストと発注用TypeKeyの対応配列を一度だけ構築する。</summary>
-        private static void EnsureUnitDropdownItemsBuilt()
+        /// ドロップダウンの表示テキストと発注用TypeKeyの対応配列を構築する。unlockedTierを超えるTierの
+        /// 項目には末尾に " [未解禁]" を付ける（Task35：選択自体は可能なままにして、生産ボタンが
+        /// TierLockedを報告する。何が研究で解禁されるか一目で分かるようにするため選択肢からは外さない）。
+        /// unlockedTierが前回と同じであれば何もしない（毎フレーム呼ばれてもリストを再構築しない）。</summary>
+        private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier)
         {
-            if (_unitDropdownItems != null) return;
+            if (_unitDropdownItems != null && _lastUnitDropdownUnlockedTier == unlockedTier) return;
 
             var items = new List<string>();
             var keys = new List<string>();
             foreach (UnitType t in LandUnitRoster.All())
             {
-                items.Add(t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")");
+                string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
+                if (t.Tier > unlockedTier) label += " [未解禁]";
+                items.Add(label);
                 keys.Add(t.TypeKey);
             }
             _unitDropdownItems = items.ToArray();
             _unitDropdownTypeKeys = keys.ToArray();
+            _lastUnitDropdownUnlockedTier = unlockedTier;
+
+            if (_unitDropdown != null)
+            {
+                int prevSelected = _unitDropdown.selectedIndex;
+                _unitDropdown.items = _unitDropdownItems;
+                if (prevSelected >= 0 && prevSelected < _unitDropdownItems.Length)
+                    _unitDropdown.selectedIndex = prevSelected;
+            }
         }
 
         /// <summary>_collapsed の反映（BaseInfoPanel.ApplyCollapsedStateから呼ばれる）。</summary>
@@ -186,6 +239,8 @@ namespace CSWarfront.Game.UI
             if (_unitDropdown != null) _unitDropdown.isVisible = !collapsed;
             if (_queueButton != null) _queueButton.isVisible = !collapsed;
             if (_cancelButton != null) _cancelButton.isVisible = !collapsed;
+            if (_investButton != null) _investButton.isVisible = !collapsed;
+            if (_unlockButton != null) _unlockButton.isVisible = !collapsed;
             if (_productionMessageLabel != null) _productionMessageLabel.isVisible = !collapsed;
             if (_queueLabel != null) _queueLabel.isVisible = !collapsed;
         }
@@ -200,6 +255,9 @@ namespace CSWarfront.Game.UI
             float y = _statusLabel.relativePosition.y + _statusLabel.height + ProductionRowGap;
 
             _lastAutoProduce = snapshot.AutoProduce;
+            _lastOwnerFactionId = snapshot.OwnerFactionId;
+            _lastOwnerUnlockedTier = snapshot.OwnerUnlockedTier;
+            EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier); // Task35: 未解禁Tierの表示更新
 
             if (_autoProduceButton != null)
             {
@@ -219,6 +277,11 @@ namespace CSWarfront.Game.UI
             float halfWidth = (width - ProductionRowGap) / 2f;
             if (_queueButton != null) _queueButton.relativePosition = new Vector3(Pad, y);
             if (_cancelButton != null) _cancelButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, y);
+            y += ProductionButtonHeight + ProductionRowGap;
+
+            // Task35: 研究投資／Tier解禁ボタン行。
+            if (_investButton != null) _investButton.relativePosition = new Vector3(Pad, y);
+            if (_unlockButton != null) _unlockButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, y);
             y += ProductionButtonHeight + ProductionRowGap;
 
             if (_productionMessageLabel != null) _productionMessageLabel.relativePosition = new Vector3(Pad, y);
@@ -311,12 +374,56 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>「研究投資」ボタン（Task35）。_lastOwnerFactionId へ ResearchInvestAmount を投資する。
+        /// 失敗理由はResearch.TryInvestの実装上、資金不足のみ（fが見つからない等の防御ケースは除く）。</summary>
+        private static void OnInvestClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                if (_currentBaseId == 0 || !_lastOwnerFactionId.HasValue)
+                {
+                    SetProductionMessage("所有者がいません");
+                    return;
+                }
+                bool ok = MilitaryManager.TryInvestResearch(_lastOwnerFactionId.Value, ResearchInvestAmount);
+                SetProductionMessage(ok ? "" : "資金不足");
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseInfoPanel.OnInvestClick error: " + e);
+            }
+        }
+
+        /// <summary>「Tier解禁」ボタン（Task35）。_lastOwnerFactionId の次Tierを解禁する。失敗時は
+        /// 直近スナップショットのUnlockedTierから「既に最大Tier」か「研究点不足」かを区別して表示する
+        /// （MilitaryManager.TryUnlockNextTierはbool一つしか返さないため、失敗理由はUI側が持つ直近の
+        /// 状態から判断する）。</summary>
+        private static void OnUnlockClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                if (_currentBaseId == 0 || !_lastOwnerFactionId.HasValue)
+                {
+                    SetProductionMessage("所有者がいません");
+                    return;
+                }
+                bool ok = MilitaryManager.TryUnlockNextTier(_lastOwnerFactionId.Value);
+                if (ok) SetProductionMessage("");
+                else SetProductionMessage(_lastOwnerUnlockedTier >= 5 ? "最大Tier" : "研究点不足");
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseInfoPanel.OnUnlockClick error: " + e);
+            }
+        }
+
         private static void SetProductionMessage(string text)
         {
             if (_productionMessageLabel != null) _productionMessageLabel.text = text;
         }
 
-        /// <summary>QueueResult -> 発注失敗理由の短い日本語文言（Task34仕様の例: 資金不足／キューが一杯）。</summary>
+        /// <summary>QueueResult -> 発注失敗理由の短い日本語文言（Task34仕様の例: 資金不足／キューが一杯。
+        /// Task35でTierLockedを追加）。</summary>
         private static string EnqueueResultMessage(QueueResult r)
         {
             switch (r)
@@ -326,6 +433,7 @@ namespace CSWarfront.Game.UI
                 case QueueResult.UnknownType: return "不明な種別です";
                 case QueueResult.QueueFull: return "キューが一杯";
                 case QueueResult.NotAffordable: return "資金不足";
+                case QueueResult.TierLocked: return "未解禁のTierです";
                 default: return "";
             }
         }
@@ -350,18 +458,26 @@ namespace CSWarfront.Game.UI
             if (_autoProduceButton != null) _autoProduceButton.eventClick -= OnAutoProduceClick;
             if (_queueButton != null) _queueButton.eventClick -= OnQueueClick;
             if (_cancelButton != null) _cancelButton.eventClick -= OnCancelClick;
+            if (_investButton != null) _investButton.eventClick -= OnInvestClick;
+            if (_unlockButton != null) _unlockButton.eventClick -= OnUnlockClick;
 
             _autoProduceButton = null;
             _autoProduceHintLabel = null;
             _unitDropdown = null;
             _queueButton = null;
             _cancelButton = null;
+            _investButton = null;
+            _unlockButton = null;
             _productionMessageLabel = null;
             _queueLabel = null;
             _lastAutoProduce = true;
+            _lastOwnerFactionId = null;
+            _lastOwnerUnlockedTier = 1;
             _productionBottomY = 0f;
-            // _unitDropdownItems/_unitDropdownTypeKeys はLandUnitRoster由来の不変データのため保持したままでよい。
-            // レベル再ロードのたびに再構築する必要は無く、EnsureUnitDropdownItemsBuiltがnullチェックで再利用する。
+            // Task35: 表示テキストはUnlockedTierに依存するようになったため、次セッションで確実に
+            // 再構築させるためセンチネルへ戻す（_unitDropdownItems自体はLandUnitRoster由来で内容は
+            // 不変のため保持したままでよく、EnsureUnitDropdownItemsBuiltがTier不一致から再構築する）。
+            _lastUnitDropdownUnlockedTier = 0;
         }
     }
 }

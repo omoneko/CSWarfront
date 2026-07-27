@@ -6,8 +6,9 @@ namespace CSWarfront.Core
     {
         // v1 -> v2: 基地ブロック末尾に CaptureGraceHours (float) を追加（Task24）。
         // v2 -> v3: 基地ブロックのさらに末尾に AutoProduce (bool) を追加（Task34）。
+        // v3 -> v4: 勢力ブロックの末尾に ResearchPoints (float) / UnlockedTier (byte) を追加（Task35）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 3;
+        private const int Version = 4;
 
         public static byte[] Serialize(WarState s)
         {
@@ -23,6 +24,7 @@ namespace CSWarfront.Core
                     w.Write(f.Treasury);
                     w.Write(f.HomeBaseId.HasValue); w.Write(f.HomeBaseId.HasValue ? f.HomeBaseId.Value : (ushort)0);
                     w.Write(f.IsPlayer); w.Write(f.Eliminated);
+                    w.Write(f.ResearchPoints); w.Write(f.UnlockedTier); // v4で追加（Task35）。ブロック末尾に追記。
                 }
                 // relations（5x5固定）
                 for (int a = 0; a < 5; a++)
@@ -66,7 +68,7 @@ namespace CSWarfront.Core
             using (var ms = new MemoryStream(bytes))
             using (var r = new BinaryReader(ms))
             {
-                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）
+                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）、v4以降（ResearchPoints/UnlockedTierの有無）
                 int fcount = r.ReadInt32();
                 for (int i = 0; i < fcount; i++)
                 {
@@ -75,6 +77,16 @@ namespace CSWarfront.Core
                     bool hasHome = r.ReadBoolean(); ushort home = r.ReadUInt16();
                     if (hasHome) f.HomeBaseId = home;
                     f.IsPlayer = r.ReadBoolean(); f.Eliminated = r.ReadBoolean();
+                    if (version >= 4)
+                    {
+                        f.ResearchPoints = r.ReadSingle();
+                        f.UnlockedTier = r.ReadByte();
+                    }
+                    else
+                    {
+                        f.ResearchPoints = 0f; // v3以前は既定値0（研究未着手）
+                        f.UnlockedTier = 1;    // v3以前は既定値1（Tier1のみ解禁の従来挙動）
+                    }
                     s.Factions.Add(f);
                 }
                 for (int a = 0; a < 5; a++)
