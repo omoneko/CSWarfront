@@ -80,6 +80,25 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
+        /// 指定idの可視表現の「現在の」ワールド座標を返す（メインスレッド専用）。
+        /// Task32: UnitInfoPanelがユニットへ追従する際、スナップショット由来の座標ではなく
+        /// 実際に描画されているGameObjectのtransform.positionを権威とするために使う
+        /// （パネルは「描画されているものそのもの」を追いかけるべきで、スナップショットの
+        /// コピー元とはタイミングがずれ得るため）。見た目が未生成/破棄済みならfalseを返す。
+        /// </summary>
+        public static bool TryGetPosition(uint instanceId, out Vector3 position)
+        {
+            position = default(Vector3);
+
+            VisualEntry entry;
+            if (!_visuals.TryGetValue(instanceId, out entry)) return false;
+            if (entry == null || entry.GameObject == null) return false;
+
+            position = entry.GameObject.transform.position;
+            return true;
+        }
+
+        /// <summary>
         /// スナップショットに基づき、生成/移動/破棄を宣言的に反映する（メインスレッド専用）。
         /// スナップショットに存在しないid（死亡・削除・未ロード含む）はここで破棄される。
         /// </summary>

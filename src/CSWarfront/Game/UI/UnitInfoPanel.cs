@@ -8,19 +8,19 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// クリック選択したユニットのステータスパネル（Task31）。UnitSelection.SelectedInstanceIdが0以外、
+    /// クリック選択したユニットのステータスパネル（Task31/Task32）。UnitSelection.SelectedInstanceIdが0以外、
     /// かつ MilitaryManager.TryGetUnitSnapshot がそのidの生存ユニットを返す間だけ表示する。
     ///
-    /// BaseInfoPanel（Game/UI/BaseInfoPanel.cs）と異なり「バニラパネルに追従」する方式ではない
+    /// Task32: 画面上の対象ユニットへ追従する（CSのバニラ車両/市民ワールド情報パネルと同様）。
+    /// BaseInfoPanel（Game/UI/BaseInfoPanel.cs）と異なり「バニラパネルの隣に追従」する方式ではない
     /// —— ユニット選択はCSのWorldInfoPanelシステムと無関係な自前クリック判定（UnitSelection）のため、
-    /// 追従すべきバニラパネルが存在しない。代わりに画面右上隅に固定位置の常設パネルとして生成する。
-    /// BaseInfoPanelは通常バニラの建物情報パネル（画面下寄りに出ることが多い）の隣に出るため、
-    /// 反対側（右上）に固定することで両パネルの重なりを避ける。
+    /// 追従すべきバニラパネルが存在しない。代わりに UnitVisuals.TryGetPosition で取得した実際の
+    /// 描画位置（ワールド座標）を毎フレーム画面座標へ変換し、その真上にパネルを配置する。
     ///
     /// スレッド注記: このクラスの public メソッドは全てメインスレッド専用（Unity UI API呼び出しのため）。
     /// WarfrontThreadingExtension.OnUpdate から毎フレーム呼ばれる想定。WarState へは一切直接触れず、
-    /// MilitaryManager.TryGetUnitSnapshot 経由でのみ読む（_stateLock はその内部で短時間だけ取られ、
-    /// ここでは保持しない）。
+    /// MilitaryManager.TryGetUnitSnapshot / UnitVisuals.TryGetPosition 経由でのみ読む（_stateLock は
+    /// 前者の内部で短時間だけ取られ、ここでは保持しない）。
     /// </summary>
     internal static class UnitInfoPanel
     {
@@ -33,7 +33,13 @@ namespace CSWarfront.Game.UI
         // ステータス表示（所属/体力/攻撃・射程/装甲・速度/状態/目標/経路の最大7行）を
         // 1行あたり約16pxで見積もった予約高さ。
         private const float StatusLabelReserveHeight = 120f;
-        private const float ScreenMargin = 16f;
+
+        /// <summary>
+        /// Task32: パネルをユニットの真上に置くための、ワールド座標での上方オフセット。
+        /// 可視性マーカー（UnitVisuals.MarkerSize=8、地面から MarkerHeight=5 持ち上げて中心配置なので
+        /// 上端はおよそ地上+9）より確実に高い位置を狙い、+12 とした（上端との間に約3ユニットの余白）。
+        /// </summary>
+        private static readonly Vector3 VerticalOffset = new Vector3(0f, 12f, 0f);
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
@@ -91,9 +97,7 @@ namespace CSWarfront.Game.UI
                 }
 
                 RefreshContents(snapshot);
-                PositionTopRight(_panel);
-                if (!_panel.isVisible) _panel.Show();
-                _panel.BringToFront();
+                UpdateTrackingPosition(selected);
             }
             catch (Exception e)
             {
@@ -235,16 +239,78 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>画面右上隅に固定位置で表示する（クラスコメント参照：BaseInfoPanelとの重なりを避けるため）。</summary>
-        private static void PositionTopRight(UIPanel panel)
+        /// <summary>
+        /// Task32: 選択中ユニットの実際の描画位置を毎フレーム画面座標へ変換し、その真上にパネルを追従させる。
+        /// 位置決めに必要な前提（可視表現・メインカメラ・UIView）のいずれかが今フレーム揃わない場合、
+        /// または対象がカメラの後方にある場合は、選択を維持したままこのフレームだけパネルを隠す
+        /// （反転表示や誤った位置での表示を避けるため）。
+        ///
+        /// 座標変換API（ColossalManaged.dll をリフレクション/IL逆アセンブルで確認済み）:
+        ///   - UIView.GetAView(): static UIView
+        ///   - UIView.WorldPointToGUI(Camera cam, Vector3 worldPoint): Vector2
+        ///     実装は「Camera.WorldToScreenPoint → x/yをそれぞれ (GetScreenResolution() / uiCamera.pixelWidth・
+        ///     pixelHeight) でスケール → UIView.ScreenPointToGUI」という順で、Unity画面座標（左下原点、実ピクセル）
+        ///     を UIView の仮想GUI解像度（GetScreenResolution()、relativePosition等が使う座標系）へ正しく
+        ///     変換してくれる。
+        ///   - UIView.ScreenPointToGUI(Vector2): Vector2 単体では
+        ///     `result.y = GetScreenResolution().y - result.y` という単純なY反転のみで、実画面ピクセルと
+        ///     UIViewの仮想解像度が異なる場合（UIスケール設定等）にX/Yのスケール補正を行わない。
+        ///     そのため本メソッドでは「カメラ背後判定」にのみ Camera.WorldToScreenPoint を自前で呼び、
+        ///     実際のGUI座標への変換は上記の理由から WorldPointToGUI に委ねる
+        ///     （どちらも UIView.GetAView() 経由で得た同一 UIView インスタンス上のメソッド）。
+        /// </summary>
+        private static void UpdateTrackingPosition(uint instanceId)
         {
-            UIView view = UIView.GetAView();
-            if (view == null || panel == null) return;
+            if (_panel == null) return;
 
+            Vector3 unitPos;
+            if (!UnitVisuals.TryGetPosition(instanceId, out unitPos))
+            {
+                Hide(); // 見た目が今フレーム未生成/破棄済み。選択は維持し次フレーム再試行。
+                return;
+            }
+
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                Hide(); // カメラ未準備（レベルロード中等）。選択は維持し次フレーム再試行。
+                return;
+            }
+
+            UIView view = UIView.GetAView();
+            if (view == null)
+            {
+                Hide();
+                return;
+            }
+
+            Vector3 targetPos = unitPos + VerticalOffset;
+
+            // カメラ後方判定専用。GUI座標そのものはこの下で WorldPointToGUI に委ねる
+            // （クラスコメント参照：ScreenPointToGUI単体はスケール未補正のため）。
+            Vector3 screenPoint = cam.WorldToScreenPoint(targetPos);
+            if (screenPoint.z <= 0f)
+            {
+                // カメラの後方＝そのままではミラー表示されてしまうため、このフレームは隠す（選択は維持）。
+                Hide();
+                return;
+            }
+
+            Vector2 guiPoint = view.WorldPointToGUI(cam, targetPos);
             Vector2 res = view.GetScreenResolution();
-            float x = Mathf.Max(0f, res.x - panel.width - ScreenMargin);
-            float y = ScreenMargin;
-            panel.relativePosition = new Vector3(x, y);
+
+            // 水平方向はユニット中心、垂直方向はパネル全体をguiPointの上に来るように配置。
+            float x = guiPoint.x - _panel.width * 0.5f;
+            float y = guiPoint.y - _panel.height;
+
+            // 画面のどの辺からもパネル全体がはみ出さないようクランプする。
+            x = Mathf.Clamp(x, 0f, Mathf.Max(0f, res.x - _panel.width));
+            y = Mathf.Clamp(y, 0f, Mathf.Max(0f, res.y - _panel.height));
+
+            _panel.relativePosition = new Vector3(x, y);
+
+            if (!_panel.isVisible) _panel.Show();
+            _panel.BringToFront();
         }
     }
 }
