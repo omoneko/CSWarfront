@@ -63,6 +63,15 @@ namespace CSWarfront.Core
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
 
+                // Task48: Hold/RallyHold は「持ち場を守る受動防御」定義そのものなので遮蔽移動の対象外
+                // （追撃や遮蔽から遮蔽への前進を一切しない）。FreeAdvanceはAiControlledと同じ扱いのため
+                // ここでは特別扱いしない（このメソッドの残りのロジックがそのまま適用される）。
+                if (u.Order == UnitOrder.Hold || u.Order == UnitOrder.RallyHold)
+                {
+                    ClearCover(u);
+                    continue;
+                }
+
                 // Mode 1: 自勢力圏内にいる間は遮蔽移動をしない（速く・道路沿いに移動させたい）。
                 // 圏内に居る/戻った時点でクールダウンもリセットし、圏外へ出た次のtickで
                 // 即座に遮蔽の評価を始められるようにする（残クールダウンを持ち越さない）。

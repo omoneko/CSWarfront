@@ -572,6 +572,8 @@ namespace CSWarfront.Game
             UI.UnitInfoPanel.Destroy();
             UI.AssetAssignPanel.Destroy(); // Task36
             UI.UnitSelection.Clear();
+            UI.UnitBoxSelection.Destroy(); // Task48: 範囲選択の矩形/ハイライトGameObjectと選択状態
+            UI.UnitCommandInput.Reset(); // Task48: 集結地点のターゲティング状態を持ち越さない
         }
     }
 }

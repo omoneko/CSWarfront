@@ -30,12 +30,46 @@ namespace CSWarfront.Game
                     WarfrontSettings.BuildFactionId,
                     i => WarfrontSettings.SetBuildFactionId(i));
 
+                AddUnitCommandHotkeyUI(helper);
+
                 OptionsModelAssignPage.Build(helper);
             }
             catch (Exception e)
             {
                 ModConfig.LogError("OnSettingsUI error: " + e);
             }
+        }
+
+        /// <summary>Task48: 範囲選択した部隊への指揮コマンド（自由進撃/停止/集結待機）のホットキー割り当てUI。
+        /// MissileDisaster.ModSettingsのキーバインドドロップダウン（KeyOptions配列のインデックスで選択値を
+        /// 管理する）と同じパターン。WarfrontSettingsはメモリ内保持のみ（クラス冒頭のコメント参照）なので、
+        /// ここではGameSettings/SavedIntを一切経由せず、選択されたKeyCodeを直接プロパティへ代入するだけでよい。</summary>
+        private static void AddUnitCommandHotkeyUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup("Unit commands (select units with a box drag, then press)");
+
+            string[] keyNames = new string[WarfrontSettings.KeyOptions.Length];
+            for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
+                keyNames[i] = WarfrontSettings.KeyOptions[i].ToString();
+
+            group.AddDropdown("Free advance (march at full speed toward the nearest hostile base)",
+                keyNames, IndexOf(WarfrontSettings.FreeAdvanceKey),
+                i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.FreeAdvanceKey = WarfrontSettings.KeyOptions[i]; });
+
+            group.AddDropdown("Hold (stop in place, still fires at anything in range)",
+                keyNames, IndexOf(WarfrontSettings.HoldKey),
+                i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.HoldKey = WarfrontSettings.KeyOptions[i]; });
+
+            group.AddDropdown("Rally (then right-click a destination; units move there, stop, and fight defensively only)",
+                keyNames, IndexOf(WarfrontSettings.RallyKey),
+                i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.RallyKey = WarfrontSettings.KeyOptions[i]; });
+        }
+
+        private static int IndexOf(UnityEngine.KeyCode key)
+        {
+            for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
+                if (WarfrontSettings.KeyOptions[i] == key) return i;
+            return 0;
         }
     }
 }

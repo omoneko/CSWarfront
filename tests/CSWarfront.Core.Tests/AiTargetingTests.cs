@@ -245,6 +245,58 @@ public class AiTargetingTests
         Assert.Equal(100f, unit.OrderTargetPos.Value.X, 3);
     }
 
+    // --- Task48: UnitInstance.Order によるAssignAdvanceのスキップ ---
+
+    [Fact]
+    public void AssignAdvance_skips_units_with_Hold_order()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.Hold;
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 1f);
+
+        Assert.False(u.OrderTargetPos.HasValue);
+        Assert.Equal(UnitState.Idle, u.State);
+        Assert.Null(u.Path);
+    }
+
+    [Fact]
+    public void AssignAdvance_skips_units_with_RallyHold_order()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(5, 0, 5);
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 1f);
+
+        // AIは目標基地を一切割り当てない。RallyPointもState==Movingのまま(呼び出し元が設定)不変。
+        Assert.False(u.OrderTargetPos.HasValue);
+        Assert.Equal(new WorldPos(5, 0, 5).X, u.RallyPoint.Value.X, 3);
+        Assert.Null(u.Path);
+    }
+
+    [Fact]
+    public void AssignAdvance_still_targets_units_with_FreeAdvance_order_like_AiControlled()
+    {
+        var s = TwoEnemyBases();
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.FreeAdvance;
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.True(u.OrderTargetPos.HasValue);
+        Assert.Equal(100f, u.OrderTargetPos.Value.X, 3); // near基地へ
+    }
+
     [Fact]
     public void ClearPath_resets_path_retry_cooldown()
     {

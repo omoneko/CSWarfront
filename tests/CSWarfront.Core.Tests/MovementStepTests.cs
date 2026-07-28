@@ -378,4 +378,108 @@ public class MovementStepTests
 
         Assert.True(s.Units[0].Position.X > beforeX, "expected unit to resume advancing toward OrderTargetPos");
     }
+
+    // --- Task48: Order (Hold/RallyHold) ---
+
+    [Fact]
+    public void Advance_never_moves_unit_with_Hold_order_even_if_State_and_OrderTargetPos_are_set()
+    {
+        var s = OneMovingUnit();
+        s.Units[0].Order = UnitOrder.Hold;
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+        Assert.Equal(0f, s.Units[0].Position.Z, 3);
+    }
+
+    [Fact]
+    public void Advance_never_moves_unit_with_Hold_order_even_with_stray_CoverDestination()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.Hold;
+        u.CoverDestination = new WorldPos(0, 0, 1000); // stale/inconsistent, should still be ignored
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+        Assert.Equal(0f, s.Units[0].Position.Z, 3);
+    }
+
+    [Fact]
+    public void Advance_moves_RallyHold_unit_toward_RallyPoint_via_straight_line_when_no_path()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(1000, 0, 0);
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
+        Assert.Equal(0f, s.Units[0].Position.Z, 1);
+    }
+
+    [Fact]
+    public void Advance_RallyHold_unit_stops_within_CoverArrivalDistance_of_RallyPoint()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(1f, 0, 0); // < CoverArrivalDistance(3)
+
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f); // stepLen (~5.4) easily covers the remaining distance
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3); // already within arrival distance, does not move
+    }
+
+    [Fact]
+    public void Advance_RallyHold_unit_consumes_Path_toward_RallyPoint_before_falling_back_to_straight_line()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(100, 0, 100);
+        u.Path = new List<WorldPos> { new WorldPos(100, 0, 0), new WorldPos(100, 0, 100) };
+        u.PathIndex = 0;
+        u.PathTarget = u.RallyPoint;
+        s.Units.Add(u);
+
+        // Same geometry as Advance_large_step_crosses_first_waypoint_and_continues_toward_second:
+        // clears the first waypoint (100 away) then advances 50 more toward the second.
+        MovementStep.Advance(s, 27.6855469f);
+
+        var pos = s.Units[0].Position;
+        Assert.Equal(100f, pos.X, 1);
+        Assert.Equal(50f, pos.Z, 1);
+        Assert.Equal(1, u.PathIndex);
+    }
+
+    [Fact]
+    public void Advance_RallyHold_unit_with_no_RallyPoint_does_not_move()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold; // RallyPoint intentionally left null
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+    }
 }

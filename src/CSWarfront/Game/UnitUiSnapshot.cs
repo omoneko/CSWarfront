@@ -34,6 +34,9 @@ namespace CSWarfront.Game
         public int PathIndex;
         /// <summary>Pathの要素数。Path未設定なら0（UIはこれで「直進」表示に切り替える）。</summary>
         public int PathCount;
+        /// <summary>プレイヤーの指揮コマンド（Task48）。UnitInfoPanelが「自由進撃/停止/集結待機/AI」の
+        /// いずれかとして表示する。</summary>
+        public UnitOrder Order;
     }
 
     /// <summary>
@@ -66,7 +69,8 @@ namespace CSWarfront.Game
                 State = unit.State,
                 TargetId = unit.TargetId,
                 PathIndex = unit.PathIndex,
-                PathCount = unit.Path != null ? unit.Path.Count : 0
+                PathCount = unit.Path != null ? unit.Path.Count : 0,
+                Order = unit.Order
             };
         }
     }

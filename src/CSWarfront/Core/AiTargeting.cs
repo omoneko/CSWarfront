@@ -37,7 +37,10 @@ namespace CSWarfront.Core
 
         /// <summary>当該勢力の非交戦ユニットに、各自位置から最寄りの敵基地へ進軍命令を与える。
         /// state.Roadsが供給されていれば道路経路(A*)も計算する（1回の呼び出しでmaxPathComputations件まで）。
-        /// FindPathに失敗したユニットはPathRetryCooldownが尽きるまで再試行しない（予算を消費しない）。</summary>
+        /// FindPathに失敗したユニットはPathRetryCooldownが尽きるまで再試行しない（予算を消費しない）。
+        /// Task48: プレイヤーが Hold/RallyHold を指示したユニットは常にスキップする（AIが目標/経路を
+        /// 一切上書きしない）。AiControlled/FreeAdvance のみ従来通り対象になる（FreeAdvanceはAIが
+        /// 目標基地を更新してよいが、プレイヤーが別命令を出すまで自由進撃モード自体は変わらない）。</summary>
         public static void AssignAdvance(WarState state, byte factionId, float dt, int maxPathComputations = 4)
         {
             int pathComputations = 0;
@@ -45,6 +48,7 @@ namespace CSWarfront.Core
             {
                 var u = state.Units[i];
                 if (u.FactionId != factionId || !u.IsAlive) continue;
+                if (u.Order != UnitOrder.AiControlled && u.Order != UnitOrder.FreeAdvance) continue;
                 if (u.State == UnitState.Engaging) continue;
 
                 u.PathRetryCooldown -= dt;

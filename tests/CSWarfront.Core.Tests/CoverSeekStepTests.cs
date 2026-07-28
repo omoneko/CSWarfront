@@ -342,4 +342,58 @@ public class CoverSeekStepTests
 
         Assert.False(self.CoverDestination.HasValue);
     }
+
+    // --- Task48: Hold/RallyHold は遮蔽移動の対象外 ---
+
+    [Fact]
+    public void Advance_never_sets_CoverDestination_for_engaging_unit_with_Hold_order()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.Order = UnitOrder.Hold;
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+    }
+
+    [Fact]
+    public void Advance_never_sets_CoverDestination_for_engaging_unit_with_RallyHold_order()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.Order = UnitOrder.RallyHold;
+        self.RallyPoint = new WorldPos(0, 0, 0);
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+    }
+
+    [Fact]
+    public void Advance_clears_stray_CoverDestination_for_unit_switched_to_Hold_order()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.CoverDestination = new WorldPos(10, 0, 10); // leftover from before the Hold command
+        self.CoverHold = true;
+        self.Order = UnitOrder.Hold;
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.False(self.CoverHold);
+    }
 }

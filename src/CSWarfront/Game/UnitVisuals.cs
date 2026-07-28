@@ -207,6 +207,24 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>
+        /// 現在生成済みの可視表現の InstanceId と実際の描画位置を列挙する（メインスレッド専用、Task48）。
+        /// Game/UI/UnitBoxSelection が範囲選択（画面矩形とワールド座標のスクリーン投影の当たり判定）に使う。
+        /// 呼び出し側が渡したバッファを Clear() してから詰め直す（GC回避、UnitVisuals.Sync と同じ規約）。
+        /// </summary>
+        public static void CollectVisible(List<uint> ids, List<Vector3> positions)
+        {
+            if (ids == null || positions == null) return;
+            ids.Clear();
+            positions.Clear();
+            foreach (var kv in _visuals)
+            {
+                if (kv.Value == null || kv.Value.GameObject == null) continue;
+                ids.Add(kv.Key);
+                positions.Add(kv.Value.GameObject.transform.position);
+            }
+        }
+
         /// <summary>追跡中の全ビジュアルを破棄する（レベルアンロード時、メインスレッド専用）。</summary>
         public static void DestroyAll()
         {

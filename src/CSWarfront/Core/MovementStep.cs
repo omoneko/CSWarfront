@@ -14,10 +14,20 @@ namespace CSWarfront.Core
     ///     Path/OrderTargetPosへの追従を再開する。CoverReevaluateCooldownも0へリセットするため、
     ///     同じtick内の次のCoverSeekStep評価（次tick）で次の遮蔽が選ばれ、遮蔽から遮蔽へ「跳ぶ」ように
     ///     前進する（半開けた場所で立ち止まって次の評価まで待つことがない）。
-    /// CoverDestinationが無いユニットは従来通りの経路/直線移動のまま変わらない。</summary>
+    /// CoverDestinationが無いユニットは従来通りの経路/直線移動のまま変わらない。
+    ///
+    /// Task48: UnitInstance.Order による分岐を追加した。
+    ///   - Hold: ループの先頭で即continueし、一切移動しない（CoverDestination等の取り残しがあっても
+    ///     無視する。停止命令の定義そのもの）。
+    ///   - RallyHold: CoverSeekStepがCoverDestinationを一切設定しないため上のCoverDestination分岐は
+    ///     通らない。代わりにOrderTargetPosの代わりにRallyPointへ向け、Path（UnitCommands.ApplyRallyが
+    ///     RallyPoint宛に計算済み）があれば消化してから直線移動でフォールバックする。CoverArrivalDistance
+    ///     以内まで近づいたら停止する（新規の定数を増やさず、Cover到達判定と同じ基準を再利用する）。
+    ///   - FreeAdvance/AiControlled: 従来通りOrderTargetPos/Pathで移動する（挙動変更なし）。</summary>
     public static class MovementStep
     {
-        /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。</summary>
+        /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
+        /// Task48: RallyPointへの到達判定にも同じ閾値を再利用する。</summary>
         public const float CoverArrivalDistance = 3f;
 
         public static void Advance(WarState state, float dt)
@@ -26,6 +36,8 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
+                if (u.Order == UnitOrder.Hold) continue; // Task48: 停止命令＝常に不動。
+
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
 
@@ -38,12 +50,33 @@ namespace CSWarfront.Core
                     continue;
                 }
 
+                if (u.Order == UnitOrder.RallyHold)
+                {
+                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen);
+                    continue;
+                }
+
                 if (u.State != UnitState.Moving || !u.OrderTargetPos.HasValue) continue;
 
                 stepLen = ConsumePath(u, stepLen);
                 if (stepLen > 0f)
                     AdvanceStraight(u, u.OrderTargetPos.Value, stepLen);
             }
+        }
+
+        /// <summary>Task48: RallyPointへ向けたキネマティック移動。UnitCommands.ApplyRallyがRallyPoint宛に
+        /// 計算した道路経路(Path)があればまずそれを消化し、残りは直線移動でフォールバックする
+        /// （ConsumePath/AdvanceStraightは通常のOrderTargetPos移動と全く同じヘルパーを再利用）。
+        /// CoverArrivalDistance以内まで近づいたら以後は何もしない（その場に留まる）。</summary>
+        private static void AdvanceTowardRally(UnitInstance u, float stepLen)
+        {
+            WorldPos rally = u.RallyPoint.Value;
+            float dist = u.Position.HorizontalDistanceTo(rally);
+            if (dist <= CoverArrivalDistance) return;
+
+            stepLen = ConsumePath(u, stepLen);
+            if (stepLen > 0f)
+                AdvanceStraight(u, rally, stepLen);
         }
 
         /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内に入ったら、

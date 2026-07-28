@@ -61,6 +61,23 @@ namespace CSWarfront.Game
                 UnitInfoPanel.UpdateVisibility();
             }
             catch (System.Exception e) { ModConfig.LogError("UnitInfoPanel update: " + e); }
+
+            // 範囲選択（Task48）。UnitSelection.Update（単発クリック、上）の直後に呼ぶことで、
+            // 「単発クリックがそのままドラッグへ発展した場合」を同一フレーム内で正しく検知できる。
+            try
+            {
+                UnitBoxSelection.EnsureCreated();
+                UnitBoxSelection.Update();
+            }
+            catch (System.Exception e) { ModConfig.LogError("UnitBoxSelection update: " + e); }
+
+            // 部隊コマンドのホットキー入力（Task48）。UnitBoxSelection.Update（上）の後に呼ぶことで、
+            // 同じフレームで確定した選択（SelectedIds）を対象にコマンドを出せるようにする。
+            try
+            {
+                UnitCommandInput.Update();
+            }
+            catch (System.Exception e) { ModConfig.LogError("UnitCommandInput update: " + e); }
         }
     }
 }

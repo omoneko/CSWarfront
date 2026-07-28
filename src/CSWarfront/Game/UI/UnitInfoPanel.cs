@@ -324,6 +324,7 @@ namespace CSWarfront.Game.UI
                 sb.Append("\n状態: ").Append(StateLabel(snapshot.State));
                 sb.Append("\n目標: ").Append(snapshot.TargetId.HasValue ? "ユニット#" + snapshot.TargetId.Value : "なし");
                 sb.Append("\n経路: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "直進");
+                sb.Append("\n命令: ").Append(OrderLabel(snapshot.Order)); // Task48
 
                 _statusLabel.text = sb.ToString();
                 RecomputePanelHeight();
@@ -362,6 +363,18 @@ namespace CSWarfront.Game.UI
                 case UnitState.Engaging: return "交戦中";
                 case UnitState.Dead: return "戦死";
                 default: return state.ToString();
+            }
+        }
+
+        /// <summary>Task48: プレイヤーの指揮コマンド（UnitOrder）の表示ラベル。</summary>
+        private static string OrderLabel(UnitOrder order)
+        {
+            switch (order)
+            {
+                case UnitOrder.FreeAdvance: return "自由進撃";
+                case UnitOrder.Hold: return "停止";
+                case UnitOrder.RallyHold: return "集結待機";
+                case UnitOrder.AiControlled: default: return "AI";
             }
         }
 

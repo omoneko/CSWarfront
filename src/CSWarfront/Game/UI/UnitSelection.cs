@@ -34,6 +34,14 @@ namespace CSWarfront.Game.UI
             SelectedInstanceId = 0;
         }
 
+        /// <summary>Task48: Game/UI/UnitBoxSelection が範囲選択の結果（先頭の1件、無ければ0）で
+        /// 上書きするための公開セッター。通常の単発クリック（下のUpdate）はこれを使わず自分で直接
+        /// 代入する。0を渡すとClear()と同じ意味になる。</summary>
+        public static void Set(uint instanceId)
+        {
+            SelectedInstanceId = instanceId;
+        }
+
         /// <summary>毎メインスレッドフレーム呼ぶ。左クリックの立ち上がりフレームのみ処理する。</summary>
         public static void Update()
         {

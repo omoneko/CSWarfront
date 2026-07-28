@@ -4,6 +4,17 @@ namespace CSWarfront.Core
 {
     public enum UnitState { Idle, Moving, Engaging, Dead }
 
+    /// <summary>プレイヤーが個別部隊/選択範囲へ与える指揮コマンド（Task48・実行時のみ・非永続化）。
+    ///   AiControlled - 既定。AI(InvasionOrders)が目標基地を割り当てる従来通りの挙動。
+    ///   FreeAdvance  - 自由進撃。各自の最高速度で最寄りの敵拠点へ進み通常通り交戦する。AIが目標基地を
+    ///                  更新することはあるが、プレイヤーが別命令を出すまでこのモードのまま。
+    ///   Hold         - 停止。その場から一切動かない（移動系フィールドはUnitCommandsが割り当て時にクリア
+    ///                  する）が、射程内の敵には引き続き応戦する（受動防御）。
+    ///   RallyHold    - 集結待機。RallyPointへ移動し到着後は停止、移動中・停止後を問わず射程内の敵にしか
+    ///                  応戦しない（追撃や遮蔽移動、拠点への進撃は一切しない）。
+    /// </summary>
+    public enum UnitOrder { AiControlled, FreeAdvance, Hold, RallyHold }
+
     /// <summary>実行時の1体。表現(車両ID)はGame層が別に保持し、ここには論理状態のみ。</summary>
     public class UnitInstance
     {
@@ -15,6 +26,13 @@ namespace CSWarfront.Core
         public UnitState State;
         public uint? TargetId;
         public WorldPos? OrderTargetPos;
+
+        /// <summary>プレイヤーの指揮コマンド（実行時のみ・非永続化、Task48）。既定はAiControlled。
+        /// セーブ/ロードでは常にAiControlledへ戻る（WarStateSerializerには一切書き出さない）。</summary>
+        public UnitOrder Order;
+
+        /// <summary>Order==RallyHold の目的地（実行時のみ・非永続化、Task48）。UnitCommands.ApplyRallyが設定する。</summary>
+        public WorldPos? RallyPoint;
 
         /// <summary>道路経路の残り（実行時のみ・非永続化）。null/空なら直線移動へフォールバック。</summary>
         public List<WorldPos> Path;
