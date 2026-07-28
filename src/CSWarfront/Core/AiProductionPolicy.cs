@@ -50,6 +50,8 @@ namespace CSWarfront.Core
 
         public static AiDecision Decide(WarState state, Faction faction, MilitaryBase b, uint seed)
         {
+            CountByCategory(state, faction.Id, out int[] counts, out int totalUnits);
+
             if (faction.UnlockedTier < 5 && faction.Treasury >= ResearchReserve)
             {
                 uint researchRoll = Hash(seed) % 100;
@@ -57,30 +59,42 @@ namespace CSWarfront.Core
                     return new AiDecision { Choice = AiSpendChoice.Research, TypeKey = null };
             }
 
-            UnitCategory chosen = ChooseCategory(state, faction, seed);
-
-            float spendCap = faction.UnlockedTier < 5
+            // Bootstrap rule (Task46 fix): a faction with zero living units needs troops before it
+            // needs research. Without this exemption, ResearchReserve(150) alone can exceed a fresh
+            // faction's entire spendable margin (e.g. Treasury=200 -> spendCap=50 < Tank_T1's 60),
+            // and with no cross-category fallback the AI produced NOTHING until treasury passed
+            // ~210. Once the faction has any living unit, the ordinary reserve applies again.
+            bool hasUnits = totalUnits > 0;
+            float spendCap = (faction.UnlockedTier < 5 && hasUnits)
                 ? faction.Treasury - ResearchReserve
                 : faction.Treasury;
             if (spendCap < 0f) spendCap = 0f;
 
-            UnitType type = ChooseHighestAffordableTier(state, chosen, faction.UnlockedTier, spendCap);
-            if (type == null) return new AiDecision { Choice = AiSpendChoice.None, TypeKey = null };
+            // Cross-category fallback (Task46 fix): try categories in deficit order (largest
+            // deficit first) and return the first one with an affordable unlocked unit, instead of
+            // being locked to the single most-deficient category. Only None when NO category has
+            // anything affordable.
+            UnitCategory[] preference = CategoryPreferenceOrder(counts, totalUnits, seed);
+            for (int i = 0; i < preference.Length; i++)
+            {
+                UnitType type = ChooseHighestAffordableTier(state, preference[i], faction.UnlockedTier, spendCap);
+                if (type != null)
+                    return new AiDecision { Choice = AiSpendChoice.Produce, TypeKey = type.TypeKey };
+            }
 
-            return new AiDecision { Choice = AiSpendChoice.Produce, TypeKey = type.TypeKey };
+            return new AiDecision { Choice = AiSpendChoice.None, TypeKey = null };
         }
 
-        /// <summary>目標比率から最も下振れている（＝不足している）兵科を選ぶ。同点はCategories配列の
-        /// 並び順（決定的）。seedから導出した小さなジッターを各兵科の乖離へ加え、僅差の場合に
-        /// 同一勢力の複数基地が常に同じ兵科へ集中しないようにする。</summary>
-        private static UnitCategory ChooseCategory(WarState state, Faction faction, uint seed)
+        /// <summary>勢力が現在保有する生存ユニットを兵科別に数える。Decideの予算判定（bootstrap判定）と
+        /// CategoryPreferenceOrderの両方で使うため一度だけ走査する。</summary>
+        private static void CountByCategory(WarState state, byte factionId, out int[] counts, out int total)
         {
-            int[] counts = new int[Categories.Length];
-            int total = 0;
+            counts = new int[Categories.Length];
+            total = 0;
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
-                if (!u.IsAlive || u.FactionId != faction.Id) continue;
+                if (!u.IsAlive || u.FactionId != factionId) continue;
                 UnitType t = state.Types.Get(u.TypeKey);
                 if (t == null) continue;
                 int idx = IndexOf(t.Category);
@@ -88,11 +102,18 @@ namespace CSWarfront.Core
                 counts[idx]++;
                 total++;
             }
+        }
 
+        /// <summary>目標比率から最も下振れている（＝不足している）兵科から順に並べた優先順位を返す
+        /// （Task46: 旧ChooseCategoryは最有力の1件だけを返していたが、その兵科が予算内で買えない場合の
+        /// 代替先が無く生産が完全停止していた。この関数は全兵科をdeficit降順で返し、呼び出し側が
+        /// 先頭から順に「買えるか」を試せるようにする）。同点はCategories配列の並び順（決定的、安定ソート）。
+        /// seedから導出した小さなジッターを各兵科の乖離へ加え、僅差の場合に同一勢力の複数基地が
+        /// 常に同じ兵科へ集中しないようにする。</summary>
+        private static UnitCategory[] CategoryPreferenceOrder(int[] counts, int total, uint seed)
+        {
+            float[] deficits = new float[Categories.Length];
             uint jitterSeed = Hash(seed ^ 0x9E3779B9u);
-
-            int bestIdx = 0;
-            float bestDeficit = float.NegativeInfinity;
             for (int i = 0; i < Categories.Length; i++)
             {
                 float share = total > 0 ? (float)counts[i] / total : 0f;
@@ -100,15 +121,31 @@ namespace CSWarfront.Core
 
                 uint categoryHash = Hash(jitterSeed + (uint)i * 2654435761u);
                 float jitter = ((categoryHash % 1000) / 1000f - 0.5f) * 2f * CompositionJitter;
-                deficit += jitter;
-
-                if (deficit > bestDeficit)
-                {
-                    bestDeficit = deficit;
-                    bestIdx = i;
-                }
+                deficits[i] = deficit + jitter;
             }
-            return Categories[bestIdx];
+
+            int[] order = new int[Categories.Length];
+            for (int i = 0; i < order.Length; i++) order[i] = i;
+
+            // Stable descending insertion sort: only shifts on strictly-smaller deficit, so ties
+            // keep their original Categories-array order (same tie-break as the old single-winner
+            // loop's strict `>` comparison, which favored the first-seen index).
+            for (int i = 1; i < order.Length; i++)
+            {
+                int key = order[i];
+                float keyDeficit = deficits[key];
+                int j = i - 1;
+                while (j >= 0 && deficits[order[j]] < keyDeficit)
+                {
+                    order[j + 1] = order[j];
+                    j--;
+                }
+                order[j + 1] = key;
+            }
+
+            UnitCategory[] result = new UnitCategory[Categories.Length];
+            for (int i = 0; i < order.Length; i++) result[i] = Categories[order[i]];
+            return result;
         }
 
         private static int IndexOf(UnitCategory category)

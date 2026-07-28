@@ -132,7 +132,12 @@ public class AiProductionPolicyTests
     {
         // Tank_T3 costs 60*(1+0.6*2) = 132. Reserve is 150. Treasury=282 -> spendCap=132 -> exactly
         // affords Tank_T3.
+        // Task46 fix: the reserve floor only applies once the faction HAS units (bootstrap
+        // exemption). A single pre-existing unit (kept far from Tank's composition target so it
+        // doesn't change which category is most deficient) keeps this test exercising the reserve
+        // instead of silently falling into the bootstrap's "whole treasury is spendable" path.
         var s = WithFullRoster(282f, unlockedTier: 3);
+        AddLivingUnits(s, UnitCategory.DroneInfantry, 1, 1);
         AiDecision d = AiProductionPolicy.Decide(s, s.Factions[0], s.Bases[0], seed: 999u);
         // With plenty of empty army and Tank as the clear composition target, and treasury far above
         // the research floor is not the case here (282 >= 150) so research is possible for this seed;
@@ -148,7 +153,10 @@ public class AiProductionPolicyTests
     {
         // Tank_T3 costs 132, Tank_T2 costs 96. Treasury=281 -> spendCap=131 (< 132, so T3 is NOT
         // affordable) but >= 96, so T2 should be chosen instead.
+        // Task46 fix: add a pre-existing unit so the reserve floor (not the bootstrap exemption)
+        // governs this scenario, same reasoning as the test above.
         var s = WithFullRoster(281f, unlockedTier: 3);
+        AddLivingUnits(s, UnitCategory.DroneInfantry, 1, 1);
         UnitType chosen = FindFirstProducedType(s, maxSeed: 2000);
         Assert.NotNull(chosen);
         Assert.Equal(UnitCategory.Tank, chosen.Category);
@@ -196,6 +204,69 @@ public class AiProductionPolicyTests
     {
         var s = WithFullRoster(0f, unlockedTier: 3);
         for (uint seed = 0; seed < 50; seed++)
+        {
+            AiDecision d = AiProductionPolicy.Decide(s, s.Factions[0], s.Bases[0], seed);
+            Assert.Equal(AiSpendChoice.None, d.Choice);
+        }
+    }
+
+    // --- Task46 bugfix: early-game stall (cross-category fallback + bootstrap exemption) ---
+
+    [Fact]
+    public void Fresh_faction_bootstraps_production_instead_of_stalling_on_the_research_reserve()
+    {
+        // OLD (buggy) behavior: a fresh faction (Treasury=200, no units, Tier=1) computed
+        // spendCap = Treasury(200) - ResearchReserve(150) = 50, but the most-deficient category
+        // (Tank) had no category-crossing fallback and Tank_T1 costs 60 > 50, so the AI produced
+        // NOTHING until treasury passed ~210 (reported first five decisions: None, None, None,
+        // Research, None).
+        // NEW: a faction with zero living units is exempt from the reserve (bootstrap rule) -
+        // the whole treasury (200) is spendable, so Tank_T1 (60) is affordable. The decision is
+        // therefore never None: it is either Research (~35% of seeds) or Produce.
+        var s = WithFullRoster(200f, unlockedTier: 1);
+        bool everProduced = false;
+        for (uint seed = 0; seed < 300; seed++)
+        {
+            AiDecision d = AiProductionPolicy.Decide(s, s.Factions[0], s.Bases[0], seed);
+            Assert.NotEqual(AiSpendChoice.None, d.Choice);
+            if (d.Choice != AiSpendChoice.Produce) continue;
+            everProduced = true;
+            UnitType chosen = s.Types.Get(d.TypeKey);
+            Assert.NotNull(chosen);
+        }
+        Assert.True(everProduced, "expected at least one seed to choose Produce (not just Research)");
+    }
+
+    [Fact]
+    public void Faction_with_units_falls_back_to_a_cheaper_category_when_the_top_pick_is_unaffordable()
+    {
+        // Faction already has 1 MechInfantry unit, so it is NOT exempt from the research reserve
+        // (bootstrap only applies with zero units). Treasury=200 -> spendCap = 200-150 = 50.
+        // Composition deficits (largest first): Tank(0.30, 0 units) > Infantry(0.20, 0 units)
+        // > Apc(0.15) > Artillery(0.10) > DroneInfantry(0.05) > MechInfantry(now heavily over
+        // target, so it drops to the bottom of the preference list).
+        // Tank_T1 costs 60 > 50 (unaffordable) - OLD behavior stopped here and returned None.
+        // NEW: cross-category fallback walks to the next-most-deficient category, Infantry, whose
+        // Infantry_T1 costs 20 <= 50, so the AI buys Infantry instead of stalling.
+        var s = WithFullRoster(200f, unlockedTier: 1);
+        AddLivingUnits(s, UnitCategory.MechInfantry, 1, 1);
+
+        UnitType chosen = FindFirstProducedType(s, maxSeed: 2000);
+        Assert.NotNull(chosen);
+        Assert.Equal(UnitCategory.Infantry, chosen.Category);
+        Assert.Equal((byte)1, chosen.Tier);
+    }
+
+    [Fact]
+    public void None_is_still_returned_when_nothing_is_affordable_with_units_present()
+    {
+        // Faction has units, so the bootstrap exemption does NOT apply and the research reserve
+        // is enforced. Treasury=140 is below ResearchReserve(150), so spendCap clamps to 0 and
+        // even the cheapest unlocked unit (Infantry_T1 @ 20) is unaffordable in every category -
+        // cross-category fallback correctly finds nothing and still returns None.
+        var s = WithFullRoster(140f, unlockedTier: 1);
+        AddLivingUnits(s, UnitCategory.MechInfantry, 1, 1);
+        for (uint seed = 0; seed < 200; seed++)
         {
             AiDecision d = AiProductionPolicy.Decide(s, s.Factions[0], s.Bases[0], seed);
             Assert.Equal(AiSpendChoice.None, d.Choice);
