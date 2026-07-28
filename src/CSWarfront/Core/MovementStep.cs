@@ -3,25 +3,49 @@ namespace CSWarfront.Core
     /// <summary>Moving状態のユニットを前進させる（キネマティック・純ロジック）。
     /// Task37: Yはもはや維持しない（旧仕様）。X/Zと同じ補間係数でウェイポイント/目標のYへ向けて
     /// 補間することで、道路の勾配（橋・坂）に沿って高さが変化するようにする（路面から浮くバグの修正）。
-    /// Path（道路経路）があればウェイポイントを順に消化し、尽きたらOrderTargetPosへの直線移動にフォールバックする。</summary>
+    /// Path（道路経路）があればウェイポイントを順に消化し、尽きたらOrderTargetPosへの直線移動にフォールバックする。
+    /// Task44: 交戦中（State==Engaging）にCoverDestinationが設定されているユニットは、Path/OrderTargetPos
+    /// を無視してCoverDestinationへ向けて進む（遮蔽を取りに行く動き）。CoverArrivalDistance以内に
+    /// 入ったら停止する（遮蔽位置に着いたら、そこから撃ち続ける＝これ以上は動かない）。
+    /// CoverDestinationが無いユニットは従来通りの経路/直線移動のまま変わらない。</summary>
     public static class MovementStep
     {
+        /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。</summary>
+        public const float CoverArrivalDistance = 3f;
+
         public static void Advance(WarState state, float dt)
         {
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
-                if (!u.IsAlive || u.State != UnitState.Moving || !u.OrderTargetPos.HasValue) continue;
+                if (!u.IsAlive) continue;
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
 
                 float stepLen = type.Speed * dt;
                 if (stepLen <= 0f) continue;
 
+                if (u.State == UnitState.Engaging && u.CoverDestination.HasValue)
+                {
+                    AdvanceTowardCover(u, u.CoverDestination.Value, stepLen);
+                    continue;
+                }
+
+                if (u.State != UnitState.Moving || !u.OrderTargetPos.HasValue) continue;
+
                 stepLen = ConsumePath(u, stepLen);
                 if (stepLen > 0f)
                     AdvanceStraight(u, u.OrderTargetPos.Value, stepLen);
             }
+        }
+
+        /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内なら何もしない
+        /// （遮蔽位置に着いたら停止し、そこから撃ち続ける）。それ以外はAdvanceStraightと同じ補間で進む。</summary>
+        private static void AdvanceTowardCover(UnitInstance u, WorldPos coverPos, float stepLen)
+        {
+            float dist = u.Position.HorizontalDistanceTo(coverPos);
+            if (dist <= CoverArrivalDistance) return;
+            AdvanceStraight(u, coverPos, stepLen);
         }
 
         /// <summary>Pathが残っていればウェイポイントを順に消化する。残ったstepLen（直線フォールバック用）を返す。</summary>

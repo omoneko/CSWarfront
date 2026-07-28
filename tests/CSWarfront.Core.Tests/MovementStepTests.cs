@@ -249,4 +249,82 @@ public class MovementStepTests
         Assert.Equal(15f, pos.Y, 1);
         Assert.Equal(1, s.Units[0].PathIndex);
     }
+
+    // --- Task44: CoverDestination優先の移動 ---
+
+    [Fact]
+    public void Advance_moves_engaging_unit_toward_CoverDestination_instead_of_OrderTargetPos()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Engaging;
+        u.OrderTargetPos = new WorldPos(1000, 0, 0); // 進軍目的地（無視されるはず）
+        u.CoverDestination = new WorldPos(0, 0, 1000); // 遮蔽位置（南北方向、こちらへ動くはず）
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        // OrderTargetPos(X方向)ではなくCoverDestination(Z方向)へ動いたことを確認する。
+        Assert.Equal(0f, s.Units[0].Position.X, 1);
+        Assert.True(s.Units[0].Position.Z > 0f, "expected unit to move toward CoverDestination (positive Z)");
+    }
+
+    [Fact]
+    public void Advance_stops_within_CoverArrivalDistance_of_CoverDestination()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Engaging;
+        u.CoverDestination = new WorldPos(1f, 0, 0); // 探索半径(arrival distance=3)より近い
+
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f); // ステップ長は十分大きい(TankSpeedPerHour≈5.4)
+
+        // すでにCoverArrivalDistance(3)以内なので動かない。
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+    }
+
+    [Fact]
+    public void Advance_does_not_use_CoverDestination_when_not_engaging()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving; // Engagingではない
+        u.OrderTargetPos = new WorldPos(1000, 0, 0);
+        u.CoverDestination = new WorldPos(0, 0, 1000); // 残っていても無視されるはず
+
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        // 通常のOrderTargetPos追従（X方向）になっているはず。
+        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
+        Assert.Equal(0f, s.Units[0].Position.Z, 1);
+    }
+
+    [Fact]
+    public void Advance_resumes_path_following_once_CoverDestination_is_cleared()
+    {
+        var s = OneMovingUnit();
+        var u = s.Units[0];
+        u.State = UnitState.Engaging;
+        u.CoverDestination = new WorldPos(0, 0, 1000);
+        MovementStep.Advance(s, 0.1f);
+        Assert.True(s.Units[0].Position.Z > 0f); // 遮蔽位置へ向かって動いた
+
+        // 交戦が終わりCoverDestinationがクリアされ、通常の移動に戻ったと仮定する。
+        u.CoverDestination = null;
+        u.State = UnitState.Moving;
+        var beforeX = s.Units[0].Position.X;
+        MovementStep.Advance(s, 0.1f);
+
+        Assert.True(s.Units[0].Position.X > beforeX, "expected unit to resume advancing toward OrderTargetPos");
+    }
 }

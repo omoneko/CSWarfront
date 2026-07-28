@@ -15,6 +15,10 @@ namespace CSWarfront.Core
         /// <summary>Game層から供給される道路網（実行時のみ・非永続化）。未供給ならnull。</summary>
         public RoadGraph Roads;
 
+        /// <summary>Game層から供給される遮蔽物（建物/Prop）マップ（実行時のみ・非永続化、Task44）。
+        /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
+        public CoverMap Cover;
+
         /// <summary>
         /// Task42: 直近1tick分の「見える発砲」イベントのトランジェント・バッファ（非永続化）。
         /// CombatStep/BaseCombatStepがダメージを実適用したタイミングでAddShotを通じて積む

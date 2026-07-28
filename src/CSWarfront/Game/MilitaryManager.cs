@@ -54,6 +54,17 @@ namespace CSWarfront.Game
         // セッション中まだ一度も構築を試みていない場合は初回のみ即座に試行する（上の間隔待ちをしない）。
         private static bool _hasAttemptedRoadBuild;
 
+        // 遮蔽物マップ（State.Cover）の再構築間隔（ゲーム内時間）。RoadGraphと同じ理由
+        // （プレイヤーが建物を建設/解体し続けるため定期的に作り直す、Task44）。simスレッドのみが触る。
+        private static float _coverRebuildAccum;
+        private const float CoverRebuildIntervalHours = 12f;
+
+        // 遮蔽物マップ未構築時（State.Cover == null）の再試行間隔（ゲーム内時間）。RoadGraphの
+        // _roadBuildRetryAccumと同じ間引きパターン（Task44）。simスレッドのみが触る。
+        private static float _coverBuildRetryAccum;
+        private const float CoverBuildRetryIntervalHours = 0.25f;
+        private static bool _hasAttemptedCoverBuild;
+
         // 幽霊基地（建物が既に存在しない論理基地）掃除の間引き用（ゲーム内時間）。毎tickフルスキャンは
         // 無駄なため一定間隔でのみ実行する（Task24）。simスレッドのみが触る。
         private static float _baseReconcileAccum;
@@ -325,11 +336,40 @@ namespace CSWarfront.Game
                     }
                 }
 
+                // 遮蔽物マップ（State.Cover）の構築/再構築（Task44）。RoadGraphと同じ「未供給なら即座に
+                // 構築を試みる／供給済みなら一定間隔で作り直す／失敗時は既存マップを維持する」パターン。
+                // CoverSeekStepが同tickでこのマップを使えるよう、進軍命令より先に済ませる。
+                if (State.Cover == null)
+                {
+                    _coverBuildRetryAccum += dt;
+                    if (!_hasAttemptedCoverBuild || _coverBuildRetryAccum >= CoverBuildRetryIntervalHours)
+                    {
+                        _hasAttemptedCoverBuild = true;
+                        _coverBuildRetryAccum -= CoverBuildRetryIntervalHours;
+                        if (_coverBuildRetryAccum < 0f) _coverBuildRetryAccum = 0f;
+                        State.Cover = CoverMapBuilder.Build();
+                    }
+                }
+                else
+                {
+                    _coverRebuildAccum += dt;
+                    if (_coverRebuildAccum >= CoverRebuildIntervalHours)
+                    {
+                        _coverRebuildAccum -= CoverRebuildIntervalHours;
+                        var rebuiltCover = CoverMapBuilder.Build();
+                        if (rebuiltCover != null) State.Cover = rebuiltCover;
+                    }
+                }
+
                 // AI進軍命令（非プレイヤー勢力）
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id, dt);
 
-                // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進）
+                // 遮蔽移動の意思決定（交戦中のユニットへ遮蔽物を活かした立ち位置を割り当てる、Task44）。
+                // MovementStepより前に呼ぶことで、このtickで決めた立ち位置へ同じtick内で動き出せるようにする。
+                CoverSeekStep.Advance(State, dt);
+
+                // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
                 // 戦闘（ユニット同士＋基地攻撃）→ 拠点の自衛射撃 → 占領（Task29でBaseDefenseStepを追加）
@@ -392,6 +432,7 @@ namespace CSWarfront.Game
                     sb.Append(" uf").Append(f2).Append("=").Append(unitsPerFaction[f2]);
 
                 sb.Append(" | roads=").Append(State.Roads != null ? State.Roads.NodeCount : 0);
+                sb.Append(" cover=").Append(State.Cover != null ? State.Cover.Count : 0);
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
                     UnitInstance u = State.Units[i];
@@ -504,6 +545,9 @@ namespace CSWarfront.Game
                 _roadRebuildAccum = 0f;
                 _roadBuildRetryAccum = 0f;
                 _hasAttemptedRoadBuild = false;
+                _coverRebuildAccum = 0f;
+                _coverBuildRetryAccum = 0f;
+                _hasAttemptedCoverBuild = false;
                 _baseReconcileAccum = 0f;
                 _hasLastGameTime = false;
                 _lastGameTime = default(DateTime);

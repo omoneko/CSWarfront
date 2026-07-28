@@ -35,6 +35,17 @@ namespace CSWarfront.Core
         /// ダメージを与えたtickで即座に1発目が出る。</summary>
         public float FireCooldown;
 
+        /// <summary>交戦中に遮蔽（建物/Prop）から狙う立ち位置（実行時のみ・非永続化、Task44）。
+        /// CoverSeekStepが設定/クリアする。setされている間はMovementStepがPath/OrderTargetPosの代わりに
+        /// ここへ向けて移動する。nullなら従来通りの移動（進軍経路/直線）。</summary>
+        public WorldPos? CoverDestination;
+
+        /// <summary>次にCoverSeekStepが遮蔽を再評価するまでの残りゲーム内時間（実行時のみ・非永続化、Task44）。
+        /// 毎tick探索するとコストが高く、かつ僅かなスコア差で立ち位置が頻繁に切り替わるジッタの原因になるため、
+        /// CoverSeekStep.CoverReevaluateHoursごとにのみ再評価する。既定値0のため、交戦を始めた最初のtickで
+        /// 即座に評価される。</summary>
+        public float CoverReevaluateCooldown;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;
