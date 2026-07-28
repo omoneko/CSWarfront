@@ -45,6 +45,12 @@ namespace CSWarfront.Game
         {
             public GameObject GameObject;
             public Vector3 LastPosition;
+
+            /// <summary>Task43: このユニットのモデルの「中央高さ」（ルートGameObjectのposition、
+            /// すなわちユニットの論理座標からの相対Y）。CreateVisual時に1回だけ計算してキャッシュする
+            /// （メッシュはビジュアルの生存中変わらないため）。CombatFxが発砲エフェクトの発射/着弾高さを
+            /// 地面レベルからこの高さへ持ち上げるために使う（TryGetMuzzleOffset参照）。</summary>
+            public float MuzzleOffsetY;
         }
 
         // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
@@ -57,6 +63,11 @@ namespace CSWarfront.Game
         private const float MinPropColliderSize = 4f;
 
         private const float MinMoveDeltaForRotation = 0.01f;
+
+        // Task43: TryGetMuzzleOffsetが返す値のクランプ範囲。借用メッシュ（アセットによって大きさが
+        // まちまち）が極端に平ら/巨大でも発砲エフェクトの高さが不自然にならないための安全域。
+        private const float MinMuzzleOffsetY = 1f;
+        private const float MaxMuzzleOffsetY = 20f;
 
         private static readonly Dictionary<uint, VisualEntry> _visuals = new Dictionary<uint, VisualEntry>();
 
@@ -106,6 +117,26 @@ namespace CSWarfront.Game
             if (entry == null || entry.GameObject == null) return false;
 
             position = entry.GameObject.transform.position;
+            return true;
+        }
+
+        /// <summary>
+        /// 指定idの可視表現の「モデル中央の高さ」を、ユニットの論理座標（position.y）からの相対値で
+        /// 返す（メインスレッド専用、Task43）。CombatFxが発砲エフェクトの発射/着弾位置を地面レベルから
+        /// 持ち上げるために使う。CreateVisual時に mesh.bounds から1回だけ計算してキャッシュ済みの値
+        /// （<see cref="MinMuzzleOffsetY"/>〜<see cref="MaxMuzzleOffsetY"/> にクランプ済み）を返すのみで、
+        /// 呼び出しのたびにメッシュへ再アクセスすることはない。見た目が未生成/破棄済みならfalseを返す
+        /// （呼び出し側はTask43既定値、例: DefaultMuzzleHeight/BaseTargetHeightへフォールバックすること）。
+        /// </summary>
+        public static bool TryGetMuzzleOffset(uint instanceId, out float yOffset)
+        {
+            yOffset = 0f;
+
+            VisualEntry entry;
+            if (!_visuals.TryGetValue(instanceId, out entry)) return false;
+            if (entry == null || entry.GameObject == null) return false;
+
+            yOffset = entry.MuzzleOffsetY;
             return true;
         }
 
@@ -239,6 +270,14 @@ namespace CSWarfront.Game
                 // に保つため、メッシュ描画専用の子("Model")にだけこのオフセットを載せる。
                 float pivotOffsetY = -mesh.bounds.min.y;
 
+                // Task43: 「モデル中央の高さ」＝ pivotOffsetY（ルート相対でメッシュの底面をY=0に
+                // 合わせる補正）＋ mesh.bounds.center.y（メッシュ自身のローカル空間での中心Y）。
+                // pivotOffsetYのおかげでメッシュは常にルートのY=0を底面として描画されるため、この和は
+                // 常に「メッシュ高さの半分」＝ルート位置から見たモデル中央の高さになる（メッシュの
+                // ピボットが底面/中心/どこにあっても関係なく成立する）。極端なメッシュ（平ら/巨大）に
+                // 備えて安全域へクランプする。
+                float muzzleOffsetY = Mathf.Clamp(pivotOffsetY + mesh.bounds.center.y, MinMuzzleOffsetY, MaxMuzzleOffsetY);
+
                 GameObject model = new GameObject("Model");
                 model.transform.SetParent(go.transform, false);
                 model.transform.localPosition = new Vector3(0f, pivotOffsetY, 0f);
@@ -265,7 +304,7 @@ namespace CSWarfront.Game
 
                 ModConfig.Log("UnitVisuals: created visual for instance " + s.InstanceId + " type=" + s.TypeKey);
 
-                return new VisualEntry { GameObject = go, LastPosition = s.Position };
+                return new VisualEntry { GameObject = go, LastPosition = s.Position, MuzzleOffsetY = muzzleOffsetY };
             }
             catch (Exception e)
             {

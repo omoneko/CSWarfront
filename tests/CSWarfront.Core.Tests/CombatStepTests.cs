@@ -225,28 +225,33 @@ public class CombatStepTests
         Assert.Equal(0f, fromUnit1[0].From.Z, 3);
         Assert.Equal(50f, fromUnit1[0].To.X, 3); // 標的(unit2)の位置
         Assert.Equal((byte)0, fromUnit1[0].FactionId);
+        // Task43: 発射位置の高さ補正（モデル中央高さ）をGame層が算出できるよう、攻撃側/標的側の
+        // InstanceIdをShotEventに載せる。
+        Assert.Equal(1u, fromUnit1[0].AttackerId); // unit1 (self)
+        Assert.Equal(2u, fromUnit1[0].TargetId);   // unit2 (target)
     }
 
     [Fact]
     public void Firing_unit_emits_at_most_one_shot_per_its_own_fire_interval()
     {
-        // Tank.FireIntervalHours = 0.25h（LandUnitRoster）。dt=0.1hずつ8回進める＝合計0.8h(=3.2間隔分)。
-        // dt=0.1はFireIntervalHours(0.25)を割り切らない値を意図的に選んでいる：発火/非発火の判定が
-        // 常にゼロから明確に離れた値(±0.05や±0.1)になり、浮動小数点の丸め誤差でゼロ境界の判定が
-        // 揺れる心配がない（決定的シミュレーションのテストとして頑健にするため）。
+        // Task43: Tank.FireIntervalHours = 0.90h（LandUnitRoster、旧0.25hから延長）。
+        // dt=0.31hずつ9回進める＝合計2.79h(=3.1間隔分)。
+        // dt=0.31はFireIntervalHours(0.90)を割り切らない値を意図的に選んでいる：発火/非発火の判定が
+        // 常にゼロから明確に離れた値になり、浮動小数点の丸め誤差でゼロ境界の判定が揺れる心配がない
+        // （決定的シミュレーションのテストとして頑健にするため）。
         var s = TwoHostileTanks(50f);
         int shotsFromUnit1 = 0;
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 9; i++)
         {
             s.RecentShots.Clear();
-            CombatStep.Advance(s, 0.1f);
+            CombatStep.Advance(s, 0.31f);
             shotsFromUnit1 += s.RecentShots.FindAll(e => e.FactionId == 0).Count;
         }
 
-        // FireCooldown推移（unit1、Tank_T1、FireIntervalHours=0.25）:
-        //   step1: 0-0.1=-0.1<=0 → 発砲、reset 0.25
-        //   step2: 0.25-0.1=0.15  step3: 0.15-0.1=0.05  step4: 0.05-0.1=-0.05<=0 → 発砲、reset 0.25
-        //   step5: 0.15  step6: 0.05  step7: -0.05<=0 → 発砲、reset 0.25  step8: 0.15
+        // FireCooldown推移（unit1、Tank_T1、FireIntervalHours=0.90）:
+        //   step1: 0-0.31=-0.31<=0 → 発砲、reset 0.90
+        //   step2: 0.90-0.31=0.59  step3: 0.59-0.31=0.28  step4: 0.28-0.31=-0.03<=0 → 発砲、reset 0.90
+        //   step5: 0.59  step6: 0.28  step7: -0.03<=0 → 発砲、reset 0.90  step8: 0.59  step9: 0.28
         // 合計3発（乱数不使用・決定的：毎回同じ値になる）。
         Assert.Equal(3, shotsFromUnit1);
     }

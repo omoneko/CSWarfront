@@ -47,7 +47,8 @@ namespace CSWarfront.Core
                 self.FireCooldown -= dt;
                 if (self.FireCooldown <= 0f)
                 {
-                    state.AddShot(new ShotEvent(self.Position, target.Position, type.ShotKind, self.FactionId));
+                    state.AddShot(new ShotEvent(self.Position, target.Position, type.ShotKind, self.FactionId,
+                        self.InstanceId, target.InstanceId));
                     self.FireCooldown = type.FireIntervalHours;
                 }
             }

@@ -54,7 +54,10 @@ namespace CSWarfront.Core
                     u.FireCooldown -= dt;
                     if (u.FireCooldown <= 0f)
                     {
-                        state.AddShot(new ShotEvent(u.Position, b.Position, type.ShotKind, u.FactionId));
+                        // TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
+                        // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
+                        state.AddShot(new ShotEvent(u.Position, b.Position, type.ShotKind, u.FactionId,
+                            u.InstanceId, 0));
                         u.FireCooldown = type.FireIntervalHours;
                     }
                 }

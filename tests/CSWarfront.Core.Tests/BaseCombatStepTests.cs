@@ -145,6 +145,10 @@ public class BaseCombatStepTests
         Assert.Equal(0f, shot.From.X, 3); // 攻撃側ユニットの位置
         Assert.Equal(40f, shot.To.X, 3);  // 基地の位置（ユニットの位置ではない）
         Assert.Equal((byte)0, shot.FactionId);
+        // Task43: 基地は論理ユニットではないため TargetId=0（Game層はこれを「ユニットでない対象」
+        // として扱い、基地用の既定の着弾高さを使う）。AttackerIdは攻撃側ユニットのInstanceId。
+        Assert.Equal(1u, shot.AttackerId);
+        Assert.Equal(0u, shot.TargetId);
     }
 
     [Fact]

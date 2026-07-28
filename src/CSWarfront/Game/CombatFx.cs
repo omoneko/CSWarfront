@@ -24,28 +24,50 @@ namespace CSWarfront.Game
     {
         /// <summary>同時に生きていられるエフェクトの上限（Task42）。大規模乱戦でGameObjectが
         /// 際限なく増えないようにする防御的上限。ShotEvent側の上限(WarState.MaxRecentShotsPerTick)とは
-        /// 独立に、こちらは「現在生存中」の総数を制限する。</summary>
-        private const int MaxLiveEffects = 120;
+        /// 独立に、こちらは「現在生存中」の総数を制限する。
+        /// Task43: 銃撃が1発→3点バーストになったことで、同じ発砲を発端に一時的に生きるエフェクト数が
+        /// 最大3倍近くまで増え得るため、120→200へ引き上げた（大規模乱戦でも従来と同程度の余裕を保つ）。</summary>
+        private const int MaxLiveEffects = 200;
 
         // カメラから遠すぎる発砲は生成自体をスキップする（軽量な距離チェックのみ）。
         private const float MaxSpawnDistanceFromCamera = 2000f;
 
+        // Task43: 発射/着弾位置をモデル中央高さへ持ち上げるための既定値（UnitVisuals.TryGetMuzzleOffset
+        // が見つからない場合のフォールバック）。AttackerId/TargetIdが0（基地等、論理ユニットでない対象）
+        // か、見た目がまだ生成されていない場合に使う。基地は建物なので既定の発射高さより高めに設定する。
+        private const float DefaultMuzzleHeight = 3f;
+        private const float BaseTargetHeight = 8f;
+
         // Gunfire（Infantry/MechInfantry/Apc/DroneInfantry/AntiAir）: 細く短いトレーサー＋小さなマズルフラッシュ。
-        private const float GunfireTracerDuration = 0.08f;
+        // Task43: 1発→3点バースト化に合わせて、1発ごとの表示時間を0.08s→0.06sへわずかに短縮した
+        // （バースト間隔0.07sより短く保ち、次弾が出る前に前弾が消え切るようにするため）。
+        private const float GunfireTracerDuration = 0.06f;
         private const float GunfireTracerWidth = 0.15f;
         private const float GunfireFlashSize = 1.2f;
+
+        // Task43: 銃撃1回＝3点バースト。1発目は即座に、2/3発目はGunfireBurstRoundGap間隔で
+        // 実時間ベースに遅延させて発射する（_pendingBursts、Update内でブロッキングなしに進める）。
+        private const int GunfireBurstRounds = 3;
+        private const float GunfireBurstRoundGap = 0.07f;
 
         // DirectFire（Tank、直射）: 同じトレーサーだが太く・明るく・やや長持ち＋一回り大きいフラッシュ。
         private const float DirectFireTracerDuration = 0.15f;
         private const float DirectFireTracerWidth = 0.35f;
         private const float DirectFireFlashSize = 2.2f;
 
-        // IndirectFire（Artillery、曲射）: Fromから放物線を飛ぶ小さな弾＋着弾時の短い噴煙。
+        // IndirectFire（Artillery、曲射）: Fromから放物線を飛ぶ光跡（トレーサー、Task43でモデル球から変更）
+        // ＋着弾時の短い噴煙。
         private const float ArcTravelDuration = 1.2f;
         private const float ArcApexRatio = 0.25f;   // 頂点高さ = 水平距離 × この比率
         private const float ArcApexMin = 4f;
         private const float ArcApexMax = 120f;
-        private const float ArcShellSize = 1.6f;
+        // Task43: 光跡（トレーサー）の見た目の太さと、狙う世界座標系での長さ（仕様の12〜16の中間）。
+        // 実際の遅延(TrailLagT)は経路長からこの長さに近づくよう逆算する（SpawnArc参照）ため、
+        // 短距離・長距離どちらの砲撃でもおおむね一定の長さの光跡に見える。
+        private const float ArcTrailWidth = 0.4f;
+        private const float ArcTrailLength = 14f;
+        private const float ArcTrailMinLagT = 0.02f;
+        private const float ArcTrailMaxLagT = 0.3f;
         private const float ImpactPuffDuration = 0.3f;
         private const float ImpactPuffSize = 3.5f;
 
@@ -53,7 +75,9 @@ namespace CSWarfront.Game
         private static readonly Color GunfireColor = new Color(1f, 0.92f, 0.55f);     // 暖かい黄白色
         private static readonly Color DirectFireColor = new Color(1f, 0.75f, 0.25f);  // より濃いオレンジ（直射の重み）
         private static readonly Color FlashColor = new Color(1f, 0.95f, 0.8f);
-        private static readonly Color ShellColor = new Color(0.85f, 0.85f, 0.8f);
+        // Task43: 曲射砲弾の光跡色。DirectFireより深いオレンジにして、遠目でも銃撃/直射と見分けやすくする
+        // （勢力色でチントしないのは他のトレーサーと同じ方針）。
+        private static readonly Color ArcTrailColor = new Color(1f, 0.55f, 0.15f);
         private static readonly Color PuffColor = new Color(0.55f, 0.5f, 0.45f);
 
         private enum Phase { Tracer, ArcTravel, ImpactPuff }
@@ -65,11 +89,12 @@ namespace CSWarfront.Game
             public float Elapsed;
             public float Duration;
 
-            // Tracer(Gunfire/DirectFire)専用。
+            // Tracer(Gunfire/DirectFire)専用、およびArcTravel専用（Task43: 光跡トレーサーとして共用）。
             public LineRenderer Line;
             public float InitialWidth;
 
-            // Tracerのフラッシュ、またはArc/Impactの弾・噴煙（役割はPhaseで決まる）を指す共有transform。
+            // Tracerのマズルフラッシュ、またはImpactPuffの噴煙（役割はPhaseで決まる）を指す共有transform。
+            // Task43: ArcTravel中はもう使わない（曲射砲弾の「弾」表現はLineに置き換わった）。
             public Transform FlashOrShell;
             public float InitialFlashSize;
 
@@ -77,16 +102,32 @@ namespace CSWarfront.Game
             public Vector3 From;
             public Vector3 To;
             public float ApexHeight;
+            /// <summary>光跡の尾が頭からどれだけ遅れるか（t=0..1の弧パラメータ上の遅延量、Task43）。
+            /// SpawnArcで経路長から逆算し、ショットの距離によらずおおむね一定の世界座標長に見えるようにする。</summary>
+            public float TrailLagT;
         }
 
         private static readonly List<Effect> _effects = new List<Effect>();
+
+        /// <summary>Task43: 銃撃3点バーストのうち、まだ発射していない後続弾を実時間で待たせておく
+        /// キュー。Update()内でブロッキングなしに実時間を消費して進める（乱数不使用・sim tickとは無関係、
+        /// あくまでGame層の見た目専用の演出）。</summary>
+        private class PendingBurst
+        {
+            public Vector3 From;
+            public Vector3 To;
+            public int RemainingRounds;
+            public float TimeUntilNextRound;
+        }
+
+        private static readonly List<PendingBurst> _pendingBursts = new List<PendingBurst>();
 
         private static Shader _shader;
         private static bool _shaderResolved;
         private static Material _gunfireMaterial;
         private static Material _directFireMaterial;
         private static Material _flashMaterial;
-        private static Material _shellMaterial;
+        private static Material _arcTrailMaterial;
         private static Material _puffMaterial;
 
         /// <summary>
@@ -114,12 +155,12 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトを実時間(realDeltaTime)で進め、寿命が尽きたものを破棄する
-        /// （メインスレッド専用）。ArcTravelはDurationに達すると新規GameObjectを作らず、同じ弾を
+        /// <summary>生存中の全エフェクトと、実行待ちのバースト後続弾(Task43)を実時間(realDeltaTime)で
+        /// 進める（メインスレッド専用）。ArcTravelはDurationに達すると新規GameObjectを作らず、同じ弾を
         /// 着弾噴煙(ImpactPuff)へ転生させてから継続する。</summary>
         public static void Update(float realDeltaTime)
         {
-            if (_effects.Count == 0) return;
+            if (_effects.Count == 0 && _pendingBursts.Count == 0) return;
 
             try
             {
@@ -149,6 +190,8 @@ namespace CSWarfront.Game
                         _effects.RemoveAt(i);
                     }
                 }
+
+                AdvancePendingBursts(realDeltaTime);
             }
             catch (Exception e)
             {
@@ -156,9 +199,41 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトを破棄する（レベルアンロード時、メインスレッド専用）。
-        /// キャッシュ済みマテリアルはGameObjectではないため破棄しない（UnitMaterialFactoryと同じ扱い、
-        /// 次セッションでも使い回せる）。</summary>
+        /// <summary>Task43: 銃撃3点バーストの2/3発目を、ブロッキングせず実時間の経過だけで進める。
+        /// GunfireBurstRoundGapごとに1発ずつ、既存のSpawnTracerで新規トレーサーを生成する。
+        /// MaxLiveEffectsに達している間は生成だけを静かにスキップする（キューの消化自体は止めない、
+        /// 大規模乱戦で待ち行列が際限なく伸び続けないようにするため）。</summary>
+        private static void AdvancePendingBursts(float realDeltaTime)
+        {
+            if (_pendingBursts.Count == 0) return;
+
+            for (int i = _pendingBursts.Count - 1; i >= 0; i--)
+            {
+                PendingBurst b = _pendingBursts[i];
+                b.TimeUntilNextRound -= realDeltaTime;
+                if (b.TimeUntilNextRound > 0f) continue;
+
+                if (_effects.Count < MaxLiveEffects)
+                {
+                    SpawnTracer(b.From, b.To, GunfireTracerDuration, GunfireTracerWidth, GunfireFlashSize,
+                        GetGunfireMaterial());
+                }
+
+                b.RemainingRounds--;
+                if (b.RemainingRounds <= 0)
+                {
+                    _pendingBursts.RemoveAt(i);
+                }
+                else
+                {
+                    b.TimeUntilNextRound += GunfireBurstRoundGap;
+                }
+            }
+        }
+
+        /// <summary>生存中の全エフェクトと待機中のバースト後続弾(Task43)を破棄する
+        /// （レベルアンロード時、メインスレッド専用）。キャッシュ済みマテリアルはGameObjectではないため
+        /// 破棄しない（UnitMaterialFactoryと同じ扱い、次セッションでも使い回せる）。</summary>
         public static void DestroyAll()
         {
             try
@@ -176,6 +251,7 @@ namespace CSWarfront.Game
             finally
             {
                 _effects.Clear();
+                _pendingBursts.Clear(); // Task43: レベルアンロード後に旧セッションの後続弾が漏れて発射されないように。
             }
         }
 
@@ -183,6 +259,12 @@ namespace CSWarfront.Game
         {
             Vector3 from = new Vector3(e.From.X, e.From.Y, e.From.Z);
             Vector3 to = new Vector3(e.To.X, e.To.Y, e.To.Z);
+
+            // Task43: 発射/着弾位置を地面レベルからモデル中央の高さへ持ち上げる。攻撃側(From)は
+            // AttackerIdの、着弾側(To)はTargetIdの見た目の高さを使う。TargetId==0は基地（または
+            // 不明な対象＝論理ユニットではない）を意味し、見た目のルックアップを試みず既定値を使う。
+            from.y += ResolveAttackerMuzzleHeight(e.AttackerId);
+            to.y += ResolveTargetMuzzleHeight(e.TargetId);
 
             if (cameraPos.HasValue)
             {
@@ -194,8 +276,17 @@ namespace CSWarfront.Game
             switch (e.Kind)
             {
                 case ShotKind.Gunfire:
+                    // Task43: 銃撃は3点バースト。1発目はここで即座に、2/3発目はGunfireBurstRoundGap
+                    // 間隔で実時間ベースに遅延させる（AdvancePendingBursts、Updateからブロッキングなしで進行）。
                     SpawnTracer(from, to, GunfireTracerDuration, GunfireTracerWidth, GunfireFlashSize,
                         GetGunfireMaterial());
+                    _pendingBursts.Add(new PendingBurst
+                    {
+                        From = from,
+                        To = to,
+                        RemainingRounds = GunfireBurstRounds - 1,
+                        TimeUntilNextRound = GunfireBurstRoundGap
+                    });
                     break;
                 case ShotKind.DirectFire:
                     SpawnTracer(from, to, DirectFireTracerDuration, DirectFireTracerWidth, DirectFireFlashSize,
@@ -205,6 +296,30 @@ namespace CSWarfront.Game
                     SpawnArc(from, to);
                     break;
             }
+        }
+
+        /// <summary>攻撃側(From)の見た目の高さ（Task43）。attackerIdが0（論理ユニットでない）か、
+        /// 見た目がまだ無い（生成前/破棄済み）場合はDefaultMuzzleHeightにフォールバックする。</summary>
+        private static float ResolveAttackerMuzzleHeight(uint attackerId)
+        {
+            if (attackerId != 0)
+            {
+                float offset;
+                if (UnitVisuals.TryGetMuzzleOffset(attackerId, out offset)) return offset;
+            }
+            return DefaultMuzzleHeight;
+        }
+
+        /// <summary>着弾側(To)の見た目の高さ（Task43）。targetId==0は基地（または不明な対象）を意味し
+        /// 見た目のルックアップを試みずBaseTargetHeightを使う。targetId!=0だが見た目が無い場合
+        /// （対象ユニットが死亡・未生成等）はDefaultMuzzleHeightにフォールバックする。</summary>
+        private static float ResolveTargetMuzzleHeight(uint targetId)
+        {
+            if (targetId == 0) return BaseTargetHeight;
+
+            float offset;
+            if (UnitVisuals.TryGetMuzzleOffset(targetId, out offset)) return offset;
+            return DefaultMuzzleHeight;
         }
 
         private static void SpawnTracer(Vector3 from, Vector3 to, float duration, float width, float flashSize,
@@ -243,18 +358,34 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>Task43: 曲射砲弾を、球のモデルではなく銃撃のような光跡（トレーサー）として描く。
+        /// LineRenderer1本の頭(head)を放物線上のtに沿って進め、尾(tail)をTrailLagTぶん遅らせて追従させる
+        /// ことで、短いストリークが弧を描いて飛んでいくように見せる（StepArcTravel参照）。</summary>
         private static void SpawnArc(Vector3 from, Vector3 to)
         {
-            Material shellMaterial = GetShellMaterial();
-            if (shellMaterial == null) return;
+            Material trailMaterial = GetArcTrailMaterial();
+            if (trailMaterial == null) return;
 
             try
             {
                 var go = new GameObject("CSWarfrontShotFxArc");
-                Transform shell = CreateSmallSphere(go.transform, from, ArcShellSize, shellMaterial);
+                var line = go.AddComponent<LineRenderer>();
+                line.sharedMaterial = trailMaterial;
+                line.useWorldSpace = true;
+                line.SetVertexCount(2);
+                line.SetWidth(ArcTrailWidth, ArcTrailWidth);
+                // 初回StepArcTravelまでの1フレーム、伸び切った光跡が一瞬見えないよう発射点で頭と尾を揃えておく。
+                line.SetPosition(0, from);
+                line.SetPosition(1, from);
 
                 float horizontalDist = Mathf.Sqrt((to.x - from.x) * (to.x - from.x) + (to.z - from.z) * (to.z - from.z));
                 float apex = Mathf.Clamp(horizontalDist * ArcApexRatio, ArcApexMin, ArcApexMax);
+
+                // 経路長（水平距離＋弧による上乗せの粗い見積もり）から、光跡がおおむねArcTrailLength
+                // （世界座標の長さ）に見えるよう尾の遅延量(t換算)を逆算する。近距離/遠距離どちらでも
+                // 極端に間延び/短縮しすぎないよう安全域にクランプする。
+                float approxPathLength = Mathf.Max(horizontalDist + apex, 1f);
+                float trailLagT = Mathf.Clamp(ArcTrailLength / approxPathLength, ArcTrailMinLagT, ArcTrailMaxLagT);
 
                 _effects.Add(new Effect
                 {
@@ -262,11 +393,11 @@ namespace CSWarfront.Game
                     Phase = Phase.ArcTravel,
                     Elapsed = 0f,
                     Duration = ArcTravelDuration,
-                    FlashOrShell = shell,
-                    InitialFlashSize = ArcShellSize,
+                    Line = line,
                     From = from,
                     To = to,
-                    ApexHeight = apex
+                    ApexHeight = apex,
+                    TrailLagT = trailLagT
                 });
             }
             catch (Exception e)
@@ -308,14 +439,26 @@ namespace CSWarfront.Game
             }
         }
 
-        private static void StepArcTravel(Effect fx)
+        /// <summary>放物線上のパラメータt(0=発射, 1=着弾)における世界座標を返す（Task43:
+        /// StepArcTravelが光跡の頭・尾の両方でこれを呼ぶための共通ヘルパー）。</summary>
+        private static Vector3 ArcPositionAt(Effect fx, float t)
         {
-            if (fx.FlashOrShell == null) return;
-            float t = fx.Duration > 0f ? Mathf.Clamp01(fx.Elapsed / fx.Duration) : 1f;
+            t = Mathf.Clamp01(t);
             Vector3 pos = Vector3.Lerp(fx.From, fx.To, t);
             // 4*apex*t*(1-t): t=0(発射)/1(着弾)で0、t=0.5でapex高さになる標準的な放物線補間。
             pos.y += 4f * fx.ApexHeight * t * (1f - t);
-            fx.FlashOrShell.position = pos;
+            return pos;
+        }
+
+        /// <summary>Task43: 光跡（LineRenderer）の頭をt、尾をt-TrailLagTの弧上の位置へ進める。
+        /// 尾が頭より前に出ないようtailTを0未満にはしない（発射直後は頭と尾が同じ発射点に収束する）。</summary>
+        private static void StepArcTravel(Effect fx)
+        {
+            if (fx.Line == null) return;
+            float t = fx.Duration > 0f ? Mathf.Clamp01(fx.Elapsed / fx.Duration) : 1f;
+            float tailT = Mathf.Max(0f, t - fx.TrailLagT);
+            fx.Line.SetPosition(1, ArcPositionAt(fx, t));
+            fx.Line.SetPosition(0, ArcPositionAt(fx, tailT));
         }
 
         private static void StepImpactPuff(Effect fx)
@@ -326,23 +469,27 @@ namespace CSWarfront.Game
             fx.FlashOrShell.localScale = new Vector3(s, s, s);
         }
 
-        /// <summary>着弾した弾(shell)を、新規GameObjectを作らず短い噴煙(puff)へ転生させる。
+        /// <summary>着弾した光跡(Line)を消し、代わりに小さな着弾噴煙(puff)を1つだけ生成して継続する
+        /// （Task43: 曲射砲弾の「弾」表現が球からトレーサーに変わったため、旧実装のように既存の球を
+        /// 使い回すのではなく、この時点で初めて着弾フラッシュ用の球を作る。曲射砲弾自体は最後まで球にしない）。
         /// 転生に失敗した場合はエフェクトを取り残さないよう即座に破棄する。</summary>
         private static void TransitionToImpactPuff(Effect fx)
         {
             try
             {
-                if (fx.FlashOrShell != null)
+                if (fx.Line != null)
                 {
-                    fx.FlashOrShell.position = fx.To;
-                    fx.FlashOrShell.localScale = new Vector3(ImpactPuffSize, ImpactPuffSize, ImpactPuffSize);
-                    Renderer r = fx.FlashOrShell.GetComponent<Renderer>();
-                    if (r != null) r.sharedMaterial = GetPuffMaterial();
+                    fx.Line.SetWidth(0f, 0f);
+                    fx.Line.enabled = false;
                 }
+
+                Transform puff = CreateSmallSphere(fx.Root.transform, fx.To, ImpactPuffSize, GetPuffMaterial());
+                fx.FlashOrShell = puff;
+                fx.InitialFlashSize = ImpactPuffSize;
+
                 fx.Phase = Phase.ImpactPuff;
                 fx.Elapsed = 0f;
                 fx.Duration = ImpactPuffDuration;
-                fx.InitialFlashSize = ImpactPuffSize;
             }
             catch (Exception e)
             {
@@ -412,10 +559,10 @@ namespace CSWarfront.Game
             return _flashMaterial;
         }
 
-        private static Material GetShellMaterial()
+        private static Material GetArcTrailMaterial()
         {
-            if (_shellMaterial == null) _shellMaterial = BuildMaterial(ShellColor);
-            return _shellMaterial;
+            if (_arcTrailMaterial == null) _arcTrailMaterial = BuildMaterial(ArcTrailColor);
+            return _arcTrailMaterial;
         }
 
         private static Material GetPuffMaterial()

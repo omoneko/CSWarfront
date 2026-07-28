@@ -94,16 +94,17 @@ public class LandUnitRosterTests
         Assert.Equal(204f, t5.Cost, 3);    // 60 * 3.4
     }
 
-    // --- Task42: 発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)の基礎値テーブル ---
-
+    // --- Task42/Task43: 発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)の基礎値テーブル ---
+    // Task43: ユーザーフィードバック（発砲間隔が短すぎる）により全面的に延長した
+    // （Gunfireは3点バーストのバースト間隔、DirectFire/IndirectFireは単発の発射間隔）。
     [Theory]
-    [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.08f)]
-    [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.08f)]
-    [InlineData(UnitCategory.Apc, ShotKind.Gunfire, 0.10f)]
-    [InlineData(UnitCategory.DroneInfantry, ShotKind.Gunfire, 0.12f)]
-    [InlineData(UnitCategory.AntiAir, ShotKind.Gunfire, 0.10f)]
-    [InlineData(UnitCategory.Tank, ShotKind.DirectFire, 0.25f)]
-    [InlineData(UnitCategory.Artillery, ShotKind.IndirectFire, 0.60f)]
+    [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.40f)]
+    [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.40f)]
+    [InlineData(UnitCategory.Apc, ShotKind.Gunfire, 0.45f)]
+    [InlineData(UnitCategory.DroneInfantry, ShotKind.Gunfire, 0.50f)]
+    [InlineData(UnitCategory.AntiAir, ShotKind.Gunfire, 0.45f)]
+    [InlineData(UnitCategory.Tank, ShotKind.DirectFire, 0.90f)]
+    [InlineData(UnitCategory.Artillery, ShotKind.IndirectFire, 2.00f)]
     public void Tier1_shot_kind_and_fire_interval_match_design_table(UnitCategory category, ShotKind expectedKind,
         float expectedIntervalHours)
     {
@@ -128,7 +129,7 @@ public class LandUnitRosterTests
     [Fact]
     public void Artillerys_fire_interval_is_longer_than_infantrys()
     {
-        // Task42: 砲兵の曲射は歩兵の銃撃より間引き間隔が長い（0.60h vs 0.08h）。
+        // Task42/43: 砲兵の曲射は歩兵の銃撃より間引き間隔が長い（2.00h vs 0.40h）。
         UnitType artillery = LandUnitRoster.Get(UnitCategory.Artillery, 1);
         UnitType infantry = LandUnitRoster.Get(UnitCategory.Infantry, 1);
         Assert.True(artillery.FireIntervalHours > infantry.FireIntervalHours);

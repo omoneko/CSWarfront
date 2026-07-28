@@ -26,9 +26,21 @@ namespace CSWarfront.Core
         public ShotKind Kind;
         public byte FactionId;
 
-        public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId)
+        /// <summary>発砲したユニットのUnitInstance.InstanceId（Task43）。Game層がFrom側の
+        /// 発射高さ（モデル中央）を求めるために使う。0という値は使われない
+        /// （UnitInstance.InstanceIdはWarState.AllocInstanceIdが1から払い出す）。</summary>
+        public uint AttackerId;
+
+        /// <summary>着弾先のUnitInstance.InstanceId（Task43）。ユニット同士の交戦（CombatStep）では
+        /// 標的ユニットのInstanceId、基地攻め（BaseCombatStep）では基地には論理ユニットIDが無いため0。
+        /// Game層はTargetId==0を「基地（または不明な対象）」として扱い、ユニットより大きい既定の
+        /// 着弾高さを使う。</summary>
+        public uint TargetId;
+
+        public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId)
         {
             From = from; To = to; Kind = kind; FactionId = factionId;
+            AttackerId = attackerId; TargetId = targetId;
         }
     }
 }

@@ -24,14 +24,15 @@ public class MvpUnitTypesTests
     }
 
     [Fact]
-    public void Infantry_T1_speed_is_5kmh_citizen_walking_pace()
+    public void Infantry_T1_speed_is_7_5kmh_after_the_1_5x_speed_buff()
     {
+        // Task43: ユーザーフィードバック「歩兵の移動速度は1.5倍」により 5km/h -> 7.5km/h に変更。
         var t = MvpUnitTypes.Infantry_T1();
         Assert.Equal("Infantry_T1", t.TypeKey);
         Assert.Equal(Domain.Land, t.Domain);
         Assert.Equal(UnitCategory.Infantry, t.Category);
-        // 5km/h -> 1.388... m/s -> / 2.05078125 ≈ 0.677 units/ゲーム内時間
-        Assert.Equal(0.677f, t.Speed, 2);
+        // 7.5km/h -> 2.0833... m/s -> / 2.05078125 ≈ 1.016 units/ゲーム内時間（旧: 5km/hで0.677）
+        Assert.Equal(1.02f, t.Speed, 2);
         Assert.Equal(60f, t.MaxHP, 3);
         Assert.Equal(20f, t.Attack, 3);
         Assert.Equal(40f, t.Range, 3);
