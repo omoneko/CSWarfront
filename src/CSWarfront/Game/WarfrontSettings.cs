@@ -32,6 +32,16 @@ namespace CSWarfront.Game
             get { return new[] { "Red", "Blue", "Faction 3", "Faction 4", "Faction 5" }; }
         }
 
+        // --- Task49: ユニット上の勢力アイコン（小さな球、Game/UnitVisuals）表示切り替え ---
+
+        private static bool _showFactionIcons = true; // 既定ON
+
+        public static bool ShowFactionIcons
+        {
+            get { return _showFactionIcons; }
+            set { _showFactionIcons = value; }
+        }
+
         // --- Task48: 部隊コマンドのキー割り当て ---
 
         /// <summary>ホットキー候補（テンキー中心、MissileDisaster.ModSettings.KeyOptionsと同じ考え方：

@@ -39,7 +39,7 @@ namespace CSWarfront.Game
     /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
     /// sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと。
     /// </summary>
-    public static class UnitVisuals
+    public static partial class UnitVisuals
     {
         private class VisualEntry
         {
@@ -51,6 +51,15 @@ namespace CSWarfront.Game
             /// （メッシュはビジュアルの生存中変わらないため）。CombatFxが発砲エフェクトの発射/着弾高さを
             /// 地面レベルからこの高さへ持ち上げるために使う（TryGetMuzzleOffset参照）。</summary>
             public float MuzzleOffsetY;
+
+            /// <summary>Task49: 勢力アイコン（小さな球）の子GameObject。WarfrontSettings.ShowFactionIconsが
+            /// OFFの間、または生成にまだ成功していない間はnull（毎フレームのUpdateFactionIconが遅延生成/破棄
+            /// を担当する）。fromAssignedProp（割り当て済みアセット）ユニットも含め、全ユニットに付く。</summary>
+            public GameObject Icon;
+
+            /// <summary>アイコンをルートGameObjectのローカル座標系で置く高さ（Y）。CreateVisual時に
+            /// mesh.bounds.max.y + ギャップから1回だけ計算してキャッシュする（MuzzleOffsetYと同じ方針）。</summary>
+            public float IconLocalHeightY;
         }
 
         // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
@@ -68,6 +77,14 @@ namespace CSWarfront.Game
         // まちまち）が極端に平ら/巨大でも発砲エフェクトの高さが不自然にならないための安全域。
         private const float MinMuzzleOffsetY = 1f;
         private const float MaxMuzzleOffsetY = 20f;
+
+        // Task49: 勢力アイコン（小さな球）をモデル上端からどれだけ浮かせるか、その安全域クランプ。
+        // ここで使うのはCreateVisual（下）のみ。スケール関連定数・生成/更新ロジックは
+        // UnitVisualsFactionIcon.cs 側の partial class 定義に分離した（500行制限のため、
+        // MilitaryManagerUnitCommands.csと同じ方針。privateメンバーでもpartial class間で共有できる）。
+        private const float IconGapAboveMesh = 1.5f;
+        private const float MinIconLocalHeightY = 2f;
+        private const float MaxIconLocalHeightY = 25f;
 
         private static readonly Dictionary<uint, VisualEntry> _visuals = new Dictionary<uint, VisualEntry>();
 
@@ -148,6 +165,11 @@ namespace CSWarfront.Game
         {
             if (snapshot == null) return;
 
+            // Task49: 勢力アイコンの距離スケーリング用にカメラを1回だけ取得する（Camera.mainはタグ検索を
+            // 伴いうるため、ユニット数分ではなくフレーム当たり1回に抑える）。見つからない場合はnullのまま
+            // 渡し、UpdateFactionIcon側でスケール計算をスキップする（アイコン自体の生成/破棄は継続する）。
+            Camera mainCamera = Camera.main;
+
             _seenIds.Clear();
             for (int i = 0; i < snapshot.Count; i++)
             {
@@ -177,6 +199,11 @@ namespace CSWarfront.Game
                     {
                         MoveVisual(entry, s.Position);
                     }
+
+                    // Task49: 生成/移動どちらの経路でも、この後で毎フレーム呼ぶ（トグルON/OFF・距離変化への
+                    // 追従を両方の経路で一元化する）。fromAssignedProp（割り当て済みアセット）ユニットも
+                    // 除外しない＝両方で動作する（要件）。
+                    UpdateFactionIcon(entry, s.FactionId, mainCamera);
                 }
                 catch (Exception e)
                 {
@@ -296,6 +323,12 @@ namespace CSWarfront.Game
                 // 備えて安全域へクランプする。
                 float muzzleOffsetY = Mathf.Clamp(pivotOffsetY + mesh.bounds.center.y, MinMuzzleOffsetY, MaxMuzzleOffsetY);
 
+                // Task49: 勢力アイコンをモデル上端の少し上に置くための高さ。pivotOffsetYのおかげで
+                // メッシュは常にルートのY=0を底面として描画されるため、pivotOffsetY + mesh.bounds.max.y が
+                // 「モデル上端」のルート相対高さになる。そこへギャップを足し、安全域へクランプする
+                // （muzzleOffsetYと同じ考え方）。
+                float iconLocalHeightY = Mathf.Clamp(pivotOffsetY + mesh.bounds.max.y + IconGapAboveMesh, MinIconLocalHeightY, MaxIconLocalHeightY);
+
                 GameObject model = new GameObject("Model");
                 model.transform.SetParent(go.transform, false);
                 model.transform.localPosition = new Vector3(0f, pivotOffsetY, 0f);
@@ -322,7 +355,7 @@ namespace CSWarfront.Game
 
                 ModConfig.Log("UnitVisuals: created visual for instance " + s.InstanceId + " type=" + s.TypeKey);
 
-                return new VisualEntry { GameObject = go, LastPosition = s.Position, MuzzleOffsetY = muzzleOffsetY };
+                return new VisualEntry { GameObject = go, LastPosition = s.Position, MuzzleOffsetY = muzzleOffsetY, IconLocalHeightY = iconLocalHeightY };
             }
             catch (Exception e)
             {
@@ -403,6 +436,8 @@ namespace CSWarfront.Game
             }
             entry.LastPosition = newPosition;
         }
+
+        // Task49: UpdateFactionIcon/CreateFactionIcon は UnitVisualsFactionIcon.cs（同じ partial class）参照。
 
         private static void DestroyVisual(uint instanceId)
         {

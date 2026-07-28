@@ -32,6 +32,10 @@ namespace CSWarfront.Game
 
                 AddUnitCommandHotkeyUI(helper);
 
+                OptionsRelationsPage.Build(helper);
+
+                AddFactionIconUI(helper);
+
                 OptionsModelAssignPage.Build(helper);
             }
             catch (Exception e)
@@ -70,6 +74,19 @@ namespace CSWarfront.Game
             for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
                 if (WarfrontSettings.KeyOptions[i] == key) return i;
             return 0;
+        }
+
+        /// <summary>Task49: ユニット上の勢力アイコン（小さな球、Game/UnitVisuals参照）の表示切り替え。
+        /// WarfrontSettingsと同じくメモリ内保持のみ（セッションをまたいだ既定値=ONへのリセットは許容、MVP）。
+        /// OFFにした場合、既に生成済みの球は次回 UnitVisuals.Sync() 時に破棄される
+        /// （UnitVisuals.Sync内でWarfrontSettings.ShowFactionIconsを見て個別に破棄する）。</summary>
+        private static void AddFactionIconUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup("Faction icons");
+            group.AddCheckbox(
+                "Show a small faction-colored marker above each unit",
+                WarfrontSettings.ShowFactionIcons,
+                v => WarfrontSettings.ShowFactionIcons = v);
         }
     }
 }

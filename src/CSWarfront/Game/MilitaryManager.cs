@@ -108,10 +108,11 @@ namespace CSWarfront.Game
                 state.Factions.Add(f);
             }
 
-            // MVPの既定関係は全勢力ペアがHostile（設定可能な関係UIは将来対応）。
-            for (byte i = 0; i < WarfrontSettings.MaxFactions; i++)
-                for (byte j = (byte)(i + 1); j < WarfrontSettings.MaxFactions; j++)
-                    state.Relations.Set(i, j, Relation.Hostile);
+            // MVPの既定関係は全勢力ペアがHostile。実装はCore.RelationPresets.ApplyAllHostileに委譲する
+            // （Task49: Options画面の「全て敵対に戻す」ボタンからも同じ実装を再利用するため）。
+            // これは「新規State作成時」のみ適用される既定値であり、既存セーブをロードした場合は
+            // シリアライズ済みの関係（WarState.Relations、format v4で25ペア全て永続化済み）がそのまま復元される。
+            RelationPresets.ApplyAllHostile(state.Relations, WarfrontSettings.MaxFactions);
 
             State = state;
         }
