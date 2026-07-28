@@ -144,8 +144,11 @@ public class CoverSeekStepTests
         Assert.False(self.CoverDestination.HasValue);
     }
 
+    // Task50: 交戦中(Mode2)の再評価は、もはやクールダウンではなく「同じ相手(TargetId)と戦い続けて
+    // いるか」だけで決まる。クールダウンをどれだけ超えて時間を進めても、TargetIdが変わらない限り
+    // 既に決めたCoverDestinationは一切変更しない（頻繁な位置変更を防ぐための最重要ガード）。
     [Fact]
-    public void Advance_does_not_reevaluate_before_cooldown_elapses()
+    public void Advance_does_not_reevaluate_while_engaging_the_same_target_even_long_after_cooldown_would_have_elapsed()
     {
         var s = BaseState();
         var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
@@ -159,34 +162,92 @@ public class CoverSeekStepTests
         CoverSeekStep.Advance(s, 0.01f);
         Assert.True(self.CoverDestination.HasValue);
         var firstDestination = self.CoverDestination.Value;
+        Assert.Equal(enemy.InstanceId, self.CoverTargetId);
 
-        // 遮蔽物を全て取り除いても、クールダウン中なら既存のCoverDestinationは変わらない。
+        // 遮蔽物を全て取り除き、旧クールダウン(0.5h)を大きく超える時間を進めても、
+        // 同じ相手と交戦し続けている限りCoverDestinationは変わらない。
         s.Cover = new CoverMap();
-        CoverSeekStep.Advance(s, 0.01f); // still well within CoverReevaluateHours (0.5h)
+        CoverSeekStep.Advance(s, CoverSeekStep.CoverReevaluateHours * 10f);
 
         Assert.True(self.CoverDestination.HasValue);
         Assert.Equal(firstDestination.X, self.CoverDestination.Value.X, 3);
     }
 
+    // Task50: 遮蔽が見つからなかった、という判断そのものも「同じ相手との交戦中は」記憶され、
+    // 毎tick探索し直されない（CoverDestinationがnullのまま安定する＝この間MovementStepは動かさない）。
     [Fact]
-    public void Advance_reevaluates_after_cooldown_elapses()
+    public void Advance_remembers_no_cover_found_for_the_same_target_and_does_not_keep_retrying()
     {
         var s = BaseState();
         var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
         var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
         self.State = UnitState.Engaging;
         self.TargetId = enemy.InstanceId;
+        s.Cover = new CoverMap(); // no cover available at all
+
+        CoverSeekStep.Advance(s, 0.01f);
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.Equal(enemy.InstanceId, self.CoverTargetId); // decision recorded even though nothing was found
+
+        // Cover appears later, but the target hasn't changed -> still must not re-pick.
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        CoverSeekStep.Advance(s, CoverSeekStep.CoverReevaluateHours * 10f);
+
+        Assert.False(self.CoverDestination.HasValue);
+    }
+
+    // Task50 TDD: 「an engaging unit re-evaluates cover only when its target changes」。
+    // 相手が変わった瞬間は（クールダウンを待たず）即座に再評価される。
+    [Fact]
+    public void Advance_reevaluates_immediately_when_the_engaged_target_changes()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy1 = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        var enemy2 = AddUnit(s, 3, UnitCategory.Infantry, 1, new WorldPos(-100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy1.InstanceId;
 
         s.Cover = new CoverMap();
         s.Cover.Add(new WorldPos(50, 0, 0), 5f);
 
         CoverSeekStep.Advance(s, 0.01f);
         Assert.True(self.CoverDestination.HasValue);
+        var firstDestination = self.CoverDestination.Value;
+        Assert.Equal(enemy1.InstanceId, self.CoverTargetId);
 
-        // 遮蔽マップを空にして、クールダウン(0.5h)を超える時間を進める。
+        // Switch to a different target (still engaging) with a cover map that no longer has
+        // anything near the old destination -> must re-pick right away, not wait for a cooldown.
+        self.TargetId = enemy2.InstanceId;
         s.Cover = new CoverMap();
-        CoverSeekStep.Advance(s, CoverSeekStep.CoverReevaluateHours + 0.01f);
+        s.Cover.Add(new WorldPos(-40, 0, 0), 5f);
+        CoverSeekStep.Advance(s, 0.01f); // tiny dt: a cooldown-based design would still be "in cooldown" here
 
+        Assert.True(self.CoverDestination.HasValue);
+        Assert.NotEqual(firstDestination.X, self.CoverDestination.Value.X, 3);
+        Assert.Equal(enemy2.InstanceId, self.CoverTargetId);
+    }
+
+    // Task50: 到達済み（またはそもそも遮蔽が無い）の交戦ユニットは、以後のtickで一切動かない
+    // （CoverSeekStep→MovementStepの連携を統合的に確認する）。
+    [Fact]
+    public void Advance_engaging_unit_with_no_cover_never_moves_on_subsequent_ticks()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0); // stray advance target; must be ignored while engaging
+        // s.Cover left null -> no cover map at all
+
+        CoverSeekStep.Advance(s, 0.01f);
+        MovementStep.Advance(s, 1f);
+        Assert.Equal(0f, self.Position.X, 3);
+
+        CoverSeekStep.Advance(s, 5f); // several ticks later, still the same target
+        MovementStep.Advance(s, 5f);
+        Assert.Equal(0f, self.Position.X, 3);
         Assert.False(self.CoverDestination.HasValue);
     }
 

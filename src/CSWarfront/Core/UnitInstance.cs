@@ -72,6 +72,15 @@ namespace CSWarfront.Core
         /// 移れるようにする（cover-to-coverのbounding advance）。</summary>
         public bool CoverHold;
 
+        /// <summary>交戦中（State==Engaging）の現在のCoverDestination/CoverHoldが、どのTargetIdに対して
+        /// 決定されたものかを覚えておく（実行時のみ・非永続化、Task50）。CoverSeekStepは、交戦中の間
+        /// TargetIdがこの値と一致し続ける限り遮蔽の再評価を一切行わない（見つからなかった場合も含め、
+        /// 判断済みの結果をそのまま維持する）。これにより「同じ相手と戦い続けている間、僅かなスコア差で
+        /// 遮蔽位置が頻繁に切り替わり、建物の陰でせわしなく動き回って見える」不具合を防ぐ。
+        /// TargetIdが変わった（新しい相手と交戦を始めた）、または交戦をやめた瞬間にnullへ戻り、
+        /// 次の交戦開始時に改めて評価される。</summary>
+        public uint? CoverTargetId;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;

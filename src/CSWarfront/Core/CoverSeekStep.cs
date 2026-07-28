@@ -18,6 +18,15 @@ namespace CSWarfront.Core
     ///      を脅威方向とみなし、目的地に確実に近づく（MinForwardProgress以上）候補があればそこを
     ///      CoverHold=falseで設定する（遮蔽から遮蔽へ跳ぶように前進、MovementStepが到達時に自動でクリアする）。
     ///      前進にならない候補しか無ければCoverDestinationは設定せず、通常の経路移動に任せる。
+    ///
+    /// Task50: モード2（交戦中）は、同じ相手（TargetId）と戦い続けている間は遮蔽の再評価を一切
+    /// 行わないよう変更した（UnitInstance.CoverTargetId参照）。旧仕様はCoverReevaluateHoursごとの
+    /// クールダウンだけで間引いていたが、それでも一定間隔で遮蔽物マップを再探索するため、僅かな
+    /// スコア差やユニットの微妙な位置変化で選ばれる候補が変わり、「建物の陰に隠れながら戦闘中なのに
+    /// 頻繁に位置を変える、せわしない動き」に見える不具合の原因だった。新仕様では、TargetIdが変わる
+    /// （新しい相手と交戦を始める）まで一切位置を選び直さない＝到達後は完全に停止したまま撃ち合う。
+    /// 遮蔽が見つからなかった場合も同様にその判断を記憶し、同じ相手との交戦中は毎tick探索し直さない。
+    /// モード3（進軍中のbounding advance）のクールダウン間引きは変更していない。
     /// </summary>
     public static class CoverSeekStep
     {
@@ -98,10 +107,9 @@ namespace CSWarfront.Core
 
                 bool isEngaging = u.State == UnitState.Engaging && u.TargetId.HasValue;
 
-                UnitInstance target = null;
                 if (isEngaging)
                 {
-                    target = state.FindUnit(u.TargetId.Value);
+                    UnitInstance target = state.FindUnit(u.TargetId.Value);
                     if (target == null || !target.IsAlive)
                     {
                         // 交戦が終わった＝次に交戦し始めたら即座に再評価してほしいので、
@@ -110,8 +118,36 @@ namespace CSWarfront.Core
                         u.CoverReevaluateCooldown = 0f;
                         continue;
                     }
+
+                    // Task50: 同じ相手と交戦し続けている間は、既に決定済みの遮蔽（見つからなかった
+                    // という判断も含む）を一切変更しない。頻繁な位置変更を防ぐための最重要ガード。
+                    if (u.CoverTargetId.HasValue && u.CoverTargetId.Value == u.TargetId.Value)
+                        continue;
+
+                    // 新規の交戦、または相手が変わった: このtickで即座に（クールダウンを待たず）評価する。
+                    u.CoverTargetId = u.TargetId;
+                    if (state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out WorldPos coverPos))
+                    {
+                        u.CoverDestination = coverPos;
+                        u.CoverHold = true;
+                    }
+                    else
+                    {
+                        // 遮蔽が見つからなかった、という判断そのものを記憶する（CoverTargetIdは
+                        // 維持し、CoverDestination/CoverHoldのみクリアする＝ClearCoverは使わない。
+                        // ClearCoverはCoverTargetIdもnullへ戻してしまい、同じ相手との交戦中に
+                        // 毎tick探索し直すことになってしまうため）。
+                        u.CoverDestination = null;
+                        u.CoverHold = false;
+                    }
+                    continue;
                 }
-                else if (!u.OrderTargetPos.HasValue)
+
+                // ここに来るのは非交戦（Mode3進軍中）のみ。次に交戦を始めたら即座に評価してほしいので
+                // ロックを解放しておく。
+                u.CoverTargetId = null;
+
+                if (!u.OrderTargetPos.HasValue)
                 {
                     // 交戦もしていない・進軍目的地も無い（Idle等）→遮蔽移動の対象外。
                     ClearCover(u);
@@ -125,21 +161,6 @@ namespace CSWarfront.Core
                 u.CoverReevaluateCooldown -= dt;
                 if (u.CoverReevaluateCooldown > 0f) continue;
                 u.CoverReevaluateCooldown = CoverReevaluateHours;
-
-                if (isEngaging)
-                {
-                    // Mode 2: 交戦中。脅威(target)から身を隠す位置へ。到着したらそこに留まり撃ち続ける。
-                    if (state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out WorldPos coverPos))
-                    {
-                        u.CoverDestination = coverPos;
-                        u.CoverHold = true;
-                    }
-                    else
-                    {
-                        ClearCover(u);
-                    }
-                    continue;
-                }
 
                 // Mode 3: 進軍中（交戦していない）。目的地(進軍先の敵基地)方向を脅威とみなし、
                 // 目的地に確実に近づく候補があれば遮蔽から遮蔽へ跳ぶように前進させる。
@@ -167,10 +188,15 @@ namespace CSWarfront.Core
             }
         }
 
+        /// <summary>CoverDestination/CoverHoldに加え、CoverTargetId（Task50の交戦中ロック）も解放する。
+        /// 「遮蔽の意思決定そのものを白紙に戻す」経路すべてで使う。交戦中に遮蔽が見つからなかった
+        /// 場合だけは、このメソッドを使わずCoverDestination/CoverHoldのみ直接クリアする
+        /// （CoverTargetIdは維持し、同じ相手との再探索を防ぐため。上のisEngagingブロック参照）。</summary>
         private static void ClearCover(UnitInstance u)
         {
             u.CoverDestination = null;
             u.CoverHold = false;
+            u.CoverTargetId = null;
         }
     }
 }

@@ -23,7 +23,17 @@ namespace CSWarfront.Core
     ///     通らない。代わりにOrderTargetPosの代わりにRallyPointへ向け、Path（UnitCommands.ApplyRallyが
     ///     RallyPoint宛に計算済み）があれば消化してから直線移動でフォールバックする。CoverArrivalDistance
     ///     以内まで近づいたら停止する（新規の定数を増やさず、Cover到達判定と同じ基準を再利用する）。
-    ///   - FreeAdvance/AiControlled: 従来通りOrderTargetPos/Pathで移動する（挙動変更なし）。</summary>
+    ///     RallyHoldは移動中・停止後を問わず射程内の敵に応戦する設計（UnitInstance.Order参照）のため、
+    ///     State==Engagingであっても下のTask50ガードより先に判定し、RallyPointへの移動は続ける
+    ///     （「持ち場へ向かいながら応戦する」という意図的な仕様。ここは変更しない）。
+    ///   - FreeAdvance/AiControlled: 従来通りOrderTargetPos/Pathで移動する（挙動変更なし）。
+    ///
+    /// Task50: 「建物の陰に隠れながら戦闘するときは停車する」フィードバック対応。CoverDestinationを
+    /// 持たない（＝適した遮蔽が見つからなかった、または自勢力圏内で遮蔽移動そのものの対象外の）
+    /// Engagingユニットは、Order==RallyHoldでない限り一切移動しない（OrderTargetPos/Pathへ進まない）。
+    /// State列挙体はEngaging/Movingが排他のため、この分岐が無くても下のMoving判定だけで実質的には
+    /// 同じ結果になっていたが、意図を明示するため独立したガードとして残す（「交戦中は遮蔽位置以外へは
+    /// 絶対に動かない」という要件を、将来Stateの意味が広がっても壊れない形で保証する）。</summary>
     public static class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
@@ -55,6 +65,9 @@ namespace CSWarfront.Core
                     if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen);
                     continue;
                 }
+
+                // Task50: 遮蔽位置を持たない交戦中ユニットは停車したまま応戦する（RallyHoldは上で処理済み）。
+                if (u.State == UnitState.Engaging) continue;
 
                 if (u.State != UnitState.Moving || !u.OrderTargetPos.HasValue) continue;
 

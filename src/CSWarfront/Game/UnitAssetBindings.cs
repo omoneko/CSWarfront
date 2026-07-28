@@ -58,7 +58,17 @@ namespace CSWarfront.Game
     ///   "typeKey=kind:assetName" / "typeKey=assetName" … レガシー行（factionIdプレフィックス無し）。
     ///                                          「全勢力共通のフォールバック」として読み込む（後方互換）。
     ///
-    /// 解決順序: 勢力別の割り当て → レガシー/全勢力共通の割り当て → 無し（既定モデル）。
+    /// 解決順序（Task50でTierフォールバックを追加）:
+    ///   1. 勢力別・exact-key（faction, typeKeyそのもの）の割り当て
+    ///   2. レガシー/全勢力共通・exact-keyの割り当て
+    ///   3. 同カテゴリ・他Tierへのフォールバック（typeKeyが "&lt;Category&gt;_T&lt;tier&gt;" として
+    ///      解析できる場合のみ）。直近の下位Tierから1まで、その後は直近の上位Tierから5まで
+    ///      （TypeKeyParser.FallbackTierOrder参照、例: Tank_T4 未割当なら T3→T2→T1→T5の順）を試し、
+    ///      各Tier候補について「勢力別 → レガシー/全勢力共通」の順に確認する。
+    ///   4. 無し（既定モデル）
+    /// これにより「Tier1にだけモデルを割り当てれば、Tier2以降にもそのモデルが自動的に適用される」
+    /// （5Tierすべてを手作業で割り当てる必要がない）。ただし特定Tierへの明示的な割り当て（手順1/2）は
+    /// 常にこのフォールバック（手順3）より優先される。
     /// kindプレフィックスの解析は AssetKindUtil.TryParsePrefix が行う。値の先頭が既知のkind名+':'で
     /// 始まらない場合は、値全体を（kindプレフィックス無しとして）AssetKind.Propの名前とみなす
     /// （既存プロップ名にたまたま':'が含まれていても誤解析しない）。
@@ -161,7 +171,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 指定勢力・種別の割り当てを解決する。解決順序: 勢力別 → 全勢力共通(レガシー) → 無し。
+        /// 指定勢力・種別の割り当てを解決する。解決順序（クラス冒頭コメント参照、Task50でTier
+        /// フォールバックを追加）: 勢力別exact → レガシー/全勢力共通exact → 同カテゴリ他Tier
+        /// フォールバック（勢力別優先） → 無し。
         /// </summary>
         public static bool TryGet(byte factionId, string typeKey, out AssetKind kind, out string assetName)
         {
@@ -181,6 +193,33 @@ namespace CSWarfront.Game
                 kind = binding.Kind;
                 assetName = binding.Name;
                 return true;
+            }
+
+            // Task50: exact-keyが無ければ、同カテゴリの他Tierへフォールバックする（「Tier1にだけ
+            // モデルを割り当てれば全Tierに効く」を実現する。パース/探索順序の組み立ては
+            // CSWarfront.Core.TypeKeyParser（純ロジック、Core.Testsでテスト済み）に委譲する）。
+            UnitCategory category;
+            byte tier;
+            if (TypeKeyParser.TryParse(typeKey, out category, out tier))
+            {
+                byte[] fallbackTiers = TypeKeyParser.FallbackTierOrder(tier);
+                for (int i = 0; i < fallbackTiers.Length; i++)
+                {
+                    string fallbackKey = LandUnitRoster.TypeKey(category, fallbackTiers[i]);
+
+                    if (_bindings.TryGetValue(MakeKey(factionId, fallbackKey), out binding))
+                    {
+                        kind = binding.Kind;
+                        assetName = binding.Name;
+                        return true;
+                    }
+                    if (_anyFactionBindings.TryGetValue(fallbackKey, out binding))
+                    {
+                        kind = binding.Kind;
+                        assetName = binding.Name;
+                        return true;
+                    }
+                }
             }
 
             kind = AssetKind.Prop;

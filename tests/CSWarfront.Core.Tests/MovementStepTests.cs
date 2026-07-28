@@ -482,4 +482,61 @@ public class MovementStepTests
 
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
+
+    // --- Task50: 「建物の陰に隠れながら戦闘するときは停車する」 ---
+
+    // 遮蔽位置(CoverDestination)が無い交戦中ユニットは、OrderTargetPos/Pathが残っていても
+    // 一切動かない（複数tickにわたって停止し続ける）。RallyHoldでない通常のAiControlled/FreeAdvance
+    // ユニットを想定（RallyHoldは移動しながら応戦する別仕様、下のテスト参照）。
+    [Fact]
+    public void Advance_engaging_unit_without_CoverDestination_never_moves_toward_OrderTargetPos()
+    {
+        var s = OneMovingUnit();
+        var u = s.Units[0];
+        u.State = UnitState.Engaging; // no CoverDestination assigned (CoverSeekStep found none, e.g.)
+
+        MovementStep.Advance(s, 1f);
+        Assert.Equal(0f, u.Position.X, 3);
+
+        MovementStep.Advance(s, 10f); // several more ticks, still nothing to move toward
+        Assert.Equal(0f, u.Position.X, 3);
+    }
+
+    // RallyHold + Engaging は例外: 「移動中・停止後を問わず射程内の敵にしか応戦しない」という
+    // Task48の意図的な仕様どおり、持ち場(RallyPoint)へ向かいながら応戦し続ける（Task50では変更しない）。
+    [Fact]
+    public void Advance_RallyHold_unit_still_advances_toward_RallyPoint_while_engaging()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(1000, 0, 0);
+        u.State = UnitState.Engaging; // fighting off something along the way, no CoverDestination
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
+    }
+
+    // 非交戦(進軍中)のbounding advanceは従来通り機能する（Task50でモード2のみを変更したことの回帰確認）。
+    [Fact]
+    public void Advance_non_engaging_unit_still_bounds_from_cover_to_cover()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.CoverDestination = new WorldPos(1f, 0, 0); // within CoverArrivalDistance(3)
+        u.CoverHold = false; // bounding advance, not holding
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.False(s.Units[0].CoverDestination.HasValue); // cleared on arrival, ready for the next cover
+        Assert.Equal(0f, s.Units[0].CoverReevaluateCooldown);
+    }
 }

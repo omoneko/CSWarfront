@@ -20,9 +20,20 @@ namespace CSWarfront.Game
         // 設定する（透視投影では screenSize ∝ worldSize / distance のため、worldSize を distance に比例させると
         // screenSize が一定に近づく）。MinIconWorldSize/MaxIconWorldSizeはその安全域クランプ:
         // 至近距離で0に潰れて消えないための下限、超望遠（大ズームアウト）で際限なく巨大化しないための上限。
-        private const float IconApparentSizeFactor = 0.02f;
-        private const float MinIconWorldSize = 2f;
-        private const float MaxIconWorldSize = 20f;
+        // Task50: ユーザーフィードバック「球アイコンのサイズを半分にして」により、Task49の値
+        // (0.02f / 2f / 20f) からちょうど半分に変更した。
+        private const float IconApparentSizeFactor = 0.01f;
+        private const float MinIconWorldSize = 1f;
+        private const float MaxIconWorldSize = 10f;
+
+        // Task50: バニラのフリーカメラモード（Cキー等でトグルされる撮影用の自由視点カメラ）が有効な間、
+        // 勢力アイコンを全て隠す（ユーザーフィードバック「FreeCameraモードで非表示にしてほしい」）。
+        // ToolsModifierControl.cameraController（静的プロパティ、CameraController型）が公開する
+        // m_freeCameraフィールド（public bool）を直接参照する。両メンバーともpublicであることを
+        // PowerShellでAssembly-CSharp.dllをリフレクションし確認済み（Game/UI/PanelChrome.IsGameMenuOpen
+        // と同じ検証方針）。取得できない/例外時は「フリーカメラではない」として扱い、初回のみログを出す
+        // （UpdateFactionIconは毎フレーム呼ばれるため連発を防ぐ）。
+        private static bool _loggedFreeCameraCheckFailure;
 
         /// <summary>
         /// 勢力アイコン（小さな球）を毎フレーム同期する。WarfrontSettings.ShowFactionIconsがOFFなら
@@ -35,7 +46,11 @@ namespace CSWarfront.Game
         {
             if (entry == null || entry.GameObject == null) return;
 
-            if (!WarfrontSettings.ShowFactionIcons)
+            // Task50: ShowFactionIcons設定OFF、またはフリーカメラモード中は既存のアイコンを破棄して
+            // 隠す（既存のON/OFFトグルと全く同じ経路。フリーカメラが終わればここを通らなくなり、
+            // 下の「entry.Icon == null なら遅延生成」で次のフレームに自動的に復元される＝
+            // Escメニューでパネルを隠す既存パターンと同じ「隠す/戻す」の考え方）。
+            if (!WarfrontSettings.ShowFactionIcons || IsFreeCameraActive())
             {
                 if (entry.Icon != null)
                 {
@@ -66,6 +81,29 @@ namespace CSWarfront.Game
             float distance = Vector3.Distance(iconWorldPos, mainCamera.transform.position);
             float worldSize = Mathf.Clamp(distance * IconApparentSizeFactor, MinIconWorldSize, MaxIconWorldSize);
             entry.Icon.transform.localScale = new Vector3(worldSize, worldSize, worldSize);
+        }
+
+        /// <summary>
+        /// Task50: バニラのフリーカメラモードが有効かどうか。ToolsModifierControl.cameraController
+        /// (静的プロパティ) の m_freeCamera (public bool フィールド) を参照する。取得不能/例外時は
+        /// falseを返し（＝アイコン非表示機能を無効化して安全側へフォールバック）、初回のみログを出す。
+        /// </summary>
+        private static bool IsFreeCameraActive()
+        {
+            try
+            {
+                CameraController cc = ToolsModifierControl.cameraController;
+                return cc != null && cc.m_freeCamera;
+            }
+            catch (Exception e)
+            {
+                if (!_loggedFreeCameraCheckFailure)
+                {
+                    _loggedFreeCameraCheckFailure = true;
+                    ModConfig.LogError("UnitVisuals.IsFreeCameraActive: 取得に失敗、フリーカメラ非表示機能を無効化します: " + e);
+                }
+                return false;
+            }
         }
 
         /// <summary>
