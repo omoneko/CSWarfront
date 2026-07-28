@@ -446,6 +446,12 @@ namespace CSWarfront.Game
                       .Append(" tgt=").Append(u.OrderTargetPos.HasValue
                           ? u.OrderTargetPos.Value.X.ToString("0") + "," + u.OrderTargetPos.Value.Z.ToString("0")
                           : "none");
+                    // 遮蔽移動モード（Task45）: territory=自勢力圏内で遮蔽移動なし、hold=交戦中で遮蔽に留まる、
+                    // bound=進軍中で遮蔽から遮蔽へ跳んでいる最中、none=遮蔽移動の対象外/候補なし。
+                    string coverMode = CoverSeekStep.IsInFriendlyTerritory(State, u) ? "territory"
+                        : u.CoverDestination.HasValue ? (u.CoverHold ? "hold" : "bound")
+                        : "none";
+                    sb.Append(" cov=").Append(coverMode);
                     // Speed（マップ距離/ゲーム内時間）を較正定数（想定値）でkm/hに逆変換して表示する（Task26）。
                     if (ut != null)
                         sb.Append(" spd=").Append((ut.Speed * SpeedCalibration.InGameHoursPerRealSecond * 3.6f).ToString("0")).Append("km/h");

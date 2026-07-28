@@ -289,24 +289,75 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
 
+    // Task44の旧仕様（テスト名 Advance_does_not_use_CoverDestination_when_not_engaging）は
+    // 「State==EngagingでなければCoverDestinationは無視する」だった。Task45でCoverSeekStepが
+    // 進軍中（交戦前、自勢力圏の外）のユニットにもCoverDestinationを設定するようになったため、
+    // MovementStepはState(Engaging/Moving)に関わらずCoverDestinationが設定されていれば必ず
+    // honorするよう変更した。以下はその新仕様を検証する（State=MovingでもCoverDestinationへ
+    // 向かい、OrderTargetPosは無視される＝bounding advance中の移動）。
     [Fact]
-    public void Advance_does_not_use_CoverDestination_when_not_engaging()
+    public void Advance_uses_CoverDestination_even_when_not_engaging_since_bounding_advance_sets_it_while_moving()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
-        u.State = UnitState.Moving; // Engagingではない
-        u.OrderTargetPos = new WorldPos(1000, 0, 0);
-        u.CoverDestination = new WorldPos(0, 0, 1000); // 残っていても無視されるはず
+        u.State = UnitState.Moving; // Engagingではないが、bounding advance中はCoverDestinationを持ちうる
+        u.OrderTargetPos = new WorldPos(1000, 0, 0); // 無視されるはず
+        u.CoverDestination = new WorldPos(0, 0, 1000); // こちらへ動くはず
+        u.CoverHold = false;
 
         s.Units.Add(u);
 
         MovementStep.Advance(s, 1f);
 
-        // 通常のOrderTargetPos追従（X方向）になっているはず。
-        Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
-        Assert.Equal(0f, s.Units[0].Position.Z, 1);
+        // OrderTargetPos(X方向)ではなくCoverDestination(Z方向)へ動いたことを確認する。
+        Assert.Equal(0f, s.Units[0].Position.X, 1);
+        Assert.True(s.Units[0].Position.Z > 0f, "expected unit to move toward CoverDestination even while not Engaging");
+    }
+
+    // Task45: bounding advance（CoverHold==false）でCoverArrivalDistance以内に到達したら、
+    // その場に留まるのではなくCoverDestinationをクリアし、CoverReevaluateCooldownも0へリセットして
+    // 次のCoverSeekStep評価がすぐ次の遮蔽を選べるようにする（遮蔽から遮蔽への「跳び」を実現する）。
+    [Fact]
+    public void Advance_clears_CoverDestination_and_resets_cooldown_on_arrival_when_not_holding()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.CoverDestination = new WorldPos(1f, 0, 0); // CoverArrivalDistance(3)より近い
+        u.CoverHold = false;
+        u.CoverReevaluateCooldown = 0.3f; // まだクールダウン中のふり
+
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.False(s.Units[0].CoverDestination.HasValue);
+        Assert.Equal(0f, s.Units[0].CoverReevaluateCooldown);
+    }
+
+    // Task45: 対して、CoverHold==true（交戦中）ならCoverArrivalDistance以内でも
+    // CoverDestinationを保持したまま、その場に留まり続ける（従来のTask44挙動）。
+    [Fact]
+    public void Advance_keeps_CoverDestination_on_arrival_when_holding()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Engaging;
+        u.CoverDestination = new WorldPos(1f, 0, 0);
+        u.CoverHold = true;
+
+        s.Units.Add(u);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(s.Units[0].CoverDestination.HasValue);
+        Assert.Equal(0f, s.Units[0].Position.X, 3); // 動いていない
     }
 
     [Fact]

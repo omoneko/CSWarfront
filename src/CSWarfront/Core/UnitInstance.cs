@@ -46,6 +46,14 @@ namespace CSWarfront.Core
         /// 即座に評価される。</summary>
         public float CoverReevaluateCooldown;
 
+        /// <summary>CoverDestinationに到達した際、その場に留まって撃ち続けるか（true）、それとも
+        /// 遮蔽から遮蔽へ前進を続けるか（false）（実行時のみ・非永続化、Task45）。
+        /// CoverSeekStepが交戦中（脅威＝TargetId）のユニットにはtrueを、進軍中（脅威＝OrderTargetPos、
+        /// まだ交戦していない）のユニットにはfalseを設定する。MovementStepはCoverArrivalDistance以内に
+        /// 入った時、trueなら停止したままにし、falseならCoverDestinationをクリアして次の遮蔽へ
+        /// 移れるようにする（cover-to-coverのbounding advance）。</summary>
+        public bool CoverHold;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;

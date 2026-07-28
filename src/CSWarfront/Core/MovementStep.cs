@@ -4,9 +4,16 @@ namespace CSWarfront.Core
     /// Task37: Yはもはや維持しない（旧仕様）。X/Zと同じ補間係数でウェイポイント/目標のYへ向けて
     /// 補間することで、道路の勾配（橋・坂）に沿って高さが変化するようにする（路面から浮くバグの修正）。
     /// Path（道路経路）があればウェイポイントを順に消化し、尽きたらOrderTargetPosへの直線移動にフォールバックする。
-    /// Task44: 交戦中（State==Engaging）にCoverDestinationが設定されているユニットは、Path/OrderTargetPos
-    /// を無視してCoverDestinationへ向けて進む（遮蔽を取りに行く動き）。CoverArrivalDistance以内に
-    /// 入ったら停止する（遮蔽位置に着いたら、そこから撃ち続ける＝これ以上は動かない）。
+    /// Task44/Task45: CoverDestinationが設定されているユニットは、State(Engaging/Moving)に関わらず
+    /// Path/OrderTargetPosを無視してCoverDestinationへ向けて進む（遮蔽を取りに行く動き）。
+    /// 旧仕様(Task44)は「State==Engagingの時だけ」honorしていたが、Task45でCoverSeekStepが
+    /// 進軍中（交戦前、自勢力圏の外）のユニットにもCoverDestinationを設定するようになったため、
+    /// このガードは撤廃した。CoverArrivalDistance以内に入った時の挙動はUnitInstance.CoverHoldで分岐する：
+    ///   - CoverHold==true（交戦中）: その場で停止し、そこから撃ち続ける（従来通り）。
+    ///   - CoverHold==false（進軍中のbounding advance）: CoverDestinationをクリアして即座に
+    ///     Path/OrderTargetPosへの追従を再開する。CoverReevaluateCooldownも0へリセットするため、
+    ///     同じtick内の次のCoverSeekStep評価（次tick）で次の遮蔽が選ばれ、遮蔽から遮蔽へ「跳ぶ」ように
+    ///     前進する（半開けた場所で立ち止まって次の評価まで待つことがない）。
     /// CoverDestinationが無いユニットは従来通りの経路/直線移動のまま変わらない。</summary>
     public static class MovementStep
     {
@@ -25,9 +32,9 @@ namespace CSWarfront.Core
                 float stepLen = type.Speed * dt;
                 if (stepLen <= 0f) continue;
 
-                if (u.State == UnitState.Engaging && u.CoverDestination.HasValue)
+                if (u.CoverDestination.HasValue)
                 {
-                    AdvanceTowardCover(u, u.CoverDestination.Value, stepLen);
+                    AdvanceTowardCover(u, stepLen);
                     continue;
                 }
 
@@ -39,12 +46,25 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内なら何もしない
-        /// （遮蔽位置に着いたら停止し、そこから撃ち続ける）。それ以外はAdvanceStraightと同じ補間で進む。</summary>
-        private static void AdvanceTowardCover(UnitInstance u, WorldPos coverPos, float stepLen)
+        /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内に入ったら、
+        /// CoverHoldに応じて「その場で停止し続ける」(true)か「CoverDestinationをクリアして
+        /// 次tickから通常の経路/直線移動または次の遮蔽評価へ委ねる」(false、Task45のbounding advance)
+        /// かを分岐する。それ以外の距離ではAdvanceStraightと同じ補間で進む。</summary>
+        private static void AdvanceTowardCover(UnitInstance u, float stepLen)
         {
+            WorldPos coverPos = u.CoverDestination.Value;
             float dist = u.Position.HorizontalDistanceTo(coverPos);
-            if (dist <= CoverArrivalDistance) return;
+            if (dist <= CoverArrivalDistance)
+            {
+                if (!u.CoverHold)
+                {
+                    // 遮蔽から遮蔽への前進中（保持しない）: ここで停止させ続けるのではなく、
+                    // 次のCoverSeekStep評価がすぐ走るようクールダウンをリセットして手放す。
+                    u.CoverDestination = null;
+                    u.CoverReevaluateCooldown = 0f;
+                }
+                return;
+            }
             AdvanceStraight(u, coverPos, stepLen);
         }
 
