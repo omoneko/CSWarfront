@@ -26,10 +26,6 @@ namespace CSWarfront.Game
         public float OwnerTreasury;
         /// <summary>所属勢力が現在保有する生存ユニット数。未所属なら0。</summary>
         public int OwnerUnitCount;
-        /// <summary>拠点の自衛射撃ダメージ（Task29で追加されたMilitaryBase.DefenseAttack）。</summary>
-        public float DefenseAttack;
-        /// <summary>拠点の自衛射撃射程（Task29で追加されたMilitaryBase.DefenseRange）。</summary>
-        public float DefenseRange;
 
         /// <summary>trueならAIがこの基地のキューを自動補充する（Task34、MilitaryBase.AutoProduceの写し）。</summary>
         public bool AutoProduce;
@@ -118,8 +114,6 @@ namespace CSWarfront.Game
                 ProducingBuildTime = producingBuildTime,
                 OwnerTreasury = ownerTreasury,
                 OwnerUnitCount = ownerUnitCount,
-                DefenseAttack = mb.DefenseAttack,
-                DefenseRange = mb.DefenseRange,
                 AutoProduce = mb.AutoProduce,
                 QueuedTypeKeys = queuedTypeKeys,
                 LastIncome = mb.LastIncome,

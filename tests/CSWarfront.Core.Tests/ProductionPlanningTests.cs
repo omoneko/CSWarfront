@@ -3,22 +3,33 @@ using Xunit;
 
 public class ProductionPlanningTests
 {
+    // Task46: unit selection moved from "cheapest/strongest affordable overall" (ChooseUnitKey) into
+    // AiProductionPolicy.Decide (composition targets + research investment). These tests focus on the
+    // Advance() wiring: does it call Decide for each empty queue slot, spend/enqueue correctly, and
+    // respect QueueCap / AutoProduce / Eliminated. AiProductionPolicy's own selection rules (composition,
+    // research probability, tier/reserve gating, determinism) are covered by AiProductionPolicyTests.
+
     [Fact]
     public void Advance_spends_treasury_and_fills_queue_to_cap()
     {
+        // UnlockedTier=5 removes the research reserve/consideration so this test isolates the
+        // spend+enqueue wiring deterministically (only Tank_T1 is registered, so it's the only
+        // possible pick regardless of composition targets).
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
-        s.Types.Register(MvpUnitTypes.Tank_T1()); // Task28: Tank_T1.Cost is now 60 (was 50)
+        s.Factions[0].UnlockedTier = 5;
+        s.Types.Register(MvpUnitTypes.Tank_T1()); // Cost 60
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
         b.OwnerFactionId = 0;
         s.Bases.Add(b);
 
         ProductionPlanning.Advance(s);
 
-        // 200 - 2*60 = 80 (old arithmetic was 200 - 2*50 = 100, before Tank_T1's cost changed)
         Assert.Equal(2, s.Bases[0].Queue.Count);
-        Assert.Equal(80f, s.Factions[0].Treasury, 3);
+        Assert.Equal("Tank_T1", s.Bases[0].Queue[0].TypeKey);
+        Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
+        Assert.Equal(80f, s.Factions[0].Treasury, 3); // 200 - 2*60
     }
 
     [Fact]
@@ -75,12 +86,8 @@ public class ProductionPlanningTests
         Assert.Equal(500f, s.Factions[0].Treasury, 3);
     }
 
-    // --- ChooseUnitKey (Task28: 陸上ロスター全体からの決定的な選択) ---
+    // --- Full roster / composition-driven selection (Task46) ---
 
-    // Task35: unlockedTier defaults to 5 (fully unlocked) so pre-existing tests below, which were
-    // written before Tier gating existed and assert the globally strongest/cheapest pick across all
-    // Tiers, keep exercising cost-based selection unaffected by the new gate. Tests that specifically
-    // exercise the gate pass unlockedTier explicitly (see the "Tier gating" section below).
     private static WarState WithFullRoster(float treasury, byte unlockedTier = 5)
     {
         var s = new WarState();
@@ -96,54 +103,6 @@ public class ProductionPlanningTests
     }
 
     [Fact]
-    public void ChooseUnitKey_with_small_treasury_picks_cheapest_affordable_unit()
-    {
-        // Infantry_T1 (Cost 20) is the globally cheapest Tier1 unit in the table; every other
-        // category's Tier1 costs more, and every higher tier costs more than its own Tier1.
-        var s = WithFullRoster(25f);
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        Assert.Equal("Infantry_T1", key);
-    }
-
-    [Fact]
-    public void ChooseUnitKey_with_large_treasury_picks_most_expensive_affordable_unit()
-    {
-        // Artillery_T5 (Cost 70 * 3.4 = 238) is the most expensive non-AntiAir land unit.
-        var s = WithFullRoster(10000f);
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        Assert.Equal("Artillery_T5", key);
-    }
-
-    [Fact]
-    public void ChooseUnitKey_never_picks_AntiAir()
-    {
-        var s = WithFullRoster(10000f);
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        UnitType chosen = s.Types.Get(key);
-        Assert.NotEqual(UnitCategory.AntiAir, chosen.Category);
-    }
-
-    [Fact]
-    public void ChooseUnitKey_is_deterministic_across_repeated_calls()
-    {
-        var s = WithFullRoster(150f);
-        string first = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        for (int i = 0; i < 10; i++)
-        {
-            string again = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-            Assert.Equal(first, again);
-        }
-    }
-
-    [Fact]
-    public void ChooseUnitKey_returns_null_when_nothing_affordable()
-    {
-        var s = WithFullRoster(5f); // less than Infantry_T1's cost of 20
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        Assert.Null(key);
-    }
-
-    [Fact]
     public void Advance_with_full_roster_and_tiny_treasury_queues_nothing()
     {
         var s = WithFullRoster(5f);
@@ -153,42 +112,20 @@ public class ProductionPlanningTests
     }
 
     [Fact]
-    public void Advance_with_full_roster_picks_strongest_affordable_units_each_slot()
+    public void Advance_with_full_roster_and_empty_army_fills_both_slots_with_tank()
     {
-        // 300: first slot buys Artillery_T5 (238, the globally strongest affordable pick),
-        // leaving 62 -> second slot re-evaluates and the strongest thing left affordable is
-        // Tank_T1 (60; the next tier/category up all cost more than 62). 300-238-60=2 left.
-        var s = WithFullRoster(300f);
+        // Task46: an AI starting with no units targets Tank first (largest deficit vs its 30% target).
+        // Both empty slots get filled in the same Advance() call since queuing alone doesn't spawn
+        // units, so the composition tally is identical for slot 1 and slot 2.
+        var s = WithFullRoster(1000f, unlockedTier: 5);
         ProductionPlanning.Advance(s);
 
         Assert.Equal(2, s.Bases[0].Queue.Count);
-        Assert.Equal("Artillery_T5", s.Bases[0].Queue[0].TypeKey);
-        Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
-        Assert.Equal(2f, s.Factions[0].Treasury, 3);
-    }
-
-    // --- Task35: Tier gating (研究で解禁したTierまでしか自動生産は選ばない) ---
-
-    [Fact]
-    public void ChooseUnitKey_never_picks_above_UnlockedTier_even_with_huge_treasury()
-    {
-        var s = WithFullRoster(10000f, unlockedTier: 1);
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        UnitType chosen = s.Types.Get(key);
-        Assert.NotNull(chosen);
-        Assert.Equal((byte)1, chosen.Tier);
-    }
-
-    [Fact]
-    public void ChooseUnitKey_picks_best_within_a_partially_unlocked_tier_range()
-    {
-        // Unlocked through Tier3: the globally strongest unit at or below Tier3 should be picked
-        // even though Tier4/5 units would be more expensive/stronger and are affordable.
-        var s = WithFullRoster(10000f, unlockedTier: 3);
-        string key = ProductionPlanning.ChooseUnitKey(s, s.Factions[0], s.Bases[0]);
-        UnitType chosen = s.Types.Get(key);
-        Assert.NotNull(chosen);
-        Assert.True(chosen.Tier <= 3);
+        foreach (var order in s.Bases[0].Queue)
+        {
+            UnitType t = s.Types.Get(order.TypeKey);
+            Assert.Equal(UnitCategory.Tank, t.Category);
+        }
     }
 
     [Fact]
@@ -205,6 +142,29 @@ public class ProductionPlanningTests
         }
     }
 
+    [Fact]
+    public void Advance_can_invest_in_research_when_behind_and_affordable()
+    {
+        // AiProductionPolicy.Decide's research roll depends on a seed Advance() derives internally
+        // (faction/base/decision index), so we search across a bounded range of baseIds for one whose
+        // seed sequence happens to roll research on the very first decision. This is a deterministic,
+        // bounded search at test time (not runtime randomness) that proves Advance actually wires
+        // Research.TryInvest through, rather than re-testing the probability itself (AiProductionPolicyTests
+        // already covers that the ~35% chance exists and respects UnlockedTier/reserve).
+        bool foundResearch = false;
+        for (ushort baseId = 100; baseId < 600 && !foundResearch; baseId++)
+        {
+            var s = WithFullRoster(200f, unlockedTier: 1); // Treasury >= ResearchReserve(150)
+            s.Bases[0].BaseId = baseId;
+
+            ProductionPlanning.Advance(s);
+
+            if (s.Factions[0].ResearchPoints > 0f) foundResearch = true;
+        }
+
+        Assert.True(foundResearch, "expected at least one baseId/seed combination to trigger a research investment");
+    }
+
     // --- Task34: AutoProduce=false opts a base out of AI auto-fill ---
 
     [Fact]
@@ -213,6 +173,7 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
+        s.Factions[0].UnlockedTier = 5; // isolate the AutoProduce wiring from research non-determinism
         s.Types.Register(MvpUnitTypes.Tank_T1());
 
         var playerControlled = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));

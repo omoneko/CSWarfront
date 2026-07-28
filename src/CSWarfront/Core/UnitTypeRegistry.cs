@@ -11,8 +11,8 @@ namespace CSWarfront.Core
             UnitType t; return _byKey.TryGetValue(typeKey, out t) ? t : null;
         }
 
-        /// <summary>登録済み全UnitTypeを列挙する（Task28: ProductionPlanning.ChooseUnitKeyが
-        /// 購入可能な選択肢を洗い出すために使う）。</summary>
+        /// <summary>登録済み全UnitTypeを列挙する（Task28: 購入可能な選択肢を洗い出すために使う。
+        /// Task46でAiProductionPolicy.ChooseHighestAffordableTierが主な呼び出し元になった）。</summary>
         public IEnumerable<UnitType> All() { return _byKey.Values; }
     }
 }

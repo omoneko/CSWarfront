@@ -17,7 +17,7 @@ namespace CSWarfront.Core
         public float BuildTime { get; private set; }
         public string AssetPrefabName { get; private set; }
 
-        /// <summary>命中率（0..1、Task38）。CombatStep/BaseCombatStep/BaseDefenseStepがダメージへ乗じる
+        /// <summary>命中率（0..1、Task38）。CombatStep/BaseCombatStepがダメージへ乗じる
         /// 期待値ベースの乗数であり、ランダムな命中/ミスの抽選ではない（本プロジェクトは決定的シミュレーション
         /// が前提のため）。「命中率40%」は「1tickごとに0.4倍のダメージが確実に入る」という意味で、
         /// 十分な時間をかけた場合の統計的な結果は乱数抽選と同じだが、連続ミス/連続命中という不公平な

@@ -1,6 +1,9 @@
 namespace CSWarfront.Core
 {
-    /// <summary>HP0の基地を最近接の敵対攻撃側へ移管し、HQ喪失勢力を脱落させる（純ロジック）。</summary>
+    /// <summary>HP0の基地を最近接の敵対攻撃側へ移管する（純ロジック）。Task46: 勢力の脱落判定
+    /// （Eliminated）はここでは直接いじらない。FactionStatus.Refreshが「所有基地の有無」から
+    /// 毎tick導出し直す唯一の場所になった（一度脱落した勢力でも基地を取り戻せば復活できるように
+    /// するため、Eliminated=trueを立てっぱなしにする経路をここから排除した）。</summary>
     public static class Occupation
     {
         public static void ResolveCaptures(WarState state)
@@ -26,11 +29,6 @@ namespace CSWarfront.Core
 
                 b.OwnerFactionId = nearest.FactionId;
                 b.CurrentHP = b.MaxHP;         // 再稼働（キューはそのまま＝奪取）
-
-                // HQ喪失判定
-                var loser = state.FindFaction(oldOwner);
-                if (loser != null && loser.HomeBaseId.HasValue && loser.HomeBaseId.Value == b.BaseId)
-                    loser.Eliminated = true;
             }
         }
     }

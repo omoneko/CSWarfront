@@ -31,10 +31,21 @@ public class OccupationTests
     }
 
     [Fact]
-    public void Losing_hq_eliminates_faction()
+    public void Losing_hq_no_longer_sets_Eliminated_directly()
+    {
+        // Task46: Occupation自体はEliminatedを直接いじらない。所有基地が本当に無くなったかどうかの
+        // 判定はFactionStatus.Refreshへ移した（一度脱落した勢力でも基地を取り戻せば復活できるように）。
+        var s = FallenBaseScenario();
+        Occupation.ResolveCaptures(s);
+        Assert.False(s.FindFaction(1).Eliminated);
+    }
+
+    [Fact]
+    public void Losing_hq_eliminates_faction_after_status_refresh()
     {
         var s = FallenBaseScenario();
         Occupation.ResolveCaptures(s);
+        FactionStatus.Refresh(s);
         Assert.True(s.FindFaction(1).Eliminated); // Blue脱落
     }
 

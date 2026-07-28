@@ -30,23 +30,6 @@ namespace CSWarfront.Core
         /// <summary>新設基地に与える占領猶予期間（ゲーム内1日）。</summary>
         public const float NewBaseGraceHours = 24f;
 
-        /// <summary>拠点の自衛射撃ダメージ（ゲーム内1時間あたり、Task29）。BaseDefenseStepが参照する。
-        /// これらはランタイム既定値であり、WarStateSerializerには追加しない
-        /// （ロードされた基地は単に既定値を再度受け取るだけで、セーブフォーマットを変える必要がないため）。</summary>
-        public const float DefaultDefenseAttack = 35f;
-
-        /// <summary>拠点の自衛射撃射程（Task29）。戦車の射程(60)より長く設定し、
-        /// 接近してくる敵が近づく前から迎撃できるようにする。</summary>
-        public const float DefaultDefenseRange = 120f;
-
-        public float DefenseAttack = DefaultDefenseAttack;
-        public float DefenseRange = DefaultDefenseRange;
-
-        /// <summary>拠点の自衛射撃の命中率（Task38）。固定値でユニット側のTierScaling/CombatSynergyとは
-        /// 独立している（基地は据え置きの設備であり、Tierやドローン観測支援の対象ではないため）。
-        /// BaseDefenseStepがDefenseAttackから算出したダメージへこれを乗じる。</summary>
-        public const float DefenseAccuracy = 0.7f;
-
         /// <summary>直近の経済tickでこの基地から実際に加算された収入（Task35、ゲーム内EconomyIntervalHours
         /// あたりの額）。UIがCSバッファ/WarStateへ直接触れずに済むよう、MilitaryManager.OnSimTickが
         /// TerritoryIncome.ForBaseの計算結果をここへキャッシュする。ランタイムのみ・非永続化

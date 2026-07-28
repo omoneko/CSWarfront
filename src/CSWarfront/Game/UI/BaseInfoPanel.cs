@@ -400,7 +400,6 @@ namespace CSWarfront.Game.UI
                 if (snapshot.IsHeadquarters) sb.Append(" (HQ)");
 
                 sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\n防衛: 攻撃").Append(snapshot.DefenseAttack.ToString("0")).Append("/h 射程").Append(snapshot.DefenseRange.ToString("0"));
                 sb.Append("\n軍資金: ").Append(snapshot.OwnerTreasury.ToString("0"));
 
                 // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切

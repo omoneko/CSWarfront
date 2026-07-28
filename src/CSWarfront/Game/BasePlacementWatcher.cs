@@ -292,6 +292,8 @@ namespace CSWarfront.Game
         /// 所有する他の基地があれば先頭を新HQへ昇格する。指していなければ何もしない（no-op）。
         /// 基地の削除（RemoveBaseAndReassignHq）・所属変更（MilitaryManager.TrySetBaseOwner）の
         /// 両方から共有される、HQ整合性維持の唯一の実装（Task25：ロジック重複を避けるため internal 公開）。
+        /// 昇格そのものは Core.FactionStatus.PromoteFirstOwnedBaseToHq を呼ぶ（Task46：
+        /// 「所有基地の先頭を新HQにする」ルールを FactionStatus.Refresh と重複させないため）。
         /// 呼び出し元が _stateLock を保持していること。
         /// </summary>
         internal static void ReassignHqIfCleared(WarState state, byte factionId, ushort baseId)
@@ -300,15 +302,10 @@ namespace CSWarfront.Game
             if (f == null || !f.HomeBaseId.HasValue || f.HomeBaseId.Value != baseId) return;
 
             f.HomeBaseId = null;
-            foreach (var other in state.Bases)
-            {
-                if (other.BaseId != baseId && other.OwnerFactionId == factionId)
-                {
-                    other.IsHeadquarters = true;
-                    f.HomeBaseId = other.BaseId;
-                    break;
-                }
-            }
+            // この時点で baseId の基地は既に削除済み（RemoveBaseAndReassignHq経由）か、既に
+            // factionId以外の所有へ切り替わっている（TrySetBaseOwner経由）ため、
+            // PromoteFirstOwnedBaseToHq の所有権チェックが自然にbaseIdを除外する。
+            FactionStatus.PromoteFirstOwnedBaseToHq(state, factionId);
         }
 
         private static MilitaryBase FindBase(WarState state, ushort baseId)

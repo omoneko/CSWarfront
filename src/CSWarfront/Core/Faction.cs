@@ -14,8 +14,8 @@ namespace CSWarfront.Core
         public float ResearchPoints;
 
         /// <summary>解禁済みの最大生産Tier（1..5）。既定は1（陸上ロスターの最低Tier）。
-        /// ProductionPlanning.ChooseUnitKey / ManualProduction.TryEnqueue はこれを超えるTierのユニットを
-        /// 選択/発注できない（Task35）。</summary>
+        /// AiProductionPolicy.Decide（Task46で旧ProductionPlanning.ChooseUnitKeyを置き換え） /
+        /// ManualProduction.TryEnqueue はこれを超えるTierのユニットを選択/発注できない（Task35）。</summary>
         public byte UnlockedTier = 1;
 
         public Faction(byte id, string name) { Id = id; Name = name; UnlockedTier = 1; }

@@ -1,9 +1,17 @@
 namespace CSWarfront.Core
 {
-    /// <summary>各勢力が軍資金を使って所有基地の生産キューを補充する（純ロジック・決定的）。</summary>
+    /// <summary>各勢力が軍資金を使って所有基地の生産キューを補充する（純ロジック・決定的）。
+    /// Task46: 選定ロジックは AiProductionPolicy.Decide に切り出した（「今払える中で一番高い
+    /// ユニット」という旧ルールは終盤の歩兵スパムを招いていたため）。</summary>
     public static class ProductionPlanning
     {
         public const int QueueCap = 2;             // 1基地あたり最大キュー長
+
+        /// <summary>1基地・1tickあたりの意思決定回数の上限（防御的）。研究への投資はキューを
+        /// 消費しないため、理論上は「研究ばかり選ばれ続ける」限りループが続きうる。Treasuryが
+        /// ResearchInvestPerDecisionずつ減っていくため実際には有限だが、念のため上限を設ける
+        /// （WarState.MaxRecentShotsPerTickと同じ、無限ループへの防御的上限という設計方針）。</summary>
+        private const int MaxDecisionsPerBasePerTick = 20;
 
         public static void Advance(WarState state)
         {
@@ -11,19 +19,35 @@ namespace CSWarfront.Core
             {
                 Faction f = state.Factions[fi];
                 if (f.Eliminated) continue;
+
                 for (int bi = 0; bi < state.Bases.Count; bi++)
                 {
                     MilitaryBase b = state.Bases[bi];
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
                     if (!b.AutoProduce) continue; // Task34: プレイヤーが手動管理を選んだ基地はAIが触らない
 
-                    // 空きスロットができるたびに選び直す：購入のたびに軍資金が減るため、
-                    // 同じtick内でも「もう最強は買えない」場合は次点が選ばれる（決定的）。
-                    while (b.Queue.Count < QueueCap)
+                    // seedの由来: (勢力Id, 基地Id, この基地でこのtick中に下した意思決定の通し番号)。
+                    // 同じ基地・同じtickでも決定のたびに種を変え、研究/生産の選択が単調に固定化しない
+                    // ようにする（Task46）。
+                    uint decisionCount = 0;
+                    for (int attempts = 0; b.Queue.Count < QueueCap && attempts < MaxDecisionsPerBasePerTick; attempts++)
                     {
-                        string key = ChooseUnitKey(state, f, b);
-                        if (key == null) break; // 何も買えない
-                        UnitType type = state.Types.Get(key);
+                        uint seed = MakeSeed(f.Id, b.BaseId, decisionCount);
+                        decisionCount++;
+
+                        AiDecision decision = AiProductionPolicy.Decide(state, f, b, seed);
+                        if (decision.Choice == AiSpendChoice.None) break; // 何も買えない・投資できない
+
+                        if (decision.Choice == AiSpendChoice.Research)
+                        {
+                            // Decideは事前にTreasury>=ResearchReserveを確認済みなのでTryInvestは
+                            // 通常成功するが、防御的にfalseなら打ち切る。
+                            if (!Research.TryInvest(f, AiProductionPolicy.ResearchInvestPerDecision)) break;
+                            Research.TryUnlockNext(f); // 足りていれば即座にTierを1つ解禁
+                            continue; // キュー枠は消費していないので同じ枠へ再挑戦
+                        }
+
+                        UnitType type = state.Types.Get(decision.TypeKey);
                         if (type == null) break;
                         if (!f.TrySpend(type.Cost)) break;
                         b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
@@ -32,35 +56,15 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>
-        /// 勢力が今払える範囲で最も強力（＝最もCostが高い）陸上ユニットを選ぶ（Task28）。
-        /// 同点はTierが高い方、さらに同点ならTypeKeyの序数（Ordinal）比較で決める（完全決定的）。
-        /// faction.UnlockedTier を超えるTierのユニットは候補から除外する（Task35: 研究未解禁のTierを
-        /// 自動生産が選ぶことはない）。何も買えなければnullを返す（現行の「TrySpend失敗時は何も積まない」
-        /// 挙動を維持）。bは現状未使用（基地種別ごとの生産制限など将来の絞り込み用に予約）。
-        /// </summary>
-        public static string ChooseUnitKey(WarState state, Faction faction, MilitaryBase b)
+        private static uint MakeSeed(byte factionId, ushort baseId, uint decisionCount)
         {
-            UnitType best = null;
-            foreach (UnitType t in state.Types.All())
+            unchecked
             {
-                if (t.Domain != Domain.Land) continue;
-                // AntiAirは今のところ対空できる相手（空ユニット）が存在しないため除外する。
-                // 空ユニットのロスターが実装されたらこの除外を外すこと。
-                if (t.Category == UnitCategory.AntiAir) continue;
-                if (t.Tier > faction.UnlockedTier) continue; // Task35: 未解禁Tierは選ばない
-                if (t.Cost > faction.Treasury) continue;
-
-                if (best == null || IsBetter(t, best)) best = t;
+                uint h = factionId;
+                h = h * 2654435761u + baseId;
+                h = h * 2654435761u + decisionCount;
+                return h;
             }
-            return best != null ? best.TypeKey : null;
-        }
-
-        private static bool IsBetter(UnitType candidate, UnitType current)
-        {
-            if (candidate.Cost != current.Cost) return candidate.Cost > current.Cost;
-            if (candidate.Tier != current.Tier) return candidate.Tier > current.Tier;
-            return string.CompareOrdinal(candidate.TypeKey, current.TypeKey) < 0;
         }
     }
 }

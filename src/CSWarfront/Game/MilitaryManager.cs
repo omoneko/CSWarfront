@@ -372,11 +372,13 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
-                // 戦闘（ユニット同士＋基地攻撃）→ 拠点の自衛射撃 → 占領（Task29でBaseDefenseStepを追加）
+                // 戦闘（ユニット同士＋基地攻撃）→ 占領 → 勢力状態の再導出（Task46: 拠点の自衛射撃は
+                // 廃止。Eliminated/HomeBaseIdはOccupationが直接いじらず、FactionStatus.Refreshが
+                // 毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても基地を取り戻せば復活する）。
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
-                BaseDefenseStep.Advance(State, dt);
                 Occupation.ResolveCaptures(State);
+                FactionStatus.Refresh(State);
 
                 // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する
                 // （ゼロクリアだとdtの端数が毎回捨てられ、実質的な頻度が下がってしまうため）。
