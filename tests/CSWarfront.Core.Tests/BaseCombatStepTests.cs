@@ -122,6 +122,50 @@ public class BaseCombatStepTests
         Assert.Equal(60f, s.Bases[0].CurrentHP, 3);
     }
 
+    // --- Task42: 発砲エフェクト(ShotEvent)は基地位置(To)を狙う ---
+
+    [Fact]
+    public void Attack_on_base_emits_shot_event_aimed_at_the_base_position()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        s.Bases.Add(enemyBase);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 0.01f); // FireCooldown既定0なので、ダメージを与えた瞬間に必ず1発出る
+
+        Assert.Single(s.RecentShots);
+        var shot = s.RecentShots[0];
+        Assert.Equal(ShotKind.DirectFire, shot.Kind); // Tank
+        Assert.Equal(0f, shot.From.X, 3); // 攻撃側ユニットの位置
+        Assert.Equal(40f, shot.To.X, 3);  // 基地の位置（ユニットの位置ではない）
+        Assert.Equal((byte)0, shot.FactionId);
+    }
+
+    [Fact]
+    public void Base_under_grace_emits_no_shot_events()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.CaptureGraceHours = 5f;
+        s.Bases.Add(enemyBase);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 1f);
+
+        Assert.Empty(s.RecentShots);
+    }
+
     [Fact]
     public void Grace_never_goes_negative()
     {

@@ -201,4 +201,78 @@ public class CombatStepTests
         // (versus 190.2 without the drone above: the synergy visibly raises artillery damage)
         Assert.Equal(176.2f, s.FindUnit(2).CurrentHP, 2);
     }
+
+    // --- Task42: 発砲エフェクト(ShotEvent)の間引き ---
+
+    [Fact]
+    public void Unit_with_no_target_emits_no_shots()
+    {
+        var s = TwoHostileTanks(100f); // range 60 外、どちらも交戦しない
+        CombatStep.Advance(s, 1f);
+        Assert.Empty(s.RecentShots);
+    }
+
+    [Fact]
+    public void Firing_unit_emits_exactly_one_shot_event_on_the_first_tick_it_deals_damage()
+    {
+        var s = TwoHostileTanks(50f); // range 60 内、両者交戦
+        CombatStep.Advance(s, 0.01f); // FireCooldown既定0なので、ダメージを与えた瞬間に必ず1発出る
+
+        var fromUnit1 = s.RecentShots.FindAll(e => e.FactionId == 0);
+        Assert.Single(fromUnit1);
+        Assert.Equal(ShotKind.DirectFire, fromUnit1[0].Kind); // Tank
+        Assert.Equal(0f, fromUnit1[0].From.X, 3);
+        Assert.Equal(0f, fromUnit1[0].From.Z, 3);
+        Assert.Equal(50f, fromUnit1[0].To.X, 3); // 標的(unit2)の位置
+        Assert.Equal((byte)0, fromUnit1[0].FactionId);
+    }
+
+    [Fact]
+    public void Firing_unit_emits_at_most_one_shot_per_its_own_fire_interval()
+    {
+        // Tank.FireIntervalHours = 0.25h（LandUnitRoster）。dt=0.1hずつ8回進める＝合計0.8h(=3.2間隔分)。
+        // dt=0.1はFireIntervalHours(0.25)を割り切らない値を意図的に選んでいる：発火/非発火の判定が
+        // 常にゼロから明確に離れた値(±0.05や±0.1)になり、浮動小数点の丸め誤差でゼロ境界の判定が
+        // 揺れる心配がない（決定的シミュレーションのテストとして頑健にするため）。
+        var s = TwoHostileTanks(50f);
+        int shotsFromUnit1 = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            s.RecentShots.Clear();
+            CombatStep.Advance(s, 0.1f);
+            shotsFromUnit1 += s.RecentShots.FindAll(e => e.FactionId == 0).Count;
+        }
+
+        // FireCooldown推移（unit1、Tank_T1、FireIntervalHours=0.25）:
+        //   step1: 0-0.1=-0.1<=0 → 発砲、reset 0.25
+        //   step2: 0.25-0.1=0.15  step3: 0.15-0.1=0.05  step4: 0.05-0.1=-0.05<=0 → 発砲、reset 0.25
+        //   step5: 0.15  step6: 0.05  step7: -0.05<=0 → 発砲、reset 0.25  step8: 0.15
+        // 合計3発（乱数不使用・決定的：毎回同じ値になる）。
+        Assert.Equal(3, shotsFromUnit1);
+    }
+
+    [Fact]
+    public void RecentShots_is_capped_at_MaxRecentShotsPerTick_even_with_a_huge_battle()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+
+        // WarState.MaxRecentShotsPerTick(200)を大きく超える数の交戦ペアを作る。各ペアは互いの射程内で、
+        // 他ペアとは十分離れているためTargetSearchが自分のペア相手だけを選ぶ（干渉しない）。
+        const int pairs = 130; // 130ペア×2ユニット=260ユニット、両方向で最大520発の"要求"が出る想定
+        uint nextId = 1;
+        for (int p = 0; p < pairs; p++)
+        {
+            float baseX = p * 1000f;
+            s.Units.Add(new UnitInstance(nextId++, "Tank_T1", 0, 100f, new WorldPos(baseX, 0f, 0f)));
+            s.Units.Add(new UnitInstance(nextId++, "Tank_T1", 1, 100f, new WorldPos(baseX + 50f, 0f, 0f)));
+        }
+
+        CombatStep.Advance(s, 0.01f);
+
+        Assert.Equal(WarState.MaxRecentShotsPerTick, s.RecentShots.Count);
+    }
 }

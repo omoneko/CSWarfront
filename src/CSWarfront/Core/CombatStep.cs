@@ -40,6 +40,16 @@ namespace CSWarfront.Core
                 bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= dmg;
                 if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
+
+                // 発砲エフェクトの間引き（Task42）: 実際にダメージを与えたこのtickでのみ
+                // FireCooldownをdt分だけ減算する。0以下になった瞬間だけShotEventを1つ積み、
+                // FireIntervalHoursへリセットする（乱数不使用・決定的）。
+                self.FireCooldown -= dt;
+                if (self.FireCooldown <= 0f)
+                {
+                    state.AddShot(new ShotEvent(self.Position, target.Position, type.ShotKind, self.FactionId));
+                    self.FireCooldown = type.FireIntervalHours;
+                }
             }
             // 2) 死亡判定
             for (int i = 0; i < state.Units.Count; i++)

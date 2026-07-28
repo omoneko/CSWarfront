@@ -46,6 +46,17 @@ namespace CSWarfront.Core
                     float siegeAccuracy = Math.Max(accuracy, SiegeAccuracyFloor);
                     b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy;
                     if (b.CurrentHP < 0f) b.CurrentHP = 0f;
+
+                    // 発砲エフェクトの間引き（Task42）。CombatStepと同じFireCooldownアキュムレータを
+                    // 共有するため、同tick内で既にユニット攻撃側で発砲済みなら、ここでは重ねて出さない
+                    // （攻撃側1体につき見た目は最大1発/FireIntervalHoursという契約を、対象が
+                    // ユニットか基地かによらず一貫させるため）。着弾先(To)は基地位置。
+                    u.FireCooldown -= dt;
+                    if (u.FireCooldown <= 0f)
+                    {
+                        state.AddShot(new ShotEvent(u.Position, b.Position, type.ShotKind, u.FactionId));
+                        u.FireCooldown = type.FireIntervalHours;
+                    }
                 }
             }
         }

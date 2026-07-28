@@ -24,16 +24,26 @@ namespace CSWarfront.Core
         /// 「運」の要素を排除できる。</summary>
         public float Accuracy { get; private set; }
 
+        /// <summary>発砲エフェクトの間引き間隔（ゲーム内時間、Task42）。ダメージは毎tick連続的に適用されるが
+        /// 見た目（ShotEvent）はこの間隔ごとに最大1回しか出さない（UnitInstance.FireCooldownで管理）。
+        /// TierScalingの対象外＝Tierを上げても発砲頻度の見た目は変わらない（単純さ優先の意図的な設計）。</summary>
+        public float FireIntervalHours { get; private set; }
+
+        /// <summary>発砲エフェクトの種別（Task42）。Game層のCombatFxが銃撃/直射/曲射のどれを描くか選ぶ。</summary>
+        public ShotKind ShotKind { get; private set; }
+
         public UnitType(string typeKey, Domain domain, UnitCategory category, byte tier,
             float maxHp, float attack, float range, float armor, float speed,
             float splashRadius, float cost, float buildTime, string assetPrefabName,
-            float accuracy)
+            float accuracy, float fireIntervalHours, ShotKind shotKind)
         {
             TypeKey = typeKey; Domain = domain; Category = category; Tier = tier;
             MaxHP = maxHp; Attack = attack; Range = range; Armor = armor; Speed = speed;
             SplashRadius = splashRadius; Cost = cost; BuildTime = buildTime;
             AssetPrefabName = assetPrefabName ?? "";
             Accuracy = accuracy;
+            FireIntervalHours = fireIntervalHours;
+            ShotKind = shotKind;
         }
     }
 

@@ -15,7 +15,30 @@ namespace CSWarfront.Core
         /// <summary>Game層から供給される道路網（実行時のみ・非永続化）。未供給ならnull。</summary>
         public RoadGraph Roads;
 
+        /// <summary>
+        /// Task42: 直近1tick分の「見える発砲」イベントのトランジェント・バッファ（非永続化）。
+        /// CombatStep/BaseCombatStepがダメージを実適用したタイミングでAddShotを通じて積む
+        /// （UnitInstance.FireCooldownで間引かれるため、攻撃側1体につき最大1件/tick）。
+        /// Game層のMilitaryManager.OnSimTickは各tickの先頭（戦闘stepより前）で必ずClear()し、
+        /// OnMainVisualUpdateが_stateLock内でコピーしてから消費すること。ここに積みっぱなしにすると
+        /// 際限なく肥大化するため、消費側がクリアする契約になっている。
+        /// WarStateSerializerには一切書き出さない（見た目専用データでセーブ不要）。
+        /// </summary>
+        public List<ShotEvent> RecentShots = new List<ShotEvent>();
+
+        /// <summary>1tickあたりRecentShotsへ追加できる最大件数（Task42）。大規模乱戦が発生しても
+        /// 表現バッファ・後段のGameObject生成が際限なく増えないようにする防御的上限。</summary>
+        public const int MaxRecentShotsPerTick = 200;
+
         public uint AllocInstanceId() { return NextInstanceId++; }
+
+        /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる
+        /// （例外にしない＝大規模乱戦でシミュレーションを止めないため）。</summary>
+        public void AddShot(ShotEvent e)
+        {
+            if (RecentShots.Count >= MaxRecentShotsPerTick) return;
+            RecentShots.Add(e);
+        }
 
         public UnitInstance FindUnit(uint id)
         {

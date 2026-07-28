@@ -94,6 +94,46 @@ public class LandUnitRosterTests
         Assert.Equal(204f, t5.Cost, 3);    // 60 * 3.4
     }
 
+    // --- Task42: 発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)の基礎値テーブル ---
+
+    [Theory]
+    [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.08f)]
+    [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.08f)]
+    [InlineData(UnitCategory.Apc, ShotKind.Gunfire, 0.10f)]
+    [InlineData(UnitCategory.DroneInfantry, ShotKind.Gunfire, 0.12f)]
+    [InlineData(UnitCategory.AntiAir, ShotKind.Gunfire, 0.10f)]
+    [InlineData(UnitCategory.Tank, ShotKind.DirectFire, 0.25f)]
+    [InlineData(UnitCategory.Artillery, ShotKind.IndirectFire, 0.60f)]
+    public void Tier1_shot_kind_and_fire_interval_match_design_table(UnitCategory category, ShotKind expectedKind,
+        float expectedIntervalHours)
+    {
+        UnitType t = LandUnitRoster.Get(category, 1);
+        Assert.Equal(expectedKind, t.ShotKind);
+        Assert.Equal(expectedIntervalHours, t.FireIntervalHours, 3);
+    }
+
+    [Fact]
+    public void Fire_interval_does_not_change_with_tier()
+    {
+        // Task42: FireIntervalHoursはTierScalingの対象外（意図的な単純化）。Tier1とTier5で同じ値。
+        UnitType t1 = LandUnitRoster.Get(UnitCategory.Tank, 1);
+        UnitType t5 = LandUnitRoster.Get(UnitCategory.Tank, 5);
+        Assert.Equal(t1.FireIntervalHours, t5.FireIntervalHours, 5);
+
+        UnitType artT1 = LandUnitRoster.Get(UnitCategory.Artillery, 1);
+        UnitType artT5 = LandUnitRoster.Get(UnitCategory.Artillery, 5);
+        Assert.Equal(artT1.FireIntervalHours, artT5.FireIntervalHours, 5);
+    }
+
+    [Fact]
+    public void Artillerys_fire_interval_is_longer_than_infantrys()
+    {
+        // Task42: 砲兵の曲射は歩兵の銃撃より間引き間隔が長い（0.60h vs 0.08h）。
+        UnitType artillery = LandUnitRoster.Get(UnitCategory.Artillery, 1);
+        UnitType infantry = LandUnitRoster.Get(UnitCategory.Infantry, 1);
+        Assert.True(artillery.FireIntervalHours > infantry.FireIntervalHours);
+    }
+
     [Fact]
     public void RegisterAll_makes_all_35_types_resolvable_by_key()
     {

@@ -27,6 +27,14 @@ namespace CSWarfront.Core
         /// FindPath失敗時に立て、失敗し続けるユニットが毎tick予算を消費するのを防ぐ（Task23レビュー）。</summary>
         public float PathRetryCooldown;
 
+        /// <summary>次の発砲エフェクト(ShotEvent)を出すまでの残りゲーム内時間（実行時のみ・非永続化、Task42）。
+        /// このユニットが実際にダメージを与えたtickでのみ dt 分だけ減算し、0以下になった時点で
+        /// ShotEventを1つ積んでから UnitType.FireIntervalHours にリセットする（CombatStep/BaseCombatStep
+        /// 参照）。ダメージを与えていないtickでは一切減算しない（＝待機中のユニットが「発砲権」を
+        /// 溜め込んで、次に交戦した瞬間に不自然な連射をすることがない）。既定値0のため、初めて
+        /// ダメージを与えたtickで即座に1発目が出る。</summary>
+        public float FireCooldown;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;

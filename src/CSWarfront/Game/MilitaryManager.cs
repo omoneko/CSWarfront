@@ -67,6 +67,11 @@ namespace CSWarfront.Game
         // OnMainVisualUpdate で使い回すスナップショット（GC回避）。メインスレッド専用アクセス。
         private static readonly List<UnitVisualState> _visualSnapshot = new List<UnitVisualState>();
 
+        // Task42: OnMainVisualUpdate で使い回す発砲イベントのスナップショット（GC回避）。
+        // メインスレッド専用アクセス。State.RecentShotsの内容を_stateLock内でここへコピーしてから、
+        // ロック解放後にCombatFx.Spawnへ渡す（UnitVisuals向けの_visualSnapshotと同じパターン）。
+        private static readonly List<ShotEvent> _shotSnapshot = new List<ShotEvent>();
+
         // save/loadスレッドとsimスレッド間の State への同時アクセスを防ぐ粗粒度ロック。
         // MVP規模（数十ユニット）では単一ロックで十分。
         private static readonly object _stateLock = new object();
@@ -261,6 +266,11 @@ namespace CSWarfront.Game
 
             lock (_stateLock)
             {
+                // Task42: 発砲エフェクト(ShotEvent)は「直近1tick分」だけを保持するトランジェント・バッファ
+                // なので、戦闘stepより前に必ずクリアする（そうしないと過去tickの分がGame層で二重に
+                // 消費され続け、際限なく肥大化する）。
+                State.RecentShots.Clear();
+
                 // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
                 // （Task18）。CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
                 // この直後のProductionPlanningから同tickで生産対象になる。
@@ -440,6 +450,7 @@ namespace CSWarfront.Game
             if (State == null) return;
 
             _visualSnapshot.Clear();
+            _shotSnapshot.Clear();
             lock (_stateLock)
             {
                 for (int i = 0; i < State.Units.Count; i++)
@@ -456,9 +467,19 @@ namespace CSWarfront.Game
                         AssetPrefabName = type != null ? type.AssetPrefabName : ""
                     });
                 }
+
+                // Task42: 発砲エフェクトも同じロック内でコピーする（State.RecentShotsはsimスレッドが
+                // 書き込むトランジェント・バッファのため、ロック外で読むとレースになる）。
+                for (int i = 0; i < State.RecentShots.Count; i++)
+                    _shotSnapshot.Add(State.RecentShots[i]);
             }
 
             UnitVisuals.Sync(_visualSnapshot);
+
+            // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
+            // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
+            CombatFx.Spawn(_shotSnapshot);
+            CombatFx.Update(Time.deltaTime);
         }
 
         /// <summary>
@@ -475,6 +496,7 @@ namespace CSWarfront.Game
             // Reset()自体はCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から
             // 呼ばれるためここで直接呼んで問題ない（_stateLockはCS実体を持たないState差し替えのみ保護）。
             UnitVisuals.DestroyAll();
+            CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
             lock (_stateLock)
             {
                 State = null;

@@ -19,31 +19,42 @@ namespace CSWarfront.Core
         {
             public readonly UnitCategory Category;
             public readonly float Hp, Attack, Range, Armor, SpeedKmh, Splash, Cost, BuildTime, Accuracy;
+            public readonly float FireIntervalHours;
+            public readonly ShotKind ShotKind;
 
             public BaseStats(UnitCategory category, float hp, float attack, float range, float armor,
-                float speedKmh, float splash, float cost, float buildTime, float accuracy)
+                float speedKmh, float splash, float cost, float buildTime, float accuracy,
+                float fireIntervalHours, ShotKind shotKind)
             {
                 Category = category; Hp = hp; Attack = attack; Range = range; Armor = armor;
                 SpeedKmh = speedKmh; Splash = splash; Cost = cost; BuildTime = buildTime;
                 Accuracy = accuracy;
+                FireIntervalHours = fireIntervalHours; ShotKind = shotKind;
             }
         }
 
-        // Tier1基礎ステータス（design table, task-28指定値、Task38で命中率(Accuracy)列を追加）。
-        // SplashはTierScalingの対象外（Tierで伸びない）。
+        // Tier1基礎ステータス（design table, task-28指定値、Task38で命中率(Accuracy)列を追加、
+        // Task42で発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)列を追加）。
+        // SplashはTierScalingの対象外（Tierで伸びない）。FireIntervalHoursも同様にTierScalingの対象外
+        // （Tierが上がっても発砲頻度の見た目は変えない、単純さ優先の意図的な設計。Task42仕様）。
         //
         // Task38: Artilleryは射程160→120、攻撃55→50に弱体化し、命中率0.35という低さで
         //   「当たれば強いが、当たらない」砲兵にした（DroneInfantryの観測支援を受けるまでは
         //   実効ダメージが他兵科より低く抑えられる）。
+        //
+        // Task42: 発砲エフェクトの間隔テーブル（design指定値）。
+        //   Infantry/MechInfantry/Apc/DroneInfantry/AntiAir = Gunfire（銃撃トレーサー）
+        //   Tank                                            = DirectFire（直射・戦車砲）
+        //   Artillery                                       = IndirectFire（曲射・放物線弾道）
         private static readonly BaseStats[] Bases =
         {
-            new BaseStats(UnitCategory.Infantry,      60f, 20f,  40f,  1f,  5f,  0f, 20f, 4f, 0.75f),
-            new BaseStats(UnitCategory.MechInfantry,   90f, 26f,  45f,  4f, 35f,  0f, 40f, 6f, 0.75f),
-            new BaseStats(UnitCategory.Apc,           110f, 22f,  50f,  6f, 45f,  0f, 45f, 6f, 0.70f),
-            new BaseStats(UnitCategory.Tank,          140f, 40f,  60f, 10f, 40f,  0f, 60f, 8f, 0.70f),
-            new BaseStats(UnitCategory.Artillery,      70f, 50f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f),
-            new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f),
-            new BaseStats(UnitCategory.AntiAir,        80f, 15f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f),
+            new BaseStats(UnitCategory.Infantry,      60f, 20f,  40f,  1f,  5f,  0f, 20f, 4f, 0.75f, 0.08f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.MechInfantry,   90f, 26f,  45f,  4f, 35f,  0f, 40f, 6f, 0.75f, 0.08f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.Apc,           110f, 22f,  50f,  6f, 45f,  0f, 45f, 6f, 0.70f, 0.10f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.Tank,          140f, 40f,  60f, 10f, 40f,  0f, 60f, 8f, 0.70f, 0.25f, ShotKind.DirectFire),
+            new BaseStats(UnitCategory.Artillery,      70f, 50f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f, 0.60f, ShotKind.IndirectFire),
+            new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f, 0.12f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.AntiAir,        80f, 15f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f, 0.10f, ShotKind.Gunfire),
         };
 
         /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（例: Tank, 3 -&gt; "Tank_T3"）。</summary>
@@ -90,7 +101,9 @@ namespace CSWarfront.Core
                 TierScaling.Cost(b.Cost, tier),
                 TierScaling.BuildTime(b.BuildTime, tier),
                 "",
-                TierScaling.Accuracy(b.Accuracy, tier));
+                TierScaling.Accuracy(b.Accuracy, tier),
+                b.FireIntervalHours,
+                b.ShotKind);
         }
     }
 }
