@@ -104,6 +104,17 @@ namespace CSWarfront.Game.UI
             {
                 if (_panel == null) return; // EnsureCreated 待ち
 
+                // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、
+                // 生のUIPanelだけを隠す（_currentBaseId/_detachedFromVanilla等のロジック状態には
+                // 一切触れない）。Hide()を経由しない理由: Hide()は「バニラパネルが閉じた/建物選択解除」
+                // という意味の強い操作で _currentBaseId=0・_detachedFromVanilla=false にリセットしてしまう
+                // ため、メニューを閉じた次のフレームで通常どおり同じ基地のパネルへ復帰できなくなる。
+                if (PanelChrome.IsGameMenuOpen())
+                {
+                    if (_panel.isVisible) _panel.Hide();
+                    return;
+                }
+
                 CityServiceWorldInfoPanel vanilla = TryGetVanillaPanel();
                 if (vanilla == null || vanilla.component == null || !vanilla.component.isVisible)
                 {

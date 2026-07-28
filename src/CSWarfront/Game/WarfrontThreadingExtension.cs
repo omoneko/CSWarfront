@@ -43,7 +43,13 @@ namespace CSWarfront.Game
 
             // Task36: モデル設定パネルは常設ではなくトグル開閉式のため、ここではEnsureCreated（冪等）のみ
             // 呼んで下地を用意する。表示/非表示自体はBaseInfoPanelの「モデル設定」ボタンが駆動する。
-            try { AssetAssignPanel.EnsureCreated(); }
+            // Task47: UpdateGameMenuStateはEscメニューが開いている間だけ表示中のパネルを一時的に隠し、
+            // 閉じたら戻す（トグル状態そのものは変更しない）。
+            try
+            {
+                AssetAssignPanel.EnsureCreated();
+                AssetAssignPanel.UpdateGameMenuState();
+            }
             catch (System.Exception e) { ModConfig.LogError("AssetAssignPanel update: " + e); }
 
             // ユニットのクリック選択とステータスパネル（Task31）。位置同期（OnMainVisualUpdate、上）の

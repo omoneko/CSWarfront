@@ -1,5 +1,6 @@
 using System;
 using ColossalFramework.UI;
+using CSWarfront.Game;
 using UnityEngine;
 
 namespace CSWarfront.Game.UI
@@ -29,6 +30,25 @@ namespace CSWarfront.Game.UI
 
         private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
         private const string CollapseGlyphCollapsed = "+";     // + (展開する = クリックすると開く)
+
+        // Task47: バニラの一時停止/ESCメニュー（PauseMenu、Escで開く「終了」「オプション」等の一覧画面）の
+        // コンポーネント名。UIView.library.Get&lt;T&gt;(name) 経由での取得は、BaseInfoPanel が
+        // CityServiceWorldInfoPanel を取得する際と全く同じ確立済みパターン（型名=登録名）を踏襲する。
+        // 検証方法と選定理由（PowerShellでColossalManaged.dll/Assembly-CSharp.dllをリフレクションし確認）:
+        //   - PauseMenu : MenuPanel : ColossalFramework.UI.UICustomControl。UICustomControlは
+        //     `UIComponent component { get; }` を公開しており、そのisVisibleがバニラの「Escで開く
+        //     一時停止/オプション選択メニュー」の表示状態そのもの（このパネル自体がEscトグルの実体）。
+        //   - 候補として検討したが不採用の他API:
+        //     ・Singleton&lt;SimulationManager&gt;.instance.SimulationPaused … ユーザーが手動で「一時停止」
+        //       ボタンを押した場合も true になり、Escメニューを開いていない場合と区別できない
+        //       （タスク要件が明示的に「不十分」と指定）。
+        //     ・UIView.HasModalInput() … PushModalスタックに何か積まれていれば真になる、より広い概念。
+        //       UIDropDown（本MOD含め多用）のポップアップはUIDropDown.OpenPopup等の実装
+        //       （リフレクションでPushModal呼び出しの痕跡なしを確認）でモーダルスタックを使わないため
+        //       直ちに競合するわけではないが、バニラの他のモーダルUI（保存/読み込みダイアログ等）でも
+        //       true になり「Escメニューが開いている」より意味が広すぎる。本タスクは「Escメニュー」に
+        //       限定した挙動を要求しているため、より的を絞ったPauseMenu.component.isVisibleを採用する。
+        private const string PauseMenuName = "PauseMenu";
 
         /// <summary>タイトル行の構築結果。各パネルはこれをフィールドに保持し、Destroy時に
         /// CollapseButton.eventClick の購読解除に使う（DragHandleは自前イベントを持たないため解除不要）。</summary>
@@ -82,6 +102,28 @@ namespace CSWarfront.Game.UI
         {
             if (h == null) return;
             if (h.CollapseButton != null) h.CollapseButton.eventClick -= onCollapseClick;
+        }
+
+        /// <summary>
+        /// Task47: バニラのEsc（一時停止/オプション選択）メニューが開いているか。BaseInfoPanel/
+        /// UnitInfoPanel/AssetAssignPanel の毎フレーム更新から呼ばれ、trueの間は各パネルを
+        /// （内部の「選択中の基地/ユニット」等のロジック状態には触れず）見た目だけ隠すために使う。
+        /// UIView.library.Get&lt;T&gt; は未登録/未生成の場合nullを返す（例外ではない）ため、
+        /// ゲーム起動直後でPauseMenuがまだ無い状況は「メニューは開いていない」として扱う
+        /// （BaseInfoPanel.TryGetVanillaPanelと同じ「未準備は通常経路」という方針）。
+        /// </summary>
+        public static bool IsGameMenuOpen()
+        {
+            try
+            {
+                PauseMenu pauseMenu = UIView.library.Get<PauseMenu>(PauseMenuName);
+                return pauseMenu != null && pauseMenu.component != null && pauseMenu.component.isVisible;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("PanelChrome.IsGameMenuOpen error: " + e);
+                return false;
+            }
         }
     }
 }

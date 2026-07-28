@@ -2,9 +2,49 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using CSWarfront.Core;
 
 namespace CSWarfront.Game
 {
+    /// <summary>
+    /// Task47: 「複製適用」で選べる複製先の範囲。値はUI（floating panel / Optionsサブページ）両方の
+    /// スコープドロップダウンの選択インデックスと一致させる（並び変更・挿入は両UIの再確認が必要）。
+    /// </summary>
+    internal enum CopyScope
+    {
+        /// <summary>同カテゴリの全Tier（同じ勢力、例: Tank_T1〜T5）。</summary>
+        SameCategoryAllTiers = 0,
+        /// <summary>全ユニット種別（同じ勢力の35キー全て）。</summary>
+        AllUnitTypes = 1,
+        /// <summary>全勢力（同じ種別、faction 0..4）。</summary>
+        AllFactionsSameType = 2,
+        /// <summary>全勢力・全種別。</summary>
+        AllFactionsAllTypes = 3
+    }
+
+    /// <summary>CopyScope ⇔ 表示ラベルの変換。AssetKindUtil と同じ方針の小さなヘルパー。</summary>
+    internal static class CopyScopeUtil
+    {
+        /// <summary>スコープドロップダウンの選択インデックス0..3の並びと完全に一致させること。</summary>
+        public static readonly CopyScope[] All =
+        {
+            CopyScope.SameCategoryAllTiers, CopyScope.AllUnitTypes,
+            CopyScope.AllFactionsSameType, CopyScope.AllFactionsAllTypes
+        };
+
+        public static string DisplayNameJa(CopyScope scope)
+        {
+            switch (scope)
+            {
+                case CopyScope.SameCategoryAllTiers: return "同カテゴリの全Tier";
+                case CopyScope.AllUnitTypes: return "全ユニット種別";
+                case CopyScope.AllFactionsSameType: return "全勢力（同じ種別）";
+                case CopyScope.AllFactionsAllTypes: return "全勢力・全種別";
+                default: return scope.ToString();
+            }
+        }
+    }
+
     /// <summary>
     /// 「(勢力ID, ユニット種別TypeKey) → サブスクライブ済みアセット(種類+名前)」の割り当てを保持・永続化する
     /// （Task36で導入、Task40で勢力別に拡張、Task41でプロップ以外の種類（建物/車両/樹木）にも対応）。
@@ -169,6 +209,86 @@ namespace CSWarfront.Game
                 ModConfig.Log("UnitAssetBindings.Clear: faction=" + factionId + " " + typeKey + " を既定に戻しました");
                 Save();
             }
+        }
+
+        /// <summary>
+        /// Task47: 「複製適用」。指定(勢力,TypeKey)の現在の割り当てを、scopeで指定した範囲の全(勢力,TypeKey)
+        /// へまとめて複製する。コピー元自体は書き込み対象から除外する（既に同じ値のため無駄な書き込み/
+        /// ログを避ける）。保存はループ内でSet()を都度呼ばず、全件の変更を終えてから1回だけ行う
+        /// （書き込み件数分ディスクI/Oが走るのを避けるため）。呼び出し元（AssetAssignPanel/
+        /// Options page）はUnitVisuals.DestroyAll()を自分で呼ぶこと（このメソッドは永続化のみ担当し、
+        /// 見た目の再生成トリガーには関与しない＝floating panelとOptionsページの両方から呼ばれるため、
+        /// 副作用はどちらのUIからも明示的に呼ぶ形に統一する）。
+        /// </summary>
+        /// <returns>実際に書き込んだ(勢力,TypeKey)の件数。コピー元に割り当てが無い、またはTypeKeyが
+        /// 不明な場合は0を返し、何も変更しない。</returns>
+        public static int CopyTo(byte fromFaction, string fromTypeKey, CopyScope scope)
+        {
+            AssetKind kind;
+            string name;
+            if (!TryGet(fromFaction, fromTypeKey, out kind, out name))
+            {
+                ModConfig.Log("UnitAssetBindings.CopyTo: コピー元 faction=" + fromFaction + " " + fromTypeKey + " に割り当てが無いためスキップしました");
+                return 0;
+            }
+
+            UnitCategory fromCategory;
+            if (!TryGetCategory(fromTypeKey, out fromCategory))
+            {
+                ModConfig.LogError("UnitAssetBindings.CopyTo: 不明なTypeKey '" + fromTypeKey + "' のためスキップしました");
+                return 0;
+            }
+
+            bool allTypes = scope == CopyScope.AllUnitTypes || scope == CopyScope.AllFactionsAllTypes;
+            bool allFactions = scope == CopyScope.AllFactionsSameType || scope == CopyScope.AllFactionsAllTypes;
+
+            int written = 0;
+            foreach (UnitType t in LandUnitRoster.All())
+            {
+                if (!allTypes)
+                {
+                    bool sameCategory = scope == CopyScope.SameCategoryAllTiers && t.Category == fromCategory;
+                    bool sameType = scope == CopyScope.AllFactionsSameType && t.TypeKey == fromTypeKey;
+                    if (!sameCategory && !sameType) continue;
+                }
+
+                if (allFactions)
+                {
+                    for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
+                    {
+                        if (f == fromFaction && t.TypeKey == fromTypeKey) continue; // コピー元自身はスキップ
+                        _bindings[MakeKey(f, t.TypeKey)] = new Binding { Kind = kind, Name = name };
+                        written++;
+                    }
+                }
+                else
+                {
+                    if (t.TypeKey == fromTypeKey) continue; // コピー元自身はスキップ
+                    _bindings[MakeKey(fromFaction, t.TypeKey)] = new Binding { Kind = kind, Name = name };
+                    written++;
+                }
+            }
+
+            if (written > 0) Save();
+            ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + fromTypeKey + " (" +
+                AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し、" + written + " 件を書き込みました");
+            return written;
+        }
+
+        /// <summary>TypeKeyからUnitCategoryを逆引きする（LandUnitRoster.All()を線形探索、35件のみなので
+        /// コストは無視できる）。見つからない場合はfalse。</summary>
+        private static bool TryGetCategory(string typeKey, out UnitCategory category)
+        {
+            foreach (UnitType t in LandUnitRoster.All())
+            {
+                if (t.TypeKey == typeKey)
+                {
+                    category = t.Category;
+                    return true;
+                }
+            }
+            category = default(UnitCategory);
+            return false;
         }
 
         /// <summary>値部分（"kind:assetName" または後方互換の "assetName" のみ）を解析する。

@@ -101,6 +101,17 @@ namespace CSWarfront.Game.UI
             {
                 if (_panel == null) return; // EnsureCreated 待ち
 
+                // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、
+                // 生のUIPanelだけを隠す（_detached等のロジック状態には一切触れない）。private Hide()を
+                // 経由しない理由はBaseInfoPanel.UpdateVisibilityと同じ（Hide()は「選択解除」相当で
+                // _detached=falseにリセットしてしまい、メニューを閉じた次のフレームで同じユニットへ
+                // 通常どおり追従復帰できなくなる）。
+                if (PanelChrome.IsGameMenuOpen())
+                {
+                    if (_panel.isVisible) _panel.Hide();
+                    return;
+                }
+
                 uint selected = UnitSelection.SelectedInstanceId;
                 if (selected == 0)
                 {

@@ -89,6 +89,13 @@ namespace CSWarfront.Game.UI
         /// <summary>Task40: 折りたたみ状態。BaseInfoPanel/UnitInfoPanelと同じくセッション中は保持する。</summary>
         private static bool _collapsed;
 
+        /// <summary>Task47: バニラEscメニューを開いたことでこのパネルを一時的に隠した場合にtrue。
+        /// このパネルはトグル開閉式（BaseInfoPanel/UnitInfoPanelのような毎フレームの表示条件再計算が無い）
+        /// ため、「ユーザーが開いていた」という事実をこのフラグだけで覚えておき、メニューが閉じたら
+        /// 単純に isVisible を戻す（Toggle/Show/Hideが管理する「開いている」という論理状態そのものには
+        /// 一切触れないため、_typeKeyDropdownの選択やスクロール位置等も含め開いていた時のまま復元される）。</summary>
+        private static bool _hiddenByMenu;
+
         /// <summary>Task40: 展開時の全体高さキャッシュ（BaseInfoPanel._expandedHeightと同じ役割）。</summary>
         private static float _expandedHeight;
 
@@ -152,6 +159,38 @@ namespace CSWarfront.Game.UI
             if (_panel != null) _panel.isVisible = false;
         }
 
+        /// <summary>Task47: WarfrontThreadingExtension.OnUpdateから毎フレーム呼ぶ。BaseInfoPanel/
+        /// UnitInfoPanelのUpdateVisibilityと異なりこのパネルは常時ポーリングの表示条件を持たないため、
+        /// 「Escメニューを開いたときに表示中だったか」を_hiddenByMenuだけで覚えておき、閉じたら
+        /// isVisibleを戻す（Hide()は呼ばない＝ユーザーの「閉じる」操作と区別する）。</summary>
+        public static void UpdateGameMenuState()
+        {
+            try
+            {
+                if (_panel == null) return;
+
+                bool menuOpen = PanelChrome.IsGameMenuOpen();
+                if (menuOpen)
+                {
+                    if (_panel.isVisible)
+                    {
+                        _panel.isVisible = false;
+                        _hiddenByMenu = true;
+                    }
+                }
+                else if (_hiddenByMenu)
+                {
+                    _hiddenByMenu = false;
+                    _panel.isVisible = true;
+                    _panel.BringToFront();
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("AssetAssignPanel.UpdateGameMenuState error: " + e);
+            }
+        }
+
         /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。パネルを破棄し静的状態を残さない。</summary>
         public static void Destroy()
         {
@@ -166,6 +205,7 @@ namespace CSWarfront.Game.UI
                 if (_propListBox != null) _propListBox.eventSelectedIndexChanged -= OnAssetSelected;
                 if (_applyButton != null) _applyButton.eventClick -= OnApplyClick;
                 if (_resetButton != null) _resetButton.eventClick -= OnResetClick;
+                if (_copyApplyButton != null) _copyApplyButton.eventClick -= OnCopyApplyClick; // Task47
                 if (_closeButton != null) _closeButton.eventClick -= OnCloseClick;
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
@@ -192,6 +232,9 @@ namespace CSWarfront.Game.UI
                 _truncatedLabel = null;
                 _applyButton = null;
                 _resetButton = null;
+                _copyScopeSectionLabel = null; // Task47
+                _copyScopeDropdown = null;
+                _copyApplyButton = null;
                 _closeButton = null;
                 _typeKeys = null;
                 _filteredAssetNames.Clear();
@@ -199,6 +242,7 @@ namespace CSWarfront.Game.UI
                 _suppressEvents = false;
                 _collapsed = false;
                 _expandedHeight = 0f;
+                _hiddenByMenu = false;
             }
         }
 
@@ -304,6 +348,16 @@ namespace CSWarfront.Game.UI
             _truncatedLabel.relativePosition = new Vector3(Pad, y);
             y += 24f + SectionGap; // 旧16f ×1.5
 
+            // Task47: 「複製適用」= 現在選択中(勢力,ユニット種別)の割り当てを他の(勢力,種別)へまとめて
+            // 複製するUI。範囲選択ドロップダウン（左）とボタン（右）を同じ行に並べる
+            // （AssetAssignPanelCopy.cs 参照）。
+            y = AddSectionLabel("複製適用", y, out _copyScopeSectionLabel);
+            float copyButtonWidth = w * 0.35f;
+            float copyDropdownWidth = w - copyButtonWidth - SectionGap;
+            _copyScopeDropdown = BuildCopyScopeDropdown(Pad, y, copyDropdownWidth);
+            _copyApplyButton = BuildButton("複製適用", Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
+            y += DropdownHeight + SectionGap;
+
             float buttonWidth = (w - SectionGap * 2f) / 3f;
             _applyButton = BuildButton("適用", Pad, y, buttonWidth, OnApplyClick);
             _resetButton = BuildButton("既定に戻す", Pad + buttonWidth + SectionGap, y, buttonWidth, OnResetClick);
@@ -407,6 +461,9 @@ namespace CSWarfront.Game.UI
             if (_truncatedLabel != null) _truncatedLabel.isVisible = visible;
             if (_applyButton != null) _applyButton.isVisible = visible;
             if (_resetButton != null) _resetButton.isVisible = visible;
+            if (_copyScopeSectionLabel != null) _copyScopeSectionLabel.isVisible = visible; // Task47
+            if (_copyScopeDropdown != null) _copyScopeDropdown.isVisible = visible;
+            if (_copyApplyButton != null) _copyApplyButton.isVisible = visible;
             if (_closeButton != null) _closeButton.isVisible = visible;
         }
     }
