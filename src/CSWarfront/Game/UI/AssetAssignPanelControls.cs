@@ -33,15 +33,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 44; // 旧22
+            dd.itemHeight = 33; // 旧22 ×1.5
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
-            dd.listHeight = 400; // 旧200
+            dd.listHeight = 300; // 旧200 ×1.5
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 1.5f; // 旧0.75f
-            dd.textFieldPadding = new RectOffset(16, 16, 12, 0); // 旧(8,8,6,0)
-            dd.itemPadding = new RectOffset(16, 0, 6, 0); // 旧(8,0,3,0)
+            dd.textScale = 1.125f; // 旧0.75f ×1.5
+            dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // 旧(8,8,6,0) ×1.5
+            dd.itemPadding = new RectOffset(12, 0, 5, 0); // 旧(8,0,3,0) ×1.5
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -53,8 +53,8 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 1.4f; // 旧0.7f
-            trigger.size = new Vector2(48f, DropdownHeight); // 旧24f
+            trigger.textScale = 1.05f; // 旧0.7f ×1.5
+            trigger.size = new Vector2(36f, DropdownHeight); // 旧24f ×1.5
             trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
             trigger.hoveredBgSprite = "ButtonMenuHovered";

@@ -19,7 +19,7 @@ namespace CSWarfront.Game.UI
     /// 参照）のうち、以下を明示設定して修正する: textColor(Color32、ほぼ白へ)、color(Color32、白のまま＝
     /// スプライトを暗くtintしない)、selectionBackgroundColor(Color32、選択範囲の可視化)、
     /// padding(RectOffset、2倍スケール)、horizontalAlignment/verticalAlignment(左/中央)、
-    /// textScale(2倍スケール)、cursorWidth(Int32、2倍スケール)。normalBgSprite/hoveredBgSprite/
+    /// textScale(1.5倍スケール)、cursorWidth(Int32)。normalBgSprite/hoveredBgSprite/
     /// focusedBgSprite/disabledBgSprite/selectionSprite は既存のまま（"TextFieldPanel"系は実際に
     /// このプロジェクトで使用実績のあるスプライト名のため、未検証の別名への変更はしない）。
     /// </summary>
@@ -37,7 +37,7 @@ namespace CSWarfront.Game.UI
             UITextField tf = _panel.AddUIComponent<UITextField>();
             tf.size = new Vector2(width, RowHeight);
             tf.relativePosition = new Vector3(x, y);
-            tf.padding = new RectOffset(12, 12, 12, 12); // 旧(6,6,6,6)
+            tf.padding = new RectOffset(9, 9, 9, 9); // 旧(6,6,6,6) ×1.5
             tf.builtinKeyNavigation = true;
             tf.isInteractive = true;
             tf.readOnly = false;
@@ -51,7 +51,7 @@ namespace CSWarfront.Game.UI
             tf.color = Color.white; // 検証済み、新規設定。スプライトを暗くtintしない（白のまま表示）。
             tf.textColor = new Color32(240, 240, 240, 255); // 旧(0,0,0)＝黒 → ほぼ白に変更（可読性修正の本体）
             tf.disabledTextColor = new Color32(150, 150, 150, 255); // 検証済み、新規設定
-            tf.textScale = 1.6f; // 旧0.8f
+            tf.textScale = 1.2f; // 旧0.8f ×1.5
             tf.cursorWidth = 2; // 旧1
             tf.cursorBlinkTime = 0.45f;
             tf.selectionSprite = "EmptySprite";
@@ -72,15 +72,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 40;
+            dd.itemHeight = 33;
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
             dd.listHeight = 200;
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 1.5f;
-            dd.textFieldPadding = new RectOffset(16, 16, 12, 0);
-            dd.itemPadding = new RectOffset(16, 0, 6, 0);
+            dd.textScale = 1.125f;
+            dd.textFieldPadding = new RectOffset(12, 12, 9, 0);
+            dd.itemPadding = new RectOffset(12, 0, 5, 0);
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -94,7 +94,7 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 1.4f;
+            trigger.textScale = 1.05f;
             trigger.size = new Vector2(40f, RowHeight);
             trigger.relativePosition = new Vector3(width - 40f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
