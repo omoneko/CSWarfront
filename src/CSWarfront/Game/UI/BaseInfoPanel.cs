@@ -72,6 +72,9 @@ namespace CSWarfront.Game.UI
         /// （縮小後のサイズから再計算すると誤差が積み重なるため、必ずこのキャッシュ値を使う）。</summary>
         private static float _expandedHeight;
 
+        /// <summary>パネル高さに掛ける倍率。文字サイズと幅は据え置きで、縦方向だけ余裕を持たせる。</summary>
+        private const float VerticalScale = 1.5f;
+
         /// <summary>
         /// 冪等。まだ生成していなければ、バニラの建物情報パネル型がライブラリから取得できる状態に
         /// なった時点で自前パネルを構築する（MissileDisasterButton.EnsureAttached と同じ
@@ -459,7 +462,9 @@ namespace CSWarfront.Game.UI
             float contentBottom = _productionBottomY > 0f
                 ? _productionBottomY
                 : _statusLabel.relativePosition.y + _statusLabel.height;
-            float newExpandedHeight = contentBottom + Pad;
+            // 内容の実寸に対して縦方向へ余裕を持たせる（ユーザー要望: 建物ウィンドウは「大きさだけ縦に1.5倍」）。
+            // 文字サイズ・幅は変えず、パネルの高さのみ VerticalScale 倍にして窮屈さを解消する。
+            float newExpandedHeight = (contentBottom + Pad) * VerticalScale;
             if (Mathf.Abs(newExpandedHeight - _expandedHeight) > 0.01f)
             {
                 _expandedHeight = newExpandedHeight;

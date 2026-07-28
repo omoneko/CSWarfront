@@ -33,13 +33,13 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 33; // 旧22 ×1.5
+            dd.itemHeight = 26; // 文字等倍・行間は少し広め
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
             dd.listHeight = 300; // 旧200 ×1.5
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 1.125f; // 旧0.75f ×1.5
+            dd.textScale = 0.75f; // 他パネルと統一
             dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // 旧(8,8,6,0) ×1.5
             dd.itemPadding = new RectOffset(12, 0, 5, 0); // 旧(8,0,3,0) ×1.5
             dd.popupColor = new Color32(45, 52, 61, 255);
@@ -53,7 +53,7 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 1.05f; // 旧0.7f ×1.5
+            trigger.textScale = 0.7f; // 他パネルと統一
             trigger.size = new Vector2(36f, DropdownHeight); // 旧24f ×1.5
             trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";

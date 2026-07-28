@@ -230,7 +230,7 @@ namespace CSWarfront.Game.UI
 
             _titleLabel = _panel.AddUIComponent<UILabel>();
             _titleLabel.text = TitleText;
-            _titleLabel.textScale = 1.35f; // 旧0.9f ×1.5
+            _titleLabel.textScale = 0.9f;   // 他パネルと統一（寸法のみ1.5倍、文字は等倍）
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += RowHeight;
 
@@ -246,7 +246,7 @@ namespace CSWarfront.Game.UI
             // Task40: 「現在の割り当て」ラベル（左）とサムネイル（右、128x128）を同じ行に並べる。
             float bindingLabelWidth = w - ThumbnailSize - SectionGap;
             _currentBindingLabel = _panel.AddUIComponent<UILabel>();
-            _currentBindingLabel.textScale = 1.125f; // 旧0.75f ×1.5
+            _currentBindingLabel.textScale = 0.75f; // 他パネルと統一
             _currentBindingLabel.textColor = new Color32(200, 200, 200, 255);
             _currentBindingLabel.wordWrap = true;
             _currentBindingLabel.autoSize = false;
@@ -268,7 +268,7 @@ namespace CSWarfront.Game.UI
             y += RowHeight + SectionGap;
 
             _customOnlyToggle = _panel.AddUIComponent<UIButton>();
-            _customOnlyToggle.textScale = 1.125f; // 旧0.75f ×1.5
+            _customOnlyToggle.textScale = 0.75f; // 他パネルと統一
             _customOnlyToggle.size = new Vector2(w, RowHeight);
             _customOnlyToggle.relativePosition = new Vector3(Pad, y);
             _customOnlyToggle.normalBgSprite = "ButtonMenu";
@@ -281,10 +281,10 @@ namespace CSWarfront.Game.UI
             _propListBox.size = new Vector2(w, ListHeight);
             _propListBox.relativePosition = new Vector3(Pad, y);
             _propListBox.normalBgSprite = "GenericPanelLight";
-            _propListBox.itemHeight = 30; // 旧20 ×1.5
+            _propListBox.itemHeight = 26; // 文字は等倍だが行間は少し広めに
             _propListBox.itemHover = "ListItemHover";
             _propListBox.itemHighlight = "ListItemHighlight";
-            _propListBox.textScale = 1.125f; // 旧0.75f ×1.5
+            _propListBox.textScale = 0.75f; // 他パネルと統一
             // Task41: GenericPanelLight（明るい背景）に対しては itemTextColor（各行の実際の文字色）を
             // 濃色にしないと可読性が無い。旧実装は textColor のみ設定していたが、UIListBox の行描画は
             // itemTextColor（ColossalManaged.dllをリフレクションで存在確認済み、Color32プロパティ）が
@@ -295,7 +295,7 @@ namespace CSWarfront.Game.UI
             y += ListHeight + SectionGap;
 
             _truncatedLabel = _panel.AddUIComponent<UILabel>();
-            _truncatedLabel.textScale = 0.975f; // 旧0.65f ×1.5
+            _truncatedLabel.textScale = 0.65f; // 他パネルと統一
             _truncatedLabel.textColor = new Color32(255, 190, 120, 255);
             _truncatedLabel.wordWrap = false;
             _truncatedLabel.autoSize = false;
@@ -340,7 +340,7 @@ namespace CSWarfront.Game.UI
         {
             label = _panel.AddUIComponent<UILabel>();
             label.text = text;
-            label.textScale = 1.125f; // 旧0.75f ×1.5
+            label.textScale = 0.75f; // 他パネルと統一
             label.textColor = new Color32(200, 200, 200, 255);
             label.relativePosition = new Vector3(Pad, y);
             return y + 27f; // 旧18f ×1.5
@@ -350,7 +350,7 @@ namespace CSWarfront.Game.UI
         {
             UIButton btn = _panel.AddUIComponent<UIButton>();
             btn.text = text;
-            btn.textScale = 1.2f; // 旧0.8f ×1.5
+            btn.textScale = 0.8f; // 他パネルと統一
             btn.size = new Vector2(width, ButtonRowHeight);
             btn.relativePosition = new Vector3(x, y);
             btn.normalBgSprite = "ButtonMenu";
