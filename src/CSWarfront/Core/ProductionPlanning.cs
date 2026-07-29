@@ -49,6 +49,10 @@ namespace CSWarfront.Core
 
                         UnitType type = state.Types.Get(decision.TypeKey);
                         if (type == null) break;
+                        // Task61: 防御的ガード。AiProductionPolicy.Decideは既に基地のSpawnableDomainsに
+                        // 応じた兵科構成表しか選ばないため通常は不要だが、将来の実装ミスで領域不一致の
+                        // TypeKeyが返ってきても、ここでキュー投入自体をブロックする（二重の安全網）。
+                        if (!DomainMaskUtil.Contains(b.SpawnableDomains, type.Domain)) break;
                         if (!f.TrySpend(type.Cost)) break;
                         b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
                     }

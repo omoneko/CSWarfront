@@ -112,6 +112,24 @@ class Mesh:
             (0, 1, 1): (x0, y1_front, z_front), (1, 1, 1): (x1, y1_front, z_front),
         })
 
+    # --- wing / fin (arbitrary-planform flat panel, Task61) --------------
+    def add_wing(self, x0, x0_z_back, x0_z_front, x1, x1_z_back, x1_z_front, y0, y1):
+        """Flat panel extruded from y0 to y1, with independently swept leading/trailing edges at
+        two spanwise stations x0 and x1. Generalizes add_tapered_box's index structure (same
+        (i,j,k)-corner-key scheme, so the already-verified winding formulas in add_hexahedron
+        carry over unchanged) to also vary Z per spanwise station, which a plain box or
+        add_tapered_box (fixed X bounds) can't express - used for delta wings and tail fins.
+        Caller MUST pass x0 < x1 numerically (same invariant add_box/add_tapered_box rely on:
+        for a mirrored/left-side panel, swap which physical side is "x0" vs "x1" so the smaller
+        value is always x0 - see build_wing_pair below). z_back/z_front follow the same
+        'z_back < z_front, +Z is nose-forward' convention as add_tapered_box."""
+        self.add_hexahedron({
+            (0, 0, 0): (x0, y0, x0_z_back), (1, 0, 0): (x1, y0, x1_z_back),
+            (0, 1, 0): (x0, y1, x0_z_back), (1, 1, 0): (x1, y1, x1_z_back),
+            (0, 0, 1): (x0, y0, x0_z_front), (1, 0, 1): (x1, y0, x1_z_front),
+            (0, 1, 1): (x0, y1, x0_z_front), (1, 1, 1): (x1, y1, x1_z_front),
+        })
+
     # --- prism (N-sided, arbitrary axis) ---------------------------------
     def add_prism(self, center, axis_dir, length, radius, sides=6):
         """Extruded regular-polygon prism (used for gun barrels / missile
@@ -295,6 +313,124 @@ def build_drone():
     return m
 
 
+def add_wing_pair(m, root_x, root_z_back, root_z_front, span, tip_z_back, tip_z_front, y0, y1):
+    """Adds a mirrored pair of wing panels (right +X, left -X) via Mesh.add_wing, taking care of
+    the x0<x1 ordering add_wing requires on both sides (see its docstring): for the right wing,
+    root(smaller x) is x0 and tip(larger x) is x1; for the mirrored left wing the roles swap
+    numerically (tip is more negative = smaller, so it becomes x0)."""
+    tip_x = root_x + span
+    m.add_wing(root_x, root_z_back, root_z_front, tip_x, tip_z_back, tip_z_front, y0, y1)  # right (+X)
+    m.add_wing(-tip_x, tip_z_back, tip_z_front, -root_x, root_z_back, root_z_front, y0, y1)  # left (-X)
+
+
+def build_destroyer():
+    m = Mesh()
+    # hull (waterline to main deck): y 0..8, ~120m long
+    m.add_box(0.0, 4.0, 0.0, 14.0, 8.0, 120.0)
+    # forward VLS deck (raised flat deck, missile silo cluster) toward the bow (+Z)
+    m.add_box(0.0, 8.5, 40.0, 10.0, 1.0, 24.0)
+    for cz in (32.0, 40.0, 48.0):
+        for cx in (-3.0, 3.0):
+            m.add_prism(center=(cx, 9.5, cz), axis_dir=(0.0, 1.0, 0.0), length=1.0, radius=0.6, sides=6)
+    # bridge superstructure: y 8.5..16.5, amidships
+    m.add_box(0.0, 12.5, -8.0, 9.0, 8.0, 26.0)
+    # radar/comms mast atop the bridge, reaching the ~20m overall height
+    m.add_prism(center=(0.0, 19.0, -8.0), axis_dir=(0.0, 1.0, 0.0), length=4.0, radius=0.6, sides=6)
+    # aft flat deck (helipad marker)
+    m.add_box(0.0, 8.5, -45.0, 8.0, 1.0, 16.0)
+    # bow deck gun + barrel
+    m.add_box(0.0, 9.0, 52.0, 3.0, 2.0, 4.0)
+    m.add_prism(center=(0.0, 10.0, 58.0), axis_dir=(0.0, 0.0, 1.0), length=8.0, radius=0.25, sides=6)
+    return m
+
+
+def build_carrier():
+    m = Mesh()
+    # hull: y 0..14, ~250m long
+    m.add_box(0.0, 7.0, 0.0, 32.0, 14.0, 250.0)
+    # flight deck: overhangs the hull, thin
+    m.add_box(0.0, 14.75, 0.0, 40.0, 1.5, 240.0)
+    # island (starboard superstructure), offset toward the deck edge
+    m.add_box(14.0, 20.5, -40.0, 8.0, 10.0, 30.0)
+    # island mast, reaching the ~30m overall height
+    m.add_prism(center=(14.0, 27.0, -40.0), axis_dir=(0.0, 1.0, 0.0), length=4.0, radius=0.6, sides=6)
+    return m
+
+
+def build_fighter():
+    m = Mesh()
+    # fuselage: y 0.2..1.8, nose toward +Z
+    m.add_box(0.0, 1.0, -1.5, 1.8, 1.6, 13.0)
+    # nose taper (wedge narrowing toward the tip)
+    m.add_tapered_box(0.0, 1.8, 0.2, 1.8, 0.4, 5.0, 8.0)
+    # tail fin (small vertical placeholder box)
+    m.add_box(0.0, 2.7, -7.0, 0.15, 2.0, 2.2)
+    # delta wings (root near mid-fuselage, swept tip)
+    add_wing_pair(m, root_x=0.9, root_z_back=-3.5, root_z_front=3.0,
+                  span=4.6, tip_z_back=-2.5, tip_z_front=1.0, y0=0.6, y1=1.0)
+    return m
+
+
+def build_bomber():
+    m = Mesh()
+    # fuselage: y 0.3..3.3, nose toward +Z
+    m.add_box(0.0, 1.8, -2.0, 3.0, 3.0, 28.0)
+    # nose taper
+    m.add_tapered_box(0.0, 3.0, 0.6, 3.0, 1.0, 10.0, 14.0)
+    # tail fin (small vertical placeholder box)
+    m.add_box(0.0, 5.3, -14.0, 0.2, 4.0, 3.5)
+    # straight, broad wings (root at fuselage, tip well outboard, ~32m span overall)
+    add_wing_pair(m, root_x=1.5, root_z_back=-2.0, root_z_front=1.5,
+                  span=14.5, tip_z_back=-0.5, tip_z_front=0.8, y0=1.4, y1=1.9)
+    # 2 underwing engine nacelles
+    for sign in (-1.0, 1.0):
+        m.add_prism(center=(sign * 7.0, 1.0, -0.5), axis_dir=(0.0, 0.0, 1.0), length=4.0, radius=0.9, sides=8)
+    return m
+
+
+def build_suicide_drone():
+    m = Mesh()
+    # 4 tiny landing skids
+    for sx, sz in ((-0.2, -0.2), (-0.2, 0.2), (0.2, -0.2), (0.2, 0.2)):
+        m.add_box(sx, 0.05, sz, 0.05, 0.10, 0.05)
+    # flat quad-copter-like body
+    m.add_box(0.0, 0.15, 0.0, 2.6, 0.20, 2.6)
+    # warhead bulge on the nose (+Z), a short 8-sided "barrel" pointing forward
+    m.add_prism(center=(0.0, 0.20, 1.4), axis_dir=(0.0, 0.0, 1.0), length=0.6, radius=0.35, sides=8)
+    # 4 small rotor discs at the corners
+    for cx, cz in ((0.9, 0.9), (-0.9, 0.9), (0.9, -0.9), (-0.9, -0.9)):
+        m.add_prism(center=(cx, 0.28, cz), axis_dir=(0.0, 1.0, 0.0), length=0.03, radius=0.35, sides=6)
+    return m
+
+
+def build_naval_base():
+    m = Mesh()
+    # main building (warehouse/hangar behind the quay)
+    m.add_box(-8.0, 5.0, -10.0, 24.0, 10.0, 14.0)
+    # quay/pier extending toward the water (+Z), flat and low
+    m.add_box(0.0, 1.0, 8.0, 30.0, 2.0, 16.0)
+    # crane: vertical mast + horizontal jib + counter-jib
+    m.add_prism(center=(10.0, 7.0, 10.0), axis_dir=(0.0, 1.0, 0.0), length=12.0, radius=0.8, sides=6)
+    m.add_box(10.0, 13.0, 17.0, 1.2, 1.2, 12.0)  # jib reaching out over the water
+    m.add_box(10.0, 13.0, 4.0, 1.2, 1.2, 4.0)    # counter-jib over the quay
+    return m
+
+
+def build_air_base():
+    m = Mesh()
+    # main hangar block
+    m.add_box(-8.0, 6.0, 0.0, 30.0, 12.0, 22.0)
+    # hangar door taper (angled roofline facing the apron, +Z)
+    m.add_tapered_box(-8.0, 30.0, 0.0, 12.0, 8.0, 9.0, 11.0)
+    # control tower: base block + glazed cab + mast
+    m.add_box(16.0, 5.0, -8.0, 6.0, 10.0, 6.0)
+    m.add_box(16.0, 10.5, -8.0, 7.0, 1.0, 7.0)
+    m.add_prism(center=(16.0, 11.5, -8.0), axis_dir=(0.0, 1.0, 0.0), length=1.0, radius=0.4, sides=6)
+    # apron markers (low flat pads in front of the hangar)
+    m.add_box(0.0, 0.15, 16.0, 24.0, 0.3, 8.0)
+    return m
+
+
 def build_military_base():
     m = Mesh()
     # main hangar block
@@ -315,6 +451,14 @@ MODELS = [
     ("Unit_AntiAir", build_antiair, (0.20, 0.24, 0.22), "Anti-air vehicle w/ 4 canisters, ~6.5x3.0x3.0m"),
     ("Unit_Drone", build_drone, (0.15, 0.15, 0.15), "Quad-rotor drone, ~2.0x2.0x0.6m"),
     ("Building_MilitaryBase", build_military_base, (0.30, 0.33, 0.24), "Military base: hangar+annex+mast, ~32x24x12m"),
+    # --- Task61: naval / air forces ---
+    ("Unit_Destroyer", build_destroyer, (0.28, 0.30, 0.32), "Missile destroyer: hull+VLS deck+bridge+mast, ~120x14x20m"),
+    ("Unit_Carrier", build_carrier, (0.32, 0.33, 0.34), "Aircraft carrier: hull+flat deck+island, ~250x40x30m"),
+    ("Unit_Fighter", build_fighter, (0.22, 0.24, 0.26), "Air superiority fighter: fuselage+delta wings+fin, ~16x11x4m"),
+    ("Unit_Bomber", build_bomber, (0.24, 0.26, 0.22), "Tactical bomber: fuselage+wings+nacelles, ~35x32x8m"),
+    ("Unit_SuicideDrone", build_suicide_drone, (0.35, 0.12, 0.10), "Suicide drone: flat body+warhead bulge+4 rotors, ~3x3x0.8m"),
+    ("Building_NavalBase", build_naval_base, (0.20, 0.28, 0.34), "Naval base: warehouse+quay+crane, ~40x30x14m"),
+    ("Building_AirBase", build_air_base, (0.34, 0.34, 0.30), "Air base: hangar+control tower+apron, ~50x36x12m"),
 ]
 
 

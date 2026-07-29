@@ -34,14 +34,47 @@ namespace CSWarfront.Core
         private const uint ResearchChancePercent = 35;
 
         /// <summary>兵科構成の目標比率（ドローン兵/歩兵含む陸上6兵科。AntiAirは対空目標が
-        /// まだ存在しないため対象外＝ProductionPlanning.ChooseUnitKeyの旧除外ルールを踏襲）。</summary>
-        private static readonly UnitCategory[] Categories =
+        /// まだ存在しないため対象外＝ProductionPlanning.ChooseUnitKeyの旧除外ルールを踏襲）。
+        /// Task61: 基地がArmy（Domain.Land生産可）のときに使う。</summary>
+        private static readonly UnitCategory[] LandCategories =
         {
             UnitCategory.Tank, UnitCategory.MechInfantry, UnitCategory.Infantry,
             UnitCategory.Apc, UnitCategory.Artillery, UnitCategory.DroneInfantry
         };
 
-        private static readonly float[] Targets = { 0.30f, 0.20f, 0.20f, 0.15f, 0.10f, 0.05f };
+        private static readonly float[] LandTargets = { 0.30f, 0.20f, 0.20f, 0.15f, 0.10f, 0.05f };
+
+        /// <summary>Task61: 基地がNavy（Domain.Sea生産可）のときに使う。駆逐艦を主力に、
+        /// 空母は少数（高コストのプラットフォームなので数を揃えない）。</summary>
+        private static readonly UnitCategory[] SeaCategories = { UnitCategory.Destroyer, UnitCategory.Carrier };
+        private static readonly float[] SeaTargets = { 0.7f, 0.3f };
+
+        /// <summary>Task61: 基地がAirForce（Domain.Air生産可）のときに使う。制空権確保の戦闘機を主力、
+        /// 対地打撃の爆撃機、少数の使い捨て自爆ドローンという構成。</summary>
+        private static readonly UnitCategory[] AirCategories =
+        {
+            UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, UnitCategory.SuicideDrone
+        };
+        private static readonly float[] AirTargets = { 0.45f, 0.35f, 0.20f };
+
+        /// <summary>Task61: 基地のSpawnableDomainsから、この基地が使う兵科構成表を選ぶ。
+        /// Sea → SeaCategories/SeaTargets、Air → AirCategories/AirTargets、それ以外（Army含む）は
+        /// 従来通りLandCategories/LandTargets（既存の全テストが前提とする既定挙動）。</summary>
+        private static void CategoriesFor(DomainMask spawnableDomains, out UnitCategory[] categories, out float[] targets)
+        {
+            if (DomainMaskUtil.Contains(spawnableDomains, Domain.Sea))
+            {
+                categories = SeaCategories; targets = SeaTargets;
+            }
+            else if (DomainMaskUtil.Contains(spawnableDomains, Domain.Air))
+            {
+                categories = AirCategories; targets = AirTargets;
+            }
+            else
+            {
+                categories = LandCategories; targets = LandTargets;
+            }
+        }
 
         /// <summary>兵科の目標比率からのズレを揺らすジッター幅（Task46）。同一tick・同一勢力の
         /// 複数基地が判で押したように同じ兵科を選び続けないための小さな揺らぎ。目標比率間の
@@ -50,7 +83,11 @@ namespace CSWarfront.Core
 
         public static AiDecision Decide(WarState state, Faction faction, MilitaryBase b, uint seed)
         {
-            CountByCategory(state, faction.Id, out int[] counts, out int totalUnits);
+            // Task61: 基地が生産できる領域(Domain)に応じて、使う兵科構成表(Land/Sea/Air)を切り替える。
+            // Army基地は従来通りLand、Navy基地はSea、AirForce基地はAir。
+            CategoriesFor(b.SpawnableDomains, out UnitCategory[] categories, out float[] targets);
+
+            CountByCategory(state, faction.Id, categories, out int[] counts, out int totalUnits);
 
             if (faction.UnlockedTier < 5 && faction.Treasury >= ResearchReserve)
             {
@@ -74,7 +111,7 @@ namespace CSWarfront.Core
             // deficit first) and return the first one with an affordable unlocked unit, instead of
             // being locked to the single most-deficient category. Only None when NO category has
             // anything affordable.
-            UnitCategory[] preference = CategoryPreferenceOrder(counts, totalUnits, seed);
+            UnitCategory[] preference = CategoryPreferenceOrder(categories, targets, counts, totalUnits, seed);
             for (int i = 0; i < preference.Length; i++)
             {
                 UnitType type = ChooseHighestAffordableTier(state, preference[i], faction.UnlockedTier, spendCap);
@@ -86,10 +123,11 @@ namespace CSWarfront.Core
         }
 
         /// <summary>勢力が現在保有する生存ユニットを兵科別に数える。Decideの予算判定（bootstrap判定）と
-        /// CategoryPreferenceOrderの両方で使うため一度だけ走査する。</summary>
-        private static void CountByCategory(WarState state, byte factionId, out int[] counts, out int total)
+        /// CategoryPreferenceOrderの両方で使うため一度だけ走査する。Task61: 対象となる兵科の並びを
+        /// categoriesで受け取るようにし、Land/Sea/Airのどの構成表でも同じロジックを再利用する。</summary>
+        private static void CountByCategory(WarState state, byte factionId, UnitCategory[] categories, out int[] counts, out int total)
         {
-            counts = new int[Categories.Length];
+            counts = new int[categories.Length];
             total = 0;
             for (int i = 0; i < state.Units.Count; i++)
             {
@@ -97,7 +135,7 @@ namespace CSWarfront.Core
                 if (!u.IsAlive || u.FactionId != factionId) continue;
                 UnitType t = state.Types.Get(u.TypeKey);
                 if (t == null) continue;
-                int idx = IndexOf(t.Category);
+                int idx = IndexOf(categories, t.Category);
                 if (idx < 0) continue;
                 counts[idx]++;
                 total++;
@@ -109,26 +147,27 @@ namespace CSWarfront.Core
         /// 代替先が無く生産が完全停止していた。この関数は全兵科をdeficit降順で返し、呼び出し側が
         /// 先頭から順に「買えるか」を試せるようにする）。同点はCategories配列の並び順（決定的、安定ソート）。
         /// seedから導出した小さなジッターを各兵科の乖離へ加え、僅差の場合に同一勢力の複数基地が
-        /// 常に同じ兵科へ集中しないようにする。</summary>
-        private static UnitCategory[] CategoryPreferenceOrder(int[] counts, int total, uint seed)
+        /// 常に同じ兵科へ集中しないようにする。Task61: categories/targetsを引数化し、Land/Sea/Airの
+        /// どの構成表でも同じロジックを再利用する。</summary>
+        private static UnitCategory[] CategoryPreferenceOrder(UnitCategory[] categories, float[] targets, int[] counts, int total, uint seed)
         {
-            float[] deficits = new float[Categories.Length];
+            float[] deficits = new float[categories.Length];
             uint jitterSeed = Hash(seed ^ 0x9E3779B9u);
-            for (int i = 0; i < Categories.Length; i++)
+            for (int i = 0; i < categories.Length; i++)
             {
                 float share = total > 0 ? (float)counts[i] / total : 0f;
-                float deficit = Targets[i] - share;
+                float deficit = targets[i] - share;
 
                 uint categoryHash = Hash(jitterSeed + (uint)i * 2654435761u);
                 float jitter = ((categoryHash % 1000) / 1000f - 0.5f) * 2f * CompositionJitter;
                 deficits[i] = deficit + jitter;
             }
 
-            int[] order = new int[Categories.Length];
+            int[] order = new int[categories.Length];
             for (int i = 0; i < order.Length; i++) order[i] = i;
 
             // Stable descending insertion sort: only shifts on strictly-smaller deficit, so ties
-            // keep their original Categories-array order (same tie-break as the old single-winner
+            // keep their original categories-array order (same tie-break as the old single-winner
             // loop's strict `>` comparison, which favored the first-seen index).
             for (int i = 1; i < order.Length; i++)
             {
@@ -143,26 +182,28 @@ namespace CSWarfront.Core
                 order[j + 1] = key;
             }
 
-            UnitCategory[] result = new UnitCategory[Categories.Length];
-            for (int i = 0; i < order.Length; i++) result[i] = Categories[order[i]];
+            UnitCategory[] result = new UnitCategory[categories.Length];
+            for (int i = 0; i < order.Length; i++) result[i] = categories[order[i]];
             return result;
         }
 
-        private static int IndexOf(UnitCategory category)
+        private static int IndexOf(UnitCategory[] categories, UnitCategory category)
         {
-            for (int i = 0; i < Categories.Length; i++)
-                if (Categories[i] == category) return i;
+            for (int i = 0; i < categories.Length; i++)
+                if (categories[i] == category) return i;
             return -1;
         }
 
         /// <summary>指定兵科のうち、unlockedTier以下・spendCap以下で最もTierが高いものを返す。
-        /// 何も条件を満たさなければnull。</summary>
+        /// 何も条件を満たさなければnull。Task61: 呼び出し元(Decide)がbase.SpawnableDomainsに応じた
+        /// categories配列からしかcategoryを渡さない（LandCategories/SeaCategories/AirCategoriesは
+        /// カテゴリの重複が無い）ため、ここでのDomain絞り込みは不要——カテゴリの一致だけで
+        /// 正しいドメインのUnitTypeに一意に絞り込める。</summary>
         private static UnitType ChooseHighestAffordableTier(WarState state, UnitCategory category, byte unlockedTier, float spendCap)
         {
             UnitType best = null;
             foreach (UnitType t in state.Types.All())
             {
-                if (t.Domain != Domain.Land) continue;
                 if (t.Category != category) continue;
                 if (t.Tier > unlockedTier) continue;
                 if (t.Cost > spendCap) continue;

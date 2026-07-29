@@ -27,6 +27,8 @@ namespace CSWarfront.Game.Serialization
                 if (bytes == null || bytes.Length == 0) return; // 新規ゲームは既定初期化に任せる
                 var types = new UnitTypeRegistry();
                 LandUnitRoster.RegisterAll(types); // 陸上7兵種×Tier1〜5（Task28）。旧セーブのTank_T1も同じキーで解決される。
+                NavalUnitRoster.RegisterAll(types); // 海上2種×Tier1〜5（Task61）。海上/航空ユニットを含むセーブの復元に必要。
+                AirUnitRoster.RegisterAll(types);   // 航空3種×Tier1〜5（Task61）。
                 WarState restored = WarStateSerializer.Deserialize(bytes, types);
                 // State差し替えと表現（車両）再生成を同一ロック内で行う（MilitaryManager参照）。
                 MilitaryManager.LoadAndRebuild(restored);

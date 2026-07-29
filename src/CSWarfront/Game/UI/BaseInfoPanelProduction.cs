@@ -67,6 +67,12 @@ namespace CSWarfront.Game.UI
         /// を表すセンチネル（有効なTierは1..5のため衝突しない、Task35）。</summary>
         private static byte _lastUnitDropdownUnlockedTier;
 
+        /// <summary>_unitDropdownItemsを最後に構築したときのSpawnableDomains（Task61）。基地種別が
+        /// 変わって選択中の基地が入れ替わった場合（陸軍→海軍基地など）にドロップダウンの中身を
+        /// 陸上/海上/航空ロスターへ切り替えるために使う。既定値DomainMask.Noneは「まだ構築していない」
+        /// センチネル（有効な基地は必ずLand/Sea/Airのいずれか1ビット以上を持つため衝突しない）。</summary>
+        private static DomainMask _lastUnitDropdownDomains = DomainMask.None;
+
         private static readonly StringBuilder _queueBuilder = new StringBuilder(128);
 
         /// <summary>ステータスラベルの下に生産セクションの各コントロールを生成する（Build()から一度だけ呼ばれる）。
@@ -76,7 +82,7 @@ namespace CSWarfront.Game.UI
         {
             if (_panel == null) return;
 
-            EnsureUnitDropdownItemsBuilt(1); // 初期表示は未所属/UnlockedTier既定値(1)相当。実値は初回RefreshContentsで反映される。
+            EnsureUnitDropdownItemsBuilt(1, DomainMask.Land); // 初期表示は未所属/UnlockedTier既定値(1)/陸軍基地相当。実値は初回RefreshContentsで反映される。
 
             _autoProduceButton = _panel.AddUIComponent<UIButton>();
             _autoProduceButton.size = new Vector2(ToggleButtonWidth, ToggleButtonHeight);
@@ -200,18 +206,32 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        /// <summary>陸上ユニットロスター全体（LandUnitRoster、カテゴリ宣言順→Tier1〜5の順）から
-        /// ドロップダウンの表示テキストと発注用TypeKeyの対応配列を構築する。unlockedTierを超えるTierの
-        /// 項目には末尾に " [未解禁]" を付ける（Task35：選択自体は可能なままにして、生産ボタンが
-        /// TierLockedを報告する。何が研究で解禁されるか一目で分かるようにするため選択肢からは外さない）。
-        /// unlockedTierが前回と同じであれば何もしない（毎フレーム呼ばれてもリストを再構築しない）。</summary>
-        private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier)
+        /// <summary>選択中の基地が生産できる領域（Task61: spawnableDomains、MilitaryBase.SpawnableDomains
+        /// の写し）のロスターから、ドロップダウンの表示テキストと発注用TypeKeyの対応配列を構築する
+        /// （陸軍基地はLandUnitRoster、海軍基地はNavalUnitRoster、航空基地はAirUnitRoster。
+        /// 未所属の基地等でどれとも一致しない場合はLandUnitRosterへフォールバックする）。
+        /// unlockedTierを超えるTierの項目には末尾に " [未解禁]" を付ける（Task35：選択自体は可能なままにして、
+        /// 生産ボタンがTierLockedを報告する。何が研究で解禁されるか一目で分かるようにするため選択肢からは
+        /// 外さない）。unlockedTier・spawnableDomainsのどちらも前回と同じであれば何もしない
+        /// （毎フレーム呼ばれてもリストを再構築しない）。</summary>
+        private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier, DomainMask spawnableDomains)
         {
-            if (_unitDropdownItems != null && _lastUnitDropdownUnlockedTier == unlockedTier) return;
+            if (_unitDropdownItems != null && _lastUnitDropdownUnlockedTier == unlockedTier &&
+                _lastUnitDropdownDomains == spawnableDomains) return;
+
+            // Task61: ロスターの切り替え時（陸軍→海軍基地など）は選択インデックスを維持する意味が
+            // 無い（全く別の兵科リストになるため）ので先頭へ戻す。Tierのみが変わった場合は従来通り
+            // 選択位置を維持する。上書き前の値をここで捕まえておく。
+            bool rosterChanged = _lastUnitDropdownDomains != spawnableDomains;
+
+            IEnumerable<UnitType> roster;
+            if (DomainMaskUtil.Contains(spawnableDomains, Domain.Sea)) roster = NavalUnitRoster.All();
+            else if (DomainMaskUtil.Contains(spawnableDomains, Domain.Air)) roster = AirUnitRoster.All();
+            else roster = LandUnitRoster.All();
 
             var items = new List<string>();
             var keys = new List<string>();
-            foreach (UnitType t in LandUnitRoster.All())
+            foreach (UnitType t in roster)
             {
                 string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
                 if (t.Tier > unlockedTier) label += " [未解禁]";
@@ -221,13 +241,16 @@ namespace CSWarfront.Game.UI
             _unitDropdownItems = items.ToArray();
             _unitDropdownTypeKeys = keys.ToArray();
             _lastUnitDropdownUnlockedTier = unlockedTier;
+            _lastUnitDropdownDomains = spawnableDomains;
 
             if (_unitDropdown != null)
             {
                 int prevSelected = _unitDropdown.selectedIndex;
                 _unitDropdown.items = _unitDropdownItems;
-                if (prevSelected >= 0 && prevSelected < _unitDropdownItems.Length)
+                if (!rosterChanged && prevSelected >= 0 && prevSelected < _unitDropdownItems.Length)
                     _unitDropdown.selectedIndex = prevSelected;
+                else if (_unitDropdownItems.Length > 0)
+                    _unitDropdown.selectedIndex = 0;
             }
         }
 
@@ -257,7 +280,8 @@ namespace CSWarfront.Game.UI
             _lastAutoProduce = snapshot.AutoProduce;
             _lastOwnerFactionId = snapshot.OwnerFactionId;
             _lastOwnerUnlockedTier = snapshot.OwnerUnlockedTier;
-            EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier); // Task35: 未解禁Tierの表示更新
+            // Task35: 未解禁Tierの表示更新。Task61: 基地の生産可能領域に応じてLand/Sea/Airロスターを切り替える。
+            EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier, snapshot.SpawnableDomains);
 
             if (_autoProduceButton != null)
             {
@@ -434,6 +458,7 @@ namespace CSWarfront.Game.UI
                 case QueueResult.QueueFull: return "キューが一杯";
                 case QueueResult.NotAffordable: return "資金不足";
                 case QueueResult.TierLocked: return "未解禁のTierです";
+                case QueueResult.WrongDomain: return "この基地では生産できない種別です"; // Task61
                 default: return "";
             }
         }
@@ -478,6 +503,7 @@ namespace CSWarfront.Game.UI
             // 再構築させるためセンチネルへ戻す（_unitDropdownItems自体はLandUnitRoster由来で内容は
             // 不変のため保持したままでよく、EnsureUnitDropdownItemsBuiltがTier不一致から再構築する）。
             _lastUnitDropdownUnlockedTier = 0;
+            _lastUnitDropdownDomains = DomainMask.None; // Task61: 次セッションで確実にロスターを再構築させる。
         }
     }
 }

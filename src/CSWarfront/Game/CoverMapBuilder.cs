@@ -87,11 +87,10 @@ namespace CSWarfront.Game
                         continue;
                     }
 
-                    // 自軍の軍事基地プレハブは遮蔽物として扱わない（拠点の真上/直近に遮蔽点が立つのは
-                    // 意味がなく、BasePlacementWatcherと同じ「参照一致 OR 名前一致」で判定する）。
-                    bool isOwnBase = ReferenceEquals(info, WarfrontBasePrefab.Prefab) ||
-                        (WarfrontBasePrefab.IsRegistered && info.name == WarfrontBasePrefab.PrefabName);
-                    if (isOwnBase)
+                    // 自軍の軍事基地プレハブ（陸軍/海軍/航空のいずれも、Task61）は遮蔽物として扱わない
+                    // （拠点の真上/直近に遮蔽点が立つのは意味がなく、BasePlacementWatcherと同じ
+                    // 「参照一致 OR 名前一致」判定をWarfrontBasePrefab.IsOwnBaseへ委譲する）。
+                    if (WarfrontBasePrefab.IsOwnBase(info))
                     {
                         skippedOwnBase++;
                         continue;

@@ -95,7 +95,13 @@ namespace CSWarfront.Core
                 if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value))
                     u.ClearPath();
 
-                if (state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
+                // Task61: Sea/Airは道路経路を一切使わない（MovementStepのSea/Air分岐はu.Pathを参照しない、
+                // Core/MovementStep.cs参照）。道路パスファインディングの予算(maxPathComputations)を
+                // 陸上ユニットのために温存するため、対象外のドメインではFindPathを一切試みない。
+                UnitType type = state.Types.Get(u.TypeKey);
+                bool isLand = type == null || type.Domain == Domain.Land; // 型が引けない防御的ケースは従来通り試みる
+
+                if (isLand && state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
                 {
                     if (pathComputations >= maxPathComputations) continue; // 予算超過。次回に持ち越し
 

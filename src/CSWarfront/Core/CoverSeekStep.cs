@@ -121,6 +121,24 @@ namespace CSWarfront.Core
                     continue;
                 }
 
+                UnitType type = state.Types.Get(u.TypeKey);
+                if (type == null)
+                {
+                    ClearCover(u);
+                    continue;
+                }
+
+                // Task61: Sea/Airは遮蔽移動の対象外（そもそも建物の陰に隠れるという概念がない領域）。
+                // MovementStepのSea/Air分岐はCoverDestinationを一切見ないため実害は無いが、ここで
+                // 明示的にスキップしておくことで「CoverSeekStepは常にLandユニットの状態しか触らない」
+                // という不変条件を保つ（将来Sea/Air用の別の駆け引き——例えば艦艇の隊列維持——を
+                // 追加する際の土台にもなる）。
+                if (type.Domain != Domain.Land)
+                {
+                    ClearCover(u);
+                    continue;
+                }
+
                 // Mode 1: 自勢力圏内にいる間は遮蔽移動もTask52のタイマーも対象外にする
                 // （速く・道路沿いに移動させたい）。圏内に居る/戻った時点でクールダウンもリセットし、
                 // 圏外へ出た次のtickで即座に遮蔽の評価を始められるようにする。
@@ -128,13 +146,6 @@ namespace CSWarfront.Core
                 {
                     ClearCover(u);
                     u.CoverReevaluateCooldown = 0f;
-                    continue;
-                }
-
-                UnitType type = state.Types.Get(u.TypeKey);
-                if (type == null)
-                {
-                    ClearCover(u);
                     continue;
                 }
 

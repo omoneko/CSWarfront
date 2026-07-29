@@ -38,7 +38,8 @@ public class CombatSynergyTests
         // would exceed 1.0 without the clamp. Real roster Artillery never reaches this high a base
         // accuracy (Tier5 is only ~0.434), so this uses a hand-built UnitType to exercise the clamp path.
         var hypotheticalArtillery = new UnitType("TestArtillery_HighAcc", Domain.Land, UnitCategory.Artillery,
-            1, 100f, 50f, 100f, 0f, 10f, 0f, 10f, 5f, "", 0.9f, 0.60f, ShotKind.IndirectFire);
+            1, 100f, 50f, 100f, 0f, 10f, 0f, 10f, 5f, "", 0.9f, 0.60f, ShotKind.IndirectFire,
+            DomainMask.Land, false);
         var artillery = new UnitInstance(1, hypotheticalArtillery.TypeKey, 0, 100f, new WorldPos(0f, 0f, 0f));
         var drone = new UnitInstance(2, "DroneInfantry_T1", 0, 100f, new WorldPos(10f, 0f, 0f));
         s.Units.Add(artillery);

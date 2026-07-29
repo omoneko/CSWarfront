@@ -777,4 +777,146 @@ public class MovementStepTests
 
         Assert.Equal(0f, s.Units[0].Position.Y, 3);
     }
+
+    // --- Task61: Air/Seaドメインの移動則 ---
+
+    private class FakeWaterSampler : IWaterSampler
+    {
+        private readonly float _waterBoundaryX;
+        private readonly float _level;
+        public FakeWaterSampler(float waterBoundaryX, float level = 0f) { _waterBoundaryX = waterBoundaryX; _level = level; }
+        public bool IsWater(float x, float z) { return x <= _waterBoundaryX; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = _level; return IsWater(x, z); }
+    }
+
+    private static WarState OneAirUnit(float startX, float startY, float targetX)
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.AirSuperiority, 1)); // Domain=Air, fast
+        var u = new UnitInstance(1, "AirSuperiority_T1", 0, 100f, new WorldPos(startX, startY, 0f));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(targetX, 0f, 0f);
+        s.Units.Add(u);
+        return s;
+    }
+
+    private static WarState OneSeaUnit(float startX, float targetX)
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(NavalUnitRoster.Get(UnitCategory.Destroyer, 1)); // Domain=Sea
+        var u = new UnitInstance(1, "Destroyer_T1", 0, 100f, new WorldPos(startX, 0f, 0f));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(targetX, 0f, 0f);
+        s.Units.Add(u);
+        return s;
+    }
+
+    [Fact]
+    public void Air_unit_ignores_Path_and_moves_straight_toward_OrderTargetPos()
+    {
+        var s = OneAirUnit(0f, 0f, 1000f);
+        s.Units[0].Path = new List<WorldPos> { new WorldPos(0f, 0f, 500f) }; // would divert a land unit; must be ignored
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(s.Units[0].Position.X > 0f, "expected the fighter to have advanced toward X");
+        Assert.Equal(0f, s.Units[0].Position.Z, 2); // did NOT follow the waypoint's Z=500 detour
+    }
+
+    [Fact]
+    public void Air_unit_holds_cruise_altitude_above_sampled_ground()
+    {
+        var s = OneAirUnit(0f, 999f, 1000f);
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z
+
+        MovementStep.Advance(s, 1f);
+
+        var pos = s.Units[0].Position;
+        // ground at (pos.X, 0) == pos.X (FakeHeightSampler returns x+z), so Y must be groundY + CruiseAltitude.
+        Assert.Equal(pos.X + MovementStep.CruiseAltitude, pos.Y, 2);
+    }
+
+    [Fact]
+    public void Air_unit_keeps_previous_Y_when_height_sampling_fails()
+    {
+        var s = OneAirUnit(0f, 500f, 1000f);
+        s.Height = new FailingHeightSampler();
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(500f, s.Units[0].Position.Y, 3);
+    }
+
+    [Fact]
+    public void Air_unit_snaps_exactly_to_objective_on_arrival()
+    {
+        var s = OneAirUnit(0f, 0f, 3f); // well within one tick's travel distance for a fast fighter
+        MovementStep.Advance(s, 1f);
+        Assert.Equal(3f, s.Units[0].Position.X, 2);
+        Assert.Equal(0f, s.Units[0].Position.Z, 2);
+    }
+
+    [Fact]
+    public void Air_unit_does_not_move_when_Idle_with_no_order()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.AirSuperiority, 1));
+        var u = new UnitInstance(1, "AirSuperiority_T1", 0, 100f, new WorldPos(0f, 0f, 0f));
+        s.Units.Add(u); // State stays Idle (default), no OrderTargetPos
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+    }
+
+    [Fact]
+    public void Sea_unit_moves_straight_toward_OrderTargetPos_when_water_sampler_absent()
+    {
+        var s = OneSeaUnit(0f, 1000f);
+        // s.Water intentionally left null: treated as "always water" (fallback for domain-less tests).
+        MovementStep.Advance(s, 1f);
+        Assert.True(s.Units[0].Position.X > 0f);
+    }
+
+    [Fact]
+    public void Sea_unit_follows_the_sampled_water_level()
+    {
+        var s = OneSeaUnit(0f, 5f); // within one tick's travel distance
+        s.Water = new FakeWaterSampler(waterBoundaryX: 1000f, level: 12f);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(5f, s.Units[0].Position.X, 2);
+        Assert.Equal(12f, s.Units[0].Position.Y, 3);
+    }
+
+    [Fact]
+    public void Sea_unit_refuses_to_step_onto_land_and_stops_at_the_waters_edge()
+    {
+        var s = OneSeaUnit(0f, 1000f); // objective is far inland, past the water boundary
+        s.Water = new FakeWaterSampler(waterBoundaryX: 3f); // only x<=3 is water
+
+        var beforeX = s.Units[0].Position.X;
+        MovementStep.Advance(s, 1f); // stepLen for a destroyer easily exceeds 3 map units
+
+        // The straight-line step would have landed past x=3 (on land), so the unit must not move at all
+        // this tick rather than teleport onto land.
+        Assert.Equal(beforeX, s.Units[0].Position.X, 3);
+    }
+
+    [Fact]
+    public void Land_unit_behaviour_is_unchanged_by_the_Sea_Air_domain_split()
+    {
+        // Regression: a plain Land unit (Tank) must still use the pre-existing Path/road logic,
+        // completely untouched by the new Domain != Land branch introduced above.
+        var s = UnitWithPath();
+        MovementStep.Advance(s, 0.1f);
+        var u = s.Units[0];
+        Assert.Equal(0.542f, u.Position.X, 2);
+        Assert.Equal(0f, u.Position.Z, 1);
+        Assert.Equal(0, u.PathIndex);
+    }
 }

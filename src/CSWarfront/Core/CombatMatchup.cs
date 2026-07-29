@@ -70,13 +70,52 @@ namespace CSWarfront.Core
             Set(UnitCategory.DroneInfantry, UnitCategory.MechInfantry, 1.2f);
             Set(UnitCategory.DroneInfantry, UnitCategory.Infantry, 0.6f);
 
-            // AntiAir（対地には弱い。vs Air系カテゴリは航空ユニット実装時に追加すること）
+            // AntiAir（対地には弱い。vs Air系カテゴリは下のTask61ブロックで追加）
             Set(UnitCategory.AntiAir, UnitCategory.Infantry, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.MechInfantry, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.Apc, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.Tank, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.Artillery, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.DroneInfantry, 0.5f);
+
+            // --- Task61: 海上/航空戦力の相性 ---
+            // 対象の「対地カテゴリ」まとめ（AirSuperiority/AntiAirのvs地上倍率をループで一括設定するため）。
+            UnitCategory[] groundCategories =
+            {
+                UnitCategory.Tank, UnitCategory.Apc, UnitCategory.MechInfantry, UnitCategory.Artillery,
+                UnitCategory.DroneInfantry, UnitCategory.Infantry, UnitCategory.AntiAir
+            };
+            UnitCategory[] airCategories =
+            {
+                UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, UnitCategory.SuicideDrone
+            };
+
+            // AirSuperiority（戦闘機）: 対空に強く(2.0)、対地に弱い(0.3)。制空権の専任機という設計。
+            for (int i = 0; i < airCategories.Length; i++)
+                Set(UnitCategory.AirSuperiority, airCategories[i], 2.0f);
+            for (int i = 0; i < groundCategories.Length; i++)
+                Set(UnitCategory.AirSuperiority, groundCategories[i], 0.3f);
+
+            // AntiAir: 対空でついに本領を発揮する(2.5)。対地は既存の0.5のまま。
+            for (int i = 0; i < airCategories.Length; i++)
+                Set(UnitCategory.AntiAir, airCategories[i], 2.5f);
+
+            // TacticalBomber（爆撃機）: 対地に強く（装甲車両1.6/歩兵1.2）、対空にはほぼ無力(0.2)。
+            Set(UnitCategory.TacticalBomber, UnitCategory.Tank, 1.6f);
+            Set(UnitCategory.TacticalBomber, UnitCategory.Apc, 1.6f);
+            Set(UnitCategory.TacticalBomber, UnitCategory.MechInfantry, 1.6f);
+            Set(UnitCategory.TacticalBomber, UnitCategory.Infantry, 1.2f);
+            for (int i = 0; i < airCategories.Length; i++)
+                Set(UnitCategory.TacticalBomber, airCategories[i], 0.2f);
+
+            // Destroyer（ミサイル駆逐艦）: 対艦・対戦車（沿岸砲撃）に強い(1.4)。それ以外は既定の1.0のまま。
+            Set(UnitCategory.Destroyer, UnitCategory.Carrier, 1.4f);
+            Set(UnitCategory.Destroyer, UnitCategory.Destroyer, 1.4f);
+            Set(UnitCategory.Destroyer, UnitCategory.Tank, 1.4f);
+
+            // Carrier（空母）: 打撃力より生存性のプラットフォーム。全カテゴリに対し弱い(0.6)。
+            for (int t = 0; t < CategoryCount; t++)
+                Table[(int)UnitCategory.Carrier, t] = 0.6f;
         }
 
         private static void Set(UnitCategory attacker, UnitCategory target, float multiplier)

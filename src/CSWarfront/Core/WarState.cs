@@ -32,6 +32,12 @@ namespace CSWarfront.Core
         /// Reset()で個別にnullへ戻す必要はない。</summary>
         public IHeightSampler Height;
 
+        /// <summary>Game層から供給される水面サンプラー（実行時のみ・非永続化、Task61）。未供給ならnull＝
+        /// MovementStepのSea分岐は「常に水上」とみなして自由に移動する（Height/RoadGraphと同じ
+        /// パターン：Game層実装が無いテスト環境でも既存の直線移動テストが素直に書けるようにするための
+        /// 安全側フォールバック）。</summary>
+        public IWaterSampler Water;
+
         /// <summary>
         /// Task42: 直近1tick分の「見える発砲」イベントのトランジェント・バッファ（非永続化）。
         /// CombatStep/BaseCombatStepがダメージを実適用したタイミングでAddShotを通じて積む

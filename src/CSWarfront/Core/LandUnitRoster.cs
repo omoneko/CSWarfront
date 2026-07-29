@@ -102,6 +102,14 @@ namespace CSWarfront.Core
 
         private static UnitType Build(BaseStats b, byte tier)
         {
+            // Task61: 陸上ユニットは原則として対地(Land)のみを狙える。唯一の例外はAntiAirで、
+            // これが「対空戦の本領」を持つ唯一の陸上兵科になる（Land|Air）。他の陸上兵科は
+            // TargetSearch/CombatStepの領域フィルタにより航空ユニットを一切狙わない
+            // （CombatMatchup側の数値相性だけでなく、そもそも交戦候補にすら挙がらない）。
+            DomainMask canTarget = b.Category == UnitCategory.AntiAir
+                ? DomainMask.Land | DomainMask.Air
+                : DomainMask.Land;
+
             return new UnitType(
                 TypeKey(b.Category, tier), Domain.Land, b.Category, tier,
                 TierScaling.Hp(b.Hp, tier),
@@ -115,7 +123,9 @@ namespace CSWarfront.Core
                 "",
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
-                b.ShotKind);
+                b.ShotKind,
+                canTarget,
+                false);
         }
     }
 }

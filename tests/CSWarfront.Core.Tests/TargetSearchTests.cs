@@ -97,4 +97,79 @@ public class TargetSearchTests
         var t = TargetSearch.FindNearestHostile(self, all, rel, 60f);
         Assert.Equal((uint)2, t.InstanceId);
     }
+
+    // --- Task61: 領域(Domain)フィルタ ---
+
+    private static UnitInstance UOf(uint id, byte fac, float x, string typeKey)
+        => new UnitInstance(id, typeKey, fac, 100f, new WorldPos(x, 0f, 0f));
+
+    [Fact]
+    public void Land_only_attacker_ignores_hostile_air_unit_in_range()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        AirUnitRoster.RegisterAll(types);
+
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "Tank_T1"); // CanTargetDomains=Land
+        var fighter = UOf(2, 1, 10f, "AirSuperiority_T1"); // Domain=Air
+        var all = new List<UnitInstance> { self, fighter };
+
+        UnitType tankType = types.Get("Tank_T1");
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f, tankType.CanTargetDomains, types);
+        Assert.Null(t);
+    }
+
+    [Fact]
+    public void AntiAir_can_target_hostile_air_unit_in_range()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        AirUnitRoster.RegisterAll(types);
+
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "AntiAir_T1"); // CanTargetDomains=Land|Air
+        var fighter = UOf(2, 1, 10f, "AirSuperiority_T1");
+        var all = new List<UnitInstance> { self, fighter };
+
+        UnitType antiAirType = types.Get("AntiAir_T1");
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f, antiAirType.CanTargetDomains, types);
+        Assert.Equal((uint)2, t.InstanceId);
+    }
+
+    [Fact]
+    public void Air_attacker_can_target_land_sea_and_air_hostiles()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        NavalUnitRoster.RegisterAll(types);
+        AirUnitRoster.RegisterAll(types);
+
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "AirSuperiority_T1"); // CanTargetDomains=All
+        var tank = UOf(2, 1, 5f, "Tank_T1");
+        var destroyer = UOf(3, 1, 55f, "Destroyer_T1");
+        var all = new List<UnitInstance> { self, tank, destroyer };
+
+        UnitType fighterType = types.Get("AirSuperiority_T1");
+        var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, fighterType.CanTargetDomains, types);
+        Assert.Equal((uint)2, nearest.InstanceId); // nearest overall (tank), domain filter doesn't exclude it
+    }
+
+    [Fact]
+    public void Domain_filter_is_skipped_when_types_registry_is_null_for_backward_compat()
+    {
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "Tank_T1");
+        var other = UOf(2, 1, 10f, "AirSuperiority_T1");
+        var all = new List<UnitInstance> { self, other };
+
+        // types=null -> no domain filtering applied, matches the legacy 4-arg overload's behaviour.
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f, DomainMask.Land, null);
+        Assert.Equal((uint)2, t.InstanceId);
+    }
 }

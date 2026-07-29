@@ -57,6 +57,12 @@ namespace CSWarfront.Core
                     // ため）。TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
                     // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
                     FireEffects.EmitThrottled(state, u, type, b.Position, 0, dt);
+
+                    // Task61: 自爆ドローンは基地攻撃でも同じく1回のダメージで自壊する
+                    // （CombatStepと同じ「CurrentHPを0にするだけ」の実装、死亡判定は次tickの
+                    // CombatStepの第2パスに委ねる）。breakで同一tick内でのこのユニットによる
+                    // 複数基地への多重ダメージを防ぐ（「1回攻撃したら死ぬ」を文字通り1回にする）。
+                    if (type.IsOneShot) { u.CurrentHP = 0f; break; }
                 }
             }
         }

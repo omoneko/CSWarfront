@@ -102,6 +102,8 @@ namespace CSWarfront.Game
             // 初期化途中の半端な状態を観測することがない。
             var state = new WarState();
             LandUnitRoster.RegisterAll(state.Types); // 陸上7兵種×Tier1〜5（Task28）
+            NavalUnitRoster.RegisterAll(state.Types); // 海上2種(Destroyer/Carrier)×Tier1〜5（Task61）
+            AirUnitRoster.RegisterAll(state.Types);   // 航空3種(AirSuperiority/TacticalBomber/SuicideDrone)×Tier1〜5（Task61）
 
             // 全5勢力を生成する（電力タブの勢力ドロップダウンはどの選択も有効な値を指すようにするため）。
             // 基地はもうここではシードしない（Task18）：プレイヤーが電力タブから基地建物を配置した瞬間に
@@ -366,6 +368,14 @@ namespace CSWarfront.Game
                 if (State.Height == null)
                 {
                     State.Height = new SurfaceHeightSampler();
+                }
+
+                // 水面サンプラー（State.Water）の供給（Task61）。State.Heightと全く同じパターン：
+                // 一度だけ生成して以後はそのまま使い回す薄いアダプタ（未供給時はnullのまま＝
+                // MovementStepのSea分岐が自動的に「常に水上」フォールバックへ切り替わる）。
+                if (State.Water == null)
+                {
+                    State.Water = new WaterSampler();
                 }
 
                 // 遮蔽物マップ（State.Cover）の構築/再構築（Task44）。RoadGraphと同じ「未供給なら即座に

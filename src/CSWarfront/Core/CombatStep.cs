@@ -15,7 +15,10 @@ namespace CSWarfront.Core
 
                 // ターゲット選定は依然として単純な「射程内最近接の敵」（TargetSearch）。
                 // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
-                var target = TargetSearch.FindNearestHostile(self, state.Units, state.Relations, type.Range);
+                // Task61: type.CanTargetDomainsで領域フィルタをかける（AntiAir以外の陸上兵科は航空ユニットを
+                // 一切狙わない、艦艇は航空ユニットを狙わない、航空ユニットは全領域を狙える、等）。
+                var target = TargetSearch.FindNearestHostile(self, state.Units, state.Relations, type.Range,
+                    type.CanTargetDomains, state.Types);
                 if (target == null)
                 {
                     if (self.State == UnitState.Engaging) self.State = UnitState.Idle;
@@ -49,6 +52,12 @@ namespace CSWarfront.Core
                 // ダメージを与えたこのtickでのみFireCooldownをdt分だけ減算する。0以下になった瞬間だけ
                 // ShotEventを1つ積み、FireIntervalHoursへリセットする（乱数不使用・決定的）。
                 FireEffects.EmitThrottled(state, self, type, target.Position, target.InstanceId, dt);
+
+                // Task61: 自爆ドローン（UnitType.IsOneShot）は、実際にダメージを与えた瞬間に自壊する。
+                // CurrentHPを0にするだけで、死亡判定・KillEvent発行は下の第2パス（既存の死亡判定ループ）が
+                // そのまま担う（自爆用の特別な分岐を増やさず、既存の「死亡はCurrentHP<=0から導出する」
+                // という単一の真実源を維持する）。
+                if (type.IsOneShot) self.CurrentHP = 0f;
             }
             // 2) 死亡判定
             // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の

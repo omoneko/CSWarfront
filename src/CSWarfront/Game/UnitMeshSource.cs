@@ -151,9 +151,10 @@ namespace CSWarfront.Game
             return TryResolve(assetPrefabName, out mesh);
         }
 
-        /// <summary>Task57: UnitCategory -&gt; src/CSWarfront/Models/Unit_*.obj のファイル名（拡張子無し）
-        /// への対応表。陸上7兵種のみ対応（海軍/空軍カテゴリはこの時点でモデル未作成のため false を返し、
-        /// 呼び出し側は (c) の車両借用/プリミティブへフォールバックする）。</summary>
+        /// <summary>Task57/Task61: UnitCategory -&gt; src/CSWarfront/Models/Unit_*.obj のファイル名
+        /// （拡張子無し）への対応表。陸上7兵種に加え、Task61で海上2種(Destroyer/Carrier)・
+        /// 航空3種(AirSuperiority/TacticalBomber/SuicideDrone)を追加した。他の未実装カテゴリは
+        /// false を返し、呼び出し側は (c) の車両借用/プリミティブへフォールバックする。</summary>
         private static bool TryGetBuiltInModelName(UnitCategory category, out string modelName)
         {
             switch (category)
@@ -165,6 +166,11 @@ namespace CSWarfront.Game
                 case UnitCategory.Artillery: modelName = "Unit_Artillery"; return true;
                 case UnitCategory.AntiAir: modelName = "Unit_AntiAir"; return true;
                 case UnitCategory.DroneInfantry: modelName = "Unit_Drone"; return true;
+                case UnitCategory.Destroyer: modelName = "Unit_Destroyer"; return true;
+                case UnitCategory.Carrier: modelName = "Unit_Carrier"; return true;
+                case UnitCategory.AirSuperiority: modelName = "Unit_Fighter"; return true;
+                case UnitCategory.TacticalBomber: modelName = "Unit_Bomber"; return true;
+                case UnitCategory.SuicideDrone: modelName = "Unit_SuicideDrone"; return true;
                 default: modelName = null; return false;
             }
         }

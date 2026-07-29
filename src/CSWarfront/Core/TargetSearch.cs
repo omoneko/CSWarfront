@@ -10,6 +10,18 @@ namespace CSWarfront.Core
         public static UnitInstance FindNearestHostile(UnitInstance self,
             IEnumerable<UnitInstance> all, RelationMatrix rel, float range)
         {
+            return FindNearestHostile(self, all, rel, range, DomainMask.All, null);
+        }
+
+        /// <summary>Task61: 領域(Domain)フィルタ付きの版。attackerCanTargetにtargetのDomain（typesで解決）が
+        /// 含まれない候補は、他の条件（射程・敵対関係）を満たしていても除外する。これがAntiAirを
+        /// 唯一の対空適性を持つ陸上兵科にし、通常の陸上兵科が航空ユニットを一切狙わなくする実体。
+        /// types が null、または候補のTypeKeyが解決できない場合は領域フィルタを適用しない
+        /// （＝従来の4引数版と同じ挙動、既存呼び出し元・テストへの後方互換フォールバック）。</summary>
+        public static UnitInstance FindNearestHostile(UnitInstance self,
+            IEnumerable<UnitInstance> all, RelationMatrix rel, float range,
+            DomainMask attackerCanTarget, UnitTypeRegistry types)
+        {
             UnitInstance bestHostile = null;
             float bestHostileDist = float.MaxValue;
             UnitInstance bestNemesis = null;
@@ -22,6 +34,13 @@ namespace CSWarfront.Core
                 if (!r.IsHostile()) continue;
                 float d = self.Position.HorizontalDistanceTo(u.Position);
                 if (d > range) continue;
+
+                if (types != null)
+                {
+                    UnitType targetType = types.Get(u.TypeKey);
+                    if (targetType != null && !DomainMaskUtil.Contains(attackerCanTarget, targetType.Domain))
+                        continue;
+                }
 
                 if (r == Relation.Nemesis)
                 {

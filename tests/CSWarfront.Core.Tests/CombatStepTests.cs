@@ -420,4 +420,76 @@ public class CombatStepTests
         Assert.Equal(hpAfterFirstHit, s.FindUnit(1).CurrentHP, 3); // no further damage
         Assert.Equal(UnitState.Idle, s.FindUnit(1).State);
     }
+
+    // --- Task61: 領域(Domain)フィルタがCombatStepへ実際に効いていること ---
+
+    [Fact]
+    public void Tank_does_not_engage_hostile_fighter_in_range_even_though_in_range()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));           // Range=60, CanTargetDomains=Land
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.AirSuperiority, 1));  // Domain=Air
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "AirSuperiority_T1", 1, 100f, new WorldPos(30f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(100f, s.FindUnit(2).CurrentHP, 3); // Tank never targeted the fighter
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(1).State);
+    }
+
+    [Fact]
+    public void AntiAir_engages_hostile_fighter_in_range()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.AntiAir, 1));        // Range=120, CanTargetDomains=Land|Air
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.AirSuperiority, 1));
+        s.Units.Add(new UnitInstance(1, "AntiAir_T1", 0, 100f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "AirSuperiority_T1", 1, 100f, new WorldPos(30f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.True(s.FindUnit(2).CurrentHP < 100f, "AntiAir should have damaged the fighter");
+        Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
+    }
+
+    // --- Task61: 自爆ドローン(UnitType.IsOneShot) ---
+
+    [Fact]
+    public void SuicideDrone_dies_immediately_after_dealing_damage()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1)); // Range=20
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Tank, 1));
+        s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0f, 0f, 0f)));
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 200f, new WorldPos(10f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.True(s.FindUnit(2).CurrentHP < 200f, "drone should have dealt damage before dying");
+        Assert.Equal(UnitState.Dead, s.FindUnit(1).State); // the drone itself died from its own attack
+    }
+
+    [Fact]
+    public void SuicideDrone_that_never_finds_a_target_does_not_die()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1));
+        s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0f, 0f, 0f)));
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.NotEqual(UnitState.Dead, s.FindUnit(1).State);
+        Assert.Equal(40f, s.FindUnit(1).CurrentHP, 3);
+    }
 }

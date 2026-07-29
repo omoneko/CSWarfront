@@ -38,5 +38,26 @@ namespace CSWarfront.Core
 
         public MilitaryBase(ushort baseId, BaseType type, WorldPos pos)
         { BaseId = baseId; Type = type; Position = pos; }
+
+        /// <summary>この基地がどの領域(Domain)のユニットを生産できるか（Task61）。Typeから機械的に導出する
+        /// 派生値であり、独立フィールドとしては持たない（=WarStateSerializerのフォーマット変更は不要。
+        /// BaseTypeは既にv1から永続化済みで、SpawnableDomainsはロード時にそこから毎回再計算される）。
+        /// Army→Land、Navy→Sea、AirForce→Air。MissileBase（Task61時点では未実装のプレースホルダ用途）は
+        /// 便宜上Landとしておく（他の3種と異なりプレイヤーが配置できるプレハブが存在しないため実害は無い）。</summary>
+        public DomainMask SpawnableDomains
+        {
+            get
+            {
+                switch (Type)
+                {
+                    case BaseType.Navy: return DomainMask.Sea;
+                    case BaseType.AirForce: return DomainMask.Air;
+                    case BaseType.Army:
+                    case BaseType.MissileBase:
+                    default:
+                        return DomainMask.Land;
+                }
+            }
+        }
     }
 }

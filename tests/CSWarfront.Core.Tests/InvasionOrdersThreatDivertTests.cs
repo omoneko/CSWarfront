@@ -30,6 +30,55 @@ public class InvasionOrdersThreatDivertTests
         Assert.Equal(100f, u.OrderTargetPos.Value.X, 3);
     }
 
+    // --- Task61: Sea/Air units never attempt road pathfinding (they ignore RoadGraph entirely) ---
+
+    [Fact]
+    public void Sea_unit_gets_OrderTargetPos_toward_enemy_base_but_never_attempts_a_road_path()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        NavalUnitRoster.RegisterAll(s.Types);
+        var ownBase = new MilitaryBase(1, BaseType.Navy, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        var enemyBase = new MilitaryBase(2, BaseType.Navy, new WorldPos(300, 0, 0)) { OwnerFactionId = 1 };
+        s.Bases.Add(ownBase); s.Bases.Add(enemyBase);
+        s.Roads = new RoadGraph(); // supplied but empty; a Land unit would still attempt FindPath against it
+        s.Units.Add(new UnitInstance(1, NavalUnitRoster.TypeKey(UnitCategory.Destroyer, 1), 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.Equal(300f, u.OrderTargetPos.Value.X, 3); // still gets an objective toward the enemy base
+        Assert.Null(u.Path);
+        // A Land unit in the same situation would have attempted FindPath and, on failure (empty
+        // RoadGraph), set PathRetryCooldown to PathRetryFailCooldownHours; a Sea unit must never
+        // enter that branch at all, so the cooldown must remain untouched (0, its initial value).
+        Assert.Equal(0f, u.PathRetryCooldown, 3);
+    }
+
+    [Fact]
+    public void Land_unit_in_the_same_situation_does_attempt_a_road_path_and_sets_the_retry_cooldown()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(300, 0, 0)) { OwnerFactionId = 1 };
+        s.Bases.Add(ownBase); s.Bases.Add(enemyBase);
+        s.Roads = new RoadGraph(); // empty -> FindPath fails
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Null(u.Path);
+        Assert.Equal(InvasionOrders.PathRetryFailCooldownHours, u.PathRetryCooldown, 3);
+    }
+
     [Fact]
     public void Unit_prefers_the_nearby_threat_over_an_enemy_base()
     {

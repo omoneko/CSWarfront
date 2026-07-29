@@ -22,6 +22,50 @@ public class CoverSeekStepTests
         return u;
     }
 
+    // --- Task61: Sea/Airは遮蔽移動の対象外 ---
+
+    [Fact]
+    public void Advance_never_sets_CoverDestination_for_an_engaging_air_unit_even_when_cover_available()
+    {
+        var s = BaseState();
+        AirUnitRoster.RegisterAll(s.Types);
+        string key = AirUnitRoster.TypeKey(UnitCategory.AirSuperiority, 1);
+        var type = s.Types.Get(key);
+        var self = new UnitInstance(1, key, 0, type.MaxHP, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(30, 0, 0));
+        s.Units.Add(self);
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(15, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.False(self.CoverHold);
+    }
+
+    [Fact]
+    public void Advance_never_sets_CoverDestination_for_a_sea_unit_advancing_toward_an_objective()
+    {
+        var s = BaseState();
+        NavalUnitRoster.RegisterAll(s.Types);
+        string key = NavalUnitRoster.TypeKey(UnitCategory.Destroyer, 1);
+        var type = s.Types.Get(key);
+        var self = new UnitInstance(1, key, 0, type.MaxHP, new WorldPos(0, 0, 0));
+        s.Units.Add(self);
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0);
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(500, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+    }
+
     [Fact]
     public void Advance_sets_CoverDestination_for_engaging_infantry_when_cover_available()
     {

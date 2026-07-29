@@ -81,9 +81,15 @@ namespace CSWarfront.Core
         /// 小さな地表補正はそのまま許容する）。</summary>
         public const float MaxSurfaceDeviation = 15f;
 
+        /// <summary>Task61: 航空ユニットが巡航する、地表からの高さ（マップ単位）。AdvanceAirが
+        /// state.Height(IHeightSampler)で地表をサンプリングできた場合、Yを常に groundHeight + この値へ
+        /// 設定する（道路の高さに合わせるMovementStepの陸上ロジックとは全く別の垂直方向の扱い）。</summary>
+        public const float CruiseAltitude = 120f;
+
         public static void Advance(WarState state, float dt)
         {
             IHeightSampler height = state.Height; // Task53: null-safeなローカルへ1回だけ拾っておく。
+            IWaterSampler water = state.Water; // Task61: 同様にnull-safeなローカルへ拾う。
 
             for (int i = 0; i < state.Units.Count; i++)
             {
@@ -96,6 +102,22 @@ namespace CSWarfront.Core
 
                 float stepLen = type.Speed * dt;
                 if (stepLen <= 0f) continue;
+
+                // Task61: Sea/Airは陸上の道路経路(Path)・遮蔽(CoverDestination)・territory-based
+                // slowdownを一切使わない、完全に別の移動則（クラス冒頭コメント参照）。CoverSeekStepが
+                // そもそもLand以外にはCoverDestinationを設定しないため、通常はu.CoverDestinationが
+                // 立っていることは無いが、防御的に陸上ロジック（下のif以降）へは絶対に流れ込ませない。
+                if (type.Domain != Domain.Land)
+                {
+                    WorldPos? objective = ResolveDomainObjective(u);
+                    if (!objective.HasValue) continue;
+
+                    if (type.Domain == Domain.Air)
+                        AdvanceAir(u, stepLen, objective.Value, height);
+                    else // Domain.Sea
+                        AdvanceSea(u, stepLen, objective.Value, water);
+                    continue;
+                }
 
                 if (u.CoverDestination.HasValue)
                 {
@@ -271,6 +293,76 @@ namespace CSWarfront.Core
                 if (deviation <= MaxSurfaceDeviation) y = sampled;
             }
             return new WorldPos(x, y, z);
+        }
+
+        // --- Task61: Sea/Air共通の目的地解決 ---
+
+        /// <summary>Sea/Airユニットが向かうべき目的地を返す（無ければnull＝このtickは動かない）。
+        /// RallyHold中はRallyPointへ（land同様、CoverArrivalDistanceの停止判定は不要——後述の
+        /// AdvanceAir/AdvanceSeaはdist<=stepLenで厳密に目的地へスナップするため、次tick以降は
+        /// dist=0でno-opになり自然に停止する）。それ以外はState==Moving/Engagingの間だけ
+        /// OrderTargetPosへ向かう（land版と異なりCoverSeekStepがSea/AirにCoverDestinationを
+        /// 一切設定しないため「Engaging中は停止して遮蔽で応戦する」という陸上の駆け引きは無く、
+        /// 単純に目的地へ向かい続けながら射程内なら交戦する、というMVPの割り切り）。
+        /// Idle・目的地未設定の場合はnullを返し、このtickは静止する。</summary>
+        private static WorldPos? ResolveDomainObjective(UnitInstance u)
+        {
+            if (u.Order == UnitOrder.RallyHold) return u.RallyPoint;
+            if (u.State != UnitState.Moving && u.State != UnitState.Engaging) return null;
+            return u.OrderTargetPos;
+        }
+
+        /// <summary>Task61: 航空ユニットの移動。RoadGraph/CoverMapを一切使わず目的地へ直線移動し、
+        /// Yは常に「(移動後のX/Zで)地表高さをサンプリングできればそれ+CruiseAltitude」、
+        /// サンプリングに失敗すれば従来のYをそのまま維持する（クラス冒頭のIHeightSampler供給パターンと
+        /// 同じ安全側フォールバック）。地表からの相対高度を毎tick取り直すため、山岳地帯の上を飛べば
+        /// 自然にYも上下する。</summary>
+        private static void AdvanceAir(UnitInstance u, float stepLen, WorldPos objective, IHeightSampler height)
+        {
+            float dist = u.Position.HorizontalDistanceTo(objective);
+            float nx, nz;
+            if (dist <= stepLen || dist <= 0.01f) { nx = objective.X; nz = objective.Z; }
+            else
+            {
+                float t = stepLen / dist;
+                nx = u.Position.X + (objective.X - u.Position.X) * t;
+                nz = u.Position.Z + (objective.Z - u.Position.Z) * t;
+            }
+
+            float ny = u.Position.Y; // サンプリング失敗時は従来のYを維持（フォールバック）。
+            float groundY;
+            if (height != null && height.TrySampleHeight(nx, nz, out groundY))
+                ny = groundY + CruiseAltitude;
+
+            u.Position = new WorldPos(nx, ny, nz);
+        }
+
+        /// <summary>Task61: 海上ユニットの移動。RoadGraph/CoverMapを一切使わず目的地へ直線移動するが、
+        /// 移動後の位置が水面でなくなる場合はそのtickは一切移動しない（陸地へテレポートしない、
+        /// クラス冒頭のIWaterSamplerコメント参照。海軍専用の経路探索が無いMVPの既知の制約——
+        /// 岬の裏側の目標へは物理的に到達できないことがある）。Yは水面サンプラーが返す値をそのまま
+        /// 採用する（サンプリングに失敗すれば従来のYを維持）。water==nullの場合は「常に水上」とみなし
+        /// 自由に移動する（Height同様、Game層未供給時のテスト容易性のための安全側フォールバック）。</summary>
+        private static void AdvanceSea(UnitInstance u, float stepLen, WorldPos objective, IWaterSampler water)
+        {
+            float dist = u.Position.HorizontalDistanceTo(objective);
+            float nx, nz;
+            if (dist <= stepLen || dist <= 0.01f) { nx = objective.X; nz = objective.Z; }
+            else
+            {
+                float t = stepLen / dist;
+                nx = u.Position.X + (objective.X - u.Position.X) * t;
+                nz = u.Position.Z + (objective.Z - u.Position.Z) * t;
+            }
+
+            if (water != null && !water.IsWater(nx, nz)) return; // 陸地へ踏み込む一歩は捨てて足止めする。
+
+            float ny = u.Position.Y;
+            float level;
+            if (water != null && water.TrySampleWaterLevel(nx, nz, out level))
+                ny = level;
+
+            u.Position = new WorldPos(nx, ny, nz);
         }
     }
 }

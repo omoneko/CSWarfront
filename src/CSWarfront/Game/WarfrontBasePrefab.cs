@@ -1,48 +1,90 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using ColossalFramework;
 using ColossalFramework.Globalization;
+using CSWarfront.Core;
 using CSWarfront.Game.Models;
 using UnityEngine;
 
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 電力（Electricity）タブに独自の「軍事基地」BuildingInfo を実行時登録する。
-    /// アセットエディタを使わず、既存の電力系プレハブの GameObject を Instantiate で複製することで、
-    /// setter非公開の m_UICategory 等の private フィールドを一切のリフレクション無しで引き継ぐ
+    /// 電力（Electricity）タブに3種の独自 BuildingInfo（陸軍/海軍/航空基地、Task61で海軍/航空を追加）を
+    /// 実行時登録する。アセットエディタを使わず、既存の電力系プレハブの GameObject を Instantiate で複製
+    /// することで、setter非公開の m_UICategory 等の private フィールドを一切のリフレクション無しで引き継ぐ
     /// （.superpowers/sdd/research-power-tab-building.md §6 で検証済みの経路）。
-    /// Task18でこのプレハブの配置をロジック上の基地（MilitaryBase）に紐付ける。本タスクではプレハブ登録のみ。
-    /// Task33でこのプレハブ名に対するロケール文字列（建物名/説明）の登録を追加した。
+    ///
+    /// Task18で陸軍基地1種のプレハブ配置をロジック上の基地（MilitaryBase）に紐付けた（クラス名は当時の
+    /// 単数形 WarfrontBasePrefab のまま、ファイル名の破壊的変更を避けるため据え置き）。
+    /// Task61で海軍/航空の2種を追加し、{BaseType, プレハブ名, モデルファイル, ロケール文言} の小さな
+    /// テーブル（<see cref="Entry"/>/<see cref="Entries"/>）を1回だけ走査する形へ一般化した。
+    /// 複製元（電力系プレハブ）の探索・サニタイズ処理は3種で共有する（同じ電力タブ内に3つとも並ぶため、
+    /// 既定では全て同じ複製元から作る＝将来より適したタブが見つかれば入れ替え可能）。
     /// </summary>
     public static class WarfrontBasePrefab
     {
+        // 後方互換: Task18時点の陸軍基地の値をそのまま公開する（BasePlacementWatcher/CoverMapBuilder等、
+        // 既存の「単一の基地プレハブ」を前提にしたコードが無くなるまでのブリッジ）。
         public const string PrefabName = "CSWarfront Military Base";
         private const string CollectionName = "CSWarfront";
 
-        // Task57: 既定(built-in)の見た目モデル。クローン直後の風力タービン見た目を、成功すれば
-        // src/CSWarfront/Models/Building_MilitaryBase.obj へ差し替える（失敗時は元の見た目のまま）。
-        private const string BuildingModelName = "Building_MilitaryBase";
-        private static readonly Color BuildingModelColor = new Color(0.30f, 0.33f, 0.24f, 1f); // 軍用オリーブグレー
+        private struct Entry
+        {
+            public BaseType Type;
+            public string PrefabName;
+            public string ModelName;
+            public Color ModelColor;
+            public string LocaleTitleText;
+            public string LocaleDescText;
+        }
 
-        // Task33: バニラ建物情報パネル（CityServiceWorldInfoPanel）が参照するロケール識別子。
-        // Assembly-CSharp.dll の文字列テーブルをスキャンして実在を確認済み（BUILDING_TITLE /
-        // BUILDING_DESC / BUILDING_SHORT_DESC）。
+        // Task33のロケール識別子（バニラCityServiceWorldInfoPanelが参照する）はTask61でも変更しない。
         private const string LocaleTitleId = "BUILDING_TITLE";
         private const string LocaleDescId = "BUILDING_DESC";
         private const string LocaleShortDescId = "BUILDING_SHORT_DESC";
-        private const string LocaleTitleText = "CSWarfront 軍事基地";
-        private const string LocaleDescText = "勢力の軍事拠点。部隊を生産し、勢力圏から軍資金を得る。";
 
-        public static BuildingInfo Prefab { get; private set; }
-        public static bool IsRegistered { get { return Prefab != null; } }
+        // Task61: 電力（Electricity）タブに3つとも並べる。海軍/航空により適したUICategory/タブが
+        // 将来見つかれば、Entry.Type別に複製元探索を分ければ差し替えられる（現状はシンプルさを優先し
+        // 3種とも同じ複製元・同じタブを共有する）。
+        private static readonly Entry[] Entries =
+        {
+            new Entry
+            {
+                Type = BaseType.Army, PrefabName = "CSWarfront Military Base", ModelName = "Building_MilitaryBase",
+                ModelColor = new Color(0.30f, 0.33f, 0.24f, 1f), // 軍用オリーブグレー
+                LocaleTitleText = "CSWarfront 陸軍基地", LocaleDescText = "勢力の陸上部隊拠点。陸上兵科を生産し、勢力圏から軍資金を得る。"
+            },
+            new Entry
+            {
+                Type = BaseType.Navy, PrefabName = "CSWarfront Naval Base", ModelName = "Building_NavalBase",
+                ModelColor = new Color(0.20f, 0.28f, 0.34f, 1f), // 軍用スレートブルー
+                LocaleTitleText = "CSWarfront 海軍基地", LocaleDescText = "勢力の海上部隊拠点。駆逐艦・空母を生産する。"
+            },
+            new Entry
+            {
+                Type = BaseType.AirForce, PrefabName = "CSWarfront Air Base", ModelName = "Building_AirBase",
+                ModelColor = new Color(0.34f, 0.34f, 0.30f, 1f), // 軍用コンクリートグレー
+                LocaleTitleText = "CSWarfront 航空基地", LocaleDescText = "勢力の航空部隊拠点。戦闘機・爆撃機・自爆ドローンを生産する。"
+            },
+        };
 
-        /// <summary>冪等。ゲームロード毎（OnLevelLoaded）に呼ばれる想定。</summary>
+        private static readonly Dictionary<BaseType, BuildingInfo> _prefabs = new Dictionary<BaseType, BuildingInfo>();
+
+        // 後方互換プロパティ（Task18時点のAPI）。陸軍基地1種のみを見る既存コード用。
+        public static BuildingInfo Prefab { get { BuildingInfo p; return _prefabs.TryGetValue(BaseType.Army, out p) ? p : null; } }
+        public static bool IsRegistered { get { return _prefabs.ContainsKey(BaseType.Army); } }
+
+        /// <summary>いずれか1種でも登録済みか（Task61）。</summary>
+        public static bool IsAnyRegistered { get { return _prefabs.Count > 0; } }
+
+        /// <summary>冪等。ゲームロード毎（OnLevelLoaded）に呼ばれる想定。3種すべての登録を試みる
+        /// （1種が既に登録済みでもスキップせず、未登録の残りを試す＝将来的な部分失敗からの回復を許容）。</summary>
         public static void EnsureRegistered()
         {
-            if (IsRegistered)
+            if (_prefabs.Count == Entries.Length)
             {
-                ModConfig.Log("WarfrontBasePrefab.EnsureRegistered: already registered ('" + Prefab.name + "'), skip");
+                ModConfig.Log("WarfrontBasePrefab.EnsureRegistered: all " + Entries.Length + " base prefabs already registered, skip");
                 return;
             }
 
@@ -69,71 +111,60 @@ namespace CSWarfront.Game
                         ", water-placement=" + stats.RejectedWaterPlacement + "); aborting registration");
                     return;
                 }
-                PowerPlantAI sourceAi = source.m_buildingAI as PowerPlantAI;
-                int sourceSubBuildingCount = source.m_subBuildings != null ? source.m_subBuildings.Length : 0;
-                ModConfig.Log("WarfrontBasePrefab: source prefab chosen = '" + source.name + "' (category='" + SafeCategory(source) + "')" +
-                    " aiType=" + (source.m_buildingAI != null ? source.m_buildingAI.GetType().Name : "null") +
-                    " m_electricityProduction=" + (sourceAi != null ? sourceAi.m_electricityProduction.ToString() : "?") +
-                    " m_resourceType=" + (sourceAi != null ? sourceAi.m_resourceType.ToString() : "?") +
-                    " m_resourceConsumption=" + (sourceAi != null ? sourceAi.m_resourceConsumption.ToString() : "?") +
-                    " m_resourceCapacity=" + (sourceAi != null ? sourceAi.m_resourceCapacity.ToString() : "?") +
-                    " m_isRenewable=" + (sourceAi != null ? sourceAi.m_isRenewable.ToString() : "?") +
-                    " workPlaceCountSum=" + (sourceAi != null ? (sourceAi.m_workPlaceCount0 + sourceAi.m_workPlaceCount1 + sourceAi.m_workPlaceCount2 + sourceAi.m_workPlaceCount3).ToString() : "?") +
-                    " subBuildingCount=" + sourceSubBuildingCount +
-                    " placementMode=" + source.m_placementMode);
 
-                GameObject sourceGo = source.gameObject;
-                if (sourceGo == null)
+                for (int i = 0; i < Entries.Length; i++)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab: source prefab '" + source.name + "' has null gameObject; aborting");
-                    return;
+                    Entry entry = Entries[i];
+                    if (_prefabs.ContainsKey(entry.Type)) continue; // 既に登録済み
+                    RegisterOne(entry, source);
                 }
-
-                GameObject cloneGo = (GameObject)UnityEngine.Object.Instantiate(sourceGo);
-                BuildingInfo clone = cloneGo.GetComponent<BuildingInfo>();
-                if (clone == null)
-                {
-                    ModConfig.LogError("WarfrontBasePrefab: clone GameObject has no BuildingInfo component; aborting");
-                    UnityEngine.Object.Destroy(cloneGo);
-                    return;
-                }
-
-                clone.name = PrefabName;
-                cloneGo.name = PrefabName;
-                clone.m_prefabInitialized = false;
-                ModConfig.Log("WarfrontBasePrefab: clone created and renamed to '" + PrefabName + "'");
-
-                if (clone.m_class == null)
-                {
-                    ModConfig.LogError("WarfrontBasePrefab: cloned prefab '" + PrefabName + "' has null m_class after clone; aborting");
-                    return;
-                }
-                if (clone.m_class.m_service != ItemClass.Service.Electricity)
-                {
-                    ModConfig.LogError("WarfrontBasePrefab: cloned prefab m_class.m_service = " + clone.m_class.m_service +
-                        " (expected Electricity); aborting");
-                    return;
-                }
-
-                SanitizeClonedPowerPlantAi(clone);
-                TrySwapVisualMesh(clone);
-
-                PrefabCollection<BuildingInfo>.InitializePrefabs(CollectionName, clone, null);
-                ModConfig.Log("WarfrontBasePrefab: InitializePrefabs('" + CollectionName + "', '" + PrefabName + "', null) done");
-
-                PrefabCollection<BuildingInfo>.BindPrefabs();
-                ModConfig.Log("WarfrontBasePrefab: BindPrefabs() done");
 
                 RefreshPanels();
-
-                Prefab = clone;
-                RegisterLocalizedStrings();
-                ModConfig.Log("WarfrontBasePrefab: registration COMPLETE, Prefab.name='" + Prefab.name + "'");
             }
             catch (Exception e)
             {
                 ModConfig.LogError("WarfrontBasePrefab.EnsureRegistered exception: " + e);
             }
+        }
+
+        /// <summary>指定BaseTypeのプレハブが登録済みならtrueで返す。</summary>
+        public static bool TryGetPrefab(BaseType type, out BuildingInfo prefab)
+        {
+            return _prefabs.TryGetValue(type, out prefab);
+        }
+
+        /// <summary>infoが登録済みのいずれかの基地プレハブに一致すれば、そのBaseTypeを返す（Task61）。
+        /// 参照一致を優先し、ダメなら名前一致（ゲームがプレハブを再インスタンス化した場合の保険、
+        /// Task18からの既存方針を踏襲）。</summary>
+        public static bool TryMatch(BuildingInfo info, out BaseType type)
+        {
+            type = default(BaseType);
+            if (info == null) return false;
+
+            foreach (var kv in _prefabs)
+            {
+                if (ReferenceEquals(info, kv.Value)) { type = kv.Key; return true; }
+            }
+            foreach (var kv in _prefabs)
+            {
+                if (info.name == PrefabNameFor(kv.Key)) { type = kv.Key; return true; }
+            }
+            return false;
+        }
+
+        /// <summary>infoが登録済みの自MOD基地プレハブのいずれかであるか（Task61、CoverMapBuilderが
+        /// 自陣営の基地建物を遮蔽物マップから除外するために使う）。</summary>
+        public static bool IsOwnBase(BuildingInfo info)
+        {
+            BaseType ignored;
+            return TryMatch(info, out ignored);
+        }
+
+        private static string PrefabNameFor(BaseType type)
+        {
+            for (int i = 0; i < Entries.Length; i++)
+                if (Entries[i].Type == type) return Entries[i].PrefabName;
+            return null;
         }
 
         /// <summary>候補走査の集計（ログ出力・abort判断用）。</summary>
@@ -173,6 +204,9 @@ namespace CSWarfront.Game
         /// AI参照の取得は reflection で確認した BuildingInfo.m_buildingAI（public フィールド）を使う
         /// （GetComponent&lt;BuildingAI&gt;() も動作するはずだが、こちらは既にゲームが解決済みの参照であり
         /// 追加のコンポーネント探索コストが無いため採用）。
+        ///
+        /// Task61: 3種の基地プレハブすべてがこの1つの複製元を共有する（EnsureRegistered参照、
+        /// 探索コストを3倍にしないため）。
         /// </summary>
         private static BuildingInfo FindElectricitySource(out SourceSearchStats stats)
         {
@@ -239,6 +273,53 @@ namespace CSWarfront.Game
             return 3; // 無印 PowerPlantAI、または将来追加される未分類サブクラス
         }
 
+        /// <summary>Task61: 1エントリ分（陸軍/海軍/航空のいずれか1種）を複製・サニタイズ・見た目差し替え・
+        /// 登録・ロケール登録までまとめて行う。EnsureRegisteredのループから呼ばれる。</summary>
+        private static void RegisterOne(Entry entry, BuildingInfo source)
+        {
+            GameObject sourceGo = source.gameObject;
+            if (sourceGo == null)
+            {
+                ModConfig.LogError("WarfrontBasePrefab: source prefab '" + source.name + "' has null gameObject; aborting '" + entry.PrefabName + "'");
+                return;
+            }
+
+            GameObject cloneGo = (GameObject)UnityEngine.Object.Instantiate(sourceGo);
+            BuildingInfo clone = cloneGo.GetComponent<BuildingInfo>();
+            if (clone == null)
+            {
+                ModConfig.LogError("WarfrontBasePrefab: clone GameObject has no BuildingInfo component; aborting '" + entry.PrefabName + "'");
+                UnityEngine.Object.Destroy(cloneGo);
+                return;
+            }
+
+            clone.name = entry.PrefabName;
+            cloneGo.name = entry.PrefabName;
+            clone.m_prefabInitialized = false;
+
+            if (clone.m_class == null)
+            {
+                ModConfig.LogError("WarfrontBasePrefab: cloned prefab '" + entry.PrefabName + "' has null m_class after clone; aborting");
+                return;
+            }
+            if (clone.m_class.m_service != ItemClass.Service.Electricity)
+            {
+                ModConfig.LogError("WarfrontBasePrefab: cloned prefab m_class.m_service = " + clone.m_class.m_service +
+                    " (expected Electricity); aborting '" + entry.PrefabName + "'");
+                return;
+            }
+
+            SanitizeClonedPowerPlantAi(clone, entry.PrefabName);
+            TrySwapVisualMesh(clone, entry.ModelName, entry.ModelColor);
+
+            PrefabCollection<BuildingInfo>.InitializePrefabs(CollectionName, clone, null);
+            PrefabCollection<BuildingInfo>.BindPrefabs();
+
+            _prefabs[entry.Type] = clone;
+            RegisterLocalizedStrings(entry);
+            ModConfig.Log("WarfrontBasePrefab: registration COMPLETE for " + entry.Type + " ('" + entry.PrefabName + "')");
+        }
+
         /// <summary>
         /// 複製後の AI が PowerPlantAI 系統であれば、ゲーム本体の PowerPlantAI.ProduceGoods 等が
         /// 除算に使う可能性のあるフィールドを、どれが分母に使われても安全なようゼロ回避値に強制する
@@ -247,87 +328,41 @@ namespace CSWarfront.Game
         /// 意図的にクローンは「小さな発電所」として振る舞う（若干の電力を供給する）— MVPとして許容。
         /// 専用アセットが用意でき次第、置き換え可能。
         /// </summary>
-        private static void SanitizeClonedPowerPlantAi(BuildingInfo clone)
+        private static void SanitizeClonedPowerPlantAi(BuildingInfo clone, string prefabName)
         {
             PowerPlantAI ai = clone.m_buildingAI as PowerPlantAI;
             if (ai == null) return;
 
-            TransferManager.TransferReason oldResourceType = ai.m_resourceType;
-            if (ai.m_resourceType != TransferManager.TransferReason.None)
-            {
-                ai.m_resourceType = TransferManager.TransferReason.None;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceType " + oldResourceType + " -> None");
-            }
-
-            if (ai.m_electricityProduction <= 0)
-            {
-                int old = ai.m_electricityProduction;
-                ai.m_electricityProduction = 16;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_electricityProduction " + old + " -> 16");
-            }
-
-            if (ai.m_resourceCapacity <= 0)
-            {
-                int old = ai.m_resourceCapacity;
-                ai.m_resourceCapacity = 1;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceCapacity " + old + " -> 1");
-            }
-
-            if (ai.m_resourceConsumption <= 0)
-            {
-                int old = ai.m_resourceConsumption;
-                ai.m_resourceConsumption = 1;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_resourceConsumption " + old + " -> 1");
-            }
-
+            if (ai.m_resourceType != TransferManager.TransferReason.None) ai.m_resourceType = TransferManager.TransferReason.None;
+            if (ai.m_electricityProduction <= 0) ai.m_electricityProduction = 16;
+            if (ai.m_resourceCapacity <= 0) ai.m_resourceCapacity = 1;
+            if (ai.m_resourceConsumption <= 0) ai.m_resourceConsumption = 1;
             if (ai.m_workPlaceCount0 + ai.m_workPlaceCount1 + ai.m_workPlaceCount2 + ai.m_workPlaceCount3 == 0)
-            {
                 ai.m_workPlaceCount0 = 1;
-                ModConfig.Log("WarfrontBasePrefab: sanitize workPlaceCountSum 0 -> 1 (m_workPlaceCount0=1)");
-            }
-
-            if (ai.m_constructionCost <= 0)
-            {
-                int old = ai.m_constructionCost;
-                ai.m_constructionCost = 1000;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_constructionCost " + old + " -> 1000");
-            }
-
-            if (ai.m_maintenanceCost <= 0)
-            {
-                int old = ai.m_maintenanceCost;
-                ai.m_maintenanceCost = 100;
-                ModConfig.Log("WarfrontBasePrefab: sanitize m_maintenanceCost " + old + " -> 100");
-            }
+            if (ai.m_constructionCost <= 0) ai.m_constructionCost = 1000;
+            if (ai.m_maintenanceCost <= 0) ai.m_maintenanceCost = 100;
         }
 
         /// <summary>
-        /// Task57: クローン直後（風力タービン等の借用済み見た目のまま）の <paramref name="clone"/> の
-        /// 描画メッシュ/マテリアルを、既定モデル Building_MilitaryBase.obj へ差し替える。
-        /// 設定するフィールドは m_mesh / m_lodMesh / m_material / m_lodMaterial の4つ（全てpublic、
-        /// BuildingInfoBase宣言。reflection-only読込でAssembly-CSharp.dllを検証済み）。LOD側も
-        /// 同じメッシュ・マテリアルをそのまま流用する（専用LODメッシュの生成は行わない＝
-        /// "if straightforward" の範囲でシンプルに済ませる）。
-        /// 失敗経路: メッシュ読込（WarfrontModelProvider.TryGetMesh）またはマテリアル生成
-        /// （UnitMaterialFactory.TryGetSolidColorMaterial）のどちらかが失敗した場合、あるいは
-        /// 途中で例外が飛んだ場合は、クローンのフィールドを一切変更せずに return する
-        /// （＝Instantiateで複製されたクローン元の風力タービン見た目がそのまま残る）。
-        /// 呼び出し元 EnsureRegistered のプレハブ登録処理（InitializePrefabs以降）には一切影響しない。
+        /// Task57/Task61: クローン直後（風力タービン等の借用済み見た目のまま）の <paramref name="clone"/> の
+        /// 描画メッシュ/マテリアルを、既定モデル(modelName.obj)へ差し替える。失敗時（メッシュ読込/
+        /// マテリアル生成のどちらかが失敗、または例外）は clone のフィールドを一切変更せず return する
+        /// （＝クローン元の見た目がそのまま残る、EnsureRegistered本体のプレハブ登録には影響しない）。
         /// </summary>
-        private static void TrySwapVisualMesh(BuildingInfo clone)
+        private static void TrySwapVisualMesh(BuildingInfo clone, string modelName, Color modelColor)
         {
             try
             {
                 Mesh mesh;
-                if (!WarfrontModelProvider.TryGetMesh(BuildingModelName, out mesh) || mesh == null)
+                if (!WarfrontModelProvider.TryGetMesh(modelName, out mesh) || mesh == null)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: built-in model '" + BuildingModelName +
-                        "' の読み込みに失敗。既定（風力タービン借用）の見た目を維持します");
+                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: built-in model '" + modelName +
+                        "' の読み込みに失敗。既定（複製元借用）の見た目を維持します");
                     return;
                 }
 
                 Material material;
-                if (!UnitMaterialFactory.TryGetSolidColorMaterial(BuildingModelColor, out material) || material == null)
+                if (!UnitMaterialFactory.TryGetSolidColorMaterial(modelColor, out material) || material == null)
                 {
                     ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: 建物用マテリアル生成に失敗。既定の見た目を維持します");
                     return;
@@ -338,7 +373,7 @@ namespace CSWarfront.Game
                 clone.m_lodMesh = mesh;
                 clone.m_lodMaterial = material;
 
-                ModConfig.Log("WarfrontBasePrefab.TrySwapVisualMesh: 見た目を built-in model '" + BuildingModelName + "' へ差し替えました");
+                ModConfig.Log("WarfrontBasePrefab.TrySwapVisualMesh: 見た目を built-in model '" + modelName + "' へ差し替えました");
             }
             catch (Exception e)
             {
@@ -347,39 +382,24 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task33: バニラの建物情報パネル（CityServiceWorldInfoPanel）は BuildingInfo.name をキーに
-        /// BUILDING_TITLE / BUILDING_SHORT_DESC のロケール文字列を検索して表示する。クローンした
-        /// プレハブ名（PrefabName）に対応するエントリが存在しないと、そのまま
-        /// "BUILDING_TITLE[CSWarfront Military Base]:0" のような生キーが画面に出てしまう（実機で確認済み）。
+        /// Task33/Task61: バニラの建物情報パネル（CityServiceWorldInfoPanel）は BuildingInfo.name をキーに
+        /// BUILDING_TITLE / BUILDING_SHORT_DESC のロケール文字列を検索して表示する。3種それぞれの
+        /// プレハブ名（entry.PrefabName）に対応するエントリを個別に登録する。
         ///
         /// ロケールAPI（ColossalManaged.dll をリフレクション/IL検証済み、Task33）:
         ///   - ColossalFramework.SingletonLite&lt;LocaleManager&gt;.instance : public static プロパティ。
-        ///     リフレクション不要で取得可能。
-        ///   - LocaleManager.m_Locale : フィールドの実際のアクセシビリティは Assembly（internal）
-        ///     （FieldInfo.Attributes で確認済み。IsPublic/IsPrivate は共にfalse）のため、
-        ///     別アセンブリの本Modからは直接参照できずリフレクションが必須。型は
-        ///     ColossalFramework.Globalization.Locale。
-        ///   - Locale.Key : 値型（struct）。public フィールド m_Identifier(string) / m_Key(string) /
-        ///     m_Index(int)、いずれも書き込み可（IsInitOnly=false）。専用コンストラクタは
-        ///     ctor(string id) の1つのみで用途が異なるため使わず、オブジェクト初期化子で組み立てる。
-        ///   - Locale.Exists(Locale.Key id) : public インスタンスメソッド、bool を返す
-        ///     （Locale には Exists(string) 等 static オーバーロードも別途あるが、ここで使うのは
-        ///     インスタンスメソッドの Key 版）。
-        ///   - Locale.AddLocalizedString(Locale.Key k, string v) : public インスタンスメソッド、void。
-        ///
-        /// EnsureRegistered は冪等（Prefab != null なら即return）なので、このメソッドも実質セッション中
-        /// 一度しか呼ばれない。ロケール切り替え（言語変更）時の再登録は本タスクのスコープ外
-        /// （既知の制約。切り替え後は再びロケールキーが空になり得るが、ゲームクラッシュ等は起きない）。
-        /// 失敗しても Prefab 自体の登録（建物として配置可能な状態）には影響させず、ログのみで継続する。
+        ///   - LocaleManager.m_Locale : Assembly内部アクセスのためリフレクションが必須。型はLocale。
+        ///   - Locale.Key { m_Identifier, m_Key, m_Index } : いずれもpublicで書き込み可。
+        ///   - Locale.Exists(Locale.Key) / Locale.AddLocalizedString(Locale.Key, string)。
         /// </summary>
-        private static void RegisterLocalizedStrings()
+        private static void RegisterLocalizedStrings(Entry entry)
         {
             try
             {
                 LocaleManager manager = SingletonLite<LocaleManager>.instance;
                 if (manager == null)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: LocaleManager.instance is null; skip (raw locale key will show)");
+                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: LocaleManager.instance is null; skip '" + entry.PrefabName + "' (raw locale key will show)");
                     return;
                 }
 
@@ -387,15 +407,15 @@ namespace CSWarfront.Game
                 Locale locale = localeField != null ? localeField.GetValue(manager) as Locale : null;
                 if (locale == null)
                 {
-                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: could not reflect LocaleManager.m_Locale; skip (raw locale key will show)");
+                    ModConfig.LogError("WarfrontBasePrefab.RegisterLocalizedStrings: could not reflect LocaleManager.m_Locale; skip '" + entry.PrefabName + "' (raw locale key will show)");
                     return;
                 }
 
-                AddIfMissing(locale, LocaleTitleId, LocaleTitleText);
-                AddIfMissing(locale, LocaleDescId, LocaleDescText);
-                AddIfMissing(locale, LocaleShortDescId, LocaleDescText);
+                AddIfMissing(locale, entry.PrefabName, LocaleTitleId, entry.LocaleTitleText);
+                AddIfMissing(locale, entry.PrefabName, LocaleDescId, entry.LocaleDescText);
+                AddIfMissing(locale, entry.PrefabName, LocaleShortDescId, entry.LocaleDescText);
 
-                ModConfig.Log("WarfrontBasePrefab: localized strings registered for '" + PrefabName + "'");
+                ModConfig.Log("WarfrontBasePrefab: localized strings registered for '" + entry.PrefabName + "'");
             }
             catch (Exception e)
             {
@@ -404,19 +424,13 @@ namespace CSWarfront.Game
         }
 
         /// <summary>既に同じ Key が登録済みなら上書きしない（Exists→AddLocalizedStringの手順はタスク仕様通り）。</summary>
-        private static void AddIfMissing(Locale locale, string identifier, string value)
+        private static void AddIfMissing(Locale locale, string prefabName, string identifier, string value)
         {
-            Locale.Key key = new Locale.Key { m_Identifier = identifier, m_Key = PrefabName, m_Index = 0 };
+            Locale.Key key = new Locale.Key { m_Identifier = identifier, m_Key = prefabName, m_Index = 0 };
             if (!locale.Exists(key))
             {
                 locale.AddLocalizedString(key, value);
             }
-        }
-
-        private static string SafeCategory(BuildingInfo info)
-        {
-            try { return info.category; }
-            catch (Exception) { return "?"; }
         }
 
         /// <summary>
@@ -428,15 +442,7 @@ namespace CSWarfront.Game
             try
             {
                 ElectricityGroupPanel groupPanel = UnityEngine.Object.FindObjectOfType<ElectricityGroupPanel>();
-                if (groupPanel != null)
-                {
-                    groupPanel.RefreshPanel();
-                    ModConfig.Log("WarfrontBasePrefab: ElectricityGroupPanel.RefreshPanel() called");
-                }
-                else
-                {
-                    ModConfig.Log("WarfrontBasePrefab: ElectricityGroupPanel not found via FindObjectOfType (may not be instantiated yet)");
-                }
+                if (groupPanel != null) groupPanel.RefreshPanel();
             }
             catch (Exception e)
             {
@@ -446,15 +452,7 @@ namespace CSWarfront.Game
             try
             {
                 ElectricityPanel panel = UnityEngine.Object.FindObjectOfType<ElectricityPanel>();
-                if (panel != null)
-                {
-                    panel.RefreshPanel();
-                    ModConfig.Log("WarfrontBasePrefab: ElectricityPanel.RefreshPanel() called");
-                }
-                else
-                {
-                    ModConfig.Log("WarfrontBasePrefab: ElectricityPanel not found via FindObjectOfType (may not be instantiated yet)");
-                }
+                if (panel != null) panel.RefreshPanel();
             }
             catch (Exception e)
             {

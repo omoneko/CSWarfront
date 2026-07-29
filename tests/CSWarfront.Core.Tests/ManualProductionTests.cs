@@ -51,6 +51,75 @@ public class ManualProductionTests
         Assert.Empty(s.Bases[0].Queue);
     }
 
+    // --- Task61: 基地の領域(Domain)ゲート ---
+
+    [Fact]
+    public void TryEnqueue_WrongDomain_when_army_base_tries_to_queue_a_naval_unit()
+    {
+        var s = WithBase(1000f); // BaseType.Army -> SpawnableDomains=Land
+        NavalUnitRoster.RegisterAll(s.Types);
+
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "Destroyer_T1");
+
+        Assert.Equal(QueueResult.WrongDomain, r);
+        Assert.Empty(s.Bases[0].Queue);
+        Assert.Equal(1000f, s.Factions[0].Treasury, 3); // no spend on rejection
+    }
+
+    [Fact]
+    public void TryEnqueue_Ok_when_navy_base_queues_a_naval_unit()
+    {
+        var s = new WarState();
+        NavalUnitRoster.RegisterAll(s.Types);
+        var f = new Faction(0, "Red");
+        f.AddTreasury(1000f);
+        s.Factions.Add(f);
+        var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "Destroyer_T1");
+
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Single(s.Bases[0].Queue);
+    }
+
+    [Fact]
+    public void TryEnqueue_WrongDomain_when_navy_base_tries_to_queue_a_land_unit()
+    {
+        var s = new WarState();
+        LandUnitRoster.RegisterAll(s.Types);
+        var f = new Faction(0, "Red");
+        f.AddTreasury(1000f);
+        s.Factions.Add(f);
+        var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "Tank_T1");
+
+        Assert.Equal(QueueResult.WrongDomain, r);
+        Assert.Empty(s.Bases[0].Queue);
+    }
+
+    [Fact]
+    public void TryEnqueue_Ok_when_air_force_base_queues_an_air_unit()
+    {
+        var s = new WarState();
+        AirUnitRoster.RegisterAll(s.Types);
+        var f = new Faction(0, "Red");
+        f.AddTreasury(1000f);
+        s.Factions.Add(f);
+        var b = new MilitaryBase(100, BaseType.AirForce, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+
+        QueueResult r = ManualProduction.TryEnqueue(s, 100, "AirSuperiority_T1");
+
+        Assert.Equal(QueueResult.Ok, r);
+        Assert.Single(s.Bases[0].Queue);
+    }
+
     [Fact]
     public void TryEnqueue_UnknownType_when_typeKey_unregistered()
     {

@@ -174,6 +174,61 @@ public class AiProductionPolicyTests
         Assert.Equal((byte)5, chosen.Tier);
     }
 
+    // --- Task61: 基地の領域(Domain)に応じた兵科構成 ---
+
+    [Fact]
+    public void Navy_base_only_ever_chooses_naval_categories()
+    {
+        var s = new WarState();
+        NavalUnitRoster.RegisterAll(s.Types);
+        var f = new Faction(0, "Red");
+        f.AddTreasury(10000f);
+        f.UnlockedTier = 5;
+        s.Factions.Add(f);
+        var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+
+        bool everProduced = false;
+        for (uint seed = 0; seed < 200; seed++)
+        {
+            AiDecision d = AiProductionPolicy.Decide(s, f, b, seed);
+            if (d.Choice != AiSpendChoice.Produce) continue;
+            everProduced = true;
+            UnitType chosen = s.Types.Get(d.TypeKey);
+            Assert.NotNull(chosen);
+            Assert.Equal(Domain.Sea, chosen.Domain);
+            Assert.True(chosen.Category == UnitCategory.Destroyer || chosen.Category == UnitCategory.Carrier);
+        }
+        Assert.True(everProduced);
+    }
+
+    [Fact]
+    public void AirForce_base_only_ever_chooses_air_categories()
+    {
+        var s = new WarState();
+        AirUnitRoster.RegisterAll(s.Types);
+        var f = new Faction(0, "Red");
+        f.AddTreasury(10000f);
+        f.UnlockedTier = 5;
+        s.Factions.Add(f);
+        var b = new MilitaryBase(100, BaseType.AirForce, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+
+        bool everProduced = false;
+        for (uint seed = 0; seed < 200; seed++)
+        {
+            AiDecision d = AiProductionPolicy.Decide(s, f, b, seed);
+            if (d.Choice != AiSpendChoice.Produce) continue;
+            everProduced = true;
+            UnitType chosen = s.Types.Get(d.TypeKey);
+            Assert.NotNull(chosen);
+            Assert.Equal(Domain.Air, chosen.Domain);
+        }
+        Assert.True(everProduced);
+    }
+
     private static UnitType FindFirstProducedType(WarState s, uint maxSeed)
     {
         for (uint seed = 0; seed < maxSeed; seed++)

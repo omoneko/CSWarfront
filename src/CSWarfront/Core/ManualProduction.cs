@@ -12,7 +12,10 @@ namespace CSWarfront.Core
         NotAffordable,
         NoOwner,
         /// <summary>発注しようとしたUnitType.TierがFaction.UnlockedTierを超えている（Task35：研究未解禁）。</summary>
-        TierLocked
+        TierLocked,
+        /// <summary>発注しようとしたUnitType.Domainが、その基地のMilitaryBase.SpawnableDomainsに
+        /// 含まれていない（Task61：陸軍基地で艦艇/航空機を発注しようとした等）。</summary>
+        WrongDomain
     }
 
     /// <summary>
@@ -28,8 +31,9 @@ namespace CSWarfront.Core
         ///  3. typeKey が state.Types に登録されているか -> UnknownType
         ///  4. 所有勢力の Faction が見つかるか -> NoOwner（整合性が崩れている場合の防御）
         ///  5. type.Tier が owner.UnlockedTier 以下か（Task35） -> TierLocked
-        ///  6. Queue.Count が MilitaryBase.ManualQueueCap 未満か -> QueueFull
-        ///  7. 所有勢力が type.Cost を払えるか（Faction.TrySpend。成功した場合のみ実際に控除する） -> NotAffordable
+        ///  6. type.Domain が b.SpawnableDomains に含まれるか（Task61） -> WrongDomain
+        ///  7. Queue.Count が MilitaryBase.ManualQueueCap 未満か -> QueueFull
+        ///  8. 所有勢力が type.Cost を払えるか（Faction.TrySpend。成功した場合のみ実際に控除する） -> NotAffordable
         /// 全て通れば ProductionOrder(typeKey, type.Cost, type.BuildTime) をQueue末尾に追加し Ok を返す。
         /// 決定的・RNG不使用。
         /// </summary>
@@ -46,6 +50,10 @@ namespace CSWarfront.Core
             if (owner == null) return QueueResult.NoOwner; // 整合性が崩れている場合の防御（通常は起きない）
 
             if (type.Tier > owner.UnlockedTier) return QueueResult.TierLocked; // Task35: 未解禁Tier
+
+            // Task61: 基地のSpawnableDomains（Army->Land, Navy->Sea, AirForce->Air）に含まれない
+            // 領域のユニットは発注できない（例: 陸軍基地から駆逐艦や戦闘機を発注することはできない）。
+            if (!DomainMaskUtil.Contains(b.SpawnableDomains, type.Domain)) return QueueResult.WrongDomain;
 
             if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
 

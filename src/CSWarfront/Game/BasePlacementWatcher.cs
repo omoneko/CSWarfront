@@ -142,9 +142,9 @@ namespace CSWarfront.Game
         private static void ProcessCreated(WarState state, List<ushort> ids)
         {
             // デバッグ計装（一時的）: 早期returnも含め、なぜ基地が登録されないかを追えるようにする。
-            if (!WarfrontBasePrefab.IsRegistered) // マッチ対象のプレハブが無ければ何もできない
+            if (!WarfrontBasePrefab.IsAnyRegistered) // マッチ対象のプレハブが1つも無ければ何もできない
             {
-                ModConfig.Log("BasePlacementWatcher: ProcessCreated: WarfrontBasePrefab.IsRegistered=False; skipping " + ids.Count + " id(s)");
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: WarfrontBasePrefab.IsAnyRegistered=False; skipping " + ids.Count + " id(s)");
                 return;
             }
 
@@ -166,25 +166,22 @@ namespace CSWarfront.Game
                 Building b = buf[id];
                 bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
                 string infoName = b.Info != null ? b.Info.name : null;
-                string expected = WarfrontBasePrefab.PrefabName;
 
-                // 参照一致 OR 名前一致: ゲームがプレハブを再インスタンス化した場合、参照比較だけでは
-                // 一致しなくなる可能性があるため両方を見る。
-                bool refMatch = b.Info != null && ReferenceEquals(b.Info, WarfrontBasePrefab.Prefab);
-                bool nameMatch = b.Info != null && b.Info.name == WarfrontBasePrefab.PrefabName;
-                bool match = refMatch || nameMatch;
-                string matchedBy = refMatch ? "reference" : (nameMatch ? "name" : "none");
+                // Task61: どの基地種別（Army/Navy/AirForce）のプレハブに一致するかをWarfrontBasePrefabへ
+                // 委譲する（参照一致優先、ダメなら名前一致。ゲームがプレハブを再インスタンス化した場合の保険）。
+                BaseType matchedType = default(BaseType);
+                bool match = b.Info != null && WarfrontBasePrefab.TryMatch(b.Info, out matchedType);
 
                 if (!flagsCreated)
                 {
                     ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=False info='" + (infoName ?? "null") +
-                        "' expected='" + expected + "' match=" + match + " -> skip (not created)");
+                        "' match=" + match + " -> skip (not created)");
                     continue;
                 }
                 if (!match)
                 {
                     ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + (infoName ?? "null") +
-                        "' expected='" + expected + "' match=False -> skip (not our prefab)");
+                        "' match=False -> skip (not our prefab)");
                     continue;
                 }
 
@@ -199,15 +196,16 @@ namespace CSWarfront.Game
                 if (existing)
                 {
                     ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + infoName +
-                        "' expected='" + expected + "' match=True(" + matchedBy + ") existing=True -> skip (already registered)");
+                        "' match=True(" + matchedType + ") existing=True -> skip (already registered)");
                     continue;
                 }
 
                 ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + infoName +
-                    "' expected='" + expected + "' match=True(" + matchedBy + ") existing=False -> REGISTERING");
+                    "' match=True(" + matchedType + ") existing=False -> REGISTERING");
 
                 Vector3 pos = b.m_position;
-                var mb = new MilitaryBase(id, BaseType.Army, new WorldPos(pos.x, pos.y, pos.z));
+                // Task61: 陸軍/海軍/航空、TryMatchが特定した種別でMilitaryBaseを作る（従来は常にArmy固定だった）。
+                var mb = new MilitaryBase(id, matchedType, new WorldPos(pos.x, pos.y, pos.z));
                 mb.OwnerFactionId = WarfrontSettings.BuildFactionId;
                 // 新設基地は一定期間占領されない（Task24）：プレイヤーが両陣営の基地を配置し終える前に
                 // 一方的に占領されてしまう不具合の対策。
@@ -266,7 +264,7 @@ namespace CSWarfront.Game
         public static void ReconcileBases(WarState state)
         {
             if (state == null) return;
-            if (!WarfrontBasePrefab.IsRegistered) return; // マッチ対象のプレハブが無ければ比較できない
+            if (!WarfrontBasePrefab.IsAnyRegistered) return; // マッチ対象のプレハブが1つも無ければ比較できない
             if (!Singleton<BuildingManager>.exists) return;
 
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
@@ -285,7 +283,12 @@ namespace CSWarfront.Game
                 {
                     Building b = buf[mb.BaseId];
                     bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
-                    bool match = flagsCreated && b.Info != null && ReferenceEquals(b.Info, WarfrontBasePrefab.Prefab);
+                    // Task61: mb.Typeに対応する具体的なプレハブ(Army/Navy/AirForce)と一致するかを見る
+                    // （以前は常にArmyのプレハブとしか比較しておらず、海軍/航空基地が常にゴースト扱いに
+                    // なってしまう回帰があったため、必ずmb.Type別に比較する）。
+                    BuildingInfo expected;
+                    bool match = flagsCreated && b.Info != null &&
+                        WarfrontBasePrefab.TryGetPrefab(mb.Type, out expected) && ReferenceEquals(b.Info, expected);
                     isGhost = !match;
                 }
                 if (isGhost)

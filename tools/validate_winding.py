@@ -101,6 +101,9 @@ def check_all_models_are_locally_outward():
     names = [
         "Unit_Infantry", "Unit_MechInfantry", "Unit_Apc", "Unit_Tank",
         "Unit_Artillery", "Unit_AntiAir", "Unit_Drone", "Building_MilitaryBase",
+        # Task61: naval / air forces
+        "Unit_Destroyer", "Unit_Carrier", "Unit_Fighter", "Unit_Bomber", "Unit_SuicideDrone",
+        "Building_NavalBase", "Building_AirBase",
     ]
     for name in names:
         path = os.path.join("src", "CSWarfront", "Models", name + ".obj")

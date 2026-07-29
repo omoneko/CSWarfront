@@ -48,6 +48,14 @@ namespace CSWarfront.Game
         /// <summary>次のTier解禁に必要な研究点（Research.CostToUnlock(OwnerUnlockedTier+1)、Task35）。
         /// 既に最大Tier（5）または未所属なら0。</summary>
         public float OwnerNextTierCost;
+
+        /// <summary>この基地の種別（Army/Navy/AirForce/MissileBase、Task61）。BaseInfoPanelが
+        /// 「陸軍基地/海軍基地/航空基地」等の表示に使う。</summary>
+        public BaseType Type;
+
+        /// <summary>この基地が生産できる領域（MilitaryBase.SpawnableDomainsの写し、Task61）。
+        /// BaseInfoPanelが「生産可能: 陸上」等の表示に使う。</summary>
+        public DomainMask SpawnableDomains;
     }
 
     /// <summary>
@@ -119,7 +127,9 @@ namespace CSWarfront.Game
                 LastIncome = mb.LastIncome,
                 OwnerResearchPoints = ownerResearchPoints,
                 OwnerUnlockedTier = ownerUnlockedTier,
-                OwnerNextTierCost = ownerNextTierCost
+                OwnerNextTierCost = ownerNextTierCost,
+                Type = mb.Type,
+                SpawnableDomains = mb.SpawnableDomains
             };
         }
     }

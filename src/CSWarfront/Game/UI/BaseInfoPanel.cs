@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using ColossalFramework.UI;
+using CSWarfront.Core;
 using CSWarfront.Game;
 using UnityEngine;
 
@@ -409,7 +410,12 @@ namespace CSWarfront.Game.UI
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
-                sb.Append("所属: ").Append(ownerName);
+                // Task61: 基地種別と生産可能な領域を先頭に表示する（海軍/航空基地の追加に伴い、
+                // プレイヤーが「この基地が何を作れるか」を一目で確認できるようにする）。
+                sb.Append("種別: ").Append(BaseTypeLabel(snapshot.Type));
+                sb.Append("  生産可能: ").Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
+
+                sb.Append("\n所属: ").Append(ownerName);
                 if (snapshot.IsHeadquarters) sb.Append(" (HQ)");
 
                 sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
@@ -455,6 +461,29 @@ namespace CSWarfront.Game.UI
                 RefreshProductionSection(snapshot); // Task34: ステータス行の下に生産セクションを再配置
                 RecomputeExpandedHeight();
             }
+        }
+
+        /// <summary>Task61: BaseType→日本語ラベル（パネル表示用）。</summary>
+        private static string BaseTypeLabel(BaseType type)
+        {
+            switch (type)
+            {
+                case BaseType.Army: return "陸軍基地";
+                case BaseType.Navy: return "海軍基地";
+                case BaseType.AirForce: return "航空基地";
+                case BaseType.MissileBase: return "ミサイル基地";
+                default: return type.ToString();
+            }
+        }
+
+        /// <summary>Task61: DomainMask→日本語ラベル（パネル表示用、"陸上"/"海上"/"航空"をビットごとに列挙）。</summary>
+        private static string SpawnableDomainsLabel(DomainMask mask)
+        {
+            var parts = new System.Collections.Generic.List<string>(3);
+            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add("陸上");
+            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add("海上");
+            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add("航空");
+            return parts.Count > 0 ? string.Join("・", parts.ToArray()) : "なし";
         }
 
         /// <summary>

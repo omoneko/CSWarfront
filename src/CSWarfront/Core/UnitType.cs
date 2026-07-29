@@ -32,10 +32,22 @@ namespace CSWarfront.Core
         /// <summary>発砲エフェクトの種別（Task42）。Game層のCombatFxが銃撃/直射/曲射のどれを描くか選ぶ。</summary>
         public ShotKind ShotKind { get; private set; }
 
+        /// <summary>このユニットが攻撃対象にできる領域（Task61: 海上/航空戦力の追加に伴う対空判定の実質化）。
+        /// TargetSearch/CombatStepが、射程・敵対関係に加えてこのマスクで候補を絞り込む。
+        /// 陸上ユニットは既定でLandのみ（AntiAirだけLand|Air）、海上ユニットはLand|Sea、
+        /// 航空ユニットはAll（Land|Sea|Air）。既定コンストラクタ引数は無く、全ロスターが明示的に指定する。</summary>
+        public DomainMask CanTargetDomains { get; private set; }
+
+        /// <summary>trueなら、このユニットは1回攻撃（ダメージ適用）した瞬間に自壊する（Task61: 自爆ドローン）。
+        /// CombatStep/BaseCombatStepが、ダメージを実際に適用した直後にCurrentHPを0にして死亡させる。
+        /// 既定はfalse（陸上/海上/戦闘機・爆撃機は通常通り継戦する）。</summary>
+        public bool IsOneShot { get; private set; }
+
         public UnitType(string typeKey, Domain domain, UnitCategory category, byte tier,
             float maxHp, float attack, float range, float armor, float speed,
             float splashRadius, float cost, float buildTime, string assetPrefabName,
-            float accuracy, float fireIntervalHours, ShotKind shotKind)
+            float accuracy, float fireIntervalHours, ShotKind shotKind,
+            DomainMask canTargetDomains, bool isOneShot)
         {
             TypeKey = typeKey; Domain = domain; Category = category; Tier = tier;
             MaxHP = maxHp; Attack = attack; Range = range; Armor = armor; Speed = speed;
@@ -44,6 +56,8 @@ namespace CSWarfront.Core
             Accuracy = accuracy;
             FireIntervalHours = fireIntervalHours;
             ShotKind = shotKind;
+            CanTargetDomains = canTargetDomains;
+            IsOneShot = isOneShot;
         }
     }
 
