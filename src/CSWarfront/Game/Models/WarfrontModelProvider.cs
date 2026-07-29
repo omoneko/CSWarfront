@@ -34,6 +34,7 @@ namespace CSWarfront.Game.Models
         private static bool _initialized;
         private static readonly Dictionary<string, Mesh> _meshCache = new Dictionary<string, Mesh>();
         private static readonly Dictionary<string, BuiltModel> _modelCache = new Dictionary<string, BuiltModel>();
+        private static readonly Dictionary<string, Color> _averageColorCache = new Dictionary<string, Color>();
         private static readonly HashSet<string> _warnedMissing = new HashSet<string>();
         private static readonly HashSet<string> _warnedMissingModel = new HashSet<string>();
 
@@ -178,6 +179,61 @@ namespace CSWarfront.Game.Models
                 ModConfig.LogError("WarfrontModelProvider.TryGetModel(" + modelName + ") error: " + e);
                 mesh = null;
                 materials = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Task71: Models/&lt;modelName&gt;.mtl の全マテリアルのKd値を単純平均した色を返す。
+        /// <see cref="TryGetMesh"/>（TryBuildMergedMesh、全サブメッシュを単一メッシュへ統合し
+        /// マテリアル情報を破棄する）と組み合わせる拠点の既定モデル向け。基地の建物は
+        /// BuildingInfo.m_material が単一フィールドのため、Task69でBlender書き出しに切り替わった
+        /// 複数マテリアルモデル（Building_MilitaryBase/NavalBase/AirBase.obj、6色前後のusemtl）を
+        /// そのまま多色描画することはできない（要件3、効果/リスクを検討した上での判断。
+        /// task-71-report.md参照）。単色化はするが、ハードコードした固定色ではなく実際の
+        /// Blenderパレットの平均色を使うことで、完全な作り物の色よりは元の見た目に近づける。
+        /// .mtl が無い/空/解析失敗時はfalseを返す（呼び出し側は既定色にフォールバックすること）。
+        /// 名前単位でキャッシュする（TryGetMeshと同じ理由）。
+        /// </summary>
+        public static bool TryGetAverageColor(string modelName, out Color color)
+        {
+            color = default(Color);
+            try
+            {
+                if (string.IsNullOrEmpty(modelName)) return false;
+
+                Color cached;
+                if (_averageColorCache.TryGetValue(modelName, out cached))
+                {
+                    color = cached;
+                    return true;
+                }
+
+                if (string.IsNullOrEmpty(_modDirectory)) return false;
+
+                string mtlPath = Path.Combine(Path.Combine(_modDirectory, ModConfig.ModelsFolderName), modelName + ".mtl");
+                if (!File.Exists(mtlPath)) return false;
+
+                Dictionary<string, MtlColor> mtl = MtlParser.Parse(File.ReadAllText(mtlPath));
+                if (mtl == null || mtl.Count == 0) return false;
+
+                float r = 0f, g = 0f, b = 0f;
+                foreach (var kv in mtl)
+                {
+                    r += kv.Value.R;
+                    g += kv.Value.G;
+                    b += kv.Value.B;
+                }
+                Color avg = new Color(r / mtl.Count, g / mtl.Count, b / mtl.Count, 1f);
+
+                _averageColorCache[modelName] = avg;
+                color = avg;
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("WarfrontModelProvider.TryGetAverageColor(" + modelName + ") error: " + e);
+                color = default(Color);
                 return false;
             }
         }

@@ -318,10 +318,17 @@ namespace CSWarfront.Game
             }
 
             SanitizeClonedPowerPlantAi(clone, entry.PrefabName);
-            TrySwapVisualMesh(clone, entry.ModelName, entry.ModelColor);
+            // Task71: 実コンポーネント（MeshFilter/Renderer）の書き換えは InitializePrefabs より
+            // 前に行う必要がある（WarfrontBasePrefabVisualSwapのXMLコメント参照。フィールドだけを
+            // 書き換えていた旧実装は InitializePrefab() に上書きされ、タービンの見た目が残っていた）。
+            bool swapped = WarfrontBasePrefabVisualSwap.TryApplyMesh(clone, entry.ModelName, entry.ModelColor);
 
             PrefabCollection<BuildingInfo>.InitializePrefabs(CollectionName, clone, null);
             PrefabCollection<BuildingInfo>.BindPrefabs();
+
+            // Task71: 遠距離LOD結合メッシュの焼き込みは InitializePrefabs/BindPrefabs の後
+            // （m_lodMesh/m_lodMaterialがInitializePrefab()経由で確定した後）でなければならない。
+            if (swapped) WarfrontBasePrefabVisualSwap.FinalizeLod(clone);
 
             _prefabs[entry.Type] = clone;
             RegisterLocalizedStrings(entry);
@@ -351,43 +358,11 @@ namespace CSWarfront.Game
             if (ai.m_maintenanceCost <= 0) ai.m_maintenanceCost = 100;
         }
 
-        /// <summary>
-        /// Task57/Task61: クローン直後（風力タービン等の借用済み見た目のまま）の <paramref name="clone"/> の
-        /// 描画メッシュ/マテリアルを、既定モデル(modelName.obj)へ差し替える。失敗時（メッシュ読込/
-        /// マテリアル生成のどちらかが失敗、または例外）は clone のフィールドを一切変更せず return する
-        /// （＝クローン元の見た目がそのまま残る、EnsureRegistered本体のプレハブ登録には影響しない）。
-        /// </summary>
-        private static void TrySwapVisualMesh(BuildingInfo clone, string modelName, Color modelColor)
-        {
-            try
-            {
-                Mesh mesh;
-                if (!WarfrontModelProvider.TryGetMesh(modelName, out mesh) || mesh == null)
-                {
-                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: built-in model '" + modelName +
-                        "' の読み込みに失敗。既定（複製元借用）の見た目を維持します");
-                    return;
-                }
-
-                Material material;
-                if (!UnitMaterialFactory.TryGetSolidColorMaterial(modelColor, out material) || material == null)
-                {
-                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: 建物用マテリアル生成に失敗。既定の見た目を維持します");
-                    return;
-                }
-
-                clone.m_mesh = mesh;
-                clone.m_material = material;
-                clone.m_lodMesh = mesh;
-                clone.m_lodMaterial = material;
-
-                ModConfig.Log("WarfrontBasePrefab.TrySwapVisualMesh: 見た目を built-in model '" + modelName + "' へ差し替えました");
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh error（既定の見た目を維持します）: " + e);
-            }
-        }
+        // Task71: 実際の見た目差し替え（メッシュ/マテリアルの実コンポーネント書き換え＋
+        // generatedInfo再計算＋LOD結合メッシュ焼き込み）は WarfrontBasePrefabVisualSwap へ分離した
+        // （旧TrySwapVisualMeshはフィールドのみを書き換えていたためInitializePrefab()に上書きされ、
+        // 風力タービンの見た目が常に残っていた。詳細はWarfrontBasePrefabVisualSwapのXMLコメント、
+        // および task-71-report.md 参照）。
 
         /// <summary>
         /// Task33/Task61: バニラの建物情報パネル（CityServiceWorldInfoPanel）は BuildingInfo.name をキーに

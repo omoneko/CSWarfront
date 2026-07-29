@@ -113,7 +113,15 @@ namespace CSWarfront.Game.Models
                 built.vertices = vertices;
                 built.subMeshCount = 1;
                 built.SetTriangles(allTris, 0);
+                // Task71: BuildingInfoBase.CalculateGeneratedInfo/InitMeshData（ゲーム本体、ilspycmdで
+                // 逆コンパイルして確認済み）は Mesh.uv / Mesh.tangents が頂点数と同じ長さの配列である
+                // ことを無条件に前提にしている（無いと IndexOutOfRangeException や
+                // PrefabException("LOD has no tangents") になる）。この単一マテリアルの単色モデルでは
+                // UV自体の値に意味は無い（マテリアルにテクスチャを貼らない）ため、長さだけ揃える
+                // ゼロ埋めUVで十分。
+                built.uv = new Vector2[vertices.Length];
                 built.RecalculateNormals();
+                built.RecalculateTangents();
                 built.RecalculateBounds();
 
                 mesh = built;

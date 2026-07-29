@@ -39,10 +39,18 @@ namespace CSWarfront.Game
     /// 占領/生産/情報パネル等バニラ・Core双方の判定に使われるフラグへ干渉するリスクがあり、
     /// 「Core/CS実体の判定ロジックには触れない」という制約に反する）。
     /// そのためこのクラスは UnitVisuals と全く同じ手法（CS実体には一切触れない自前GameObjectを
-    /// 論理座標へ重ねて描画する）を採用する。<b>バニラの建物メッシュは隠さない</b>——割り当て済みの
-    /// 拠点では、種別ごとの既定モデル（Building_MilitaryBase/NavalBase/AirBase/MissileBase.obj、
-    /// WarfrontBasePrefab.TrySwapVisualMesh参照）の上に、割り当てられたアセットのオーバーレイが重なって
-    /// 見える（意図的なトレードオフ。要件の「隠すのが危険なら重ねて表示し、その旨を明記する」に従う）。
+    /// 論理座標へ重ねて描画する）を採用する。
+    ///
+    /// Task71: 上記コメント（当初の設計判断）はスタッキング（風力タービンの残存＋割り当てアセットが
+    /// その上に重なって見える不具合）の報告を受けて見直した。ゲーム本体を ilspycmd で逆コンパイルして
+    /// 調べた結果、Building.Flags.Hidden はレンダリング（Building.RenderInstance）だけを個別に
+    /// 抑制し、選択（BuildingManager.RayCastは幾何グリッドラウンドキャストでレンダリングと無関係）・
+    /// 占領（Core側はCS実体のflagsを一切見ない）・情報パネルには影響しないことを確認できた
+    /// （詳細は task-71-report.md）。そのため現在はオーバーレイが実際に生成された拠点についてのみ
+    /// <see cref="BaseHiddenSync"/> 経由でバニラ側のBuildingメッシュを個別に隠し、割り当て済みの
+    /// 拠点では既定モデル（Building_MilitaryBase/NavalBase/AirBase/MissileBase.obj、
+    /// WarfrontBasePrefabVisualSwap参照）ではなく割り当てられたアセットのみが見える
+    /// （スタッキングは発生しない）。
     ///
     /// 割り当てが無い勢力の拠点にはオーバーレイを一切生成しない（要件: 「割り当てのある拠点だけ」）。
     /// Task60では基地種別を区別しない単一キー（<see cref="UnitAssetBindings.BaseTypeKey"/>、"MilitaryBase"）
@@ -132,6 +140,10 @@ namespace CSWarfront.Game
                             continue;
                         }
                         _visuals[s.BaseId] = entry;
+                        // Task71: オーバーレイが実際に生成できた拠点のみ、バニラ/既定モデルの建物
+                        // メッシュを隠す（要件2、スタッキング防止）。simスレッドへはペンディング経由
+                        // で反映される（BaseHiddenSync参照）。
+                        BaseHiddenSync.SetDesired(s.BaseId, true);
                     }
                     else
                     {
@@ -183,6 +195,10 @@ namespace CSWarfront.Game
                     {
                         UnityEngine.Object.Destroy(kv.Value.GameObject);
                     }
+                    // Task71: オーバーレイを失う拠点は既定モデルの見た目へ戻す（隠すのをやめる）。
+                    // 呼び出し元がその後すぐSyncし直す場合（割り当て変更UI）は、まだ割り当てが
+                    // 残っている拠点はこの直後のCreateVisualで即座にtrueへ戻るため実質フリッカーのみ。
+                    BaseHiddenSync.SetDesired(kv.Key, false);
                 }
             }
             catch (Exception e)
@@ -268,6 +284,8 @@ namespace CSWarfront.Game
                         UnityEngine.Object.Destroy(entry.GameObject);
                     }
                     _visuals.Remove(baseId);
+                    // Task71: オーバーレイを失った拠点は既定モデルの見た目へ戻す（隠すのをやめる）。
+                    BaseHiddenSync.SetDesired(baseId, false);
                     ModConfig.Log("BaseVisuals: destroyed overlay for base " + baseId);
                 }
             }

@@ -86,6 +86,12 @@ namespace CSWarfront.Game
                 // この直後のProductionPlanningから同tickで生産対象になる。
                 BasePlacementWatcher.ProcessPending(State);
 
+                // Task71: 勢力別アセットのオーバーレイ生成/破棄（BaseVisuals、メインスレッド）が
+                // 記録した「この拠点のバニラ見た目を隠すべきか」のペンディングをCS建物バッファへ
+                // 反映する（要件2、スタッキング防止）。BasePlacementWatcher.ProcessPendingの直後
+                // （基地の登録/解体が確定した後）に置く。
+                BaseHiddenSync.ApplyPending();
+
                 // 幽霊基地（建物実体が既に無い論理基地）の掃除（Task24）。CS建物バッファの読み取りを
                 // 伴うためsimスレッド専用。毎tickフルスキャンは無駄なので一定間隔でのみ実行する。
                 _baseReconcileAccum += dt;
