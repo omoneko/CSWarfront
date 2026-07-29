@@ -40,9 +40,24 @@ namespace CSWarfront.Game.UI
     /// スコープドロップダウンの選択値を渡すだけ（AssetAssignPanelCopy.cs のフローティングパネル側と
     /// 完全に同じ呼び出し方）。
     ///
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。OnSettingsUIはOptions画面を開く
-    /// たびに再実行されうるため、Build()は毎回すべてのコントロールを新規生成する前提で書かれている
-    /// （古い参照は次のBuild()呼び出しで静的フィールドごと上書きされる。Mod.cs Task40時点の設計を踏襲）。
+    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    ///
+    /// Task52バグ修正: 上の段落は「OnSettingsUIはOptions画面を開くたびに再実行されうる」という
+    /// 誤った前提で書かれていた。実際にはCSのOptionsMainPanel（Assembly-CSharp.dll、ILSpyで逆コンパイル
+    /// して確認済み。詳細はOptionsRelationsPage.csのクラス冒頭コメント参照）は各MODのOnSettingsUIを
+    /// OptionsMainPanel.Awake()（通常は都市読み込み前のメインメニューの時点）でただ一度だけ呼び、
+    /// 以後はロケール変更かMOD有効/無効の変更の時だけ再構築する。つまりBuild()はAssetCatalogが空
+    /// （都市未読み込み）の状態で一度だけ実行され、以後どれだけ都市を読み込み直してOptions画面を開き
+    /// 直しても、Build()自体は二度と呼ばれない。
+    ///
+    /// 修正はOptionsRelationsPageと同じパターン: グループパネルのeventVisibilityChangedを購読し
+    /// （Options画面でこのMODのタブが選択されるたびに、配下の全コンポーネントへ伝播する形で発火する。
+    /// UIComponent、ColossalManaged.dllを逆コンパイルして確認済み）、発火のたびに
+    /// RefreshFromState()で（1)AssetCatalogを再走査した上で都市読み込み状況を判定し、
+    /// (2)ユニット種別/アセットのドロップダウン内容と「現在の割り当て」表示を再構築し、
+    /// (3)全コントロールのisEnabledを判定結果へ同期し、(4)ヒントラベルを更新する。
+    /// 新しいコントロールは一切生成しない（Build()で一度だけ生成した既存のフィールドを更新するのみ、
+    /// 二重生成防止）。
     /// </summary>
     internal static class OptionsModelAssignPage
     {
@@ -52,9 +67,13 @@ namespace CSWarfront.Game.UI
         private static UIDropDown _factionDropdown;
         private static UIDropDown _typeKeyDropdown;
         private static UIDropDown _assetKindDropdown;
+        private static UICheckBox _customOnlyCheckbox;
         private static UITextField _searchField;
         private static UIDropDown _assetDropdown;
         private static UIDropDown _copyScopeDropdown;
+        private static UIButton _applyButton;
+        private static UIButton _resetButton;
+        private static UIButton _copyApplyButton;
         private static UILabel _currentBindingLabel;
         private static UISprite _thumbnailSprite;
         private static UILabel _countLabel;
@@ -98,7 +117,7 @@ namespace CSWarfront.Game.UI
                 for (int i = 0; i < AssetKindUtil.All.Length; i++) kindLabels[i] = AssetKindUtil.DisplayNameJa(AssetKindUtil.All[i]);
                 _assetKindDropdown = group.AddDropdown("アセット種別", kindLabels, 0, OnAssetKindChanged) as UIDropDown;
 
-                group.AddCheckbox("サブスクライブ済みのみ", _customOnly, OnCustomOnlyChanged);
+                _customOnlyCheckbox = group.AddCheckbox("サブスクライブ済みのみ", _customOnly, OnCustomOnlyChanged) as UICheckBox;
                 // Task47: AddTextfieldのOnTextSubmittedは未使用（OnTextChangedだけで十分）だが、
                 // UIHelper実装がコールバックのnullガードを持つか未検証のため、nullは渡さずno-opを渡す
                 // （IL上はeventTextSubmitted購読が無条件に見えたため、安全側に倒す）。
@@ -119,13 +138,21 @@ namespace CSWarfront.Game.UI
                 // 上記と同じ理由でnullではなくno-opコールバックを渡す。
                 _copyScopeDropdown = group.AddDropdown("複製適用の範囲", copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
 
-                group.AddButton("適用", OnApplyClick);
-                group.AddButton("既定に戻す", OnResetClick);
+                _applyButton = group.AddButton("適用", OnApplyClick) as UIButton;
+                _resetButton = group.AddButton("既定に戻す", OnResetClick) as UIButton;
                 object copyButtonObj = group.AddButton("複製適用", OnCopyApplyClick);
+                _copyApplyButton = copyButtonObj as UIButton;
 
                 _hintLabel = CreateNoteLabel(copyButtonObj);
 
-                RefreshAll();
+                // Task52バグ修正: このMODのOptionsタブが選択される（＝祖先コンポーネントのisVisibleが
+                // trueへ変わり、それがこのグループパネルまで伝播する）たびに発火するeventVisibilityChanged
+                // を購読し、その時点の状態でRefreshFromStateを呼ぶ（クラス冒頭のコメント参照）。
+                // Build()自体はOptionsMainPanel.Awake()等で一度しか呼ばれないため、これが無いと
+                // メインメニューで一度だけ構築された無効化済みのUIが都市読み込み後も更新されない。
+                if (groupPanel != null) groupPanel.eventVisibilityChanged += OnGroupVisibilityChanged;
+
+                RefreshFromState();
             }
             catch (Exception e)
             {
@@ -290,23 +317,71 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>マップ未ロード（メインメニュー等）でアセットが1件も無い状況をヒントラベルへ表示する
-        /// （AssetAssignPanel.HasAnyProps=Rescan込みの4種類横断チェックを再利用、Task40の挙動を踏襲）。</summary>
-        private static void RefreshHint()
+        /// <summary>マップ未ロード（メインメニュー等）でアセットが1件も無い状況をヒントラベルへ表示する。
+        /// stateReadyはAssetAssignPanel.HasAnyProps()（Rescan込みの4種類横断チェック、Task40の挙動を踏襲）
+        /// の結果を呼び出し元（RefreshFromState）から受け取る。ここで再度HasAnyProps()を呼ぶと
+        /// AssetCatalog.Rescan()が二重に走ってしまうため（Rescanはキャッシュを空にするだけで、直後の
+        /// GetNamesが4種類とも再走査し直すことになり無駄）、呼び出し元で1回だけ判定させる。</summary>
+        private static void RefreshHint(bool stateReady)
         {
             if (_hintLabel == null) return;
-            _hintLabel.text = AssetAssignPanel.HasAnyProps()
+            _hintLabel.text = stateReady
                 ? ""
                 : "現在利用可能なアセット（プロップ/建物/車両/樹木）が0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みのアセットが一覧に表示されます。";
         }
 
-        private static void RefreshAll()
+        /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正）。
+        /// isVisible==trueの時だけ（＝Options内でこのMODのタブが選択された/表示された時だけ）
+        /// RefreshFromStateを呼ぶ。非表示化(false)の際は何もしない
+        /// （OptionsRelationsPage.OnGroupVisibilityChangedと同じ方針）。</summary>
+        private static void OnGroupVisibilityChanged(UIComponent component, bool isVisible)
         {
-            AssetCatalog.Rescan();
-            RefreshTypeKeyLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);
-            RefreshAssetDropdown();
-            RefreshCurrentBinding();
-            RefreshHint();
+            if (!isVisible) return;
+            RefreshFromState();
+        }
+
+        /// <summary>Task52バグ修正: Build()での初回構築時、および以後Options内でこのMODのタブが
+        /// 選択されるたびに呼ぶ共通の再同期処理。AssetAssignPanel.HasAnyProps()（内部でAssetCatalog.Rescan()
+        /// を行った上で4種類横断チェックする、Task40から使っている既存メソッド）で現在都市が読み込まれて
+        /// いるかを判定し、ユニット種別/アセットのドロップダウン内容・現在の割り当て表示・ヒントラベルを
+        /// 最新化した上で、全コントロールのisEnabledを判定結果へ同期する。新しいコントロールは一切
+        /// 生成しない（Build()で一度だけ生成した既存フィールドを更新するのみ＝二重生成防止）。
+        /// 例外はここで握りつぶし、UIコールバックからゲームループへ例外を伝播させない。</summary>
+        private static void RefreshFromState()
+        {
+            try
+            {
+                bool stateReady = AssetAssignPanel.HasAnyProps();
+
+                RefreshTypeKeyLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);
+                RefreshAssetDropdown();
+                RefreshCurrentBinding();
+                RefreshHint(stateReady);
+
+                SetControlsEnabled(stateReady);
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("OptionsModelAssignPage.RefreshFromState error: " + e);
+            }
+        }
+
+        /// <summary>都市読み込み状況（stateReady）に応じて、全コントロールのisEnabledを一括同期する
+        /// （OptionsRelationsPage.RefreshFromStateのisEnabled同期と同じ考え方をコントロール一式へ拡張した
+        /// もの）。stateReady==falseの間（メインメニュー等でアセットが1件も無い）はユーザーが操作しても
+        /// 意味のある結果にならないため、無効化した上でヒントラベル（RefreshHint）で理由を説明する。</summary>
+        private static void SetControlsEnabled(bool enabled)
+        {
+            if (_factionDropdown != null) _factionDropdown.isEnabled = enabled;
+            if (_typeKeyDropdown != null) _typeKeyDropdown.isEnabled = enabled;
+            if (_assetKindDropdown != null) _assetKindDropdown.isEnabled = enabled;
+            if (_customOnlyCheckbox != null) _customOnlyCheckbox.isEnabled = enabled;
+            if (_searchField != null) _searchField.isEnabled = enabled;
+            if (_assetDropdown != null) _assetDropdown.isEnabled = enabled;
+            if (_copyScopeDropdown != null) _copyScopeDropdown.isEnabled = enabled;
+            if (_applyButton != null) _applyButton.isEnabled = enabled;
+            if (_resetButton != null) _resetButton.isEnabled = enabled;
+            if (_copyApplyButton != null) _copyApplyButton.isEnabled = enabled;
         }
 
         private static void OnFactionChanged(int value)
