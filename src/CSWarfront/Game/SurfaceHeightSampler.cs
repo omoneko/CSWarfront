@@ -24,29 +24,55 @@ namespace CSWarfront.Game
     ///    生の地形しか返さないため、まさにこのTask53が修正したいバグの原因そのものになる）。
     ///  - TerrainManager.instance: Singleton&lt;TerrainManager&gt;.instance（RoadGraphBuilder/
     ///    CoverMapBuilderと同じColossalFramework.Singletonパターン）。
+    ///
+    /// ハードニング（Task53追記）: このマップの実測地表は約270であり、旧実装（失敗時に0fを返す
+    /// float SampleHeight）だと、TerrainManagerが一時的に未生成/例外を投げた瞬間にMovementStepが
+    /// その0fをそのままユニットのYへ採用し、1tickだけ地表の約270下へテレポートする可視グリッチに
+    /// なっていた。TrySampleHeight形式にし、失敗時はfalseを返してMovementStep側にY補間フォールバックを
+    /// 委ねる（このクラスは決して失敗値をheightに"それらしい"値として書き込まない）。
     /// </summary>
     internal sealed class SurfaceHeightSampler : IHeightSampler
     {
-        public float SampleHeight(float x, float z)
+        // RoadGraphBuilder/CoverMapBuilderと同じ間引きパターン（Task23/Task44）: MovementStepは
+        // simスレッド上でtickごとに大量に呼ばれるため、失敗が続く間ログを埋め尽くさないよう最初の
+        // 1回だけ記録する。成功したら次に失敗した際にまた1回だけ記録する（抑制状態をリセット）。
+        // simスレッド専用アクセスのためロック不要。
+        private static bool _failureAlreadyLogged;
+
+        public bool TrySampleHeight(float x, float z, out float height)
         {
             // RoadGraphBuilder/CoverMapBuilderと同じ防御方針: Singleton未生成（レベルロード直後の
-            // ごく短い間隙等）ならこのtickだけ諦める。呼び出し元(MovementStep)は本来のX/Y補間結果を
-            // そのまま採用済みのため、ここで例外を投げずに"それらしい"値を返す必要がある。
-            // WarState.Height自体は非nullのまま維持する（MilitaryManagerが毎tick作り直すことはない）ため、
-            // 呼び出し側で例外を握りつぶすのがこのクラスの責務になる。
-            if (!Singleton<TerrainManager>.exists) return 0f;
+            // ごく短い間隙等）ならこのtickだけ諦める。ハードニング: ここで"それらしい"値（0f等）を
+            // 返さず、失敗をfalseで明示し、呼び出し元(MovementStep)に既存のY補間結果をそのまま
+            // 採用させる（0fがそのままYに採用され地表の遥か下へテレポートする不具合の再発防止）。
+            if (!Singleton<TerrainManager>.exists)
+            {
+                if (!_failureAlreadyLogged)
+                {
+                    ModConfig.LogError("SurfaceHeightSampler.TrySampleHeight: TerrainManager not ready; falling back to interpolation");
+                    _failureAlreadyLogged = true;
+                }
+                height = default(float);
+                return false;
+            }
 
             try
             {
-                return Singleton<TerrainManager>.instance.SampleDetailHeight(x, z);
+                height = Singleton<TerrainManager>.instance.SampleDetailHeight(x, z);
+                _failureAlreadyLogged = false; // 成功したので次の失敗はまた1回だけログする
+                return true;
             }
             catch (System.Exception e)
             {
-                // MovementStepはsimスレッド上でtickごとに大量に呼ばれるため、例外が続いても
-                // ログを埋め尽くさないよう詳細メッセージのみ（間引きはあえてしない＝発生自体が
-                // 想定外であり、Nothing may throw into the game loopの原則を優先する）。
-                ModConfig.LogError("SurfaceHeightSampler.SampleHeight error: " + e);
-                return 0f;
+                // 例外が続いてもログを埋め尽くさないよう最初の1回だけ記録する（間引きなしで毎tick
+                // 出すと"Nothing may throw into the game loop"の原則がログスパムに変わってしまう）。
+                if (!_failureAlreadyLogged)
+                {
+                    ModConfig.LogError("SurfaceHeightSampler.TrySampleHeight error: " + e);
+                    _failureAlreadyLogged = true;
+                }
+                height = default(float);
+                return false;
             }
         }
     }

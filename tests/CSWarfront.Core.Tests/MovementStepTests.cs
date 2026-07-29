@@ -5,12 +5,30 @@ using Xunit;
 public class MovementStepTests
 {
     // Task53: state.Height（IHeightSampler）のフェイク実装。x+zという単純な決定的関数を返すため、
-    // 「移動後のPosition.Yが常にSampleHeight(X, Z)と一致する」ことをアサーションだけで検証できる
-    // （ウェイポイント/直線移動どちらのYとも通常一致しない値なので、旧来のY補間経路が誤って
-    // 使われていないことも同時に検出できる）。
+    // 「移動後のPosition.Yが常にTrySampleHeight(X, Z)の結果と一致する」ことをアサーションだけで
+    // 検証できる（ウェイポイント/直線移動どちらのYとも通常一致しない値なので、旧来のY補間経路が
+    // 誤って使われていないことも同時に検出できる）。
     private class FakeHeightSampler : IHeightSampler
     {
-        public float SampleHeight(float x, float z) { return x + z; }
+        public bool TrySampleHeight(float x, float z, out float height)
+        {
+            height = x + z;
+            return true;
+        }
+    }
+
+    // Task53ハードニング: TrySampleHeightが常にfalseを返す（TerrainManager瞬断/例外を模した）フェイク。
+    // out引数には意図的に「地表からかけ離れた値」(-9999f)を書き込む。もしMovementStep側がfalseの
+    // 戻り値を見落としてこのheightをそのまま採用してしまえば、テストのアサーションで即座に
+    // 検出できるようにするための仕込み（実プロダクションのSurfaceHeightSamplerが失敗時に0fを
+    // 返していたのと同種の「失敗値がそのまま採用される」不具合を再現・検出する）。
+    private class FailingHeightSampler : IHeightSampler
+    {
+        public bool TrySampleHeight(float x, float z, out float height)
+        {
+            height = -9999f;
+            return false;
+        }
     }
 
 
@@ -596,14 +614,14 @@ public class MovementStepTests
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
-        s.Height = new FakeHeightSampler(); // SampleHeight(10, 0) = 10
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(10, 0) -> true, 10
 
         // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達（ウェイポイントに到達）
         MovementStep.Advance(s, 2f);
 
         Assert.Equal(10f, s.Units[0].Position.X, 1);
         // Task37の旧仕様なら Y はウェイポイントの7になるはずだが、Heightサンプラーがあれば
-        // それを無視して SampleHeight(10, 0) = 10 が採用される。
+        // それを無視して TrySampleHeight(10, 0) = 10 が採用される。
         Assert.Equal(10f, s.Units[0].Position.Y, 3);
     }
 
@@ -618,7 +636,7 @@ public class MovementStepTests
         var pos = s.Units[0].Position;
         Assert.Equal(TankSpeedPerHour, pos.X, 2);
         Assert.Equal(0f, pos.Z, 1);
-        // 旧来の補間ならYは0のまま維持されるはずだが、SampleHeight(X, Z) = X + 0 = X が採用される。
+        // 旧来の補間ならYは0のまま維持されるはずだが、TrySampleHeight(X, Z) = X + 0 = X が採用される。
         Assert.Equal(pos.X, pos.Y, 3);
     }
 
@@ -639,7 +657,7 @@ public class MovementStepTests
         var pos = s.Units[0].Position;
         Assert.Equal(0f, pos.X, 1);
         Assert.True(pos.Z > 0f, "expected partial movement toward CoverDestination");
-        // SampleHeight(X, Z) = X + Z = 0 + Z = Z が採用される（旧来の補間なら0のまま）。
+        // TrySampleHeight(X, Z) = X + Z = 0 + Z = Z が採用される（旧来の補間なら0のまま）。
         Assert.Equal(pos.Z, pos.Y, 3);
     }
 
@@ -660,5 +678,30 @@ public class MovementStepTests
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(39.7f, s.Units[0].Position.Y, 1); // Advance_interpolates_y_toward_target_in_straight_line_fallbackと同じ期待値
+    }
+
+    // Task53ハードニング: TrySampleHeightがfalseを返す（TerrainManager瞬断/例外を模した）場合、
+    // MovementStepはout引数の値（実装によっては0f等、地表と無関係な値）を絶対にYへ採用してはならず、
+    // state.Height == nullのときと全く同じY補間結果になること（＝失敗時のフォールバックが
+    // null-samplerパスと同一の経路を通っていること）を確認する。これが「TerrainManager瞬断で
+    // ユニットが地表の遥か下へ一瞬テレポートする」不具合の再発防止そのもの。
+    [Fact]
+    public void Advance_falls_back_to_old_y_interpolation_when_TrySampleHeight_fails()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 42, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(100, 0, 0);
+        s.Units.Add(u);
+        s.Height = new FailingHeightSampler(); // 常にfalseを返す。out引数(-9999f)は絶対に採用されないはず。
+
+        MovementStep.Advance(s, 1f);
+
+        // Advance_preserves_old_y_interpolation_when_HeightSampler_is_nullと全く同じ期待値
+        // （= state.Height == nullのときと同一の補間結果になっていることの確認）。
+        Assert.Equal(39.7f, s.Units[0].Position.Y, 1);
+        Assert.NotEqual(-9999f, s.Units[0].Position.Y);
     }
 }

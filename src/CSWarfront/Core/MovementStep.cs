@@ -43,9 +43,12 @@ namespace CSWarfront.Core
     /// 補間するだけだった（上記Task37）が、これはウェイポイント間・オフロードの直線移動・遮蔽/集結移動の
     /// 途中で、道路の盛土・建設後に変化した地形・橋などの"実際の"地表を下回ってしまうことがあった。
     /// state.Height（IHeightSampler、Game層がTerrainManager.SampleDetailHeightで実装）が供給されて
-    /// いれば、X/Zを計算した直後に必ずそれでYを上書きする（ウェイポイント移動・直線移動・遮蔽移動・
-    /// 集結移動のすべての経路で共通）。state.Height == nullなら、従来のY補間をそのまま維持する
-    /// （安全側フォールバック・既存テストの前提を変えない）。</summary>
+    /// おりTrySampleHeightが成功すれば、X/Zを計算した直後に必ずそれでYを上書きする（ウェイポイント移動・
+    /// 直線移動・遮蔽移動・集結移動のすべての経路で共通）。state.Height == null、またはTrySampleHeightが
+    /// 失敗（false）した場合は、従来のY補間をそのまま維持する（安全側フォールバック・既存テストの前提を
+    /// 変えない）。ハードニング（Task53追記）: 失敗時に0f等の失敗値をそのままYへ採用すると、地表が
+    /// 0f付近ではないマップ（例: 実測約270）で1tickだけ地表の遥か下へテレポートする可視バグになるため、
+    /// Try形式で「失敗」を明示的に判別しフォールバックする（ResolvePosition参照）。</summary>
     public static class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
@@ -227,12 +230,16 @@ namespace CSWarfront.Core
         }
 
         /// <summary>Task53: 移動計算で得たX/Y/Zから実際に採用するWorldPosを組み立てる。heightが供給されて
-        /// いれば、渡されたy（従来のウェイポイント/補間Y）を捨てて height.SampleHeight(x, z)（建設後の
-        /// 実地表）で上書きする。heightがnullなら渡されたyをそのまま使う（従来どおりの補間・スナップ挙動、
-        /// 既存テストの前提を変えない安全側フォールバック）。</summary>
+        /// おりTrySampleHeightが成功すれば、渡されたy（従来のウェイポイント/補間Y）を捨てて
+        /// サンプリングした値（建設後の実地表）で上書きする。heightがnull、またはTrySampleHeightが
+        /// 失敗（false）した場合は渡されたyをそのまま使う（従来どおりの補間・スナップ挙動、
+        /// 既存テストの前提を変えない安全側フォールバック）。
+        /// ハードニング: サンプリング失敗時に失敗値（out引数の不定値）をYへ採用することは絶対にしない
+        /// （TerrainManager瞬断時に0fがそのまま採用され地表の遥か下へテレポートする不具合の再発防止）。</summary>
         private static WorldPos ResolvePosition(float x, float y, float z, IHeightSampler height)
         {
-            if (height != null) y = height.SampleHeight(x, z);
+            float sampled;
+            if (height != null && height.TrySampleHeight(x, z, out sampled)) y = sampled;
             return new WorldPos(x, y, z);
         }
     }
