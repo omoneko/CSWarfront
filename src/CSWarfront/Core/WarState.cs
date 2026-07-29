@@ -63,6 +63,16 @@ namespace CSWarfront.Core
         /// </summary>
         public CombatZoneTracker CombatZones = new CombatZoneTracker();
 
+        /// <summary>
+        /// Task58: 他MOD（ゴジラ災害/エイリアン侵略）由来の「外部脅威」の集合（実行時のみ・非永続化）。
+        /// RoadGraph/Coverと同じパターン: Game層(ExternalThreatBridge)が毎tick、生きている他MODの
+        /// 状態（IsActive/位置）から再同期する（新規出現の追加、既存の位置更新、消えた分の除去）。
+        /// HPはCSWarfrontがここで独自に管理する（相手MODはHP/被弾APIを公開していないため）。
+        /// WarStateSerializerには一切書き出さない＝セーブ/ロードのたびに空へ戻るが、Game層が次tickで
+        /// 相手MODの現在状態から即座に復元するため実害は無い。
+        /// </summary>
+        public List<ExternalThreat> Threats = new List<ExternalThreat>();
+
         public uint AllocInstanceId() { return NextInstanceId++; }
 
         /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる

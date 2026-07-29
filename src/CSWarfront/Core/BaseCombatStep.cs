@@ -50,19 +50,13 @@ namespace CSWarfront.Core
                     // Task54: 被弾地点（基地攻め）も戦闘域として報告する（CombatStepと同じ理由）。
                     state.CombatZones.ReportCombat(b.Position);
 
-                    // 発砲エフェクトの間引き（Task42）。CombatStepと同じFireCooldownアキュムレータを
-                    // 共有するため、同tick内で既にユニット攻撃側で発砲済みなら、ここでは重ねて出さない
-                    // （攻撃側1体につき見た目は最大1発/FireIntervalHoursという契約を、対象が
-                    // ユニットか基地かによらず一貫させるため）。着弾先(To)は基地位置。
-                    u.FireCooldown -= dt;
-                    if (u.FireCooldown <= 0f)
-                    {
-                        // TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
-                        // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
-                        state.AddShot(new ShotEvent(u.Position, b.Position, type.ShotKind, u.FactionId,
-                            u.InstanceId, 0, type.Category));
-                        u.FireCooldown = type.FireIntervalHours;
-                    }
+                    // 発砲エフェクトの間引き（Task42、Task58でFireEffects.EmitThrottledへ集約）。
+                    // CombatStepと同じFireCooldownアキュムレータを共有するため、同tick内で既に
+                    // ユニット攻撃側で発砲済みなら、ここでは重ねて出さない（攻撃側1体につき見た目は
+                    // 最大1発/FireIntervalHoursという契約を、対象がユニットか基地かによらず一貫させる
+                    // ため）。TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
+                    // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
+                    FireEffects.EmitThrottled(state, u, type, b.Position, 0, dt);
                 }
             }
         }

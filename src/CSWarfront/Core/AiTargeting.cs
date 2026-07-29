@@ -35,15 +35,25 @@ namespace CSWarfront.Core
         /// （0.35は「並行する別路を選ぶ程度」を狙ったチューニング値。上げすぎると不合理な大回りになる）。</summary>
         public const float PathJitter = 0.35f;
 
+        /// <summary>Task58: 自勢力の所有基地からこの水平距離以内に生きている外部脅威（ゴジラ/エイリアン）
+        /// がいる場合、非プレイヤーユニットは敵基地への進軍より脅威への迎撃を優先する
+        /// （FindDivertThreat参照）。到着後はThreatCombatStepが通常通り交戦する。</summary>
+        public const float ThreatDivertRadius = 600f;
+
         /// <summary>当該勢力の非交戦ユニットに、各自位置から最寄りの敵基地へ進軍命令を与える。
         /// state.Roadsが供給されていれば道路経路(A*)も計算する（1回の呼び出しでmaxPathComputations件まで）。
         /// FindPathに失敗したユニットはPathRetryCooldownが尽きるまで再試行しない（予算を消費しない）。
         /// Task48: プレイヤーが Hold/RallyHold を指示したユニットは常にスキップする（AIが目標/経路を
         /// 一切上書きしない）。AiControlled/FreeAdvance のみ従来通り対象になる（FreeAdvanceはAIが
-        /// 目標基地を更新してよいが、プレイヤーが別命令を出すまで自由進撃モード自体は変わらない）。</summary>
+        /// 目標基地を更新してよいが、プレイヤーが別命令を出すまで自由進撃モード自体は変わらない）。
+        /// Task58: 自勢力の領土（所有基地）の近くに外部脅威がいる間は、対象ユニット全員がそちらへ
+        /// 迂回する（敵基地への進軍より優先）。脅威が消える/撃破されると、次回の呼び出しから
+        /// 自動的に通常の敵基地進軍へ戻る（状態を持たず毎回再判定するだけなので「revert」に
+        /// 特別なロジックは不要）。</summary>
         public static void AssignAdvance(WarState state, byte factionId, float dt, int maxPathComputations = 4)
         {
             int pathComputations = 0;
+            WorldPos? divertTarget = FindNearbyThreatToOwnTerritory(state, factionId);
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
@@ -54,10 +64,19 @@ namespace CSWarfront.Core
                 u.PathRetryCooldown -= dt;
                 if (u.PathRetryCooldown < 0f) u.PathRetryCooldown = 0f;
 
-                var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position);
-                if (target == null) continue;
+                WorldPos targetPos;
+                if (divertTarget.HasValue)
+                {
+                    targetPos = divertTarget.Value;
+                }
+                else
+                {
+                    var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position);
+                    if (target == null) continue;
+                    targetPos = target.Position;
+                }
 
-                u.OrderTargetPos = target.Position;
+                u.OrderTargetPos = targetPos;
                 u.State = UnitState.Moving;
 
                 if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value))
@@ -78,6 +97,28 @@ namespace CSWarfront.Core
                     u.PathRetryCooldown = path == null ? PathRetryFailCooldownHours : 0f;
                 }
             }
+        }
+
+        /// <summary>Task58: factionIdが所有する基地のいずれかからThreatDivertRadius以内（水平距離）に
+        /// 生きている（未撃破の）外部脅威が1体でもいれば、その脅威の位置を返す。複数該当する場合は
+        /// state.Threats走査順で最初に見つかったもの（優先順位付けは行わない、単純さ優先）。
+        /// 無ければnull（＝通常の敵基地進軍のまま）。</summary>
+        private static WorldPos? FindNearbyThreatToOwnTerritory(WarState state, byte factionId)
+        {
+            for (int t = 0; t < state.Threats.Count; t++)
+            {
+                var threat = state.Threats[t];
+                if (threat.IsDefeated) continue;
+
+                for (int b = 0; b < state.Bases.Count; b++)
+                {
+                    var ownedBase = state.Bases[b];
+                    if (ownedBase.OwnerFactionId != factionId) continue;
+                    if (threat.Position.HorizontalDistanceTo(ownedBase.Position) <= ThreatDivertRadius)
+                        return threat.Position;
+                }
+            }
+            return null;
         }
 
         private static bool IsSameTarget(WorldPos a, WorldPos b)

@@ -390,7 +390,13 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // AI進軍命令（非プレイヤー勢力）
+                // 外部脅威（ゴジラ災害/エイリアン侵略、Task58）の同期。他MODが導入されていなければ
+                // 何もしない（ExternalThreatBridge内部で間引き・リフレクション解決結果をキャッシュする）。
+                // AI進軍命令（迂回判定）・ThreatCombatStepより前に済ませ、このtick中は最新の位置を使う。
+                ExternalThreatBridge.Advance(State, dt);
+
+                // AI進軍命令（非プレイヤー勢力）。Task58: 自勢力の territory 近くに外部脅威がいれば
+                // 敵基地より優先してそちらへ迂回する（InvasionOrders.AssignAdvance内部で判定）。
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id, dt);
 
@@ -401,11 +407,14 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
-                // 戦闘（ユニット同士＋基地攻撃）→ 占領 → 勢力状態の再導出（Task46: 拠点の自衛射撃は
-                // 廃止。Eliminated/HomeBaseIdはOccupationが直接いじらず、FactionStatus.Refreshが
-                // 毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても基地を取り戻せば復活する）。
+                // 戦闘（ユニット同士＋基地攻撃＋外部脅威、Task58）→ 占領 → 勢力状態の再導出（Task46:
+                // 拠点の自衛射撃は廃止。Eliminated/HomeBaseIdはOccupationが直接いじらず、
+                // FactionStatus.Refreshが毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても
+                // 基地を取り戻せば復活する）。ThreatCombatStepは通常の戦闘に「加えて」実行するだけで、
+                // ターゲット選定を奪い合わない（射程内なら両方に同時に撃つ、Core/ThreatCombatStep参照）。
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
+                ThreatCombatStep.Advance(State, dt);
                 Occupation.ResolveCaptures(State);
                 FactionStatus.Refresh(State);
 
@@ -473,6 +482,13 @@ namespace CSWarfront.Game
 
                 sb.Append(" | roads=").Append(State.Roads != null ? State.Roads.NodeCount : 0);
                 sb.Append(" cover=").Append(State.Cover != null ? State.Cover.Count : 0);
+                // Task58: 現在アクティブな外部脅威（ゴジラ/エイリアン）の残りHP%を一目で分かるようにする。
+                for (int ti = 0; ti < State.Threats.Count; ti++)
+                {
+                    var t = State.Threats[ti];
+                    float pct = t.MaxHP > 0f ? (t.CurrentHP / t.MaxHP) * 100f : 0f;
+                    sb.Append(" threat=").Append(t.Kind).Append(" ").Append(pct.ToString("0")).Append("%");
+                }
                 for (int i = 0; i < State.Units.Count && i < 2; i++)
                 {
                     UnitInstance u = State.Units[i];

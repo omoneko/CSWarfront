@@ -45,16 +45,10 @@ namespace CSWarfront.Core
                 // CombatZoneTracker側でマージされるため、ここでは間引き不要。
                 state.CombatZones.ReportCombat(target.Position);
 
-                // 発砲エフェクトの間引き（Task42）: 実際にダメージを与えたこのtickでのみ
-                // FireCooldownをdt分だけ減算する。0以下になった瞬間だけShotEventを1つ積み、
-                // FireIntervalHoursへリセットする（乱数不使用・決定的）。
-                self.FireCooldown -= dt;
-                if (self.FireCooldown <= 0f)
-                {
-                    state.AddShot(new ShotEvent(self.Position, target.Position, type.ShotKind, self.FactionId,
-                        self.InstanceId, target.InstanceId, type.Category));
-                    self.FireCooldown = type.FireIntervalHours;
-                }
+                // 発砲エフェクトの間引き（Task42、Task58でFireEffects.EmitThrottledへ集約）: 実際に
+                // ダメージを与えたこのtickでのみFireCooldownをdt分だけ減算する。0以下になった瞬間だけ
+                // ShotEventを1つ積み、FireIntervalHoursへリセットする（乱数不使用・決定的）。
+                FireEffects.EmitThrottled(state, self, type, target.Position, target.InstanceId, dt);
             }
             // 2) 死亡判定
             // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
