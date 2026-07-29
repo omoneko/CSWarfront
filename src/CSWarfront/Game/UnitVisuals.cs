@@ -281,11 +281,12 @@ namespace CSWarfront.Game
             try
             {
                 Mesh mesh;
+                Material[] builtInMaterials;
                 bool fromAssignedProp;
                 bool fromBuiltInModel;
                 AssetKind resolvedKind;
                 string resolvedAssetName;
-                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out fromBuiltInModel, out resolvedKind, out resolvedAssetName))
+                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out builtInMaterials, out fromAssignedProp, out fromBuiltInModel, out resolvedKind, out resolvedAssetName))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;
@@ -293,11 +294,26 @@ namespace CSWarfront.Game
 
                 // Task37: 割り当て済みアセット（プロップ/建物/車両/樹木、Task41で拡張）がある場合は
                 // アセット自身の見た目（テクスチャ）を維持し、勢力色で塗らない。
-                // 割り当てが無い場合のみ、従来通り勢力色マテリアルを使う。
-                Material material;
-                bool materialOk = fromAssignedProp
-                    ? UnitMaterialFactory.TryGetAssetMaterial(resolvedKind, resolvedAssetName, out material)
-                    : UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material);
+                // Task69: 既定(built-in)モデルは、割り当て済みモデルと同様に自分自身の色
+                // （builtInMaterials、tools/export_builtin_obj.py 由来モデルの実際のMTL色）で描画し、
+                // 勢力色ティントはしない（勢力の識別は既存の勢力アイコンに一本化）。
+                // どちらでもない場合のみ、従来通り勢力色の単一マテリアルを使う。
+                bool useBuiltInMaterials = fromBuiltInModel && builtInMaterials != null && builtInMaterials.Length > 0;
+
+                Material material = null;
+                bool materialOk;
+                if (useBuiltInMaterials)
+                {
+                    materialOk = true; // マテリアルは WarfrontModelProvider.TryGetModel が既に用意済み
+                }
+                else if (fromAssignedProp)
+                {
+                    materialOk = UnitMaterialFactory.TryGetAssetMaterial(resolvedKind, resolvedAssetName, out material);
+                }
+                else
+                {
+                    materialOk = UnitMaterialFactory.TryGetFactionMaterial(s.FactionId, out material);
+                }
                 if (!materialOk)
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のマテリアル生成に失敗、表現をスキップ");
@@ -336,7 +352,14 @@ namespace CSWarfront.Game
                 MeshFilter filter = model.AddComponent<MeshFilter>();
                 filter.sharedMesh = mesh;
                 MeshRenderer renderer = model.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = material;
+                if (useBuiltInMaterials)
+                {
+                    renderer.sharedMaterials = builtInMaterials;
+                }
+                else
+                {
+                    renderer.sharedMaterial = material;
+                }
 
                 go.transform.position = s.Position;
 

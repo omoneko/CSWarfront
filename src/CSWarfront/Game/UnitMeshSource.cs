@@ -82,14 +82,20 @@ namespace CSWarfront.Game
         /// <see cref="Models.WarfrontModelProvider"/> 経由でそのメッシュを返す。この経路で解決できたかは
         /// <paramref name="fromBuiltInModel"/> で報告する。fromAssignedProp と違いこちらはアセット固有の
         /// テクスチャを持たないため、呼び出し側は fromAssignedProp と同様「可視性マーカーを出さない」
-        /// 判断には使うが、マテリアルは（fromAssignedPropがfalseのままなので）従来通り勢力色を使う
-        /// （UnitVisuals.CreateVisual の materialOk 分岐は変更不要）。対象外のカテゴリ（海軍/空軍等、
-        /// Task57時点ではモデル未作成）は素通りして (c) へ進む。
+        /// 判断に使う。対象外のカテゴリ（Task69時点で全カテゴリ対応済み）は素通りして (c) へ進む。
+        ///
+        /// Task69: 既定モデルのマテリアルを <see cref="Models.WarfrontModelProvider.TryGetModel"/>
+        /// （.obj の usemtl ブロックごとにサブメッシュ+専用マテリアルを持つマルチマテリアル版）から
+        /// 取得し、<paramref name="builtInMaterials"/> として返すよう変更した。Blender製モデル
+        /// （tools/export_builtin_obj.py 由来）はモデル自身の実際の色を持つため、これ以降 fromBuiltInModel
+        /// の場合は（勢力色ティントではなく）常にこの配列を使って描画する（UnitVisuals.CreateVisual
+        /// 側で分岐。勢力の識別は既存の勢力アイコンに一本化した）。
         /// </summary>
-        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out bool fromBuiltInModel, out AssetKind resolvedKind, out string resolvedAssetName)
+        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out Material[] builtInMaterials, out bool fromAssignedProp, out bool fromBuiltInModel, out AssetKind resolvedKind, out string resolvedAssetName)
         {
             fromAssignedProp = false;
             fromBuiltInModel = false;
+            builtInMaterials = null;
             resolvedKind = AssetKind.Prop;
             resolvedAssetName = null;
 
@@ -135,9 +141,11 @@ namespace CSWarfront.Game
                     TryGetBuiltInModelName(category, out builtInModelName))
                 {
                     Mesh builtInMesh;
-                    if (WarfrontModelProvider.TryGetMesh(builtInModelName, out builtInMesh))
+                    Material[] builtInMats;
+                    if (WarfrontModelProvider.TryGetModel(builtInModelName, out builtInMesh, out builtInMats))
                     {
                         mesh = builtInMesh;
+                        builtInMaterials = builtInMats;
                         fromBuiltInModel = true;
                         return true;
                     }

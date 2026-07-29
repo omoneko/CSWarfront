@@ -7,19 +7,35 @@ using UnityEngine;
 namespace CSWarfront.Game.Models
 {
     /// <summary>
-    /// 兵科別・軍事基地の既定（built-in）モデルの単一窓口（Task57）。Mod 配置フォルダの
-    /// Models/&lt;name&gt;.obj から実行時にメッシュを構築してキャッシュする。
-    /// MissileDisaster.Game.Models.MissileModelProvider.LoadMergedMesh を縮小移植したもの
-    /// （AssetBundle・デカール・GameObject即時生成等は持ち込まない。ここではメッシュのみ提供し、
-    /// GameObject化やマテリアル割り当ては呼び出し側 UnitVisuals/WarfrontBasePrefab が行う）。
-    /// メッシュ生成を伴うため、必ずメインスレッドから呼ぶこと。
+    /// 兵科別・軍事基地の既定（built-in）モデルの単一窓口（Task57、Task69でマルチマテリアル対応）。
+    /// Mod 配置フォルダの Models/&lt;name&gt;.obj(+.mtl) から実行時にメッシュ/マテリアルを構築して
+    /// キャッシュする。
+    /// <see cref="TryGetMesh"/>: MissileDisaster.Game.Models.MissileModelProvider.LoadMergedMesh を
+    /// 縮小移植。全サブメッシュを1つに統合した単一 Mesh のみ返す（マテリアルは呼び出し側が塗る）。
+    /// 拠点（WarfrontBasePrefab、CSの BuildingInfo.m_material が単一フィールドのため複数マテリアルを
+    /// 受け取れない）専用。
+    /// <see cref="TryGetModel"/>: MissileDisaster.Game.Models.MissileModelProvider.BuildFromObj を
+    /// 縮小移植。.obj の usemtl ブロックをそのままサブメッシュとして残し、サブメッシュごとに .mtl の
+    /// Kd 色で塗った自前マテリアルを返す（GameObject化は呼び出し側 UnitVisuals が行う）。
+    /// ユニットの既定モデル解決の主経路（Task69: 既定モデルは常に自分自身のMTL色で描画し、勢力色
+    /// ティントは廃止した）。
+    /// AssetBundle・デカール・GameObject即時生成等は持ち込まない。
+    /// メッシュ/マテリアル生成を伴うため、必ずメインスレッドから呼ぶこと。
     /// </summary>
     internal static class WarfrontModelProvider
     {
+        private class BuiltModel
+        {
+            public Mesh Mesh;
+            public Material[] Materials;
+        }
+
         private static string _modDirectory;
         private static bool _initialized;
         private static readonly Dictionary<string, Mesh> _meshCache = new Dictionary<string, Mesh>();
+        private static readonly Dictionary<string, BuiltModel> _modelCache = new Dictionary<string, BuiltModel>();
         private static readonly HashSet<string> _warnedMissing = new HashSet<string>();
+        private static readonly HashSet<string> _warnedMissingModel = new HashSet<string>();
 
         /// <summary>冪等。WarfrontLoadingExtension.LoadModAssets から、UnitAssetBindings.Load /
         /// WarfrontSounds.Initialize と同じタイミングで（かつ WarfrontBasePrefab.EnsureRegistered
@@ -83,6 +99,85 @@ namespace CSWarfront.Game.Models
             {
                 ModConfig.LogError("WarfrontModelProvider.TryGetMesh(" + modelName + ") error: " + e);
                 mesh = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Task69: Models/&lt;modelName&gt;.obj(+.mtl) を、.obj が持つ usemtl ブロックそのままの
+        /// マルチサブメッシュ Mesh + サブメッシュごとの .mtl 色マテリアル配列として読み込む
+        /// （<see cref="WarfrontMeshBuilder.TryBuild"/> 参照。MissileDisaster.Game.Models.
+        /// MissileModelProvider.BuildFromObj を縮小移植したもの）。
+        /// 既定モデルは全て自分自身のMTL色で描画する方針（勢力色ティントは既定モデルでは廃止、
+        /// 呼び出し側 UnitVisuals 参照）のため、こちらが built-in モデル解決の主経路になる。
+        /// <see cref="TryGetMesh"/>（単一サブメッシュへ統合、勢力色で塗る用途）は
+        /// WarfrontBasePrefab（拠点の既定モデル。CSの BuildingInfo.m_material が単一フィールドの
+        /// ため、そもそも複数マテリアルを受け取れない）専用として残す。
+        /// 失敗時（未初期化/ファイル無し/解析失敗）は false を返す。名前単位でキャッシュする
+        /// （静的モデルのため、生成した Mesh/Material[] をそのまま全ユニットで共有して問題ない）。
+        /// </summary>
+        public static bool TryGetModel(string modelName, out Mesh mesh, out Material[] materials)
+        {
+            mesh = null;
+            materials = null;
+            try
+            {
+                if (string.IsNullOrEmpty(modelName)) return false;
+
+                BuiltModel cached;
+                if (_modelCache.TryGetValue(modelName, out cached) && cached != null && cached.Mesh != null)
+                {
+                    mesh = cached.Mesh;
+                    materials = cached.Materials;
+                    return true;
+                }
+
+                if (string.IsNullOrEmpty(_modDirectory))
+                {
+                    ModConfig.LogError("WarfrontModelProvider.TryGetModel(" + modelName + "): modDirectory 未初期化 (Initialize 未呼び出し)");
+                    return false;
+                }
+
+                string modelsDir = Path.Combine(_modDirectory, ModConfig.ModelsFolderName);
+                string objPath = Path.Combine(modelsDir, modelName + ".obj");
+                if (!File.Exists(objPath))
+                {
+                    if (_warnedMissingModel.Add(modelName))
+                    {
+                        ModConfig.LogError("WarfrontModelProvider: OBJ が見つかりません path=" + objPath);
+                    }
+                    return false;
+                }
+
+                ObjData data = ObjParser.Parse(File.ReadAllText(objPath));
+
+                Dictionary<string, MtlColor> mtl = null;
+                string mtlPath = Path.Combine(modelsDir, modelName + ".mtl");
+                if (File.Exists(mtlPath))
+                {
+                    mtl = MtlParser.Parse(File.ReadAllText(mtlPath));
+                }
+
+                Mesh built;
+                Material[] builtMaterials;
+                if (!WarfrontMeshBuilder.TryBuild(data, mtl, ModConfig.ObjFallbackColor, out built, out builtMaterials))
+                {
+                    ModConfig.LogError("WarfrontModelProvider: マルチマテリアルメッシュ構築失敗 name=" + modelName + " path=" + objPath);
+                    return false;
+                }
+
+                _modelCache[modelName] = new BuiltModel { Mesh = built, Materials = builtMaterials };
+                ModConfig.Log("WarfrontModelProvider: built-in model(multi-material) を読み込みました name=" + modelName +
+                    " subMeshes=" + (builtMaterials != null ? builtMaterials.Length : 0));
+                mesh = built;
+                materials = builtMaterials;
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("WarfrontModelProvider.TryGetModel(" + modelName + ") error: " + e);
+                mesh = null;
+                materials = null;
                 return false;
             }
         }

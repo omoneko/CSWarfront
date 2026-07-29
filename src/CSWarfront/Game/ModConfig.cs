@@ -15,6 +15,13 @@ namespace CSWarfront.Game
         /// Game/Models/WarfrontModelProviderが実行時に読み込む。</summary>
         public const string ModelsFolderName = "Models";
 
+        /// <summary>Task69: 既定(built-in)モデルのマルチマテリアル描画（WarfrontMeshBuilder.TryBuild）で
+        /// 使う Standard シェーダのパラメータと、.mtl 側にそのスロットの色が無かった場合のフォールバック色。
+        /// MissileDisaster.Game.ModConfig の同名定数と同じ値（実績のある値をそのまま踏襲）。</summary>
+        public const float ObjMetallic = 0.6f;
+        public const float ObjGlossiness = 0.5f;
+        public static readonly Color ObjFallbackColor = new Color(0.25f, 0.25f, 0.25f, 1f);
+
         public static void Log(string msg) { Debug.Log(Tag + msg); }
         public static void LogError(string msg) { Debug.LogError(Tag + msg); }
     }
