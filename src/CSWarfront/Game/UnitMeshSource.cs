@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using CSWarfront.Core;
+using CSWarfront.Game.Models;
 using UnityEngine;
 namespace CSWarfront.Game
 {
@@ -73,10 +75,21 @@ namespace CSWarfront.Game
         /// 割り当て済みアセットがある場合は可視性マーカー立方体や勢力色を出さない判断をする。
         /// <paramref name="resolvedKind"/>/<paramref name="resolvedAssetName"/> は fromAssignedProp=true
         /// の時のみ意味のある値を返す（UnitMaterialFactory.TryGetAssetMaterial に渡すため）。
+        ///
+        /// Task57: (a)と(c)の間に (b) 「ユニットのUnitCategoryに対応する既定(built-in)モデル」を
+        /// 挿入した。typeKeyを Core.TypeKeyParser で解析し（Tierフォールバック探索と同じ手法）、
+        /// カテゴリに対応する src/CSWarfront/Models/Unit_*.obj があれば
+        /// <see cref="Models.WarfrontModelProvider"/> 経由でそのメッシュを返す。この経路で解決できたかは
+        /// <paramref name="fromBuiltInModel"/> で報告する。fromAssignedProp と違いこちらはアセット固有の
+        /// テクスチャを持たないため、呼び出し側は fromAssignedProp と同様「可視性マーカーを出さない」
+        /// 判断には使うが、マテリアルは（fromAssignedPropがfalseのままなので）従来通り勢力色を使う
+        /// （UnitVisuals.CreateVisual の materialOk 分岐は変更不要）。対象外のカテゴリ（海軍/空軍等、
+        /// Task57時点ではモデル未作成）は素通りして (c) へ進む。
         /// </summary>
-        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out AssetKind resolvedKind, out string resolvedAssetName)
+        public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out bool fromAssignedProp, out bool fromBuiltInModel, out AssetKind resolvedKind, out string resolvedAssetName)
         {
             fromAssignedProp = false;
+            fromBuiltInModel = false;
             resolvedKind = AssetKind.Prop;
             resolvedAssetName = null;
 
@@ -112,7 +125,48 @@ namespace CSWarfront.Game
                 ModConfig.LogError("UnitMeshSource.TryResolve(faction=" + factionId + ", typeKey=" + typeKey + ") binding lookup error: " + e);
             }
 
+            try
+            {
+                UnitCategory category;
+                byte tier;
+                string builtInModelName;
+                if (!string.IsNullOrEmpty(typeKey) &&
+                    TypeKeyParser.TryParse(typeKey, out category, out tier) &&
+                    TryGetBuiltInModelName(category, out builtInModelName))
+                {
+                    Mesh builtInMesh;
+                    if (WarfrontModelProvider.TryGetMesh(builtInModelName, out builtInMesh))
+                    {
+                        mesh = builtInMesh;
+                        fromBuiltInModel = true;
+                        return true;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitMeshSource.TryResolve(faction=" + factionId + ", typeKey=" + typeKey + ") built-in model lookup error: " + e);
+            }
+
             return TryResolve(assetPrefabName, out mesh);
+        }
+
+        /// <summary>Task57: UnitCategory -&gt; src/CSWarfront/Models/Unit_*.obj のファイル名（拡張子無し）
+        /// への対応表。陸上7兵種のみ対応（海軍/空軍カテゴリはこの時点でモデル未作成のため false を返し、
+        /// 呼び出し側は (c) の車両借用/プリミティブへフォールバックする）。</summary>
+        private static bool TryGetBuiltInModelName(UnitCategory category, out string modelName)
+        {
+            switch (category)
+            {
+                case UnitCategory.Infantry: modelName = "Unit_Infantry"; return true;
+                case UnitCategory.MechInfantry: modelName = "Unit_MechInfantry"; return true;
+                case UnitCategory.Apc: modelName = "Unit_Apc"; return true;
+                case UnitCategory.Tank: modelName = "Unit_Tank"; return true;
+                case UnitCategory.Artillery: modelName = "Unit_Artillery"; return true;
+                case UnitCategory.AntiAir: modelName = "Unit_AntiAir"; return true;
+                case UnitCategory.DroneInfantry: modelName = "Unit_Drone"; return true;
+                default: modelName = null; return false;
+            }
         }
 
         /// <summary>

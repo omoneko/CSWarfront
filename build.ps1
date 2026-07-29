@@ -20,4 +20,14 @@ if (Test-Path $soundsSrc) {
     Write-Host "Sounds deployed: $soundsDst"
 }
 
+# Deploy built-in default models (Unit_*.obj/.mtl, Building_MilitaryBase.obj/.mtl).
+# WarfrontModelProvider loads these at runtime (Task57).
+$modelsSrc = "src\CSWarfront\Models"
+if (Test-Path $modelsSrc) {
+    $modelsDst = Join-Path $modDir "Models"
+    New-Item -ItemType Directory -Force -Path $modelsDst | Out-Null
+    Copy-Item (Join-Path $modelsSrc "*") $modelsDst -Include *.obj,*.mtl -Force
+    Write-Host "Models deployed: $modelsDst"
+}
+
 Write-Host "Deployment complete: $modDir"

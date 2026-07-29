@@ -2,6 +2,7 @@ using System.Reflection;
 using ColossalFramework;
 using ColossalFramework.Plugins;
 using CSWarfront.Game.Audio;
+using CSWarfront.Game.Models;
 using ICities;
 namespace CSWarfront.Game
 {
@@ -28,9 +29,14 @@ namespace CSWarfront.Game
                 if (mode == LoadMode.NewGame || mode == LoadMode.LoadGame ||
                     mode == LoadMode.NewGameFromScenario)
                 {
+                    // Task57: LoadModAssets（WarfrontModelProvider.Initializeを含む）を
+                    // EnsureRegistered より先に呼ぶよう順序を変更した。EnsureRegistered が
+                    // 軍事基地プレハブの見た目を built-in model（Building_MilitaryBase.obj）へ
+                    // 差し替える際、WarfrontModelProvider が未初期化だと必ず失敗する
+                    // （modDirectory 未解決）ため。
+                    LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音／Task57: 既定モデル
                     WarfrontBasePrefab.EnsureRegistered();
                     BasePlacementWatcher.Subscribe();
-                    LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音の読込
                 }
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelLoaded: " + e); }
@@ -70,6 +76,7 @@ namespace CSWarfront.Game
                 string modPath = info != null ? info.modPath : null;
                 UnitAssetBindings.Load(modPath);
                 WarfrontSounds.Initialize(modPath); // Task51
+                WarfrontModelProvider.Initialize(modPath); // Task57
             }
             catch (System.Exception e)
             {

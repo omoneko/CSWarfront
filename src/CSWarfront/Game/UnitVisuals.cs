@@ -282,9 +282,10 @@ namespace CSWarfront.Game
             {
                 Mesh mesh;
                 bool fromAssignedProp;
+                bool fromBuiltInModel;
                 AssetKind resolvedKind;
                 string resolvedAssetName;
-                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out resolvedKind, out resolvedAssetName))
+                if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out fromAssignedProp, out fromBuiltInModel, out resolvedKind, out resolvedAssetName))
                 {
                     ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
                     return null;
@@ -339,10 +340,12 @@ namespace CSWarfront.Game
 
                 go.transform.position = s.Position;
 
-                if (fromAssignedProp)
+                if (fromAssignedProp || fromBuiltInModel)
                 {
                     // 要件1: プロップ割り当てがある場合は可視性マーカー立方体を出さない。
-                    // クリック選択の当たり判定は代わりにルートへ直接付ける（マーカーが無いため）。
+                    // Task57: 既定(built-in)モデルも同様（本物のシルエットを持つため、借用メッシュ
+                    // 用の保険マーカーはもう不要）。クリック選択の当たり判定は代わりにルートへ
+                    // 直接付ける（マーカーが無いため）。
                     AttachPropCollider(go, mesh, pivotOffsetY);
                 }
                 else

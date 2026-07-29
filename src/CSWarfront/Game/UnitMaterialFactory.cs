@@ -163,6 +163,38 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>
+        /// Task57: 軍事基地プレハブ（WarfrontBasePrefab）の既定モデル用マテリアルを生成する。
+        /// 勢力別ではない（基地プレハブは全勢力共通の1つのBuildingInfoとして登録されるため、
+        /// ユニットのような勢力色分けの入力がそもそも無い）ため、固定色を受け取って単純に
+        /// 自前の標準シェーダーMaterialへ塗るだけの薄いヘルパー。キャッシュしない
+        /// （EnsureRegistered実行時に1回だけ呼ばれる想定で、頻度・コストとも無視できるため）。
+        /// TryGetFactionMaterial/TryGetAssetMaterialと同じ理由でCS側のMaterialは一切借用しない。
+        /// </summary>
+        public static bool TryGetSolidColorMaterial(Color color, out Material material)
+        {
+            Shader shader = ResolveShader();
+            if (shader == null)
+            {
+                material = null;
+                return false;
+            }
+
+            try
+            {
+                Material mat = new Material(shader);
+                mat.color = color;
+                material = mat;
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitMaterialFactory.TryGetSolidColorMaterial error: " + e);
+                material = null;
+                return false;
+            }
+        }
+
         private static Color ColorForFaction(byte factionId)
         {
             return factionId < FactionColors.Length ? FactionColors[factionId] : FallbackColor;

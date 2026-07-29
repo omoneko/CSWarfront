@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using ColossalFramework;
 using ColossalFramework.Globalization;
+using CSWarfront.Game.Models;
 using UnityEngine;
 
 namespace CSWarfront.Game
@@ -18,6 +19,11 @@ namespace CSWarfront.Game
     {
         public const string PrefabName = "CSWarfront Military Base";
         private const string CollectionName = "CSWarfront";
+
+        // Task57: 既定(built-in)の見た目モデル。クローン直後の風力タービン見た目を、成功すれば
+        // src/CSWarfront/Models/Building_MilitaryBase.obj へ差し替える（失敗時は元の見た目のまま）。
+        private const string BuildingModelName = "Building_MilitaryBase";
+        private static readonly Color BuildingModelColor = new Color(0.30f, 0.33f, 0.24f, 1f); // 軍用オリーブグレー
 
         // Task33: バニラ建物情報パネル（CityServiceWorldInfoPanel）が参照するロケール識別子。
         // Assembly-CSharp.dll の文字列テーブルをスキャンして実在を確認済み（BUILDING_TITLE /
@@ -110,6 +116,7 @@ namespace CSWarfront.Game
                 }
 
                 SanitizeClonedPowerPlantAi(clone);
+                TrySwapVisualMesh(clone);
 
                 PrefabCollection<BuildingInfo>.InitializePrefabs(CollectionName, clone, null);
                 ModConfig.Log("WarfrontBasePrefab: InitializePrefabs('" + CollectionName + "', '" + PrefabName + "', null) done");
@@ -291,6 +298,51 @@ namespace CSWarfront.Game
                 int old = ai.m_maintenanceCost;
                 ai.m_maintenanceCost = 100;
                 ModConfig.Log("WarfrontBasePrefab: sanitize m_maintenanceCost " + old + " -> 100");
+            }
+        }
+
+        /// <summary>
+        /// Task57: クローン直後（風力タービン等の借用済み見た目のまま）の <paramref name="clone"/> の
+        /// 描画メッシュ/マテリアルを、既定モデル Building_MilitaryBase.obj へ差し替える。
+        /// 設定するフィールドは m_mesh / m_lodMesh / m_material / m_lodMaterial の4つ（全てpublic、
+        /// BuildingInfoBase宣言。reflection-only読込でAssembly-CSharp.dllを検証済み）。LOD側も
+        /// 同じメッシュ・マテリアルをそのまま流用する（専用LODメッシュの生成は行わない＝
+        /// "if straightforward" の範囲でシンプルに済ませる）。
+        /// 失敗経路: メッシュ読込（WarfrontModelProvider.TryGetMesh）またはマテリアル生成
+        /// （UnitMaterialFactory.TryGetSolidColorMaterial）のどちらかが失敗した場合、あるいは
+        /// 途中で例外が飛んだ場合は、クローンのフィールドを一切変更せずに return する
+        /// （＝Instantiateで複製されたクローン元の風力タービン見た目がそのまま残る）。
+        /// 呼び出し元 EnsureRegistered のプレハブ登録処理（InitializePrefabs以降）には一切影響しない。
+        /// </summary>
+        private static void TrySwapVisualMesh(BuildingInfo clone)
+        {
+            try
+            {
+                Mesh mesh;
+                if (!WarfrontModelProvider.TryGetMesh(BuildingModelName, out mesh) || mesh == null)
+                {
+                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: built-in model '" + BuildingModelName +
+                        "' の読み込みに失敗。既定（風力タービン借用）の見た目を維持します");
+                    return;
+                }
+
+                Material material;
+                if (!UnitMaterialFactory.TryGetSolidColorMaterial(BuildingModelColor, out material) || material == null)
+                {
+                    ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh: 建物用マテリアル生成に失敗。既定の見た目を維持します");
+                    return;
+                }
+
+                clone.m_mesh = mesh;
+                clone.m_material = material;
+                clone.m_lodMesh = mesh;
+                clone.m_lodMaterial = material;
+
+                ModConfig.Log("WarfrontBasePrefab.TrySwapVisualMesh: 見た目を built-in model '" + BuildingModelName + "' へ差し替えました");
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("WarfrontBasePrefab.TrySwapVisualMesh error（既定の見た目を維持します）: " + e);
             }
         }
 
