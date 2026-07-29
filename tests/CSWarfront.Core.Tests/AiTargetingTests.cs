@@ -60,6 +60,120 @@ public class AiTargetingTests
         Assert.Equal((ushort)11, t.BaseId);
     }
 
+    // --- Task64: Sea-domain units target the nearest hostile-owned BaseType.Navy base only, ignoring
+    // hostile bases of other types (they used to beach themselves marching on inland Army/AirForce/
+    // MissileBase targets). Land/Air callers keep the old "any hostile base type" behaviour by using
+    // the default domain parameter (Domain.Land), exercised by every other test in this file. ---
+
+    [Fact]
+    public void ChooseTargetBase_for_sea_domain_ignores_a_nearer_non_navy_base()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        var nearArmy = new MilitaryBase(10, BaseType.Army, new WorldPos(50, 0, 0)); nearArmy.OwnerFactionId = 1;
+        var farNavy = new MilitaryBase(11, BaseType.Navy, new WorldPos(500, 0, 0)); farNavy.OwnerFactionId = 1;
+        s.Bases.Add(nearArmy); s.Bases.Add(farNavy);
+
+        var t = AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0), Domain.Sea);
+        Assert.Equal((ushort)11, t.BaseId); // the farther Navy base wins over the nearer Army base
+    }
+
+    [Fact]
+    public void ChooseTargetBase_for_sea_domain_returns_null_when_no_hostile_navy_base_exists()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        var army = new MilitaryBase(10, BaseType.Army, new WorldPos(50, 0, 0)); army.OwnerFactionId = 1;
+        var airForce = new MilitaryBase(11, BaseType.AirForce, new WorldPos(60, 0, 0)); airForce.OwnerFactionId = 1;
+        s.Bases.Add(army); s.Bases.Add(airForce);
+
+        Assert.Null(AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0), Domain.Sea));
+    }
+
+    [Fact]
+    public void ChooseTargetBase_for_sea_domain_still_prefers_a_farther_nemesis_navy_base()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Factions.Add(new Faction(2, "Nemesis"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Relations.Set(0, 2, Relation.Nemesis);
+        var closeHostileNavy = new MilitaryBase(10, BaseType.Navy, new WorldPos(50, 0, 0)); closeHostileNavy.OwnerFactionId = 1;
+        var fartherNemesisNavy = new MilitaryBase(11, BaseType.Navy, new WorldPos(200, 0, 0)); fartherNemesisNavy.OwnerFactionId = 2;
+        s.Bases.Add(closeHostileNavy); s.Bases.Add(fartherNemesisNavy);
+
+        var t = AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0), Domain.Sea);
+        Assert.Equal((ushort)11, t.BaseId);
+    }
+
+    [Fact]
+    public void ChooseTargetBase_default_domain_is_unaffected_and_still_ignores_base_type()
+    {
+        // Domain.Land (the default) must keep the pre-Task64 behaviour: any hostile-owned base type
+        // is a valid target, regardless of BaseType.
+        var s = TwoEnemyBases(); // all three bases are BaseType.Army
+        var t = AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0));
+        Assert.Equal((ushort)10, t.BaseId);
+    }
+
+    [Fact]
+    public void AssignAdvance_sea_unit_targets_the_nearest_hostile_navy_base_ignoring_a_nearer_army_base()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        NavalUnitRoster.RegisterAll(s.Types);
+        var nearArmy = new MilitaryBase(10, BaseType.Army, new WorldPos(50, 0, 0)); nearArmy.OwnerFactionId = 1;
+        var farNavy = new MilitaryBase(11, BaseType.Navy, new WorldPos(500, 0, 0)); farNavy.OwnerFactionId = 1;
+        s.Bases.Add(nearArmy); s.Bases.Add(farNavy);
+        s.Units.Add(new UnitInstance(1, NavalUnitRoster.TypeKey(UnitCategory.Destroyer, 1), 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.Equal(500f, u.OrderTargetPos.Value.X, 3); // Navy base, not the nearer Army base
+    }
+
+    [Fact]
+    public void AssignAdvance_sea_unit_gets_no_order_when_no_hostile_navy_base_exists()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        NavalUnitRoster.RegisterAll(s.Types);
+        var army = new MilitaryBase(10, BaseType.Army, new WorldPos(50, 0, 0)); army.OwnerFactionId = 1;
+        s.Bases.Add(army);
+        s.Units.Add(new UnitInstance(1, NavalUnitRoster.TypeKey(UnitCategory.Destroyer, 1), 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1); // MVP patrol behaviour: idle, no advance order, still fights whatever comes in range
+        Assert.False(u.OrderTargetPos.HasValue);
+        Assert.Equal(UnitState.Idle, u.State);
+    }
+
+    [Fact]
+    public void AssignAdvance_land_unit_targeting_is_unaffected_by_the_sea_navy_restriction()
+    {
+        var s = TwoEnemyBases(); // all BaseType.Army; a land unit must still be able to target them
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.Equal(100f, u.OrderTargetPos.Value.X, 3); // near Army base, as before
+    }
+
     [Fact]
     public void AssignAdvance_sets_moving_orders_for_faction_units()
     {

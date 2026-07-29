@@ -77,8 +77,13 @@ namespace CSWarfront.Core
         /// <summary>着弾による基地HPの減少量（固定値）。占領猶予中の基地は無傷（BaseCombatStepと同じ方針）。</summary>
         public const float ImpactDamageBase = 300f;
 
-        /// <summary>着弾による外部脅威（KAIJU/Alien）へのダメージ（固定値）。</summary>
-        public const float ImpactDamageThreat = 600f;
+        /// <summary>着弾による外部脅威（KAIJU/Alien）へのダメージ（固定値）。
+        /// Task64: 脅威HPのTier5再調整（Godzilla 20000→65000、Alien 8000→26000、
+        /// Core/ThreatCombatStep.ThreatArmor 20→45）に合わせて600→2000へ引き上げた。
+        /// 5発フル備蓄でも2000*5=10000（Godzillaの約15%、Alienの約38%）に留まり、単発でも連射でも
+        /// ミサイルだけで撃破できない「戦力を補う一撃」の位置づけを保つ（詳細な算出根拠は
+        /// ThreatCombatStep.ThreatArmorのコメントおよびtask-64レポート参照）。</summary>
+        public const float ImpactDamageThreat = 2000f;
 
         /// <summary>
         /// baseIdの基地からtargetへ1発発射する。判定順序（先に失敗した方を返す）:
@@ -188,9 +193,14 @@ namespace CSWarfront.Core
             return false;
         }
 
-        /// <summary>着弾解決: ImpactRadius以内の全ての自軍・非自軍のユニット/基地/外部脅威（＝勢力を問わない、
-        /// CS都市建物は対象外＝スコープ外）にダメージを与える。基地は占領猶予中(CaptureGraceHours&gt;0)なら
-        /// 無傷（BaseCombatStepの猶予保護と同じ方針）。</summary>
+        /// <summary>着弾解決: ImpactRadius以内のユニット/基地/外部脅威にダメージを与える。
+        /// Task64（味方誤爆の除外）: 発射勢力自身、および発射勢力にとってRelation.Alliedな勢力の
+        /// ユニット/基地は無傷にする（RelationMatrixは自己関係を常にAlliedとして持つため、
+        /// 「発射勢力自身」は「Allied判定」の特殊ケースとして自動的にカバーされる＝分岐を分ける必要がない）。
+        /// Neutral勢力は引き続きダメージを受ける（巻き添え被害＝意図的な設計。ミサイルは狙った座標を
+        /// 面で薙ぎ払うだけで、中立勢力まで気を遣ってはくれない）。外部脅威(KAIJU/Alien)は
+        /// 誰の味方でもないため、勢力を問わず常にダメージを受ける（下のThreatsループにAllied判定は無い）。
+        /// 基地は占領猶予中(CaptureGraceHours&gt;0)なら無傷（BaseCombatStepの猶予保護と同じ方針）。</summary>
         private static void ResolveImpact(WarState state, MissileInFlight m)
         {
             WorldPos pos = m.To;
@@ -200,6 +210,7 @@ namespace CSWarfront.Core
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
                 if (pos.HorizontalDistanceTo(u.Position) > ImpactRadius) continue;
+                if (state.Relations.Get(m.FactionId, u.FactionId) == Relation.Allied) continue; // 自軍・同盟軍は無傷（Task64）
 
                 u.CurrentHP -= ImpactDamageUnit;
                 if (u.State != UnitState.Dead && u.CurrentHP <= 0f)
@@ -218,6 +229,7 @@ namespace CSWarfront.Core
                 if (b.OwnerFactionId == null) continue;
                 if (b.CaptureGraceHours > 0f) continue; // 猶予中は無敵（BaseCombatStepと同じ方針）
                 if (pos.HorizontalDistanceTo(b.Position) > ImpactRadius) continue;
+                if (state.Relations.Get(m.FactionId, b.OwnerFactionId.Value) == Relation.Allied) continue; // 自軍・同盟軍の基地は無傷（Task64）
 
                 b.CurrentHP -= ImpactDamageBase;
                 if (b.CurrentHP < 0f) b.CurrentHP = 0f;

@@ -36,9 +36,18 @@ namespace CSWarfront.Game
         // HP/装甲テーブル（design指定値、Task58）。相手MODはHPを持たないため、ここがCSWarfront側の
         // 唯一の真実源になる。Radiusは大型の当たり判定を確保するためThreatCombatStep.ThreatArmorと
         // 合わせてチューニングした値（ユニットのRangeへ加算される、Core/ThreatCombatStep参照）。
-        private const float GodzillaMaxHP = 20000f;
+        //
+        // Task64再調整（旧Godzilla20000/Alien8000→65000/26000）: Core/ThreatCombatStep.ThreatArmorを
+        // 20→45へ引き上げた上で、Tier5戦車50両編成（DamagePerHit(104,45)=59 * accuracy0.868 ≈ 51.2/h、
+        // 合計約2560/h）がおおよそゲーム内1日で仕留められる分量へHPを再設定した:
+        //   Godzilla 65000 / 2560 ≈ 25.4h（≈1日強）
+        //   Alien    26000 / 2560 ≈ 10.2h（Godzillaの約40%、より短時間で片付く「小型脅威」の位置づけ）
+        // 爆撃機・観測支援を受けた砲兵はこれより大幅に速く削れる（詳細はtask-64レポート参照）。
+        // 弾道ミサイル(BallisticMissiles.ImpactDamageThreat=2000)も同時に引き上げてあり、5発フル備蓄
+        // (10000)はGodzillaの約15%・Alienの約38%に相当する「戦力を補う一撃」に留まる（単発で解決しない）。
+        private const float GodzillaMaxHP = 65000f;
         private const float GodzillaRadius = 45f;
-        private const float AlienMaxHP = 8000f;
+        private const float AlienMaxHP = 26000f;
         private const float AlienRadius = 25f;
 
         // 初期値をThreatSyncIntervalHoursにしておくことで、セッション開始後の最初のOnSimTick呼び出しで

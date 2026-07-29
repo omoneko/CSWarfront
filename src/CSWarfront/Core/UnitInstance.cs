@@ -112,6 +112,18 @@ namespace CSWarfront.Core
         /// （「suppresses cover after a stall and re-enables it later」の実装）。</summary>
         public float CoverSuppressionRemaining;
 
+        /// <summary>UnitCategory.Carrierのみが使う: 現在建造中の艦載機の進捗（0..1、Task64）。
+        /// 0fは「建造中でない（次tickで新しい機体の建造着手を判定する）」を意味し、CarrierAirWing.Advanceが
+        /// 建造着手の瞬間に微小な正の値へ設定することで「建造中」と区別する（MilitaryBase.MissileBuildProgress
+        /// と同じ実行時のみ・非永続化パターン）。空母以外のユニットでは常に0のまま無視される。</summary>
+        public float CarrierBuildProgress;
+
+        /// <summary>UnitCategory.Carrierのみが使う: これまでにこの空母が建造着手した艦載機の累計数
+        /// （実行時のみ・非永続化、Task64）。CarrierAirWing.NextBuildCategoryが「艦載機id＋この累計数」を
+        /// ハッシュして次に建造する兵科を決定的に選ぶための入力になる（seedにより偏らせつつも
+        /// System.Randomは使わない）。1回の建造に着手するたびに1つずつ増える。</summary>
+        public uint CarrierBuildCounter;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;

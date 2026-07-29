@@ -180,6 +180,88 @@ public class BallisticMissilesTests
         Assert.Equal(500f, graced.CurrentHP, 3); // untouched
     }
 
+    // --- Task64: no friendly fire — the launching faction and its allies are spared, hostile/neutral
+    // factions and external threats still take the full hit. ---
+
+    [Fact]
+    public void Impact_spares_the_launching_factions_own_units()
+    {
+        var s = WithLaunchedMissileBase(1, out var b); // launcher faction = 0
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var own = new UnitInstance(1, "x", 0, 500f, target); // same faction as launcher
+        s.Units.Add(own);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(500f, own.CurrentHP, 3); // untouched
+    }
+
+    [Fact]
+    public void Impact_spares_units_of_a_faction_allied_to_the_launcher()
+    {
+        var s = WithLaunchedMissileBase(1, out var b); // launcher faction = 0
+        s.Factions.Add(new Faction(2, "Green"));
+        s.Relations.Set(0, 2, Relation.Allied);
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var allied = new UnitInstance(1, "x", 2, 500f, target);
+        s.Units.Add(allied);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(500f, allied.CurrentHP, 3); // untouched
+    }
+
+    [Fact]
+    public void Impact_still_damages_a_neutral_factions_units()
+    {
+        var s = WithLaunchedMissileBase(1, out var b); // launcher faction = 0
+        s.Factions.Add(new Faction(2, "Green")); // default relation to 0 is Neutral
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var neutral = new UnitInstance(1, "x", 2, 500f, target);
+        s.Units.Add(neutral);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(500f - MissileStep.ImpactDamageUnit, neutral.CurrentHP, 3); // collateral damage, intended
+    }
+
+    [Fact]
+    public void Impact_spares_the_launching_factions_own_bases()
+    {
+        var s = WithLaunchedMissileBase(1, out var b); // launcher faction = 0
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var ownBase = new MilitaryBase(200, BaseType.Army, target);
+        ownBase.OwnerFactionId = 0;
+        ownBase.MaxHP = 500f; ownBase.CurrentHP = 500f;
+        s.Bases.Add(ownBase);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(500f, ownBase.CurrentHP, 3); // untouched
+    }
+
+    [Fact]
+    public void Impact_spares_bases_of_a_faction_allied_to_the_launcher()
+    {
+        var s = WithLaunchedMissileBase(1, out var b); // launcher faction = 0
+        s.Factions.Add(new Faction(2, "Green"));
+        s.Relations.Set(0, 2, Relation.Allied);
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var alliedBase = new MilitaryBase(200, BaseType.Army, target);
+        alliedBase.OwnerFactionId = 2;
+        alliedBase.MaxHP = 500f; alliedBase.CurrentHP = 500f;
+        s.Bases.Add(alliedBase);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(500f, alliedBase.CurrentHP, 3); // untouched
+    }
+
     [Fact]
     public void Impact_damages_external_threats_within_radius()
     {

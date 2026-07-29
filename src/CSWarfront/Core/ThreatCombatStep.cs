@@ -19,8 +19,25 @@ namespace CSWarfront.Core
     {
         /// <summary>脅威に対する装甲値。ゴジラ/エイリアンは規格外にタフなので、小火器は
         /// CombatMath.DamagePerHitの最低保証(1)しか通らずほぼ無力化される一方、戦車・砲兵クラスの
-        /// 攻撃力（Attack &gt; ThreatArmor）があって初めて有効打になる（ThreatCombatStepTests参照）。</summary>
-        public const float ThreatArmor = 20f;
+        /// 攻撃力（Attack &gt; ThreatArmor）があって初めて有効打になる（ThreatCombatStepTests参照）。
+        ///
+        /// Task64再調整（旧20→45）: 旧値20はTier1火力を基準にしていたが、Tier5編成では脆すぎた。
+        /// 実際の算出（TierScaling: Attack x2.6・Accuracy基礎値の1.24倍@Tier5、CombatMath.DamagePerHit=
+        /// max(1,attack-armor)）:
+        ///   Tier5戦車 (Attack 40x2.6=104, Accuracy 0.70x1.24=0.868):
+        ///     旧armor20 → DamagePerHit(104,20)=84 × 0.868 ≈ 72.9/h。
+        ///     50両編成なら 50*72.9 ≈ 3645/h、旧Godzilla(20000)を約5.5時間で撃破 — Tier5編成に対して
+        ///     一瞬で溶けてしまい「弱すぎる」というユーザー指摘の直接の原因。
+        ///     新armor45 → DamagePerHit(104,45)=59 × 0.868 ≈ 51.2/h（約30%減）。
+        ///   Tier5歩兵 (Attack 20x2.6=52, Accuracy 0.75x1.24=0.93):
+        ///     新armor45 → DamagePerHit(52,45)=max(1,7)=7 × 0.93 ≈ 6.5/h。
+        ///     戦車(≈51.2/h)の約1/8に留まり、「小火器はほぼ無力」という設計意図はTier5でも健在
+        ///     （旧armor20のTier1同士の比較ほど極端(旧19倍)ではないが、装甲45は歩兵の生アタック52
+        ///     ぎりぎりを削り取る値に意図的にチューニングしてあり、歩兵単独の脅威狩りを引き続き
+        ///     非現実的にする）。
+        /// 新しいHP値（Godzilla 65000/Alien 26000）・ミサイル対脅威ダメージ(2000)の算出根拠も
+        /// あわせてtask-64レポート参照。</summary>
+        public const float ThreatArmor = 45f;
 
         public static void Advance(WarState state, float dt)
         {

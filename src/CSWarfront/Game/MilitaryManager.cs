@@ -350,6 +350,20 @@ namespace CSWarfront.Game
                 // ユニット生産と同じ「生産計画→進捗消化」の並びに揃える。
                 MissileStockpile.Advance(State, dt);
 
+                // Task64: 空母の艦載機運用。基地(MilitaryBase)のキュー機構を使わずCarrierAirWingが
+                // 直接UnitInstanceを追加する（ProductionStepと同じ並び位置、ProductionStep自身の
+                // すぐ後）。例外はCarrierAirWing.Advance内で発生させない設計だが、simループを
+                // 絶対に止めないための最終防御としてtry/catchで包む（他のCore step呼び出しには
+                // 無い追加のガードだが、新規ロジックを初めてゲームループに繋ぐタスクのため慎重を期す）。
+                try
+                {
+                    CarrierAirWing.Advance(State, dt);
+                }
+                catch (Exception e)
+                {
+                    ModConfig.LogError("MilitaryManager: CarrierAirWing.Advance 中に例外: " + e);
+                }
+
                 // 道路網（State.Roads）の構築/再構築。InvasionOrdersが同tickで経路計算できるよう、
                 // 進軍命令より先に済ませる（Task23）。未供給ならここで即座に構築し、供給済みなら
                 // プレイヤーの道路建設/破壊を反映するため一定間隔で作り直す。ビルド失敗（null）時は

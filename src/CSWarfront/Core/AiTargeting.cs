@@ -4,15 +4,24 @@ namespace CSWarfront.Core
     {
         /// <summary>Task59: 宿敵(Nemesis)勢力が所有する基地が1つでもあれば、その中で最近接のものを
         /// 通常のHostile所有基地より優先して返す。宿敵所有基地が無ければ従来通り最近接のHostile所有
-        /// 基地を返す（宿敵が存在しない場合は挙動が完全に従来のまま）。</summary>
-        public static MilitaryBase ChooseTargetBase(WarState state, byte factionId, WorldPos from)
+        /// 基地を返す（宿敵が存在しない場合は挙動が完全に従来のまま）。
+        ///
+        /// Task64: domainを省略（またはDomain.Land/Airのまま呼ぶ）した従来の呼び出し元は、基地の
+        /// BaseTypeを問わず最近接のHostile/Nemesis所有基地を返す従来通りの挙動を維持する。
+        /// domain=Domain.Seaで呼んだ場合のみ、BaseType.Navyの基地に絞り込む——海上ユニットは
+        /// 内陸のArmy/AirForce/MissileBaseへ直線で向かって座礁するのを防ぐため（ユーザー要望
+        /// 「海上経路探索は敵海軍基地までの直線でひとまず」）。Nemesis優先の優先順位そのものは
+        /// Navy基地の集合の中でも変わらず適用される。</summary>
+        public static MilitaryBase ChooseTargetBase(WarState state, byte factionId, WorldPos from, Domain domain = Domain.Land)
         {
+            bool navyOnly = domain == Domain.Sea;
             MilitaryBase bestHostile = null; float bestHostileDist = float.MaxValue;
             MilitaryBase bestNemesis = null; float bestNemesisDist = float.MaxValue;
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 var b = state.Bases[j];
                 if (b.OwnerFactionId == null) continue;
+                if (navyOnly && b.Type != BaseType.Navy) continue;
                 Relation r = state.Relations.Get(factionId, b.OwnerFactionId.Value);
                 if (!r.IsHostile()) continue;
                 float d = from.HorizontalDistanceTo(b.Position);
@@ -77,6 +86,13 @@ namespace CSWarfront.Core
                 u.PathRetryCooldown -= dt;
                 if (u.PathRetryCooldown < 0f) u.PathRetryCooldown = 0f;
 
+                // Task61: Sea/Airは道路経路を一切使わない（MovementStepのSea/Air分岐はu.Pathを参照しない、
+                // Core/MovementStep.cs参照）。道路パスファインディングの予算(maxPathComputations)を
+                // 陸上ユニットのために温存するため、対象外のドメインではFindPathを一切試みない。
+                UnitType type = state.Types.Get(u.TypeKey);
+                Domain domain = type != null ? type.Domain : Domain.Land; // 型が引けない防御的ケースは従来通りLand扱い
+                bool isLand = domain == Domain.Land;
+
                 WorldPos targetPos;
                 if (divertTarget.HasValue)
                 {
@@ -84,7 +100,11 @@ namespace CSWarfront.Core
                 }
                 else
                 {
-                    var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position);
+                    // Task64: Sea(艦艇)は BaseType.Navy の敵対所有基地のみを狙う（内陸のArmy/AirForce/
+                    // MissileBaseへ直線で向かって座礁するのを防ぐ）。Navy基地が1つも無ければ
+                    // targetがnullになり下のcontinueでスキップされる＝進撃命令を出さない
+                    // （MVPの巡回挙動：その場でIdleのまま、射程内に来た敵とは引き続き交戦する）。
+                    var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position, domain);
                     if (target == null) continue;
                     targetPos = target.Position;
                 }
@@ -94,12 +114,6 @@ namespace CSWarfront.Core
 
                 if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value))
                     u.ClearPath();
-
-                // Task61: Sea/Airは道路経路を一切使わない（MovementStepのSea/Air分岐はu.Pathを参照しない、
-                // Core/MovementStep.cs参照）。道路パスファインディングの予算(maxPathComputations)を
-                // 陸上ユニットのために温存するため、対象外のドメインではFindPathを一切試みない。
-                UnitType type = state.Types.Get(u.TypeKey);
-                bool isLand = type == null || type.Domain == Domain.Land; // 型が引けない防御的ケースは従来通り試みる
 
                 if (isLand && state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
                 {
