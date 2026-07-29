@@ -58,6 +58,12 @@ namespace CSWarfront.Game
                 for (int i = 0; i < kills.Count; i++)
                 {
                     KillEvent k = kills[i];
+                    // Task53: 歩兵・ドローン兵の撃破では「車両撃破時」の爆発音をオミットする
+                    // （生身の歩兵が爆発するのは演出として不自然なため）。MechInfantryは車両に
+                    // 乗った機械化歩兵なので対象外＝従来どおり爆発音を鳴らす（あえて含めない）。
+                    if (k.Category == UnitCategory.Infantry || k.Category == UnitCategory.DroneInfantry)
+                        continue;
+
                     Vector3 pos = new Vector3(k.Position.X, k.Position.Y, k.Position.Z);
                     WarfrontSoundPlayer.PlayKill(pos, cameraPos);
                 }

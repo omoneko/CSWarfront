@@ -19,10 +19,19 @@ namespace CSWarfront.Core
         /// <summary>撃破されたユニット（victim）の所属勢力ID。</summary>
         public byte FactionId;
 
-        public KillEvent(WorldPos position, byte factionId)
+        /// <summary>撃破されたユニット（victim）の兵科（Task53、歩兵系の撃破音オミット）。
+        /// Game層（CombatFx.SpawnKillSounds）がこれを見て、歩兵（Infantry/DroneInfantry）の
+        /// 撃破では「車両撃破時」の爆発音を鳴らさないよう間引く。ダメージ計算・命中判定には
+        /// 一切使わない（ShotEvent.Categoryと同じく見た目・音専用の付随データ）。
+        /// UnitTypeが見つからない防御的ケースではdefault(UnitCategory)（Tank=0）が入る
+        /// （その場合は撃破音を鳴らす側＝安全側のフォールバック）。</summary>
+        public UnitCategory Category;
+
+        public KillEvent(WorldPos position, byte factionId, UnitCategory category)
         {
             Position = position;
             FactionId = factionId;
+            Category = category;
         }
     }
 }

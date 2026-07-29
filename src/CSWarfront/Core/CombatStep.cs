@@ -55,13 +55,17 @@ namespace CSWarfront.Core
             // 2) 死亡判定
             // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
             // トリガーとしてKillEventを1件だけ積む（State != Deadを条件にしているため二重には積まない）。
+            // Task53: KillEventに被撃破ユニットのUnitCategoryを積む（歩兵系の撃破音オミット判定用）。
+            // UnitTypeが見つからない防御的ケースではdefault(UnitCategory)（Tank=0、撃破音は鳴る側）にする。
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
                 if (u.State != UnitState.Dead && u.CurrentHP <= 0f)
                 {
                     u.State = UnitState.Dead;
-                    state.AddKill(new KillEvent(u.Position, u.FactionId));
+                    var uType = state.Types.Get(u.TypeKey);
+                    var category = uType != null ? uType.Category : default(UnitCategory);
+                    state.AddKill(new KillEvent(u.Position, u.FactionId, category));
                 }
             }
         }

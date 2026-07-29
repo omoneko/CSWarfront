@@ -298,6 +298,29 @@ public class CombatStepTests
         var kill = s.RecentKills[0];
         Assert.Equal(50f, kill.Position.X, 3); // 撃破されたunit2の位置
         Assert.Equal((byte)1, kill.FactionId); // 撃破されたunit2（Blue）の所属勢力
+        Assert.Equal(UnitCategory.Tank, kill.Category); // Task53: 撃破されたunit2の兵科（Tank_T1）
+    }
+
+    // Task53: 歩兵の撃破音オミット判定に使うUnitCategoryが、被撃破ユニットのUnitTypeから
+    // 正しく引かれることを検証する（Game層CombatFx.SpawnKillSoundsのInfantry/DroneInfantry判定の前提）。
+    [Fact]
+    public void Killing_an_infantry_unit_emits_a_kill_event_with_Infantry_category()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Types.Register(MvpUnitTypes.Infantry_T1());
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0f, 0f, 0f)));
+        var victim = new UnitInstance(2, "Infantry_T1", 1, 1f, new WorldPos(50f, 0f, 0f));
+        s.Units.Add(victim);
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
+        Assert.Single(s.RecentKills);
+        Assert.Equal(UnitCategory.Infantry, s.RecentKills[0].Category);
     }
 
     [Fact]

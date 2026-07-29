@@ -37,7 +37,15 @@ namespace CSWarfront.Core
     ///     （UnitInstance.EngageHoldTimerで計測、CoverSeekStepが管理）。超えたら、CoverDestinationの
     ///     有無に関わらずEngaging中でもOrderTargetPos/Pathへの移動を許可する（射程内ならCombatStepが
     ///     移動しながらでも撃ち合いを継続する＝「it may keep firing while moving」）。
-    /// どちらか一方でも条件を満たせば、Engaging中でも移動を再開する（詳細はAdvanceの本体を参照）。</summary>
+    /// どちらか一方でも条件を満たせば、Engaging中でも移動を再開する（詳細はAdvanceの本体を参照）。
+    ///
+    /// Task53:「ユニットが時々地面にめり込む」不具合の修正。従来はYをウェイポイント/目標のYへ向けて
+    /// 補間するだけだった（上記Task37）が、これはウェイポイント間・オフロードの直線移動・遮蔽/集結移動の
+    /// 途中で、道路の盛土・建設後に変化した地形・橋などの"実際の"地表を下回ってしまうことがあった。
+    /// state.Height（IHeightSampler、Game層がTerrainManager.SampleDetailHeightで実装）が供給されて
+    /// いれば、X/Zを計算した直後に必ずそれでYを上書きする（ウェイポイント移動・直線移動・遮蔽移動・
+    /// 集結移動のすべての経路で共通）。state.Height == nullなら、従来のY補間をそのまま維持する
+    /// （安全側フォールバック・既存テストの前提を変えない）。</summary>
     public static class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
@@ -53,6 +61,8 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state, float dt)
         {
+            IHeightSampler height = state.Height; // Task53: null-safeなローカルへ1回だけ拾っておく。
+
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
@@ -67,13 +77,13 @@ namespace CSWarfront.Core
 
                 if (u.CoverDestination.HasValue)
                 {
-                    AdvanceTowardCover(u, stepLen, dt);
+                    AdvanceTowardCover(u, stepLen, dt, height);
                     continue;
                 }
 
                 if (u.Order == UnitOrder.RallyHold)
                 {
-                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen);
+                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen, height);
                     continue;
                 }
 
@@ -94,9 +104,9 @@ namespace CSWarfront.Core
 
                 if (!u.OrderTargetPos.HasValue) continue;
 
-                stepLen = ConsumePath(u, stepLen);
+                stepLen = ConsumePath(u, stepLen, height);
                 if (stepLen > 0f)
-                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen);
+                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen, height);
             }
         }
 
@@ -104,15 +114,15 @@ namespace CSWarfront.Core
         /// 計算した道路経路(Path)があればまずそれを消化し、残りは直線移動でフォールバックする
         /// （ConsumePath/AdvanceStraightは通常のOrderTargetPos移動と全く同じヘルパーを再利用する）。
         /// CoverArrivalDistance以内まで近づいたら以後は何もしない（その場に留まる）。</summary>
-        private static void AdvanceTowardRally(UnitInstance u, float stepLen)
+        private static void AdvanceTowardRally(UnitInstance u, float stepLen, IHeightSampler height)
         {
             WorldPos rally = u.RallyPoint.Value;
             float dist = u.Position.HorizontalDistanceTo(rally);
             if (dist <= CoverArrivalDistance) return;
 
-            stepLen = ConsumePath(u, stepLen);
+            stepLen = ConsumePath(u, stepLen, height);
             if (stepLen > 0f)
-                AdvanceStraight(u, rally, stepLen);
+                AdvanceStraight(u, rally, stepLen, height);
         }
 
         /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内に入ったら、
@@ -120,7 +130,7 @@ namespace CSWarfront.Core
         /// 「CoverDestinationをクリアして次tickから通常の経路/直線移動または次の遮蔽評価へ委ねる」
         /// (false、互換維持用のフォールバック経路)かを分岐する。それ以外の距離ではAdvanceStraightと
         /// 同じ補間で進む（この間はCoverHoldTimerを0のまま維持し、実際に静止した時間だけを計測する）。</summary>
-        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt)
+        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt, IHeightSampler height)
         {
             WorldPos coverPos = u.CoverDestination.Value;
             float distBefore = u.Position.HorizontalDistanceTo(coverPos);
@@ -155,11 +165,11 @@ namespace CSWarfront.Core
 
             // まだ到達していない＝保持はまだ始まっていないのでタイマーは0のまま。
             u.CoverHoldTimer = 0f;
-            AdvanceStraight(u, coverPos, stepLen);
+            AdvanceStraight(u, coverPos, stepLen, height);
         }
 
         /// <summary>Pathが残っていればウェイポイントを順に消化する。残ったstepLen（直線フォールバック用）を返す。</summary>
-        private static float ConsumePath(UnitInstance u, float stepLen)
+        private static float ConsumePath(UnitInstance u, float stepLen, IHeightSampler height)
         {
             if (u.Path == null) return stepLen;
 
@@ -172,13 +182,15 @@ namespace CSWarfront.Core
                 {
                     // Task37: ウェイポイントに到達したらそのウェイポイントのYをそのまま採用する
                     // （旧: u.Position.Yを維持 → 路面から浮く原因だった）。
-                    u.Position = new WorldPos(waypoint.X, waypoint.Y, waypoint.Z);
+                    // Task53: state.Heightが供給されていれば、そのウェイポイントのYではなく
+                    // 実際の地表（建設後）のYへスナップする（ウェイポイント自体のYが古い/不正確でも安全）。
+                    u.Position = ResolvePosition(waypoint.X, waypoint.Y, waypoint.Z, height);
                     stepLen -= dist;
                     u.PathIndex++;
                 }
                 else
                 {
-                    MoveToward(u, waypoint, stepLen);
+                    MoveToward(u, waypoint, stepLen, height);
                     return 0f;
                 }
             }
@@ -186,20 +198,24 @@ namespace CSWarfront.Core
             return stepLen;
         }
 
-        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen)
+        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height)
         {
             float dist = u.Position.HorizontalDistanceTo(target);
             if (dist <= stepLen || dist <= 0.01f)
-                u.Position = new WorldPos(target.X, target.Y, target.Z); // 到達: targetのYをそのまま採用（Task37、旧:u.Position.Y維持）
+                // 到達: targetのYをそのまま採用（Task37、旧:u.Position.Y維持）。
+                // Task53: state.Heightが供給されていれば実際の地表のYへスナップする。
+                u.Position = ResolvePosition(target.X, target.Y, target.Z, height);
             else
-                MoveToward(u, target, stepLen);
+                MoveToward(u, target, stepLen, height);
         }
 
         /// <summary>X/Zと同じ補間係数(t = stepLen/dist)でYも目標へ向けて補間する（Task37）。
         /// 旧仕様は常に u.Position.Y を維持していたため、道路の勾配（橋・坂）を無視して水平飛行して
         /// しまい「路面から浮いている」ように見えるバグの原因だった。X/Zの補間ロジック自体は変更していない
-        /// （オーバーシュートは発生しない、既存のAdvance_stops_at_target_without_overshootで保証）。</summary>
-        private static void MoveToward(UnitInstance u, WorldPos target, float stepLen)
+        /// （オーバーシュートは発生しない、既存のAdvance_stops_at_target_without_overshootで保証）。
+        /// Task53: heightが供給されていれば、この補間したY自体は使わず、計算済みのX/Zで実際の地表を
+        /// サンプリングした値をYに採用する（ResolvePositionが分岐）。</summary>
+        private static void MoveToward(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height)
         {
             float dist = u.Position.HorizontalDistanceTo(target);
             if (dist <= 0.01f) return;
@@ -207,7 +223,17 @@ namespace CSWarfront.Core
             float nx = u.Position.X + (target.X - u.Position.X) * t;
             float nz = u.Position.Z + (target.Z - u.Position.Z) * t;
             float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
-            u.Position = new WorldPos(nx, ny, nz);
+            u.Position = ResolvePosition(nx, ny, nz, height);
+        }
+
+        /// <summary>Task53: 移動計算で得たX/Y/Zから実際に採用するWorldPosを組み立てる。heightが供給されて
+        /// いれば、渡されたy（従来のウェイポイント/補間Y）を捨てて height.SampleHeight(x, z)（建設後の
+        /// 実地表）で上書きする。heightがnullなら渡されたyをそのまま使う（従来どおりの補間・スナップ挙動、
+        /// 既存テストの前提を変えない安全側フォールバック）。</summary>
+        private static WorldPos ResolvePosition(float x, float y, float z, IHeightSampler height)
+        {
+            if (height != null) y = height.SampleHeight(x, z);
+            return new WorldPos(x, y, z);
         }
     }
 }

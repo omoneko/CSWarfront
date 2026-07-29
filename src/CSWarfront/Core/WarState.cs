@@ -19,6 +19,14 @@ namespace CSWarfront.Core
         /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
         public CoverMap Cover;
 
+        /// <summary>Game層から供給される地表高さサンプラー（実行時のみ・非永続化、Task53）。
+        /// 未供給ならnull＝MovementStepは従来どおりウェイポイント/目標のYを補間する（既存の挙動・
+        /// テストへの後方互換フォールバック）。供給されていれば、道路/建物建設後の"見た目の"地表
+        /// （TerrainManager.SampleDetailHeight相当）へユニットのYをスナップし、路面へのめり込みを防ぐ。
+        /// RoadGraph/CoverMapと同じパターン: WarStateとライフサイクルを共にする（Stateごと破棄される）ため、
+        /// Reset()で個別にnullへ戻す必要はない。</summary>
+        public IHeightSampler Height;
+
         /// <summary>
         /// Task42: 直近1tick分の「見える発砲」イベントのトランジェント・バッファ（非永続化）。
         /// CombatStep/BaseCombatStepがダメージを実適用したタイミングでAddShotを通じて積む

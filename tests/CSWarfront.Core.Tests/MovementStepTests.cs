@@ -4,6 +4,16 @@ using Xunit;
 
 public class MovementStepTests
 {
+    // Task53: state.Height（IHeightSampler）のフェイク実装。x+zという単純な決定的関数を返すため、
+    // 「移動後のPosition.Yが常にSampleHeight(X, Z)と一致する」ことをアサーションだけで検証できる
+    // （ウェイポイント/直線移動どちらのYとも通常一致しない値なので、旧来のY補間経路が誤って
+    // 使われていないことも同時に検出できる）。
+    private class FakeHeightSampler : IHeightSampler
+    {
+        public float SampleHeight(float x, float z) { return x + z; }
+    }
+
+
     private static WarState OneMovingUnit()
     {
         var s = new WarState();
@@ -569,5 +579,86 @@ public class MovementStepTests
         MovementStep.Advance(s, 1f);
         Assert.True(s.Units[0].Position.X > beforeX,
             "expected the unit to resume advancing once MaxCoverHoldHours elapsed");
+    }
+
+    // --- Task53: state.Heightが供給されている場合、Yは常にサンプリング値へ置き換わる ---
+
+    [Fact]
+    public void Advance_uses_sampled_height_instead_of_waypoint_y_on_arrival_when_HeightSampler_supplied()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(10, 7, 0);
+        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // ウェイポイント自体のY=7
+        u.PathIndex = 0;
+        u.PathTarget = u.OrderTargetPos;
+        s.Units.Add(u);
+        s.Height = new FakeHeightSampler(); // SampleHeight(10, 0) = 10
+
+        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達（ウェイポイントに到達）
+        MovementStep.Advance(s, 2f);
+
+        Assert.Equal(10f, s.Units[0].Position.X, 1);
+        // Task37の旧仕様なら Y はウェイポイントの7になるはずだが、Heightサンプラーがあれば
+        // それを無視して SampleHeight(10, 0) = 10 が採用される。
+        Assert.Equal(10f, s.Units[0].Position.Y, 3);
+    }
+
+    [Fact]
+    public void Advance_uses_sampled_height_during_partial_straight_line_move_when_HeightSampler_supplied()
+    {
+        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0)、Yは直線移動では常に0のはず（旧仕様）
+        s.Height = new FakeHeightSampler();
+
+        MovementStep.Advance(s, 1f); // stepLen ≈ TankSpeedPerHour(5.418), まだ目標に届かない部分移動
+
+        var pos = s.Units[0].Position;
+        Assert.Equal(TankSpeedPerHour, pos.X, 2);
+        Assert.Equal(0f, pos.Z, 1);
+        // 旧来の補間ならYは0のまま維持されるはずだが、SampleHeight(X, Z) = X + 0 = X が採用される。
+        Assert.Equal(pos.X, pos.Y, 3);
+    }
+
+    [Fact]
+    public void Advance_uses_sampled_height_during_partial_cover_move_when_HeightSampler_supplied()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Engaging;
+        u.CoverDestination = new WorldPos(0, 0, 1000); // 南北方向、Z方向へ部分移動する
+        s.Units.Add(u);
+        s.Height = new FakeHeightSampler();
+
+        MovementStep.Advance(s, 1f); // まだCoverArrivalDistanceに届かない部分移動
+
+        var pos = s.Units[0].Position;
+        Assert.Equal(0f, pos.X, 1);
+        Assert.True(pos.Z > 0f, "expected partial movement toward CoverDestination");
+        // SampleHeight(X, Z) = X + Z = 0 + Z = Z が採用される（旧来の補間なら0のまま）。
+        Assert.Equal(pos.Z, pos.Y, 3);
+    }
+
+    [Fact]
+    public void Advance_preserves_old_y_interpolation_when_HeightSampler_is_null()
+    {
+        // 回帰確認: state.Heightを一切設定しない（既定でnull）場合、Task37の従来のY補間が
+        // そのまま維持されることを明示的に確認する（他の大多数のテストが暗黙に依存している前提）。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 42, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(100, 0, 0);
+        s.Units.Add(u);
+        Assert.Null(s.Height);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(39.7f, s.Units[0].Position.Y, 1); // Advance_interpolates_y_toward_target_in_straight_line_fallbackと同じ期待値
     }
 }

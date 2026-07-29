@@ -343,6 +343,16 @@ namespace CSWarfront.Game
                     }
                 }
 
+                // 地表高さサンプラー（State.Height）の供給（Task53）。RoadGraph/Coverと違って毎tick
+                // 作り直す必要のある「スナップショット」ではなく、TerrainManagerへその場で問い合わせる
+                // 薄いアダプタなので、一度だけ生成して以後はそのまま使い回す（未供給時はnullのまま
+                // ＝MovementStepが自動的に従来のY補間へフォールバックするため、失敗時の再試行ロジックは
+                // 不要）。State自体が破棄されればHeightも道連れで消える（Roadsと同じライフサイクル）。
+                if (State.Height == null)
+                {
+                    State.Height = new SurfaceHeightSampler();
+                }
+
                 // 遮蔽物マップ（State.Cover）の構築/再構築（Task44）。RoadGraphと同じ「未供給なら即座に
                 // 構築を試みる／供給済みなら一定間隔で作り直す／失敗時は既存マップを維持する」パターン。
                 // CoverSeekStepが同tickでこのマップを使えるよう、進軍命令より先に済ませる。
