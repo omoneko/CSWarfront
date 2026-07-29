@@ -78,6 +78,9 @@ namespace CSWarfront.Game
         // OnMainVisualUpdate で使い回すスナップショット（GC回避）。メインスレッド専用アクセス。
         private static readonly List<UnitVisualState> _visualSnapshot = new List<UnitVisualState>();
 
+        // Task60: 同上、軍事拠点（BaseVisuals）向けのスナップショット。メインスレッド専用アクセス。
+        private static readonly List<BaseVisualState> _baseVisualSnapshot = new List<BaseVisualState>();
+
         // Task42: OnMainVisualUpdate で使い回す発砲イベントのスナップショット（GC回避）。
         // メインスレッド専用アクセス。State.RecentShotsの内容を_stateLock内でここへコピーしてから、
         // ロック解放後にCombatFx.Spawnへ渡す（UnitVisuals向けの_visualSnapshotと同じパターン）。
@@ -553,6 +556,7 @@ namespace CSWarfront.Game
             if (State == null) return;
 
             _visualSnapshot.Clear();
+            _baseVisualSnapshot.Clear();
             _shotSnapshot.Clear();
             _killSnapshot.Clear();
             lock (_stateLock)
@@ -572,6 +576,30 @@ namespace CSWarfront.Game
                     });
                 }
 
+                // Task60: 軍事拠点も同じロック内でスナップショットを組み立てる。位置(WorldPos)は
+                // Core（State.Bases、基地配置時にBasePlacementWatcherが一度だけ記録した不変値
+                // ＝拠点は配置後に移動しないため再読込不要）から、向きはBasePlacementWatcher
+                // ._baseAngles（simスレッドがCS建物バッファから既に読み取り済みのキャッシュ、
+                // このロックと同じ_stateLockで書き込まれるため、ここで読むのは安全）から取る。
+                // BuildingManagerバッファへメインスレッドから直接アクセスすることは一切無い
+                // （CS実体はsimスレッド専用というルールを維持する）。
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    MilitaryBase b = State.Bases[i];
+                    if (b.OwnerFactionId == null) continue; // 未所属の拠点は勢力別割り当ての対象外
+
+                    float angle;
+                    if (!BasePlacementWatcher.TryGetAngle(b.BaseId, out angle)) angle = 0f;
+
+                    _baseVisualSnapshot.Add(new BaseVisualState
+                    {
+                        BaseId = b.BaseId,
+                        FactionId = b.OwnerFactionId.Value,
+                        Position = new Vector3(b.Position.X, b.Position.Y, b.Position.Z),
+                        Angle = angle
+                    });
+                }
+
                 // Task42: 発砲エフェクトも同じロック内でコピーする（State.RecentShotsはsimスレッドが
                 // 書き込むトランジェント・バッファのため、ロック外で読むとレースになる）。
                 for (int i = 0; i < State.RecentShots.Count; i++)
@@ -583,6 +611,7 @@ namespace CSWarfront.Game
             }
 
             UnitVisuals.Sync(_visualSnapshot);
+            BaseVisuals.Sync(_baseVisualSnapshot); // Task60: ロック解放後、Unity操作はここで行う
 
             // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
@@ -605,6 +634,7 @@ namespace CSWarfront.Game
             // Reset()自体はCSのロードライフサイクル（メインスレッド、OnLevelUnloading経由）から
             // 呼ばれるためここで直接呼んで問題ない（_stateLockはCS実体を持たないState差し替えのみ保護）。
             UnitVisuals.DestroyAll();
+            BaseVisuals.DestroyAll(); // Task60: 基地の勢力別オーバーレイもレベルアンロード時に破棄する。
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
             // Task54: このMODが封鎖した道路(PathFailedビット)を解除する。Reset()自体はOnLevelUnloading
             // （レベル遷移中、simスレッドは既に停止している想定）から呼ばれるため他スレッドとの競合は

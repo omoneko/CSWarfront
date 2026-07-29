@@ -86,6 +86,24 @@ namespace CSWarfront.Game
     {
         private const string FileName = "unit-assets.txt";
 
+        /// <summary>
+        /// Task60: 軍事拠点（MilitaryBase、Game/WarfrontBasePrefab.cs が登録する単一のBuildingInfo）の
+        /// 勢力別モデル割り当てに使う特別な TypeKey。<b>ユニット種別ではない</b>
+        /// （LandUnitRoster.All()には含まれず、UnitType/UnitCategoryとしての実体も持たない）。
+        /// 単に「(勢力, "MilitaryBase") → アセット」という1エントリを、既存のユニット向け割り当て
+        /// インフラ（本ファイルのTryGet/Set/Clear、ファイル形式、UI一式）にそのまま相乗りさせるための
+        /// 識別子として使う。TryGet呼び出し自体は変更不要（Tierフォールバック探索はTypeKeyParser.TryParse
+        /// がこの文字列を解析できず素通りするだけで、勢力別/全勢力共通のexact-key解決はそのまま動く）。
+        /// CopyTo だけはこのキーを特別扱いする必要がある（LandUnitRoster.All()を線形探索する既存ロジックは
+        /// この仮想的な"種別"を決して含まないため、同カテゴリ/全ユニット種別スコープはそもそも無意味）。
+        /// </summary>
+        public const string BaseTypeKey = "MilitaryBase";
+
+        /// <summary>UI（AssetAssignPanel/OptionsModelAssignPage）のドロップダウンで<see cref="BaseTypeKey"/>
+        /// の代わりに表示する日本語ラベル。生のキー文字列をそのまま出すと「これは35種のユニットの1つ」
+        /// という誤解を招くため、常にこのラベルへ差し替えて表示する。</summary>
+        public const string BaseTypeKeyDisplayName = "軍事基地（拠点）";
+
         private struct Binding
         {
             public AssetKind Kind;
@@ -271,6 +289,14 @@ namespace CSWarfront.Game
                 return 0;
             }
 
+            // Task60: コピー元が軍事拠点（BaseTypeKey）の場合は専用の複製処理へ分岐する。
+            // LandUnitRoster.All() を線形探索する下のユニット向けロジックはこの仮想的な"種別"を
+            // 決して含まないため、そのまま流すと必ず0件（TryGetCategory失敗）になってしまう。
+            if (fromTypeKey == BaseTypeKey)
+            {
+                return CopyBaseTo(fromFaction, kind, name, scope);
+            }
+
             UnitCategory fromCategory;
             if (!TryGetCategory(fromTypeKey, out fromCategory))
             {
@@ -311,6 +337,41 @@ namespace CSWarfront.Game
             if (written > 0) Save();
             ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + fromTypeKey + " (" +
                 AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し、" + written + " 件を書き込みました");
+            return written;
+        }
+
+        /// <summary>
+        /// Task60: コピー元が<see cref="BaseTypeKey"/>（軍事拠点）の場合専用の複製処理。
+        /// 拠点には「カテゴリ」も「Tier」も「他のユニット種別」も存在しないため、CopyScopeのうち
+        /// 「勢力」次元を持つ2つ（AllFactionsSameType=全勢力（同じ種別）／AllFactionsAllTypes=全勢力・
+        /// 全種別）だけを「他の全勢力の拠点へ複製する」という意味に読み替えて対応する。
+        /// 「種別」次元を持つ2つ（SameCategoryAllTiers=同カテゴリの全Tier／AllUnitTypes=全ユニット種別）は
+        /// 拠点に対して意味を成さない（ユニット種別ではないため）ので、要件通り何も書き込まず0を返す
+        /// （呼び出し元のUIはwritten==0の場合ApplyBindingChange相当の反映処理を呼ばないため、
+        /// ユーザーには「何も起きなかった」だけが見え、誤って他のユニット種別へ書き込まれることは無い）。
+        /// </summary>
+        private static int CopyBaseTo(byte fromFaction, AssetKind kind, string name, CopyScope scope)
+        {
+            bool allFactions = scope == CopyScope.AllFactionsSameType || scope == CopyScope.AllFactionsAllTypes;
+            if (!allFactions)
+            {
+                ModConfig.Log("UnitAssetBindings.CopyTo: " + BaseTypeKey + " はscope=" + scope +
+                    " に対応しないためスキップしました（同カテゴリ/全ユニット種別はユニット専用のスコープです）");
+                return 0;
+            }
+
+            int written = 0;
+            for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
+            {
+                if (f == fromFaction) continue; // コピー元自身はスキップ
+                _bindings[MakeKey(f, BaseTypeKey)] = new Binding { Kind = kind, Name = name };
+                written++;
+            }
+
+            if (written > 0) Save();
+            ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + BaseTypeKey + " (" +
+                AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し（他の全勢力の拠点へ）、" +
+                written + " 件を書き込みました");
             return written;
         }
 

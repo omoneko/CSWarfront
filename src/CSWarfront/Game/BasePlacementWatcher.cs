@@ -22,6 +22,19 @@ namespace CSWarfront.Game
         private static readonly List<ushort> _pendingCreated = new List<ushort>();
         private static readonly List<ushort> _pendingReleased = new List<ushort>();
 
+        /// <summary>
+        /// Task60: 基地建物の向き（ラジアン、CS Building.m_angle）のキャッシュ。Game/BaseVisuals.cs が
+        /// 勢力別モデルのオーバーレイを正しい向きで表示するために使う。書き込みは常にこのクラスの
+        /// simスレッド専用メソッド（ProcessCreated、呼び出し元 MilitaryManager.OnSimTick が既に
+        /// _stateLock を保持している）から行う——ここで既にCS建物バッファ（Building構造体）を
+        /// 読んでいるため、便乗して1回の読み取りで済ませ、メインスレッドから BuildingManager へ
+        /// 触れる経路を増やさない（既定の安全な選択：CS実体はsimスレッド専用というルールを維持する）。
+        /// 読み取り（<see cref="TryGetAngle"/>）は MilitaryManager.OnMainVisualUpdate が同じ
+        /// _stateLock を保持したままスナップショット構築中に呼ぶ想定（Dictionary自体はスレッドセーフで
+        /// はないため、呼び出し側の規約でスレッド安全性を担保する）。
+        /// </summary>
+        private static readonly Dictionary<ushort, float> _baseAngles = new Dictionary<ushort, float>();
+
         /// <summary>冪等。OnLevelLoaded から呼ばれる想定。</summary>
         public static void Subscribe()
         {
@@ -67,6 +80,18 @@ namespace CSWarfront.Game
                 _pendingCreated.Clear();
                 _pendingReleased.Clear();
             }
+            // Task60: 呼び出し元（MilitaryManager.Reset）は既に_stateLockを保持しているため、
+            // ここで追加のロックは不要（_baseAnglesの書き込みは常にそのロック内、ProcessCreated経由）。
+            _baseAngles.Clear();
+        }
+
+        /// <summary>Task60: 指定基地の向き（ラジアン）を返す。呼び出し元は_stateLockを保持していること
+        /// （クラス冒頭の<see cref="_baseAngles"/>コメント参照）。まだ一度もProcessCreatedで観測されて
+        /// いない基地（理論上は無いはずだが、防御的に）はfalseを返し、呼び出し側は既定角度(0)へ
+        /// フォールバックすること。</summary>
+        internal static bool TryGetAngle(ushort baseId, out float angleRadians)
+        {
+            return _baseAngles.TryGetValue(baseId, out angleRadians);
         }
 
         // CSのイベントハンドラ本体。呼び出しスレッド不明のため、idの記録のみ（例外は必ず握る）。
@@ -163,6 +188,13 @@ namespace CSWarfront.Game
                     continue;
                 }
 
+                // Task60: この時点でCS建物バッファ（Building構造体、既にbとして読み込み済み）から
+                // 基地の向きを取得できる。新規登録・復元済み（existing、下のチェック）のどちらでも
+                // 常に更新する——復元時（セーブロード後にEventBuildingCreatedが再発火するケース）は
+                // これを existing チェックより前で行わないと、プロセス起動直後は BaseVisuals が
+                // 向きを一切知らないままになってしまうため。
+                _baseAngles[id] = b.m_angle;
+
                 bool existing = FindBase(state, id) != null; // 冪等: セーブロード直後や重複イベント対策
                 if (existing)
                 {
@@ -217,6 +249,7 @@ namespace CSWarfront.Game
                 bool wasHq = mb.IsHeadquarters;
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
+                _baseAngles.Remove(id); // Task60: 解体済みidの向きキャッシュを持ち越さない
 
                 ModConfig.Log("BasePlacementWatcher: base removed id=" + id +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
@@ -269,6 +302,7 @@ namespace CSWarfront.Game
                 bool wasHq = mb.IsHeadquarters;
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
+                _baseAngles.Remove(mb.BaseId); // Task60: 幽霊基地の向きキャッシュを持ち越さない
                 ModConfig.Log("BasePlacementWatcher: ReconcileBases: removed ghost base id=" + mb.BaseId +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
             }

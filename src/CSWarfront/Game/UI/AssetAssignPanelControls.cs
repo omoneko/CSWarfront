@@ -16,10 +16,13 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static partial class AssetAssignPanel
     {
-        /// <summary>LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件のTypeKeyを構築する。</summary>
+        /// <summary>Task60: 先頭に軍事拠点の特別キー（UnitAssetBindings.BaseTypeKey）を1件追加した上で、
+        /// LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件のTypeKeyを構築する（計36件）。
+        /// 拠点はユニット種別ではない（LandUnitRoster.All()には含まれない）が、モデル割り当てUIの
+        /// 対象としては同列に選べるようにする、という要件のため先頭に手動で挿入する。</summary>
         private static void BuildTypeKeys()
         {
-            List<string> keys = new List<string>();
+            List<string> keys = new List<string> { UnitAssetBindings.BaseTypeKey };
             foreach (UnitType t in LandUnitRoster.All()) keys.Add(t.TypeKey);
             _typeKeys = keys.ToArray();
         }
@@ -89,7 +92,9 @@ namespace CSWarfront.Game.UI
         /// <summary>Task40: ラベルは現在選択中の勢力(SelectedFactionId)の割り当てを表示する
         /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。
         /// Task41: プロップ以外の種類が割り当てられている場合は "[建物]MyBuilding" のように種類タグを
-        /// 付ける（AssetKindUtil.Describe）。</summary>
+        /// 付ける（AssetKindUtil.Describe）。
+        /// Task60: 軍事拠点（UnitAssetBindings.BaseTypeKey）だけは生のキー文字列ではなく
+        /// BaseTypeKeyDisplayName（「軍事基地（拠点）」）を表示し、ユニットの1つと誤解されないようにする。</summary>
         private static string[] BuildDropdownLabels()
         {
             if (_typeKeys == null) return new string[0];
@@ -103,7 +108,10 @@ namespace CSWarfront.Game.UI
                 string suffix = UnitAssetBindings.TryGet(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
                     : "(既定)";
-                labels[i] = _typeKeys[i] + " → " + suffix;
+                string displayKey = _typeKeys[i] == UnitAssetBindings.BaseTypeKey
+                    ? UnitAssetBindings.BaseTypeKeyDisplayName
+                    : _typeKeys[i];
+                labels[i] = displayKey + " → " + suffix;
             }
             return labels;
         }
@@ -199,7 +207,8 @@ namespace CSWarfront.Game.UI
             RefreshCurrentBindingLabel();
 
             UnitVisuals.DestroyAll();
-            ModConfig.Log("AssetAssignPanel: 割り当て変更を反映するため UnitVisuals.DestroyAll() を実行しました");
+            BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
+            ModConfig.Log("AssetAssignPanel: 割り当て変更を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
         }
 
         private static void OnCloseClick(UIComponent component, UIMouseEventParameter eventParam)
