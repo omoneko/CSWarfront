@@ -79,8 +79,9 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel != null) return;
-                UIView view = UIView.GetAView();
+                UIView view = PanelChrome.GetCachedView();
                 if (view == null) return; // UI未初期化。次フレーム再試行。
                 Build(view);
             }
@@ -99,6 +100,7 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel == null) return; // EnsureCreated 待ち
 
                 // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、
@@ -427,7 +429,7 @@ namespace CSWarfront.Game.UI
                 return;
             }
 
-            UIView view = UIView.GetAView();
+            UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
             if (view == null)
             {
                 Hide();

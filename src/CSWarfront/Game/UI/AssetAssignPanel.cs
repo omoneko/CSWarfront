@@ -108,8 +108,9 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel != null) return;
-                UIView view = UIView.GetAView();
+                UIView view = PanelChrome.GetCachedView();
                 if (view == null) return; // UI未初期化。次フレーム再試行。
                 Build(view);
             }
@@ -167,6 +168,7 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel == null) return;
 
                 bool menuOpen = PanelChrome.IsGameMenuOpen();

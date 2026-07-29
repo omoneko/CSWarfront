@@ -1,4 +1,5 @@
 using System;
+using ColossalFramework;
 using ColossalFramework.UI;
 using CSWarfront.Game;
 using UnityEngine;
@@ -49,6 +50,25 @@ namespace CSWarfront.Game.UI
         //       true になり「Escメニューが開いている」より意味が広すぎる。本タスクは「Escメニュー」に
         //       限定した挙動を要求しているため、より的を絞ったPauseMenu.component.isVisibleを採用する。
         private const string PauseMenuName = "PauseMenu";
+
+        // Task56: クラッシュ後調査で、UIView.library.Get&lt;T&gt;（実体は ColossalFramework.UI.UIDynamicPanels.Get,
+        // ilspycmdでColossalManaged.dllを逆コンパイルし確認）自体は m_CachedPanels（Dictionary）へのルックアップ
+        // だけで、呼ぶたびにプレハブをインスタンス化することは無いと判明した（単一インスタンスパネルは全て
+        // UIView.Awake→m_PanelsLibrary.Init(this)で起動時に一括生成済み、Getはキャッシュ済みインスタンスを
+        // 返すだけ）。とはいえ「毎フレーム・複数パネルから」ライブラリ経由の型解決を行うこと自体は無駄な
+        // GetComponent呼び出しを繰り返すだけでなく、UIView自体が未登録（ロード中等）だと
+        // UIView.library がnullを返し UIDynamicPanels.Get の呼び出しがNullReferenceExceptionになる
+        // （try/catchで既に握ってはいるが、ロード中は毎フレーム例外→ログの温床になる）。防御的に一度だけ
+        // 解決してキャッシュし、以後は使い回す。Unity側でこのインスタンスが破棄された場合はUnityEngine.Object
+        // のoperator==オーバーロードにより自動的に「null相当」に戻るが、念のためMilitaryManager.Reset()
+        // （レベルアンロード時）からも明示的に ResetCache() で null 化する。
+        private static PauseMenu _cachedPauseMenu;
+
+        // Task56: UIView.GetAView()（static Dictionary&lt;string,UIView&gt;.Values.FirstOrDefault()、
+        // ilspycmdで確認済み・こちらもインスタンス化はしない）を複数箇所が毎フレーム呼んでいたため、
+        // 同じ考え方でキャッシュを共有する（BaseInfoPanelDrag.PositionNextToVanilla / UnitInfoPanel.
+        // UpdateTrackingPosition / UnitBoxSelection.UpdateRectVisual が使用）。
+        private static UIView _cachedView;
 
         /// <summary>タイトル行の構築結果。各パネルはこれをフィールドに保持し、Destroy時に
         /// CollapseButton.eventClick の購読解除に使う（DragHandleは自前イベントを持たないため解除不要）。</summary>
@@ -116,14 +136,74 @@ namespace CSWarfront.Game.UI
         {
             try
             {
-                PauseMenu pauseMenu = UIView.library.Get<PauseMenu>(PauseMenuName);
-                return pauseMenu != null && pauseMenu.component != null && pauseMenu.component.isVisible;
+                // Task56: 毎フレームUIView.library.Get&lt;T&gt;を呼び直すのではなく、一度解決できたら
+                // キャッシュを使い回す（上のフィールドコメント参照。Get自体は非破壊なルックアップだが、
+                // ロード中はUIView.libraryがnullになりうるため、キャッシュ済みなら再解決自体を省略できる）。
+                if (_cachedPauseMenu == null)
+                {
+                    UIDynamicPanels lib = UIView.library;
+                    if (lib != null) _cachedPauseMenu = lib.Get<PauseMenu>(PauseMenuName);
+                }
+                return _cachedPauseMenu != null && _cachedPauseMenu.component != null && _cachedPauseMenu.component.isVisible;
             }
             catch (Exception e)
             {
                 ModConfig.LogError("PanelChrome.IsGameMenuOpen error: " + e);
                 return false;
             }
+        }
+
+        /// <summary>Task56: UIView.GetAView()のキャッシュ済みアクセサ（上のフィールドコメント参照）。
+        /// 毎フレーム呼ぶ複数箇所（BaseInfoPanelDrag/UnitInfoPanel/UnitBoxSelection）はこちらを使う。</summary>
+        public static UIView GetCachedView()
+        {
+            if (_cachedView == null)
+            {
+                _cachedView = UIView.GetAView();
+            }
+            return _cachedView;
+        }
+
+        /// <summary>
+        /// Task56: ゲームがUIライブラリ（バニラUI・自パネル問わず）に触れてよい状態か。
+        /// レベルロード中/アンロード中は false を返し、呼び出し側（各パネルのEnsureCreated/
+        /// UpdateVisibility、UnitSelection/UnitBoxSelection/UnitCommandInput等の毎フレームUI入口）は
+        /// このフレームの処理を丸ごとスキップする（MilitaryManager.OnMainVisualUpdateのユニット見た目
+        /// 同期＝Unity GameObjectのみを触る処理は対象外。UIライブラリに触れないため継続してよい）。
+        ///
+        /// 判定に使うシグナル（ilspycmdでAssembly-CSharp.dllのLoadingManagerを逆コンパイルし確認済み）:
+        ///   - public volatile bool LoadingManager.m_loadingComplete: レベルロードのコルーチンが
+        ///     全工程を終えた最後（OnLevelLoadedをMOD拡張へ配信する直前）にtrueへセットされる
+        ///     （LoadingManager.cs 1813行目）。ロード開始時・アンロード開始時にはfalseへ戻す
+        ///     （391/401, 429/439, 467/477行目）。
+        ///   - public volatile bool LoadingManager.m_applicationQuitting: アプリ終了シーケンス開始でtrue。
+        ///   - 存在確認は Singleton&lt;LoadingManager&gt;.exists（ = 内部static fieldのnullチェックのみ、
+        ///     .instance と違いオブジェクトを新規生成しない）を先に見る。これはLoadingManager自身が
+        ///     AutoSaveTimer内で使っている既存パターン（LoadingManager.cs 52行目）と同じ。
+        /// いずれもvolatile boolの読み取りのみでアロケーションなし。
+        /// </summary>
+        public static bool IsGameReadyForUi()
+        {
+            try
+            {
+                return Singleton<LoadingManager>.exists
+                    && Singleton<LoadingManager>.instance.m_loadingComplete
+                    && !Singleton<LoadingManager>.instance.m_applicationQuitting;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("PanelChrome.IsGameReadyForUi error: " + e);
+                return false;
+            }
+        }
+
+        /// <summary>Task56: MilitaryManager.Reset()（レベルアンロード時）から呼ぶ。キャッシュ済みの
+        /// PauseMenu/UIView参照を破棄し、次セッションで改めて解決させる（テアダウン中にUnity側で
+        /// 実際に破棄されるかどうかに関わらず、古い参照を持ち越さないための明示的なクリア）。</summary>
+        public static void ResetCache()
+        {
+            _cachedPauseMenu = null;
+            _cachedView = null;
         }
     }
 }

@@ -595,6 +595,10 @@ namespace CSWarfront.Game
             // 想定していない。CombatRoadBlocker.Reset内部は例外を外へ伝播しないガード付き
             // （レベルティアダウン中でNetManagerが無効化されているケースがあり得るため、失敗しても
             // 実害なしとして許容する＝要件通り）。
+            // Task56レビュー: このコメントは元々あったが実際の呼び出しが抜けており、レベルアンロードでも
+            // PathFailedビットが解除されないまま次セッションへ持ち越されうる欠落だったため追加した。
+            CombatRoadBlocker.Reset();
+
             lock (_stateLock)
             {
                 State = null;
@@ -623,6 +627,7 @@ namespace CSWarfront.Game
             UI.UnitSelection.Clear();
             UI.UnitBoxSelection.Destroy(); // Task48: 範囲選択の矩形/ハイライトGameObjectと選択状態
             UI.UnitCommandInput.Reset(); // Task48: 集結地点のターゲティング状態を持ち越さない
+            UI.PanelChrome.ResetCache(); // Task56: キャッシュ済みPauseMenu/UIView参照を次セッションへ持ち越さない
         }
     }
 }

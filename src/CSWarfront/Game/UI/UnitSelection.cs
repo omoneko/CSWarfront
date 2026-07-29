@@ -47,6 +47,7 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (!Input.GetMouseButtonDown(0)) return;
 
                 // カーソルがUI上にあるクリックは3D世界のraycastへ渡さない。

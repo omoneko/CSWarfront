@@ -84,6 +84,7 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel != null) return;
                 if (TryGetVanillaPanel() == null) return; // UI未初期化。次フレーム再試行。
                 Build();
@@ -102,6 +103,7 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_panel == null) return; // EnsureCreated 待ち
 
                 // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、

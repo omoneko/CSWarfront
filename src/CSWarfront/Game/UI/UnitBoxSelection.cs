@@ -81,8 +81,9 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
                 if (_rectPanel != null) return;
-                UIView view = UIView.GetAView();
+                UIView view = PanelChrome.GetCachedView();
                 if (view == null) return;
                 if (view.FindUIComponent<UIPanel>(RectPanelName) != null) return;
 
@@ -115,6 +116,13 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi())
+                {
+                    // Task56: ロード/アンロード中はUIライブラリに触れない。進行中のドラッグ候補も破棄する。
+                    CancelDrag();
+                    return;
+                }
+
                 if (PanelChrome.IsGameMenuOpen())
                 {
                     CancelDrag();
@@ -211,7 +219,7 @@ namespace CSWarfront.Game.UI
         private static void UpdateRectVisual(Vector2 startScreen, Vector2 curScreen)
         {
             if (_rectPanel == null) return;
-            UIView view = UIView.GetAView();
+            UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
             if (view == null) return;
 
             Vector2 a = view.ScreenPointToGUI(startScreen);

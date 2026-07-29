@@ -24,7 +24,7 @@ namespace CSWarfront.Game.UI
         private static void PositionNextToVanilla(CityServiceWorldInfoPanel vanilla)
         {
             UIComponent vc = vanilla.component;
-            UIView view = UIView.GetAView();
+            UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
             if (vc == null || _panel == null || view == null) return;
 
             Vector3 abs = vc.absolutePosition;

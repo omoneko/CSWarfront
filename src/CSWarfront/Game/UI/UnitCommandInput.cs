@@ -39,6 +39,12 @@ namespace CSWarfront.Game.UI
         {
             try
             {
+                if (!PanelChrome.IsGameReadyForUi())
+                {
+                    _awaitingRallyClick = false; // Task56: ロード/アンロード中はUIライブラリに触れない
+                    return;
+                }
+
                 if (PanelChrome.IsGameMenuOpen())
                 {
                     _awaitingRallyClick = false; // メニューが開いたらターゲティングは打ち切る
