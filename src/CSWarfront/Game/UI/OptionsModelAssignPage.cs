@@ -59,7 +59,7 @@ namespace CSWarfront.Game.UI
     /// 新しいコントロールは一切生成しない（Build()で一度だけ生成した既存のフィールドを更新するのみ、
     /// 二重生成防止）。
     /// </summary>
-    internal static class OptionsModelAssignPage
+    internal static partial class OptionsModelAssignPage
     {
         private const string GroupTitle = "モデル割り当て";
         private const string NoSelectionLabel = "（未選択）";
@@ -145,6 +145,10 @@ namespace CSWarfront.Game.UI
 
                 _hintLabel = CreateNoteLabel(copyButtonObj);
 
+                // Task70: 「全て初期化」ボタンと「セット」プリセット行（実体はOptionsModelAssignPagePresets.cs、
+                // 500行制限のため新規追加分は最初からそちらへ置いた）。
+                BuildPresetsSection(group);
+
                 // Task52バグ修正: このMODのOptionsタブが選択される（＝祖先コンポーネントのisVisibleが
                 // trueへ変わり、それがこのグループパネルまで伝播する）たびに発火するeventVisibilityChanged
                 // を購読し、その時点の状態でRefreshFromStateを呼ぶ（クラス冒頭のコメント参照）。
@@ -160,23 +164,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「現在の割り当て」ラベルとサムネイルをグループパネルへ直接追加する（AddDropdown等の
-        /// 後に呼ぶことで、その直後に表示される位置に並ぶ。AssetAssignPanelFaction.BuildThumbnailSpriteと
-        /// 同じ寸法・考え方）。</summary>
-        private static void BuildBindingPreview(UIComponent groupPanel)
-        {
-            _currentBindingLabel = groupPanel.AddUIComponent<UILabel>();
-            _currentBindingLabel.textScale = 0.8f;
-            _currentBindingLabel.textColor = new Color32(200, 200, 200, 255);
-            _currentBindingLabel.wordWrap = true;
-            _currentBindingLabel.autoHeight = true;
-            _currentBindingLabel.width = 500f;
-            _currentBindingLabel.text = "";
-
-            _thumbnailSprite = groupPanel.AddUIComponent<UISprite>();
-            _thumbnailSprite.size = new Vector2(96f, 96f);
-            _thumbnailSprite.isVisible = false;
-        }
+        // Task70: BuildBindingPreview/RefreshAssetDropdown/RefreshCurrentBinding/RefreshThumbnail は
+        // 500行制限のため OptionsModelAssignPageBinding.cs（同じpartial class）へ分離した。
 
         /// <summary>ボタンの親パネルへ状態表示用のUILabelを追加する（Task40時点のMod.CreateHintLabelと
         /// 同じ手法）。取得に失敗しても致命的ではない（ログのみ表示できなくなるだけ）。</summary>
@@ -260,78 +249,6 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        private static void RefreshAssetDropdown()
-        {
-            if (_assetDropdown == null) return;
-
-            string filter = _searchField != null ? _searchField.text : null;
-            List<string> names = AssetCatalog.GetNames(SelectedAssetKind, _customOnly, filter);
-
-            _filteredAssetNames.Clear();
-            bool truncated = names.Count > AssetAssignPanel.MaxListItems;
-            int count = truncated ? AssetAssignPanel.MaxListItems : names.Count;
-            for (int i = 0; i < count; i++) _filteredAssetNames.Add(names[i]);
-
-            string[] items = new string[_filteredAssetNames.Count + 1];
-            items[0] = NoSelectionLabel;
-            for (int i = 0; i < _filteredAssetNames.Count; i++) items[i + 1] = _filteredAssetNames[i];
-
-            _suppressEvents = true;
-            try
-            {
-                _assetDropdown.items = items;
-                _assetDropdown.selectedIndex = 0;
-            }
-            finally
-            {
-                _suppressEvents = false;
-            }
-
-            if (_countLabel != null)
-            {
-                _countLabel.text = truncated
-                    ? "※ " + names.Count + " 件中 " + AssetAssignPanel.MaxListItems + " 件のみ表示（検索で絞り込んでください）"
-                    : names.Count + " 件";
-            }
-        }
-
-        private static void RefreshCurrentBinding()
-        {
-            if (_currentBindingLabel == null || _typeKeyDropdown == null || _typeKeys == null) return;
-
-            int idx = _typeKeyDropdown.selectedIndex;
-            if (idx < 0 || idx >= _typeKeys.Length)
-            {
-                _currentBindingLabel.text = "";
-                RefreshThumbnail(AssetKind.Prop, null);
-                return;
-            }
-
-            AssetKind kind;
-            string name;
-            bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
-            _currentBindingLabel.text = "現在の割り当て: " + (bound ? AssetKindUtil.Describe(kind, name) : "(既定のモデル)");
-            RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
-        }
-
-        private static void RefreshThumbnail(AssetKind kind, string name)
-        {
-            if (_thumbnailSprite == null) return;
-
-            UITextureAtlas atlas;
-            string spriteName;
-            if (!string.IsNullOrEmpty(name) && AssetCatalog.TryGetThumbnail(kind, name, out atlas, out spriteName))
-            {
-                _thumbnailSprite.atlas = atlas;
-                _thumbnailSprite.spriteName = spriteName;
-                _thumbnailSprite.isVisible = true;
-            }
-            else
-            {
-                _thumbnailSprite.isVisible = false;
-            }
-        }
-
         /// <summary>マップ未ロード（メインメニュー等）でアセットが1件も無い状況をヒントラベルへ表示する。
         /// stateReadyはAssetAssignPanel.HasAnyProps()（Rescan込みの4種類横断チェック、Task40の挙動を踏襲）
         /// の結果を呼び出し元（RefreshFromState）から受け取る。ここで再度HasAnyProps()を呼ぶと
@@ -372,6 +289,7 @@ namespace CSWarfront.Game.UI
                 RefreshAssetDropdown();
                 RefreshCurrentBinding();
                 RefreshHint(stateReady);
+                RefreshPresetSlotLabels(); // Task70: タブ表示のたびに空スロット表示を最新化
 
                 SetControlsEnabled(stateReady);
             }
@@ -397,100 +315,15 @@ namespace CSWarfront.Game.UI
             if (_applyButton != null) _applyButton.isEnabled = enabled;
             if (_resetButton != null) _resetButton.isEnabled = enabled;
             if (_copyApplyButton != null) _copyApplyButton.isEnabled = enabled;
+            if (_clearAllButton != null) _clearAllButton.isEnabled = enabled; // Task70
+            if (_presetSlotDropdown != null) _presetSlotDropdown.isEnabled = enabled;
+            if (_presetSaveButton != null) _presetSaveButton.isEnabled = enabled;
+            if (_presetLoadButton != null) _presetLoadButton.isEnabled = enabled;
         }
 
-        private static void OnFactionChanged(int value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-                RefreshTypeKeyLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);
-                RefreshCurrentBinding();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnFactionChanged error: " + e);
-            }
-        }
-
-        private static void OnTypeKeyChanged(int value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-                RefreshCurrentBinding();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnTypeKeyChanged error: " + e);
-            }
-        }
-
-        private static void OnAssetKindChanged(int value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-                RefreshAssetDropdown();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnAssetKindChanged error: " + e);
-            }
-        }
-
-        private static void OnCustomOnlyChanged(bool value)
-        {
-            try
-            {
-                _customOnly = value;
-                RefreshAssetDropdown();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnCustomOnlyChanged error: " + e);
-            }
-        }
-
-        private static void OnSearchTextChanged(string value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-                RefreshAssetDropdown();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnSearchTextChanged error: " + e);
-            }
-        }
-
-        /// <summary>AddTextfieldのOnTextSubmitted用no-op（Enter確定時の追加処理は不要。OnTextChangedで
-        /// 都度絞り込み済みのため）。</summary>
-        private static void OnSearchTextSubmitted(string value)
-        {
-        }
-
-        /// <summary>AddDropdownのeventCallback用no-op（複製先スコープはOnCopyApplyClickが押された
-        /// 時点でselectedIndexを読むだけで足りるため）。</summary>
-        private static void OnCopyScopeChanged(int value)
-        {
-        }
-
-        private static void OnAssetSelected(int value)
-        {
-            try
-            {
-                if (_suppressEvents) return;
-
-                if (value >= 1 && value - 1 < _filteredAssetNames.Count) RefreshThumbnail(SelectedAssetKind, _filteredAssetNames[value - 1]);
-                else RefreshCurrentBinding();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("OptionsModelAssignPage.OnAssetSelected error: " + e);
-            }
-        }
+        // Task70: OnFactionChanged/OnTypeKeyChanged/OnAssetKindChanged/OnCustomOnlyChanged/
+        // OnSearchTextChanged/OnSearchTextSubmitted/OnCopyScopeChanged/OnAssetSelected は
+        // 500行制限のため OptionsModelAssignPageEvents.cs（同じpartial class）へ分離した。
 
         private static void OnApplyClick()
         {

@@ -150,6 +150,7 @@ namespace CSWarfront.Game.UI
             RefreshDropdownLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);
             RefreshAssetList();
             RefreshCurrentBindingLabel();
+            RefreshPresetSlotLabels(); // Task70: 開くたびに空スロット表示（安価なFile.Existsのみ）を最新化
 
             _panel.isVisible = true;
             _panel.BringToFront();
@@ -208,6 +209,7 @@ namespace CSWarfront.Game.UI
                 if (_applyButton != null) _applyButton.eventClick -= OnApplyClick;
                 if (_resetButton != null) _resetButton.eventClick -= OnResetClick;
                 if (_copyApplyButton != null) _copyApplyButton.eventClick -= OnCopyApplyClick; // Task47
+                DestroyPresetsSection(); // Task70: 全て初期化ボタン＋セット行のイベント購読解除＋フィールドのリセット
                 if (_closeButton != null) _closeButton.eventClick -= OnCloseClick;
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
@@ -360,11 +362,30 @@ namespace CSWarfront.Game.UI
             _copyApplyButton = BuildButton("複製適用", Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
             y += DropdownHeight + SectionGap;
 
-            float buttonWidth = (w - SectionGap * 2f) / 3f;
+            // Task70: 「全て初期化」を既存3ボタンと同じ行に4つ目のボタンとして追加した
+            // （要件「既存のボタンの隣に」）。均等4分割にするため既存3ボタンの幅計算も併せて変更する。
+            float buttonWidth = (w - SectionGap * 3f) / 4f;
             _applyButton = BuildButton("適用", Pad, y, buttonWidth, OnApplyClick);
-            _resetButton = BuildButton("既定に戻す", Pad + buttonWidth + SectionGap, y, buttonWidth, OnResetClick);
-            _closeButton = BuildButton("閉じる", Pad + (buttonWidth + SectionGap) * 2f, y, buttonWidth, OnCloseClick);
-            y += ButtonRowHeight + Pad;
+            _resetButton = BuildButton("既定に戻す", Pad + (buttonWidth + SectionGap), y, buttonWidth, OnResetClick);
+            _clearAllButton = BuildClearAllButton(Pad + (buttonWidth + SectionGap) * 2f, y, buttonWidth);
+            _closeButton = BuildButton("閉じる", Pad + (buttonWidth + SectionGap) * 3f, y, buttonWidth, OnCloseClick);
+            y += ButtonRowHeight + SectionGap;
+
+            // Task70: 「セット」プリセット行（スロット1-3の保存/読込、AssetAssignPanelPresets.cs参照）。
+            y = AddSectionLabel("セット", y, out _presetSectionLabel);
+            BuildPresetRow(Pad, y, w);
+            y += DropdownHeight + SectionGap;
+
+            _presetMessageLabel = _panel.AddUIComponent<UILabel>();
+            _presetMessageLabel.textScale = 0.65f; // 他パネルと統一（_truncatedLabelと同じスケール）
+            _presetMessageLabel.textColor = new Color32(255, 210, 140, 255);
+            _presetMessageLabel.wordWrap = true;
+            _presetMessageLabel.autoSize = false;
+            _presetMessageLabel.autoHeight = true;
+            _presetMessageLabel.width = w;
+            _presetMessageLabel.text = "";
+            _presetMessageLabel.relativePosition = new Vector3(Pad, y);
+            y += 24f + Pad;
 
             _expandedHeight = y;
             _panel.height = y;
@@ -466,6 +487,12 @@ namespace CSWarfront.Game.UI
             if (_copyScopeSectionLabel != null) _copyScopeSectionLabel.isVisible = visible; // Task47
             if (_copyScopeDropdown != null) _copyScopeDropdown.isVisible = visible;
             if (_copyApplyButton != null) _copyApplyButton.isVisible = visible;
+            if (_clearAllButton != null) _clearAllButton.isVisible = visible; // Task70
+            if (_presetSectionLabel != null) _presetSectionLabel.isVisible = visible;
+            if (_presetSlotDropdown != null) _presetSlotDropdown.isVisible = visible;
+            if (_presetSaveButton != null) _presetSaveButton.isVisible = visible;
+            if (_presetLoadButton != null) _presetLoadButton.isVisible = visible;
+            if (_presetMessageLabel != null) _presetMessageLabel.isVisible = visible;
             if (_closeButton != null) _closeButton.isVisible = visible;
         }
     }

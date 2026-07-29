@@ -115,6 +115,12 @@ namespace CSWarfront.Game
         // Set() はメモリ内のみで保持し保存はスキップする（EnsureRegisteredと同様、ロード自体は止めない）。
         private static string _filePath;
 
+        // Task70: プリセットスロット（unit-assets-set1〜3.txt）のパスを組み立てるために保持する
+        // modDirectory 自体（_filePathはFileName付きの完全パスのため、ディレクトリだけを別途持つ）。
+        // Loadでmod DirectoryをNULLで受け取った場合はこちらもnullのままとなり、
+        // UnitAssetBindingsPresets.cs 側のスロット操作は全て「保存先未解決」として何もせずfalseを返す。
+        private static string _modDirectory;
+
         public static int Count { get { return _bindings.Count + _anyFactionBindings.Count; } }
 
         /// <summary>起動時（WarfrontLoadingExtension.OnLevelLoaded）に一度呼ぶ。冪等ではない
@@ -124,6 +130,7 @@ namespace CSWarfront.Game
             _bindings.Clear();
             _anyFactionBindings.Clear();
             _filePath = null;
+            _modDirectory = null;
 
             try
             {
@@ -133,6 +140,7 @@ namespace CSWarfront.Game
                     return;
                 }
 
+                _modDirectory = modDirectory; // Task70: プリセットスロットのパス組み立て用に保持
                 _filePath = Path.Combine(modDirectory, FileName);
                 if (!File.Exists(_filePath))
                 {
@@ -140,36 +148,8 @@ namespace CSWarfront.Game
                     return;
                 }
 
-                string[] lines = File.ReadAllLines(_filePath, Encoding.UTF8);
-                int parsed = 0;
-                for (int i = 0; i < lines.Length; i++)
-                {
-                    string line = lines[i];
-                    if (string.IsNullOrEmpty(line)) continue;
-
-                    int eq = line.IndexOf('=');
-                    if (eq <= 0 || eq >= line.Length - 1) continue; // キー/値どちらかが空なら無視
-
-                    string key = line.Substring(0, eq);
-                    string rawValue = line.Substring(eq + 1);
-                    if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(rawValue)) continue;
-
-                    Binding binding;
-                    ParseValue(rawValue, out binding);
-
-                    byte factionId;
-                    string typeKey;
-                    if (TryParseFactionKey(key, out factionId, out typeKey))
-                    {
-                        _bindings[MakeKey(factionId, typeKey)] = binding;
-                    }
-                    else
-                    {
-                        // レガシー行（Task36形式）。全勢力共通のフォールバックとして扱う。
-                        _anyFactionBindings[key] = binding;
-                    }
-                    parsed++;
-                }
+                int parsed;
+                ParseFileInto(_filePath, _bindings, _anyFactionBindings, out parsed);
 
                 ModConfig.Log("UnitAssetBindings.Load: '" + _filePath + "' から " + parsed + " 件の割り当てを読み込みました（勢力別 " +
                     _bindings.Count + " 件 / 全勢力共通(レガシー) " + _anyFactionBindings.Count + " 件）");
@@ -180,6 +160,44 @@ namespace CSWarfront.Game
                 ModConfig.LogError("UnitAssetBindings.Load error（割り当て無しとして継続）: " + e);
                 _bindings.Clear();
                 _anyFactionBindings.Clear();
+            }
+        }
+
+        /// <summary>Task70: ファイル形式のパース本体（Load/UnitAssetBindingsPresets.LoadFromSlotの共有ヘルパー）。
+        /// 呼び出し前に <paramref name="path"/> の存在確認は済ませておくこと（存在しなければ
+        /// File.ReadAllLinesが例外を投げ、呼び出し側のtry/catchで捕捉される想定）。1行ごとの解析仕様は
+        /// クラス冒頭コメントのファイル形式節を参照。</summary>
+        private static void ParseFileInto(string path, Dictionary<string, Binding> bindings, Dictionary<string, Binding> anyFactionBindings, out int parsedCount)
+        {
+            parsedCount = 0;
+            string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (string.IsNullOrEmpty(line)) continue;
+
+                int eq = line.IndexOf('=');
+                if (eq <= 0 || eq >= line.Length - 1) continue; // キー/値どちらかが空なら無視
+
+                string key = line.Substring(0, eq);
+                string rawValue = line.Substring(eq + 1);
+                if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(rawValue)) continue;
+
+                Binding binding;
+                ParseValue(rawValue, out binding);
+
+                byte factionId;
+                string typeKey;
+                if (TryParseFactionKey(key, out factionId, out typeKey))
+                {
+                    bindings[MakeKey(factionId, typeKey)] = binding;
+                }
+                else
+                {
+                    // レガシー行（Task36形式）。全勢力共通のフォールバックとして扱う。
+                    anyFactionBindings[key] = binding;
+                }
+                parsedCount++;
             }
         }
 
@@ -424,24 +442,7 @@ namespace CSWarfront.Game
                     return;
                 }
 
-                // File.WriteAllLines(path, lines, encoding) は .NET 4.0 以降の追加オーバーロードであり、
-                // 本プロジェクトの TargetFrameworkVersion v3.5 環境では確実に存在するとは限らないため、
-                // .NET 1.1 から存在する StreamWriter を明示的に使う（WarStateSerializer等、既存コードの
-                // File.ReadAllText/File.Exists 止まりの使用実績に対し、書き込みはより保守的な経路を選ぶ）。
-                using (StreamWriter writer = new StreamWriter(_filePath, false, Encoding.UTF8))
-                {
-                    // レガシー/全勢力共通の行は読み込んだキー形式（factionIdプレフィックス無し）のまま
-                    // 書き戻す。値は毎回 kind プレフィックス付きの新形式へ正規化する。
-                    foreach (KeyValuePair<string, Binding> kv in _anyFactionBindings)
-                    {
-                        writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);
-                    }
-                    // 勢力別の行はキーが既に "factionId|typeKey" 形式。
-                    foreach (KeyValuePair<string, Binding> kv in _bindings)
-                    {
-                        writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);
-                    }
-                }
+                WriteBindingsToFile(_filePath, _bindings, _anyFactionBindings);
 
                 ModConfig.Log("UnitAssetBindings.Save: '" + _filePath + "' へ 勢力別" + _bindings.Count +
                     "件 + 全勢力共通" + _anyFactionBindings.Count + "件 を保存しました");
@@ -449,6 +450,31 @@ namespace CSWarfront.Game
             catch (Exception e)
             {
                 ModConfig.LogError("UnitAssetBindings.Save error: " + e);
+            }
+        }
+
+        /// <summary>Task70: シリアライズ本体（Save/UnitAssetBindingsPresets.SaveToSlotの共有ヘルパー）。
+        /// ファイル形式はクラス冒頭コメント参照。呼び出し側のtry/catchで例外を捕捉する想定
+        /// （このメソッド自身は例外を握りつぶさない）。</summary>
+        private static void WriteBindingsToFile(string path, Dictionary<string, Binding> bindings, Dictionary<string, Binding> anyFactionBindings)
+        {
+            // File.WriteAllLines(path, lines, encoding) は .NET 4.0 以降の追加オーバーロードであり、
+            // 本プロジェクトの TargetFrameworkVersion v3.5 環境では確実に存在するとは限らないため、
+            // .NET 1.1 から存在する StreamWriter を明示的に使う（WarStateSerializer等、既存コードの
+            // File.ReadAllText/File.Exists 止まりの使用実績に対し、書き込みはより保守的な経路を選ぶ）。
+            using (StreamWriter writer = new StreamWriter(path, false, Encoding.UTF8))
+            {
+                // レガシー/全勢力共通の行は読み込んだキー形式（factionIdプレフィックス無し）のまま
+                // 書き戻す。値は毎回 kind プレフィックス付きの新形式へ正規化する。
+                foreach (KeyValuePair<string, Binding> kv in anyFactionBindings)
+                {
+                    writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);
+                }
+                // 勢力別の行はキーが既に "factionId|typeKey" 形式。
+                foreach (KeyValuePair<string, Binding> kv in bindings)
+                {
+                    writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);
+                }
             }
         }
     }
