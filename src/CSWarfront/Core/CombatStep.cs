@@ -41,6 +41,10 @@ namespace CSWarfront.Core
                 target.CurrentHP -= dmg;
                 if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
 
+                // Task54: 被弾地点を「戦闘域」として報告する（民間交通の迂回用）。近傍への報告は
+                // CombatZoneTracker側でマージされるため、ここでは間引き不要。
+                state.CombatZones.ReportCombat(target.Position);
+
                 // 発砲エフェクトの間引き（Task42）: 実際にダメージを与えたこのtickでのみ
                 // FireCooldownをdt分だけ減算する。0以下になった瞬間だけShotEventを1つ積み、
                 // FireIntervalHoursへリセットする（乱数不使用・決定的）。

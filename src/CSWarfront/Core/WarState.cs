@@ -54,6 +54,15 @@ namespace CSWarfront.Core
         /// <summary>1tickあたりRecentKillsへ追加できる最大件数（Task51）。RecentShotsと同じ防御的上限。</summary>
         public const int MaxRecentKillsPerTick = 200;
 
+        /// <summary>
+        /// Task54: 発砲/被弾から追跡する「戦闘域」の集合（実行時のみ・非永続化）。RoadGraph/Coverと違い
+        /// Game層から供給されるのではなく、Core自身がCombatStep/BaseCombatStepからの報告で維持する
+        /// （WarStateSerializerには一切書き出さない＝セーブ/ロードのたびに空へ戻る。ロード直後は
+        /// 一時的にゾーンが消えるが、戦闘が続いていればすぐ報告が再開し数tickで復元される。実害は無い）。
+        /// フィールド初期化子で構築するため、newされたWarStateはnullを心配せず即座に使える。
+        /// </summary>
+        public CombatZoneTracker CombatZones = new CombatZoneTracker();
+
         public uint AllocInstanceId() { return NextInstanceId++; }
 
         /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる

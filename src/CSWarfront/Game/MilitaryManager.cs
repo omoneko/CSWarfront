@@ -224,7 +224,19 @@ namespace CSWarfront.Game
             lock (_stateLock)
             {
                 if (State == null) EnsureInitialized();
-                return CSWarfront.Core.WarStateSerializer.Serialize(State);
+                // Task54: このMODが立てた戦闘域の道路封鎖(PathFailedビット)をセーブデータへ
+                // 焼き込まないよう、シリアライズの前後で一時的に外して戻す（_stateLock保持中なので
+                // simスレッドとは競合しない。CombatRoadBlocker.OwnedはRAM上の集合なのでこの間も
+                // 覚えたまま＝戻すのは同じセグメント集合）。
+                CombatRoadBlocker.UnblockAllForSave();
+                try
+                {
+                    return CSWarfront.Core.WarStateSerializer.Serialize(State);
+                }
+                finally
+                {
+                    CombatRoadBlocker.ReblockAfterSave();
+                }
             }
         }
 
@@ -396,6 +408,15 @@ namespace CSWarfront.Game
                 BaseCombatStep.Advance(State, dt);
                 Occupation.ResolveCaptures(State);
                 FactionStatus.Refresh(State);
+
+                // 戦闘域（Task54）の期限管理。上のCombatStep/BaseCombatStepが今tick分の報告を
+                // 積み終えた後に減算する（同tickに報告された分がいきなり0未満になって消えないように）。
+                State.CombatZones.Advance(dt);
+
+                // 戦闘域に応じた道路封鎖（Task54）。CombatZonesが確定した後、民間の経路計算より前に
+                // 反映しておきたいところだが、MovementStep（経路の消化・新規計算含む）は既に上で
+                // 終わっている。次tickの経路計算からは反映されるため1tickの遅延は許容する。
+                CombatRoadBlocker.Advance(State, dt);
 
                 // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する
                 // （ゼロクリアだとdtの端数が毎回捨てられ、実質的な頻度が下がってしまうため）。
@@ -569,6 +590,11 @@ namespace CSWarfront.Game
             // 呼ばれるためここで直接呼んで問題ない（_stateLockはCS実体を持たないState差し替えのみ保護）。
             UnitVisuals.DestroyAll();
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
+            // Task54: このMODが封鎖した道路(PathFailedビット)を解除する。Reset()自体はOnLevelUnloading
+            // （レベル遷移中、simスレッドは既に停止している想定）から呼ばれるため他スレッドとの競合は
+            // 想定していない。CombatRoadBlocker.Reset内部は例外を外へ伝播しないガード付き
+            // （レベルティアダウン中でNetManagerが無効化されているケースがあり得るため、失敗しても
+            // 実害なしとして許容する＝要件通り）。
             lock (_stateLock)
             {
                 State = null;

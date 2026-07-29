@@ -47,6 +47,9 @@ namespace CSWarfront.Core
                     b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy;
                     if (b.CurrentHP < 0f) b.CurrentHP = 0f;
 
+                    // Task54: 被弾地点（基地攻め）も戦闘域として報告する（CombatStepと同じ理由）。
+                    state.CombatZones.ReportCombat(b.Position);
+
                     // 発砲エフェクトの間引き（Task42）。CombatStepと同じFireCooldownアキュムレータを
                     // 共有するため、同tick内で既にユニット攻撃側で発砲済みなら、ここでは重ねて出さない
                     // （攻撃側1体につき見た目は最大1発/FireIntervalHoursという契約を、対象が
