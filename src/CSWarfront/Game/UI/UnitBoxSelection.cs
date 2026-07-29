@@ -44,8 +44,13 @@ namespace CSWarfront.Game.UI
         private const string RectPanelName = "CSWarfrontBoxSelectRect";
 
         /// <summary>この距離（実スクリーンピクセル）を超えて動いて初めて「ドラッグ」とみなす。
-        /// 手ぶれ程度の移動を伴う「ただのクリック」を誤ってドラッグ扱いしないための遊び。</summary>
-        private const float DragThresholdPixels = 6f;
+        /// 手ぶれ程度の移動を伴う「ただのクリック」を誤ってドラッグ扱いしないための遊び。
+        /// Task62: 実機ログで「selected 0 unit(s) via drag」が連発していた根本原因がこの値。
+        /// 旧値(6px)は高DPI環境やマウスセンサーのジッタで通常のクリックですら容易に超えてしまい、
+        /// 普通の単発クリックが誤ってドラッグ判定され、範囲内に何も無ければ選択を巻き添えで
+        /// 消していた（後述のFinishBoxSelectの「空振りドラッグでは選択を消さない」ルールと合わせて
+        /// 二重に対策する）。8px以上を推奨値として10pxへ引き上げる。</summary>
+        private const float DragThresholdPixels = 10f;
 
         private const float MaxCameraDistanceCheck = 100000f; // WorldToScreenPointのz>0判定にのみ使用（距離クランプ無し）
 
@@ -71,6 +76,7 @@ namespace CSWarfront.Game.UI
 
         private static readonly List<uint> _idBuffer = new List<uint>();
         private static readonly List<Vector3> _posBuffer = new List<Vector3>();
+        private static readonly List<uint> _foundBuffer = new List<uint>(); // Task62: FinishBoxSelectの結果を確定前に貯めておくワーク領域（GC回避）
 
         private static readonly Dictionary<uint, GameObject> _highlightMarkers = new Dictionary<uint, GameObject>();
         private static readonly List<uint> _staleHighlightIds = new List<uint>();
@@ -238,7 +244,15 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>ドラッグ終了時に一度だけ呼ばれる。スクリーン矩形内に投影されるユニットをSelectedIdsへ
-        /// 反映し、UnitSelection.SelectedInstanceId も先頭のIDで上書きする（0件なら未選択扱い）。</summary>
+        /// 反映し、UnitSelection.SelectedInstanceId も先頭のIDで上書きする。
+        ///
+        /// Task62: 決定事項 — 矩形内に1体も見つからない「空振りドラッグ」は、既存の選択を
+        /// サイレントに消さない（何もせず直前の選択をそのまま残す）。理由: DragThresholdPixels引き上げ後も
+        /// 手ぶれ等で意図せずドラッグが確定することはあり得るうえ、コマンド待機中（UnitCommandInput.
+        /// IsAwaitingRallyClick等）に選択が空振りドラッグで消えると、直後に出すコマンドが対象0件で
+        /// 空振りする実害が出る。矩形が実際に1体以上を捉えた場合のみSelectedIdsを置き換える
+        /// （範囲を変えて選び直す通常のドラッグ操作はこれまで通り機能する）。選択を明示的に0件へ戻す
+        /// UI操作は本タスクの対象外（既存にも無い）。</summary>
         private static void FinishBoxSelect(Vector2 startScreen, Vector2 endScreen)
         {
             Camera cam = Camera.main;
@@ -251,17 +265,21 @@ namespace CSWarfront.Game.UI
 
             UnitVisuals.CollectVisible(_idBuffer, _posBuffer);
 
-            SelectedIds.Clear();
+            _foundBuffer.Clear();
             for (int i = 0; i < _idBuffer.Count; i++)
             {
                 Vector3 sp = cam.WorldToScreenPoint(_posBuffer[i]);
                 if (sp.z <= 0f || sp.z > MaxCameraDistanceCheck) continue; // カメラ後方は対象外
                 if (sp.x < minX || sp.x > maxX || sp.y < minY || sp.y > maxY) continue;
-                SelectedIds.Add(_idBuffer[i]);
+                _foundBuffer.Add(_idBuffer[i]);
             }
 
-            UnitSelection.Set(SelectedIds.Count > 0 ? SelectedIds[0] : 0);
-            ModConfig.Log("UnitBoxSelection: selected " + SelectedIds.Count + " unit(s) via drag");
+            if (_foundBuffer.Count == 0) return; // Task62: 空振りドラッグは既存の選択を維持する（上記コメント参照）。
+
+            SelectedIds.Clear();
+            SelectedIds.AddRange(_foundBuffer);
+            UnitSelection.Set(SelectedIds[0]);
+            ModConfig.Log("UnitBoxSelection: selected " + SelectedIds.Count + " unit(s) via drag"); // Task62: 0件はもう発生しないためログはcount>0のみ
         }
 
         /// <summary>選択中ユニットへ毎フレーム追従する簡易ハイライト（薄い円柱、コライダー無し）を

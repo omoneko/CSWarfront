@@ -79,6 +79,26 @@ public class InvasionOrdersThreatDivertTests
         Assert.Equal(InvasionOrders.PathRetryFailCooldownHours, u.PathRetryCooldown, 3);
     }
 
+    // Task62 verdict (b): the threat-diversion branch must never flip a FreeAdvance unit's Order back
+    // to AiControlled (AssignAdvance only ever writes OrderTargetPos/State, never Order itself).
+    [Fact]
+    public void Diversion_branch_does_not_change_a_FreeAdvance_unit_s_Order()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        s.Bases.Add(ownBase);
+        s.Threats.Add(Threat(50f)); // within ThreatDivertRadius, triggers the diversion branch
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)) { Order = UnitOrder.FreeAdvance };
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        Assert.Equal(50f, u.OrderTargetPos.Value.X, 3); // diverted, confirming the branch actually ran
+        Assert.Equal(UnitOrder.FreeAdvance, u.Order); // ...without touching Order
+    }
+
     [Fact]
     public void Unit_prefers_the_nearby_threat_over_an_enemy_base()
     {
@@ -224,5 +244,94 @@ public class InvasionOrdersThreatDivertTests
 
         Assert.False(u.OrderTargetPos.HasValue);
         Assert.Equal(UnitState.Idle, u.State);
+    }
+
+    // --- Task62: Nemesis threats waive ThreatDivertRadius entirely (any base type qualifies) ---
+
+    [Fact]
+    public void Nemesis_threat_far_beyond_ThreatDivertRadius_is_diverted_to_when_faction_owns_a_base()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Navy, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 }; // any BaseType qualifies
+        s.Bases.Add(ownBase);
+        var nemesisThreat = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(5000f, 0f, 0f), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f };
+        s.Threats.Add(nemesisThreat); // 5000 >> ThreatDivertRadius(600)
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Nemesis);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(UnitState.Moving, u.State);
+        Assert.Equal(5000f, u.OrderTargetPos.Value.X, 3); // distance limit waived for Nemesis
+    }
+
+    [Fact]
+    public void Ordinary_hostile_threat_beyond_ThreatDivertRadius_is_still_not_diverted_to()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(150, 0, 0)) { OwnerFactionId = 1 };
+        s.Bases.Add(ownBase); s.Bases.Add(enemyBase);
+        s.Threats.Add(Threat(5000f)); // ordinary Hostile (default ThreatRelations), far beyond 600
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(150f, u.OrderTargetPos.Value.X, 3); // radius still applies to plain Hostile relations
+    }
+
+    [Fact]
+    public void Nemesis_threat_is_not_diverted_to_when_faction_owns_no_base_at_all()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(300, 0, 0)) { OwnerFactionId = 1 };
+        s.Bases.Add(enemyBase); // faction 0 owns zero bases
+        var nemesisThreat = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(50f, 0f, 0f), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f };
+        s.Threats.Add(nemesisThreat);
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Nemesis);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(300f, u.OrderTargetPos.Value.X, 3); // no owned base to divert "toward" -> falls back to enemy base targeting
+    }
+
+    [Fact]
+    public void Player_ordered_units_are_never_diverted_even_by_an_unlimited_range_nemesis_threat()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        s.Bases.Add(ownBase);
+        var nemesisThreat = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(9000f, 0f, 0f), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f };
+        s.Threats.Add(nemesisThreat);
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Nemesis);
+        var rallyHoldUnit = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0))
+        {
+            Order = UnitOrder.RallyHold,
+            RallyPoint = new WorldPos(20f, 0f, 0f)
+        };
+        s.Units.Add(rallyHoldUnit);
+
+        InvasionOrders.AssignAdvance(s, 0, 1f);
+
+        // AssignAdvance must not touch RallyHold units at all (Task48 contract), regardless of the
+        // Task62 unlimited-range Nemesis rule: OrderTargetPos stays unset, RallyPoint is untouched.
+        Assert.False(rallyHoldUnit.OrderTargetPos.HasValue);
+        Assert.Equal(20f, rallyHoldUnit.RallyPoint.Value.X, 3);
     }
 }

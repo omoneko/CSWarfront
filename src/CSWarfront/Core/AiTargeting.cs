@@ -124,11 +124,23 @@ namespace CSWarfront.Core
         /// Task59: 宿敵(Nemesis)関係の脅威が対象内に1体でもあれば、通常のHostile脅威より優先し、
         /// 自勢力の基地への最短距離が最小のものを返す。宿敵が無ければ、従来通り同条件で最短距離が
         /// 最小の通常Hostile脅威を返す（宿敵が存在しない場合は挙動が完全に従来のまま）。
+        /// Task62: 宿敵(Nemesis)関係の脅威に限り、ThreatDivertRadiusによる距離制限を一切適用しない
+        /// （陸海空いずれかの基地を1つでも所有していれば、マップ上どこにいてもその宿敵を敵基地進軍より
+        /// 優先して迎撃対象にする）。基地を1つも持たない勢力（＝迎撃に向かわせる拠点自体が無い）は
+        /// 宿敵であっても対象外のまま（従来のHostile同様、何もしない）。通常のHostile脅威は
+        /// 引き続きThreatDivertRadius以内という条件を維持する（挙動変更なし）。
         /// どちらも無ければnull（＝通常の敵基地進軍のまま）。</summary>
         private static WorldPos? FindNearbyThreatToOwnTerritory(WarState state, byte factionId)
         {
             WorldPos? bestHostile = null; float bestHostileDist = float.MaxValue;
             WorldPos? bestNemesis = null; float bestNemesisDist = float.MaxValue;
+
+            // Task62: 「基地を1つでも持っているか」は距離に関係ない全体条件なので、脅威ループの外で一度だけ判定する。
+            bool ownsAnyBase = false;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                if (state.Bases[b].OwnerFactionId == factionId) { ownsAnyBase = true; break; }
+            }
 
             for (int t = 0; t < state.Threats.Count; t++)
             {
@@ -146,14 +158,18 @@ namespace CSWarfront.Core
                     float d = threat.Position.HorizontalDistanceTo(ownedBase.Position);
                     if (d < nearestOwnedBaseDist) nearestOwnedBaseDist = d;
                 }
-                if (nearestOwnedBaseDist > ThreatDivertRadius) continue;
 
                 if (rel == Relation.Nemesis)
                 {
+                    // Task62: 距離制限を一切課さない。基地を1つも持たない勢力だけは対象外にする
+                    // （nearestOwnedBaseDistは基地が無ければ計算しようがなくfloat.MaxValueのまま＝
+                    // ownsAnyBaseで明示的に弾く。基地が1つでもあれば必ず有限の距離が入る）。
+                    if (!ownsAnyBase) continue;
                     if (nearestOwnedBaseDist < bestNemesisDist) { bestNemesisDist = nearestOwnedBaseDist; bestNemesis = threat.Position; }
                 }
                 else
                 {
+                    if (nearestOwnedBaseDist > ThreatDivertRadius) continue;
                     if (nearestOwnedBaseDist < bestHostileDist) { bestHostileDist = nearestOwnedBaseDist; bestHostile = threat.Position; }
                 }
             }

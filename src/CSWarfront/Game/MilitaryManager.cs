@@ -90,6 +90,11 @@ namespace CSWarfront.Game
         // CombatFx.SpawnKillSoundsへ渡す（_shotSnapshotと全く同じパターン）。
         private static readonly List<KillEvent> _killSnapshot = new List<KillEvent>();
 
+        // Task62: 同上、選択中ユニットの進撃/集結先（UI.OrderDestinationMarkers向け）。
+        // UI.UnitBoxSelection.SelectedIds（Game層・main-thread専用の状態）を_stateLock内で参照するのは
+        // OnMainVisualUpdate自体がメインスレッド専用のため問題ない（他のGame層main-thread状態と同じ扱い）。
+        private static readonly List<UI.OrderDestinationState> _orderMarkerSnapshot = new List<UI.OrderDestinationState>();
+
         // save/loadスレッドとsimスレッド間の State への同時アクセスを防ぐ粗粒度ロック。
         // MVP規模（数十ユニット）では単一ロックで十分。
         private static readonly object _stateLock = new object();
@@ -569,6 +574,7 @@ namespace CSWarfront.Game
             _baseVisualSnapshot.Clear();
             _shotSnapshot.Clear();
             _killSnapshot.Clear();
+            _orderMarkerSnapshot.Clear();
             lock (_stateLock)
             {
                 for (int i = 0; i < State.Units.Count; i++)
@@ -584,6 +590,36 @@ namespace CSWarfront.Game
                         Position = new Vector3(u.Position.X, u.Position.Y, u.Position.Z),
                         AssetPrefabName = type != null ? type.AssetPrefabName : ""
                     });
+                }
+
+                // Task62: 選択中ユニット（UI.UnitBoxSelection.SelectedIds）の進撃/集結先を同じロック内で
+                // 収集する（M&B風の目的地マーカー、UI.OrderDestinationMarkers向け）。Hold中・目的地未設定の
+                // ユニットは対象外（マーカーを出さない＝仕様どおり「目的地が無い」ことを意味する）。
+                var selectedIds = UI.UnitBoxSelection.SelectedIds;
+                for (int i = 0; i < selectedIds.Count; i++)
+                {
+                    UnitInstance u = State.FindUnit(selectedIds[i]);
+                    if (u == null || !u.IsAlive) continue;
+
+                    if (u.Order == UnitOrder.RallyHold)
+                    {
+                        if (!u.RallyPoint.HasValue) continue;
+                        WorldPos p = u.RallyPoint.Value;
+                        _orderMarkerSnapshot.Add(new UI.OrderDestinationState
+                        {
+                            Position = new Vector3(p.X, p.Y, p.Z),
+                            Kind = UI.OrderMarkerKind.Rally
+                        });
+                    }
+                    else if (u.Order != UnitOrder.Hold && u.OrderTargetPos.HasValue)
+                    {
+                        WorldPos p = u.OrderTargetPos.Value;
+                        _orderMarkerSnapshot.Add(new UI.OrderDestinationState
+                        {
+                            Position = new Vector3(p.X, p.Y, p.Z),
+                            Kind = UI.OrderMarkerKind.Advance
+                        });
+                    }
                 }
 
                 // Task60: 軍事拠点も同じロック内でスナップショットを組み立てる。位置(WorldPos)は
@@ -622,6 +658,7 @@ namespace CSWarfront.Game
 
             UnitVisuals.Sync(_visualSnapshot);
             BaseVisuals.Sync(_baseVisualSnapshot); // Task60: ロック解放後、Unity操作はここで行う
+            UI.OrderDestinationMarkers.Sync(_orderMarkerSnapshot); // Task62: 同上
 
             // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
@@ -646,6 +683,8 @@ namespace CSWarfront.Game
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 基地の勢力別オーバーレイもレベルアンロード時に破棄する。
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
+            UI.OrderDestinationMarkers.DestroyAll(); // Task62: 目的地マーカーもレベルアンロード時に破棄する。
+            UI.CommandToast.Destroy(); // Task62: トーストラベルもレベルアンロード時に破棄する。
             // Task54: このMODが封鎖した道路(PathFailedビット)を解除する。Reset()自体はOnLevelUnloading
             // （レベル遷移中、simスレッドは既に停止している想定）から呼ばれるため他スレッドとの競合は
             // 想定していない。CombatRoadBlocker.Reset内部は例外を外へ伝播しないガード付き

@@ -78,6 +78,15 @@ namespace CSWarfront.Game
                 UnitCommandInput.Update();
             }
             catch (System.Exception e) { ModConfig.LogError("UnitCommandInput update: " + e); }
+
+            // Task62: コマンド発行時の画面中央トースト。UnitCommandInputがShow()を呼ぶ側なので、
+            // ここでは冪等な生成とフェード/非表示の時間経過管理だけを毎フレーム行う。
+            try
+            {
+                CommandToast.EnsureCreated();
+                CommandToast.Update();
+            }
+            catch (System.Exception e) { ModConfig.LogError("CommandToast update: " + e); }
         }
     }
 }
