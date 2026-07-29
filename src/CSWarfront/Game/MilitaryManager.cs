@@ -465,6 +465,11 @@ namespace CSWarfront.Game
                 BaseCombatStep.Advance(State, dt);
                 ThreatCombatStep.Advance(State, dt);
 
+                // Task65: 脅威（ゴジラ/エイリアン）の近接オーラダメージ。ThreatCombatStepの直後
+                // （ユニット→脅威の攻撃が確定した直後）に実行する。ThreatRelationsを見ない逆方向
+                // （脅威→ユニット）のダメージなので、通常戦闘のターゲット選定には一切影響しない。
+                ThreatAuraStep.Advance(State, dt);
+
                 // Task63: 弾道ミサイルの飛翔進捗・迎撃・着弾解決。仕様どおりThreatCombatStepの直後・
                 // 経済tickより前に実行する（着弾ダメージが同tickのOccupation/FactionStatus再導出に反映される）。
                 MissileStep.Advance(State, dt);
@@ -480,6 +485,11 @@ namespace CSWarfront.Game
                 // 反映しておきたいところだが、MovementStep（経路の消化・新規計算含む）は既に上で
                 // 終わっている。次tickの経路計算からは反映されるため1tickの遅延は許容する。
                 CombatRoadBlocker.Advance(State, dt);
+
+                // Task65: 戦闘域(State.CombatZones)付近のまれな火災/建物崩壊。DisasterHelpersはsim
+                // スレッド専用のため、同じくCS建物バッファ絡みのCombatRoadBlockerの直後に置く
+                // （道路封鎖の判定が終わった後で問題ない＝両者は互いに依存しない独立した処理）。
+                CombatCollateral.Advance(State, dt);
 
                 // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する
                 // （ゼロクリアだとdtの端数が毎回捨てられ、実質的な頻度が下がってしまうため）。
@@ -720,7 +730,9 @@ namespace CSWarfront.Game
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
             CombatFx.Spawn(_shotSnapshot);
             CombatFx.SpawnKillSounds(_killSnapshot); // Task51: 撃破音（視覚エフェクトは無し）
+            KillFx.Spawn(_killSnapshot); // Task65: 撃破爆発エフェクト（音とは別のエフェクト専用クラス、同じカテゴリ判定を共有）
             CombatFx.Update(Time.deltaTime);
+            KillFx.Update(Time.deltaTime);
 
             // Task63: 着弾/迎撃の演出（フラッシュ/爆発+音）と、生存中の演出の実時間更新。
             MissileVisuals.HandleImpacts(_missileImpactSnapshot);
@@ -743,6 +755,7 @@ namespace CSWarfront.Game
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 基地の勢力別オーバーレイもレベルアンロード時に破棄する。
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
+            KillFx.DestroyAll(); // Task65: 撃破爆発エフェクトもレベルアンロード時に破棄する。
             MissileVisuals.DestroyAll(); // Task63: 飛翔中ミサイルの見た目もレベルアンロード時に破棄する。
             MissileVisuals.DestroyAllFx(); // Task63: 着弾/迎撃の演出も同様。
             UI.OrderDestinationMarkers.DestroyAll(); // Task62: 目的地マーカーもレベルアンロード時に破棄する。
@@ -755,6 +768,7 @@ namespace CSWarfront.Game
             // Task56レビュー: このコメントは元々あったが実際の呼び出しが抜けており、レベルアンロードでも
             // PathFailedビットが解除されないまま次セッションへ持ち越されうる欠落だったため追加した。
             CombatRoadBlocker.Reset();
+            CombatCollateral.Reset(); // Task65: 抽選間引き用の内部状態もレベルアンロード時にクリアする。
 
             lock (_stateLock)
             {

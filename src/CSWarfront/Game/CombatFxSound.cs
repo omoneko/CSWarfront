@@ -61,8 +61,7 @@ namespace CSWarfront.Game
                     // Task53: 歩兵・ドローン兵の撃破では「車両撃破時」の爆発音をオミットする
                     // （生身の歩兵が爆発するのは演出として不自然なため）。MechInfantryは車両に
                     // 乗った機械化歩兵なので対象外＝従来どおり爆発音を鳴らす（あえて含めない）。
-                    if (k.Category == UnitCategory.Infantry || k.Category == UnitCategory.DroneInfantry)
-                        continue;
+                    if (!IsVehicleDestructionCategory(k.Category)) continue;
 
                     Vector3 pos = new Vector3(k.Position.X, k.Position.Y, k.Position.Z);
                     WarfrontSoundPlayer.PlayKill(pos, cameraPos);
@@ -72,6 +71,16 @@ namespace CSWarfront.Game
             {
                 ModConfig.LogError("CombatFx.SpawnKillSounds error: " + e);
             }
+        }
+
+        /// <summary>撃破カテゴリが「車両撃破時」の演出（爆発音＝この直上のSpawnKillSounds、
+        /// および爆発エフェクト＝Task65のKillFx.Spawn）の対象かどうか。両者が全く同じ基準を
+        /// 使う必要がある（Task65仕様：音とエフェクトで判定がズレると「爆発音は鳴るのに火柱が
+        /// 出ない」ような不整合が生まれる）ため、判定ロジックをここ1箇所に集約して共有する。
+        /// 歩兵・ドローン兵（生身）はfalse、それ以外（MechInfantryを含む全車両系）はtrue。</summary>
+        internal static bool IsVehicleDestructionCategory(UnitCategory category)
+        {
+            return category != UnitCategory.Infantry && category != UnitCategory.DroneInfantry;
         }
     }
 }
