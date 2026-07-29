@@ -79,5 +79,28 @@ namespace CSWarfront.Game
             get { return _rallyKey; }
             set { _rallyKey = value; }
         }
+
+        // --- Task51: 兵科別射撃音・撃破音の音量設定 ---
+        // 他の設定と同じくメモリ内保持のみ（クラス冒頭のコメント参照、セッションをまたいだ既定値への
+        // リセットは許容、MVP）。
+
+        private static int _soundVolume = 50; // 0..100、既定50%
+
+        /// <summary>発砲音・撃破音の音量（0=無音〜100=最大）。WarfrontSoundPlayerが
+        /// AudioSource.volume = SoundVolume / 100f として毎回参照する。</summary>
+        public static int SoundVolume
+        {
+            get { return _soundVolume; }
+            set { _soundVolume = value < 0 ? 0 : (value > 100 ? 100 : value); }
+        }
+
+        private static bool _soundMuted; // 既定OFF（鳴らす）
+
+        /// <summary>ONの間はWarfrontSoundPlayerが一切音を再生しない（SoundVolumeの値に関わらず）。</summary>
+        public static bool SoundMuted
+        {
+            get { return _soundMuted; }
+            set { _soundMuted = value; }
+        }
     }
 }

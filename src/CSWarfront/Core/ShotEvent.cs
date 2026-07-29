@@ -37,10 +37,16 @@ namespace CSWarfront.Core
         /// 着弾高さを使う。</summary>
         public uint TargetId;
 
-        public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId)
+        /// <summary>発砲したユニットの兵科（Task51、兵科別射撃音）。Game層（WarfrontSounds.ShotSoundFor）が
+        /// これを見て銃撃/重機関銃/砲撃/対空ミサイルのどの音を鳴らすかを選ぶ。ダメージ計算・命中判定には
+        /// 一切使わない（ShotKindと同じく見た目・音専用の付随データ）。</summary>
+        public UnitCategory Category;
+
+        public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId,
+            UnitCategory category)
         {
             From = from; To = to; Kind = kind; FactionId = factionId;
-            AttackerId = attackerId; TargetId = targetId;
+            AttackerId = attackerId; TargetId = targetId; Category = category;
         }
     }
 }

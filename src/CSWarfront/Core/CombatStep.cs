@@ -48,15 +48,21 @@ namespace CSWarfront.Core
                 if (self.FireCooldown <= 0f)
                 {
                     state.AddShot(new ShotEvent(self.Position, target.Position, type.ShotKind, self.FactionId,
-                        self.InstanceId, target.InstanceId));
+                        self.InstanceId, target.InstanceId, type.Category));
                     self.FireCooldown = type.FireIntervalHours;
                 }
             }
             // 2) 死亡判定
+            // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
+            // トリガーとしてKillEventを1件だけ積む（State != Deadを条件にしているため二重には積まない）。
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
-                if (u.State != UnitState.Dead && u.CurrentHP <= 0f) u.State = UnitState.Dead;
+                if (u.State != UnitState.Dead && u.CurrentHP <= 0f)
+                {
+                    u.State = UnitState.Dead;
+                    state.AddKill(new KillEvent(u.Position, u.FactionId));
+                }
             }
         }
 

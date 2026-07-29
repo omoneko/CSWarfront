@@ -34,6 +34,18 @@ namespace CSWarfront.Core
         /// 表現バッファ・後段のGameObject生成が際限なく増えないようにする防御的上限。</summary>
         public const int MaxRecentShotsPerTick = 200;
 
+        /// <summary>
+        /// Task51: 直近1tick分の「ユニット撃破」イベントのトランジェント・バッファ（非永続化）。
+        /// RecentShotsと全く同じ契約: CombatStepがユニットをUnitState.Deadへ遷移させたタイミングで
+        /// AddKillを通じて積む。Game層のMilitaryManager.OnSimTickは各tickの先頭で必ずClear()し、
+        /// OnMainVisualUpdateが_stateLock内でコピーしてから消費すること。
+        /// WarStateSerializerには一切書き出さない（見た目・音専用データでセーブ不要）。
+        /// </summary>
+        public List<KillEvent> RecentKills = new List<KillEvent>();
+
+        /// <summary>1tickあたりRecentKillsへ追加できる最大件数（Task51）。RecentShotsと同じ防御的上限。</summary>
+        public const int MaxRecentKillsPerTick = 200;
+
         public uint AllocInstanceId() { return NextInstanceId++; }
 
         /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる
@@ -42,6 +54,14 @@ namespace CSWarfront.Core
         {
             if (RecentShots.Count >= MaxRecentShotsPerTick) return;
             RecentShots.Add(e);
+        }
+
+        /// <summary>撃破イベントを1件積む（Task51）。MaxRecentKillsPerTickに達していれば黙って捨てる
+        /// （AddShotと同じ防御方針）。</summary>
+        public void AddKill(KillEvent e)
+        {
+            if (RecentKills.Count >= MaxRecentKillsPerTick) return;
+            RecentKills.Add(e);
         }
 
         public UnitInstance FindUnit(uint id)

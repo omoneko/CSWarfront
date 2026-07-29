@@ -149,6 +149,8 @@ public class BaseCombatStepTests
         // として扱い、基地用の既定の着弾高さを使う）。AttackerIdは攻撃側ユニットのInstanceId。
         Assert.Equal(1u, shot.AttackerId);
         Assert.Equal(0u, shot.TargetId);
+        // Task51: 兵科別射撃音をGame層が選べるよう、発砲したユニットのUnitCategoryをShotEventに載せる。
+        Assert.Equal(UnitCategory.Tank, shot.Category);
     }
 
     [Fact]

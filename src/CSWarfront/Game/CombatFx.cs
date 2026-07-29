@@ -20,7 +20,7 @@ namespace CSWarfront.Game
     /// per-instance化しない）。勢力色でチントしない＝トレーサーは「発砲そのもの」として読めるようにし、
     /// 陣営マーカーと誤読されないようにする（要件）。
     /// </summary>
-    internal static class CombatFx
+    internal static partial class CombatFx
     {
         /// <summary>同時に生きていられるエフェクトの上限（Task42）。大規模乱戦でGameObjectが
         /// 際限なく増えないようにする防御的上限。ShotEvent側の上限(WarState.MaxRecentShotsPerTick)とは
@@ -296,6 +296,9 @@ namespace CSWarfront.Game
                     SpawnArc(from, to);
                     break;
             }
+
+            // Task51: 兵科別の発砲音再生（実装はCombatFxSound.cs、同じpartial class）。
+            PlayShotSound(e, from, cameraPos);
         }
 
         /// <summary>攻撃側(From)の見た目の高さ（Task43）。attackerIdが0（論理ユニットでない）か、

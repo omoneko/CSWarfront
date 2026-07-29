@@ -36,6 +36,8 @@ namespace CSWarfront.Game
 
                 AddFactionIconUI(helper);
 
+                AddSoundUI(helper);
+
                 OptionsModelAssignPage.Build(helper);
             }
             catch (Exception e)
@@ -87,6 +89,21 @@ namespace CSWarfront.Game
                 "Show a small faction-colored marker above each unit",
                 WarfrontSettings.ShowFactionIcons,
                 v => WarfrontSettings.ShowFactionIcons = v);
+        }
+
+        /// <summary>Task51: 兵科別射撃音・撃破音の音量スライダーとミュートトグル。WarfrontSettingsと
+        /// 同じくメモリ内保持のみ（セッションをまたいだ既定値=50%/ミュートOFFへのリセットは許容、MVP）。</summary>
+        private static void AddSoundUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup("Firing sounds");
+            group.AddSlider(
+                "Sound volume",
+                0f, 100f, 1f, WarfrontSettings.SoundVolume,
+                v => WarfrontSettings.SoundVolume = (int)v);
+            group.AddCheckbox(
+                "Mute all firing/kill sounds",
+                WarfrontSettings.SoundMuted,
+                v => WarfrontSettings.SoundMuted = v);
         }
     }
 }

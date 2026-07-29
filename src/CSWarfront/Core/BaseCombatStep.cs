@@ -57,7 +57,7 @@ namespace CSWarfront.Core
                         // TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
                         // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
                         state.AddShot(new ShotEvent(u.Position, b.Position, type.ShotKind, u.FactionId,
-                            u.InstanceId, 0));
+                            u.InstanceId, 0, type.Category));
                         u.FireCooldown = type.FireIntervalHours;
                     }
                 }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using ColossalFramework;
 using ColossalFramework.Plugins;
+using CSWarfront.Game.Audio;
 using ICities;
 namespace CSWarfront.Game
 {
@@ -29,7 +30,7 @@ namespace CSWarfront.Game
                 {
                     WarfrontBasePrefab.EnsureRegistered();
                     BasePlacementWatcher.Subscribe();
-                    LoadUnitAssetBindings(); // Task36: サブスクライブ済みプロップのユニットモデル割り当て
+                    LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音の読込
                 }
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelLoaded: " + e); }
@@ -48,14 +49,15 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task36: UnitAssetBindings（TypeKey→サブスクライブ済みプロップ名の割り当て）をMODディレクトリから
-        /// 読み込む。Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
+        /// Task36: UnitAssetBindings（TypeKey→サブスクライブ済みプロップ名の割り当て）を、Task51:
+        /// WarfrontSounds（発砲音・撃破音のwav読込）を、それぞれMODディレクトリから読み込む/初期化する。
+        /// Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
         /// 本クラスが既に WarfrontBasePrefab.EnsureRegistered() と同じタイミング（ゲームプレイ可能な
-        /// LoadModeでのOnLevelLoaded）でプレハブ登録を行っており、割り当て読み込みも同じタイミングで
-        /// 十分だからである。modPath が取得できない場合はログのみで継続し、UnitAssetBindings側は
-        /// メモリ内のみで動作する（割り当ては保存されないが、ロード自体は止めない）。
+        /// LoadModeでのOnLevelLoaded）でプレハブ登録を行っており、資産読み込みも同じタイミングで
+        /// 十分だからである。modPath が取得できない場合はログのみで継続し、両者ともメモリ内のみで
+        /// 動作する（UnitAssetBindingsの割り当てやWarfrontSoundsの音は使えないが、ロード自体は止めない）。
         /// </summary>
-        private static void LoadUnitAssetBindings()
+        private static void LoadModAssets()
         {
             try
             {
@@ -63,13 +65,15 @@ namespace CSWarfront.Game
                     Singleton<PluginManager>.instance.FindPluginInfo(Assembly.GetExecutingAssembly());
                 if (info == null || string.IsNullOrEmpty(info.modPath))
                 {
-                    ModConfig.LogError("LoadUnitAssetBindings: PluginManager から modPath を取得できませんでした（メモリ内のみで動作）");
+                    ModConfig.LogError("LoadModAssets: PluginManager から modPath を取得できませんでした（メモリ内のみで動作）");
                 }
-                UnitAssetBindings.Load(info != null ? info.modPath : null);
+                string modPath = info != null ? info.modPath : null;
+                UnitAssetBindings.Load(modPath);
+                WarfrontSounds.Initialize(modPath); // Task51
             }
             catch (System.Exception e)
             {
-                ModConfig.LogError("LoadUnitAssetBindings error: " + e);
+                ModConfig.LogError("LoadModAssets error: " + e);
             }
         }
     }

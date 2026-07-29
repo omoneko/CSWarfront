@@ -229,6 +229,8 @@ public class CombatStepTests
         // InstanceIdをShotEventに載せる。
         Assert.Equal(1u, fromUnit1[0].AttackerId); // unit1 (self)
         Assert.Equal(2u, fromUnit1[0].TargetId);   // unit2 (target)
+        // Task51: 兵科別射撃音をGame層が選べるよう、発砲したユニットのUnitCategoryをShotEventに載せる。
+        Assert.Equal(UnitCategory.Tank, fromUnit1[0].Category);
     }
 
     [Fact]
@@ -279,5 +281,58 @@ public class CombatStepTests
         CombatStep.Advance(s, 0.01f);
 
         Assert.Equal(WarState.MaxRecentShotsPerTick, s.RecentShots.Count);
+    }
+
+    // --- Task51: 撃破イベント(KillEvent)は死亡判定と同じtickで積まれる ---
+
+    [Fact]
+    public void Killing_a_unit_emits_exactly_one_kill_event_at_the_victims_position()
+    {
+        var s = TwoHostileTanks(50f); // range 60 内、両者交戦
+        s.FindUnit(2).CurrentHP = 1f; // このtickの一撃で確実に死ぬところまで削っておく
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
+        Assert.Single(s.RecentKills);
+        var kill = s.RecentKills[0];
+        Assert.Equal(50f, kill.Position.X, 3); // 撃破されたunit2の位置
+        Assert.Equal((byte)1, kill.FactionId); // 撃破されたunit2（Blue）の所属勢力
+    }
+
+    [Fact]
+    public void Unit_that_survives_the_tick_emits_no_kill_event()
+    {
+        var s = TwoHostileTanks(50f); // range 60 内、両者とも100HPで生存する
+        CombatStep.Advance(s, 1f);
+        Assert.Empty(s.RecentKills);
+    }
+
+    [Fact]
+    public void RecentKills_is_capped_at_MaxRecentKillsPerTick_even_with_a_huge_battle()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+
+        // WarState.MaxRecentKillsPerTick(200)を大きく超える数の交戦ペアを作り、片方を1HPにしておくことで
+        // 同一tickで全ペアが同時に死亡し得る状況を作る（RecentShots版のキャップ検証と同じ配置パターン）。
+        // 各ペアにつき死亡するのは1HP側の1体のみ（もう一方は100HPで生き残る、攻撃順の都合で反撃も受けない）
+        // なので、200件のキャップを実際に超えさせるにはペア数自体を200超にする必要がある。
+        const int pairs = 250;
+        uint nextId = 1;
+        for (int p = 0; p < pairs; p++)
+        {
+            float baseX = p * 1000f;
+            s.Units.Add(new UnitInstance(nextId++, "Tank_T1", 0, 100f, new WorldPos(baseX, 0f, 0f)));
+            var victim = new UnitInstance(nextId++, "Tank_T1", 1, 1f, new WorldPos(baseX + 50f, 0f, 0f));
+            s.Units.Add(victim);
+        }
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(WarState.MaxRecentKillsPerTick, s.RecentKills.Count);
     }
 }

@@ -83,6 +83,10 @@ namespace CSWarfront.Game
         // ロック解放後にCombatFx.Spawnへ渡す（UnitVisuals向けの_visualSnapshotと同じパターン）。
         private static readonly List<ShotEvent> _shotSnapshot = new List<ShotEvent>();
 
+        // Task51: 同上、State.RecentKillsの内容を_stateLock内でここへコピーしてから、ロック解放後に
+        // CombatFx.SpawnKillSoundsへ渡す（_shotSnapshotと全く同じパターン）。
+        private static readonly List<KillEvent> _killSnapshot = new List<KillEvent>();
+
         // save/loadスレッドとsimスレッド間の State への同時アクセスを防ぐ粗粒度ロック。
         // MVP規模（数十ユニット）では単一ロックで十分。
         private static readonly object _stateLock = new object();
@@ -282,6 +286,8 @@ namespace CSWarfront.Game
                 // なので、戦闘stepより前に必ずクリアする（そうしないと過去tickの分がGame層で二重に
                 // 消費され続け、際限なく肥大化する）。
                 State.RecentShots.Clear();
+                // Task51: 撃破イベント(KillEvent)もRecentShotsと全く同じ理由・同じタイミングでクリアする。
+                State.RecentKills.Clear();
 
                 // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
                 // （Task18）。CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
@@ -501,6 +507,7 @@ namespace CSWarfront.Game
 
             _visualSnapshot.Clear();
             _shotSnapshot.Clear();
+            _killSnapshot.Clear();
             lock (_stateLock)
             {
                 for (int i = 0; i < State.Units.Count; i++)
@@ -522,6 +529,10 @@ namespace CSWarfront.Game
                 // 書き込むトランジェント・バッファのため、ロック外で読むとレースになる）。
                 for (int i = 0; i < State.RecentShots.Count; i++)
                     _shotSnapshot.Add(State.RecentShots[i]);
+
+                // Task51: 撃破イベントも同じロック内・同じ理由でコピーする。
+                for (int i = 0; i < State.RecentKills.Count; i++)
+                    _killSnapshot.Add(State.RecentKills[i]);
             }
 
             UnitVisuals.Sync(_visualSnapshot);
@@ -529,6 +540,7 @@ namespace CSWarfront.Game
             // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
             CombatFx.Spawn(_shotSnapshot);
+            CombatFx.SpawnKillSounds(_killSnapshot); // Task51: 撃破音（視覚エフェクトは無し）
             CombatFx.Update(Time.deltaTime);
         }
 

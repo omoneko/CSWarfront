@@ -8,4 +8,16 @@ $dll = "src\CSWarfront\bin\Release\CSWarfront.dll"
 $modDir = Join-Path $env:LOCALAPPDATA "Colossal Order\Cities_Skylines\Addons\Mods\CSWarfront"
 New-Item -ItemType Directory -Force -Path $modDir | Out-Null
 Copy-Item $dll $modDir -Force
+
+# Deploy sound assets (Sounds/*.wav). WarfrontSounds loads these at runtime.
+# Note: CS (Unity 5.6) cannot decode MP3 at runtime, so only the converted *.wav files are deployed;
+# the original *.mp3 files also live under src\CSWarfront\Sounds\ as source material but are not copied.
+$soundsSrc = "src\CSWarfront\Sounds"
+if (Test-Path $soundsSrc) {
+    $soundsDst = Join-Path $modDir "Sounds"
+    New-Item -ItemType Directory -Force -Path $soundsDst | Out-Null
+    Copy-Item (Join-Path $soundsSrc "*") $soundsDst -Include *.wav -Force
+    Write-Host "Sounds deployed: $soundsDst"
+}
+
 Write-Host "Deployment complete: $modDir"
