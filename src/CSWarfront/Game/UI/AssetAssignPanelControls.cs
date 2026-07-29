@@ -16,13 +16,20 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static partial class AssetAssignPanel
     {
-        /// <summary>Task60: 先頭に軍事拠点の特別キー（UnitAssetBindings.BaseTypeKey）を1件追加した上で、
-        /// LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件のTypeKeyを構築する（計36件）。
-        /// 拠点はユニット種別ではない（LandUnitRoster.All()には含まれない）が、モデル割り当てUIの
-        /// 対象としては同列に選べるようにする、という要件のため先頭に手動で挿入する。</summary>
+        /// <summary>Task66: 先頭に基地種別ごとの4キー（陸軍/海軍/空軍/ミサイル、UnitAssetBindings.
+        /// ArmyBaseTypeKey等）を追加した上で、LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件の
+        /// TypeKeyを構築する（計39件）。拠点はユニット種別ではない（LandUnitRoster.All()には含まれない）が、
+        /// モデル割り当てUIの対象としては同列に選べるようにする、という要件のため先頭に手動で挿入する
+        /// （Task60時点は単一キーだったが、基地種別ごとの割り当てを可能にするため4キーへ分割した）。</summary>
         private static void BuildTypeKeys()
         {
-            List<string> keys = new List<string> { UnitAssetBindings.BaseTypeKey };
+            List<string> keys = new List<string>
+            {
+                UnitAssetBindings.ArmyBaseTypeKey,
+                UnitAssetBindings.NavyBaseTypeKey,
+                UnitAssetBindings.AirBaseTypeKey,
+                UnitAssetBindings.MissileBaseTypeKey
+            };
             foreach (UnitType t in LandUnitRoster.All()) keys.Add(t.TypeKey);
             _typeKeys = keys.ToArray();
         }
@@ -93,8 +100,10 @@ namespace CSWarfront.Game.UI
         /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。
         /// Task41: プロップ以外の種類が割り当てられている場合は "[建物]MyBuilding" のように種類タグを
         /// 付ける（AssetKindUtil.Describe）。
-        /// Task60: 軍事拠点（UnitAssetBindings.BaseTypeKey）だけは生のキー文字列ではなく
-        /// BaseTypeKeyDisplayName（「軍事基地（拠点）」）を表示し、ユニットの1つと誤解されないようにする。</summary>
+        /// Task66: 基地種別キー（陸軍/海軍/空軍/ミサイル）は生のキー文字列ではなく
+        /// UnitAssetBindings.DisplayNameForBaseKeyの日本語ラベルを表示し、ユニットの1つと誤解されない
+        /// ようにする。割り当ての解決も種別別キー→旧統合キーの順（UnitAssetBindings.TryGetEffective）で
+        /// 行い、旧統合キーからのフォールバックが効いている場合もそれを「現在の割り当て」として表示する。</summary>
         private static string[] BuildDropdownLabels()
         {
             if (_typeKeys == null) return new string[0];
@@ -105,12 +114,10 @@ namespace CSWarfront.Game.UI
             {
                 AssetKind kind;
                 string name;
-                string suffix = UnitAssetBindings.TryGet(factionId, _typeKeys[i], out kind, out name)
+                string suffix = UnitAssetBindings.TryGetEffective(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
                     : "(既定)";
-                string displayKey = _typeKeys[i] == UnitAssetBindings.BaseTypeKey
-                    ? UnitAssetBindings.BaseTypeKeyDisplayName
-                    : _typeKeys[i];
+                string displayKey = UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[i]);
                 labels[i] = displayKey + " → " + suffix;
             }
             return labels;
@@ -146,7 +153,7 @@ namespace CSWarfront.Game.UI
 
             AssetKind kind;
             string name;
-            bool bound = UnitAssetBindings.TryGet(SelectedFactionId, _typeKeys[idx], out kind, out name);
+            bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
             _currentBindingLabel.text = "現在の割り当て: " + (bound ? AssetKindUtil.Describe(kind, name) : "(既定のモデル)");
             RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
@@ -209,6 +216,26 @@ namespace CSWarfront.Game.UI
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
             ModConfig.Log("AssetAssignPanel: 割り当て変更を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+
+            WarnIfNoOwnedBaseForKey(typeIdx);
+        }
+
+        /// <summary>Task66バグ調査対応: 適用先が基地種別キーで、かつ選択中の勢力がその種別の拠点を
+        /// 1つも所有していない場合、割り当て自体は正しく保存されるが見た目には何も反映されないため
+        /// （反映先の拠点が存在しない）、ユーザーが「反映されていない＝不具合」と誤解しないよう
+        /// ログへ明示的な案内を残す（現在の割り当てラベルにも同じ文言を追記する）。</summary>
+        private static void WarnIfNoOwnedBaseForKey(int typeIdx)
+        {
+            if (_typeKeys == null || typeIdx < 0 || typeIdx >= _typeKeys.Length) return;
+
+            BaseType baseType;
+            if (!UnitAssetBindings.TryGetBaseTypeForKey(_typeKeys[typeIdx], out baseType)) return;
+            if (MilitaryManager.HasOwnedBaseOfType(SelectedFactionId, baseType)) return;
+
+            string note = "（この勢力が所有する" + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
+                "が現在ありません。拠点を建設/所属変更すると反映されます）";
+            ModConfig.Log("AssetAssignPanel: " + note);
+            if (_currentBindingLabel != null) _currentBindingLabel.text += "\n" + note;
         }
 
         private static void OnCloseClick(UIComponent component, UIMouseEventParameter eventParam)

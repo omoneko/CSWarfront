@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CSWarfront.Core;
 using UnityEngine;
 namespace CSWarfront.Game
 {
@@ -16,33 +17,42 @@ namespace CSWarfront.Game
         /// <summary>建物の向き（ラジアン、CS Building.m_angle そのもの）。
         /// BasePlacementWatcher.TryGetAngle が解決できなかった場合は呼び出し側が0（既定の向き）を渡す。</summary>
         public float Angle;
+
+        /// <summary>Task66: 基地種別（陸軍/海軍/空軍/ミサイル）。Core.MilitaryBase.Type をそのまま運ぶだけ
+        /// （CoreのState.Basesに既に存在するフィールドで、Game層で新たに算出する必要は無い）。
+        /// UnitAssetBindings.TryGetForBaseへ渡し、種別ごとのモデル割り当てキーを解決するために使う。</summary>
+        public BaseType Type;
     }
 
     /// <summary>
     /// Task60: 軍事拠点（MilitaryBase）に勢力ごとの見た目を持たせるためのオーバーレイ描画。
     ///
     /// 設計判断（すべてのバニラ機能を壊さないための唯一の安全な経路）:
-    /// 全勢力の拠点は WarfrontBasePrefab が登録する「たった1つの共有BuildingInfo」から生成される
+    /// 各基地種別（陸軍/海軍/空軍/ミサイル）の拠点は WarfrontBasePrefab が種別ごとに登録する専用の
+    /// BuildingInfo（Task61で1種類→4種類に拡張、種別内では全勢力が同じプレハブを共有する）から生成される
     /// 本物のCS建物（配置/AI/情報パネル/占領は全てバニラのBuildingManager/BuildingAIが担う）。
     /// BuildingInfo.m_mesh はプレハブ（アセット）単位のフィールドであり、CS標準APIには「建物インスタンス
     /// ごとに描画メッシュを差し替える」手段が無い。もし拠点ごとにm_meshを書き換えられたとしても、
-    /// それは共有BuildingInfoそのものを書き換えることになり、既に配置済みの他勢力の拠点も含めて
-    /// 全拠点の見た目が同時に変わってしまう（要件と正反対の結果）。バニラ側のメッシュを個別に隠す
+    /// それは種別内で共有されるBuildingInfoそのものを書き換えることになり、既に配置済みの他勢力の同種別拠点
+    /// も含めて見た目が同時に変わってしまう（要件と正反対の結果）。バニラ側のメッシュを個別に隠す
     /// 公式APIも存在しない（Building.m_flagsをいじって「見えなくする」ことは可能かもしれないが、
     /// 占領/生産/情報パネル等バニラ・Core双方の判定に使われるフラグへ干渉するリスクがあり、
     /// 「Core/CS実体の判定ロジックには触れない」という制約に反する）。
     /// そのためこのクラスは UnitVisuals と全く同じ手法（CS実体には一切触れない自前GameObjectを
     /// 論理座標へ重ねて描画する）を採用する。<b>バニラの建物メッシュは隠さない</b>——割り当て済みの
-    /// 拠点では、既定モデル（Building_MilitaryBase.obj、WarfrontBasePrefab.TrySwapVisualMesh参照）の
-    /// 上に、割り当てられたアセットのオーバーレイが重なって見える（意図的なトレードオフ。要件の
-    /// 「隠すのが危険なら重ねて表示し、その旨を明記する」に従う）。
+    /// 拠点では、種別ごとの既定モデル（Building_MilitaryBase/NavalBase/AirBase/MissileBase.obj、
+    /// WarfrontBasePrefab.TrySwapVisualMesh参照）の上に、割り当てられたアセットのオーバーレイが重なって
+    /// 見える（意図的なトレードオフ。要件の「隠すのが危険なら重ねて表示し、その旨を明記する」に従う）。
     ///
     /// 割り当てが無い勢力の拠点にはオーバーレイを一切生成しない（要件: 「割り当てのある拠点だけ」）。
-    /// UnitAssetBindings の特別キー <see cref="UnitAssetBindings.BaseTypeKey"/>（"MilitaryBase"、
-    /// ユニット種別ではない）で (勢力, "MilitaryBase") → アセットの割り当てを解決する
+    /// Task60では基地種別を区別しない単一キー（<see cref="UnitAssetBindings.BaseTypeKey"/>、"MilitaryBase"）
+    /// のみで (勢力, "MilitaryBase") → アセットを解決していたが、Task66で基地種別ごとの専用キー
+    /// （<see cref="UnitAssetBindings.BaseTypeKeyFor"/>）に対応した <see cref="UnitAssetBindings.TryGetForBase"/>
+    /// を使うよう変更した（種別別キーに無ければ旧統合キーへフォールバックする、後方互換）
     /// （UnitMeshSource.TryResolveは使わない——あちらはユニット向けのTierフォールバック/既定モデル
     /// フォールバック/車両プレハブ借用フォールバックまで含む重い解決チェーンだが、拠点には
-    /// Tierも既定built-inモデル解決も無関係なため、UnitAssetBindings.TryGetを直接呼ぶ薄い実装で足りる）。
+    /// Tierも既定built-inモデル解決も無関係なため、UnitAssetBindings.TryGetForBaseを直接呼ぶ薄い実装で
+    /// 足りる）。
     ///
     /// 借用するのはメッシュ(AssetCatalog.TryGetMesh)とテクスチャ(UnitMaterialFactory.TryGetAssetMaterial
     /// 経由でmainTextureのみ)だけで、CS側のMaterial/AIは一切借用しない（UnitVisuals/UnitMeshSourceと
@@ -96,7 +106,8 @@ namespace CSWarfront.Game
                 {
                     AssetKind kind;
                     string name;
-                    bool hasAssignment = UnitAssetBindings.TryGet(s.FactionId, UnitAssetBindings.BaseTypeKey, out kind, out name);
+                    // Task66: 基地種別ごとの割り当てキーを解決する（種別別キー→旧統合キーの順、後方互換）。
+                    bool hasAssignment = UnitAssetBindings.TryGetForBase(s.FactionId, s.Type, out kind, out name);
 
                     if (!hasAssignment)
                     {
@@ -192,7 +203,7 @@ namespace CSWarfront.Game
                 Mesh mesh;
                 if (!AssetCatalog.TryGetMesh(kind, name, out mesh) || mesh == null)
                 {
-                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " のメッシュ解決に失敗（" +
+                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") のメッシュ解決に失敗（" +
                         kind + ":" + name + "）、オーバーレイをスキップします（既定の見た目のまま）");
                     return null;
                 }
@@ -202,7 +213,7 @@ namespace CSWarfront.Game
                 Material material;
                 if (!UnitMaterialFactory.TryGetAssetMaterial(kind, name, out material) || material == null)
                 {
-                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " のマテリアル生成に失敗、オーバーレイをスキップします");
+                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") のマテリアル生成に失敗、オーバーレイをスキップします");
                     return null;
                 }
 
@@ -233,7 +244,7 @@ namespace CSWarfront.Game
                 // 経由の選択で動作しており、そちらを一切変更しない・奪わないことが要件（占領・パネルが
                 // 従来通り動く）のため。
 
-                ModConfig.Log("BaseVisuals: created overlay for base " + s.BaseId + " faction=" + s.FactionId +
+                ModConfig.Log("BaseVisuals: created overlay for base " + s.BaseId + " (" + s.Type + ") faction=" + s.FactionId +
                     " asset=" + kind + ":" + name);
 
                 return new VisualEntry { GameObject = go };

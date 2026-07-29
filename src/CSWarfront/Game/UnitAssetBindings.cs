@@ -69,6 +69,15 @@ namespace CSWarfront.Game
     /// これにより「Tier1にだけモデルを割り当てれば、Tier2以降にもそのモデルが自動的に適用される」
     /// （5Tierすべてを手作業で割り当てる必要がない）。ただし特定Tierへの明示的な割り当て（手順1/2）は
     /// 常にこのフォールバック（手順3）より優先される。
+    ///
+    /// 基地（軍事拠点）専用の解決は<see cref="TryGetForBase"/>が別に持つ（Tierフォールバックは無関係のため
+    /// TryGetは経由しない）。Task60では基地種別を区別しない単一キー（<see cref="BaseTypeKey"/>、
+    /// "MilitaryBase"）のみだったが、Task66で陸軍/海軍/空軍/ミサイルの4種別キー（<see cref="ArmyBaseTypeKey"/>
+    /// 等）へ分割した。解決順序: 1. 種別別キー・勢力別exact → 2. 種別別キー・レガシー/全勢力共通exact →
+    /// 3. 旧統合キー（"MilitaryBase"）・勢力別exact → 4. 旧統合キー・レガシー/全勢力共通exact → 5. 無し。
+    /// これにより、Task66以前に保存された "faction|MilitaryBase=..." 行は「種別別の明示的割り当てが
+    /// 無い基地種別すべてに共通のフォールバック」として引き続き機能する（unit-assets.txtの書き換え不要）。
+    ///
     /// kindプレフィックスの解析は AssetKindUtil.TryParsePrefix が行う。値の先頭が既知のkind名+':'で
     /// 始まらない場合は、値全体を（kindプレフィックス無しとして）AssetKind.Propの名前とみなす
     /// （既存プロップ名にたまたま':'が含まれていても誤解析しない）。
@@ -82,27 +91,13 @@ namespace CSWarfront.Game
     /// （ここでの失敗がロード自体を止めてはならない）。
     /// メインスレッド専用という制約は無いが、呼び出しは全てメインスレッド（UI/ロード処理）から行われる想定。
     /// </summary>
-    internal static class UnitAssetBindings
+    internal static partial class UnitAssetBindings
     {
+        // Task66: 基地種別キー定数（BaseTypeKey/ArmyBaseTypeKey等）・表示名・BaseTypeKeyFor/
+        // TryGetBaseTypeForKey/DisplayNameForBaseKey・TryGetForBase・CopyBaseTo は500行制限のため
+        // UnitAssetBindingsBaseTypes.cs（同じ partial class、Game/UnitAssetBindingsBaseTypes.cs）へ分離した。
+
         private const string FileName = "unit-assets.txt";
-
-        /// <summary>
-        /// Task60: 軍事拠点（MilitaryBase、Game/WarfrontBasePrefab.cs が登録する単一のBuildingInfo）の
-        /// 勢力別モデル割り当てに使う特別な TypeKey。<b>ユニット種別ではない</b>
-        /// （LandUnitRoster.All()には含まれず、UnitType/UnitCategoryとしての実体も持たない）。
-        /// 単に「(勢力, "MilitaryBase") → アセット」という1エントリを、既存のユニット向け割り当て
-        /// インフラ（本ファイルのTryGet/Set/Clear、ファイル形式、UI一式）にそのまま相乗りさせるための
-        /// 識別子として使う。TryGet呼び出し自体は変更不要（Tierフォールバック探索はTypeKeyParser.TryParse
-        /// がこの文字列を解析できず素通りするだけで、勢力別/全勢力共通のexact-key解決はそのまま動く）。
-        /// CopyTo だけはこのキーを特別扱いする必要がある（LandUnitRoster.All()を線形探索する既存ロジックは
-        /// この仮想的な"種別"を決して含まないため、同カテゴリ/全ユニット種別スコープはそもそも無意味）。
-        /// </summary>
-        public const string BaseTypeKey = "MilitaryBase";
-
-        /// <summary>UI（AssetAssignPanel/OptionsModelAssignPage）のドロップダウンで<see cref="BaseTypeKey"/>
-        /// の代わりに表示する日本語ラベル。生のキー文字列をそのまま出すと「これは35種のユニットの1つ」
-        /// という誤解を招くため、常にこのラベルへ差し替えて表示する。</summary>
-        public const string BaseTypeKeyDisplayName = "軍事基地（拠点）";
 
         private struct Binding
         {
@@ -199,6 +194,41 @@ namespace CSWarfront.Game
             assetName = null;
             if (string.IsNullOrEmpty(typeKey)) return false;
 
+            if (TryGetExact(factionId, typeKey, out kind, out assetName)) return true;
+
+            // Task50: exact-keyが無ければ、同カテゴリの他Tierへフォールバックする（「Tier1にだけ
+            // モデルを割り当てれば全Tierに効く」を実現する。パース/探索順序の組み立ては
+            // CSWarfront.Core.TypeKeyParser（純ロジック、Core.Testsでテスト済み）に委譲する）。
+            // typeKeyが"<Category>_T<tier>"として解析できない場合（基地種別キー等）はTryParseが
+            // falseを返して素通りするだけで、例外や誤マッチは起きない。
+            UnitCategory category;
+            byte tier;
+            if (TypeKeyParser.TryParse(typeKey, out category, out tier))
+            {
+                byte[] fallbackTiers = TypeKeyParser.FallbackTierOrder(tier);
+                for (int i = 0; i < fallbackTiers.Length; i++)
+                {
+                    string fallbackKey = LandUnitRoster.TypeKey(category, fallbackTiers[i]);
+                    if (TryGetExact(factionId, fallbackKey, out kind, out assetName)) return true;
+                }
+            }
+
+            kind = AssetKind.Prop;
+            assetName = null;
+            return false;
+        }
+
+        // Task66: TryGetEffective/TryGetForBase は UnitAssetBindingsBaseTypes.cs（同じ partial class）へ
+        // 分離した（500行制限）。TryGetExact（下）はどちらからも呼ばれる共有ヘルパーのためこちらに残す。
+
+        /// <summary>勢力別exact → レガシー/全勢力共通exactの2段のみを見る（フォールバック無し）内部ヘルパー。
+        /// TryGet（Tierフォールバック込み）とTryGetForBase（旧統合キーフォールバック込み）の両方から
+        /// 共有される最小単位。</summary>
+        private static bool TryGetExact(byte factionId, string typeKey, out AssetKind kind, out string assetName)
+        {
+            kind = AssetKind.Prop;
+            assetName = null;
+
             Binding binding;
             if (_bindings.TryGetValue(MakeKey(factionId, typeKey), out binding))
             {
@@ -212,36 +242,6 @@ namespace CSWarfront.Game
                 assetName = binding.Name;
                 return true;
             }
-
-            // Task50: exact-keyが無ければ、同カテゴリの他Tierへフォールバックする（「Tier1にだけ
-            // モデルを割り当てれば全Tierに効く」を実現する。パース/探索順序の組み立ては
-            // CSWarfront.Core.TypeKeyParser（純ロジック、Core.Testsでテスト済み）に委譲する）。
-            UnitCategory category;
-            byte tier;
-            if (TypeKeyParser.TryParse(typeKey, out category, out tier))
-            {
-                byte[] fallbackTiers = TypeKeyParser.FallbackTierOrder(tier);
-                for (int i = 0; i < fallbackTiers.Length; i++)
-                {
-                    string fallbackKey = LandUnitRoster.TypeKey(category, fallbackTiers[i]);
-
-                    if (_bindings.TryGetValue(MakeKey(factionId, fallbackKey), out binding))
-                    {
-                        kind = binding.Kind;
-                        assetName = binding.Name;
-                        return true;
-                    }
-                    if (_anyFactionBindings.TryGetValue(fallbackKey, out binding))
-                    {
-                        kind = binding.Kind;
-                        assetName = binding.Name;
-                        return true;
-                    }
-                }
-            }
-
-            kind = AssetKind.Prop;
-            assetName = null;
             return false;
         }
 
@@ -281,20 +281,29 @@ namespace CSWarfront.Game
         /// 不明な場合は0を返し、何も変更しない。</returns>
         public static int CopyTo(byte fromFaction, string fromTypeKey, CopyScope scope)
         {
+            // Task66: コピー元が基地種別キー（Army/Navy/Air/MissileBaseTypeKey）の場合は専用の複製処理へ
+            // 分岐する。LandUnitRoster.All() を線形探索する下のユニット向けロジックはこの仮想的な"種別"を
+            // 決して含まないため、そのまま流すと必ず0件（TryGetCategory失敗）になってしまう。
+            // 「現在の割り当て」表示（TryGetForBase、旧統合キーへのフォールバックを含む）と同じ実効値を
+            // 複製できるよう、コピー元の解決も TryGet ではなく TryGetForBase を使う。
+            BaseType fromBaseType;
+            bool isBaseKey = TryGetBaseTypeForKey(fromTypeKey, out fromBaseType);
+
             AssetKind kind;
             string name;
-            if (!TryGet(fromFaction, fromTypeKey, out kind, out name))
+            bool hasSource = isBaseKey
+                ? TryGetForBase(fromFaction, fromBaseType, out kind, out name)
+                : TryGet(fromFaction, fromTypeKey, out kind, out name);
+
+            if (!hasSource)
             {
                 ModConfig.Log("UnitAssetBindings.CopyTo: コピー元 faction=" + fromFaction + " " + fromTypeKey + " に割り当てが無いためスキップしました");
                 return 0;
             }
 
-            // Task60: コピー元が軍事拠点（BaseTypeKey）の場合は専用の複製処理へ分岐する。
-            // LandUnitRoster.All() を線形探索する下のユニット向けロジックはこの仮想的な"種別"を
-            // 決して含まないため、そのまま流すと必ず0件（TryGetCategory失敗）になってしまう。
-            if (fromTypeKey == BaseTypeKey)
+            if (isBaseKey)
             {
-                return CopyBaseTo(fromFaction, kind, name, scope);
+                return CopyBaseTo(fromFaction, fromTypeKey, kind, name, scope);
             }
 
             UnitCategory fromCategory;
@@ -340,40 +349,10 @@ namespace CSWarfront.Game
             return written;
         }
 
-        /// <summary>
-        /// Task60: コピー元が<see cref="BaseTypeKey"/>（軍事拠点）の場合専用の複製処理。
-        /// 拠点には「カテゴリ」も「Tier」も「他のユニット種別」も存在しないため、CopyScopeのうち
-        /// 「勢力」次元を持つ2つ（AllFactionsSameType=全勢力（同じ種別）／AllFactionsAllTypes=全勢力・
-        /// 全種別）だけを「他の全勢力の拠点へ複製する」という意味に読み替えて対応する。
-        /// 「種別」次元を持つ2つ（SameCategoryAllTiers=同カテゴリの全Tier／AllUnitTypes=全ユニット種別）は
-        /// 拠点に対して意味を成さない（ユニット種別ではないため）ので、要件通り何も書き込まず0を返す
-        /// （呼び出し元のUIはwritten==0の場合ApplyBindingChange相当の反映処理を呼ばないため、
-        /// ユーザーには「何も起きなかった」だけが見え、誤って他のユニット種別へ書き込まれることは無い）。
-        /// </summary>
-        private static int CopyBaseTo(byte fromFaction, AssetKind kind, string name, CopyScope scope)
-        {
-            bool allFactions = scope == CopyScope.AllFactionsSameType || scope == CopyScope.AllFactionsAllTypes;
-            if (!allFactions)
-            {
-                ModConfig.Log("UnitAssetBindings.CopyTo: " + BaseTypeKey + " はscope=" + scope +
-                    " に対応しないためスキップしました（同カテゴリ/全ユニット種別はユニット専用のスコープです）");
-                return 0;
-            }
-
-            int written = 0;
-            for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
-            {
-                if (f == fromFaction) continue; // コピー元自身はスキップ
-                _bindings[MakeKey(f, BaseTypeKey)] = new Binding { Kind = kind, Name = name };
-                written++;
-            }
-
-            if (written > 0) Save();
-            ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + BaseTypeKey + " (" +
-                AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し（他の全勢力の拠点へ）、" +
-                written + " 件を書き込みました");
-            return written;
-        }
+        // Task66: CopyBaseTo（コピー元が基地種別キーの場合の専用複製処理）は
+        // UnitAssetBindingsBaseTypes.cs（同じ partial class）へ分離した（500行制限）。
+        // _bindings/MakeKey/Save は private static だが partial class 内では全パーツで共有されるため
+        // 問題なくそちらから呼べる。
 
         /// <summary>TypeKeyからUnitCategoryを逆引きする（LandUnitRoster.All()を線形探索、35件のみなので
         /// コストは無視できる）。見つからない場合はfalse。</summary>

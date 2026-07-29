@@ -191,6 +191,28 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
+        /// Task66: 指定勢力が指定種別の拠点を1つでも所有しているか（AssetAssignPanel/OptionsModelAssignPage
+        /// が「基地種別ごとのモデル割り当て」を適用する際、割り当て対象の拠点が現時点で1つも無い場合に
+        /// ユーザーへヒントを出すために使う。バグ調査で判明した通り、割り当て自体は正しく保存されていても、
+        /// 対応する拠点が存在しなければ見た目には何も反映されないため、ユーザーには「反映されていない」
+        /// ように見えてしまう——このメソッドはその状況を明示的に案内するためのものであり、割り当ての
+        /// 保存/適用ロジック自体には一切影響しない）。
+        /// </summary>
+        public static bool HasOwnedBaseOfType(byte factionId, BaseType type)
+        {
+            lock (_stateLock)
+            {
+                if (State == null) return false;
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    MilitaryBase b = State.Bases[i];
+                    if (b.Type == type && b.OwnerFactionId.HasValue && b.OwnerFactionId.Value == factionId) return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 基地情報パネル表示用の値をロック内でコピーして返す（UIが WarState へ直接触れないため、Task25）。
         /// </summary>
         public static bool TryGetBaseSnapshot(ushort baseId, out BaseUiSnapshot snapshot)
@@ -690,7 +712,8 @@ namespace CSWarfront.Game
                         BaseId = b.BaseId,
                         FactionId = b.OwnerFactionId.Value,
                         Position = new Vector3(b.Position.X, b.Position.Y, b.Position.Z),
-                        Angle = angle
+                        Angle = angle,
+                        Type = b.Type // Task66: 基地種別ごとのモデル割り当てキーを解決するために必要
                     });
                 }
 

@@ -48,7 +48,6 @@ namespace CSWarfront.Game
         // 建物/車両の総数はプロップより桁違いに多いことがあるため、種類ごとに個別キャッシュし
         // 実際に一覧表示された種類だけを都度スキャンする（4種類まとめての一括スキャンはしない）。
         private static readonly List<Entry>[] _all = new List<Entry>[KindCount];
-        private static readonly bool[] _loggedScanOnce = new bool[KindCount];
 
         /// <summary>全種類の走査結果を破棄し、次回 GetNames 呼び出し時に再走査させる。
         /// AssetAssignPanel が開かれるたびに呼ぶことで「今サブスクライブしているアセット」を反映する。</summary>
@@ -214,11 +213,12 @@ namespace CSWarfront.Game
                 default: list = new List<Entry>(); break;
             }
 
-            if (!_loggedScanOnce[idx])
-            {
-                _loggedScanOnce[idx] = true;
-                ModConfig.Log("AssetCatalog: " + kind + " 走査完了、mesh有り " + list.Count + " 件");
-            }
+            // Task66バグ調査で判明: 以前はプロセス内で種類ごとに1回しかログしなかった（_loggedScanOnce
+            // ガード）ため、メインメニュー時点（0件）の走査だけが記録され、都市ロード後にRescan()経由で
+            // 再走査され直しても件数が更新されたことがログから追えなかった（「割り当てたアセットが反映
+            // されない」調査を著しく困難にした）。Rescan()はUIパネルを開いた時だけ呼ばれる低頻度パス
+            // （毎フレームではない）なので、常にログしてもスパムにならない。
+            ModConfig.Log("AssetCatalog: " + kind + " 走査完了、mesh有り " + list.Count + " 件");
 
             _all[idx] = list;
         }
