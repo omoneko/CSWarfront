@@ -48,7 +48,17 @@ namespace CSWarfront.Core
     /// 失敗（false）した場合は、従来のY補間をそのまま維持する（安全側フォールバック・既存テストの前提を
     /// 変えない）。ハードニング（Task53追記）: 失敗時に0f等の失敗値をそのままYへ採用すると、地表が
     /// 0f付近ではないマップ（例: 実測約270）で1tickだけ地表の遥か下へテレポートする可視バグになるため、
-    /// Try形式で「失敗」を明示的に判別しフォールバックする（ResolvePosition参照）。</summary>
+    /// Try形式で「失敗」を明示的に判別しフォールバックする（ResolvePosition参照）。
+    ///
+    /// Task55:「ユニットが空中戦を始める（地面から浮いたまま戦闘する）」不具合の修正。原因はGame層の
+    /// SurfaceHeightSamplerがTerrainManager.SampleDetailHeightの誤ったオーバーロード（(float,float)、
+    /// ワールド座標をそのままdetailグリッド座標として渡し、かつ1/64のスケール変換も欠落）を呼んでいた
+    /// ことで、Task53のTrySampleHeightは常に「成功（true）」しつつ荒唐無稽な高さを返していた
+    /// （Game層側の修正はSurfaceHeightSampler.cs参照）。Core側では多層防御として、ResolvePositionに
+    /// MaxSurfaceDeviationによる乖離クランプを追加した: TrySampleHeightがtrueを返しても、値が
+    /// 補間済みYから大きく乖離していれば採用せず補間済みYを使う。これにより、IHeightSampler実装側の
+    /// 座標系/API誤用が将来再発しても、Coreはユニットを空へ打ち上げるような致命的な被害を機械的に
+    /// 防げる（ResolvePosition参照）。</summary>
     public static class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
@@ -61,6 +71,15 @@ namespace CSWarfront.Core
         /// 再開できるようにする。これが「隠れている間は動かないが、いつまでも隠れ続けはしない」
         /// というユーザー要件のガードレールになる。</summary>
         public const float MaxCoverHoldHours = 1.0f;
+
+        /// <summary>Task55（「ユニットが空中戦を始める」不具合の多層防御）: state.Height
+        /// （IHeightSampler、Game層実装）が返すサンプリング済みYは、Task53の補間済みY
+        /// （ウェイポイント/直線移動の従来ロジックが計算した値）からこの値を超えて乖離していれば
+        /// 採用しない。IHeightSampler実装（Game層のTerrainManager呼び出し）が将来誤ったAPI/
+        /// オーバーロード・座標系を使う不具合を再発しても、Core側のこのクランプが「ユニットを
+        /// 空へ打ち上げる」規模の被害を機械的に防ぐ（Task53が意図した盛土などcm～m規模の
+        /// 小さな地表補正はそのまま許容する）。</summary>
+        public const float MaxSurfaceDeviation = 15f;
 
         public static void Advance(WarState state, float dt)
         {
@@ -235,11 +254,22 @@ namespace CSWarfront.Core
         /// 失敗（false）した場合は渡されたyをそのまま使う（従来どおりの補間・スナップ挙動、
         /// 既存テストの前提を変えない安全側フォールバック）。
         /// ハードニング: サンプリング失敗時に失敗値（out引数の不定値）をYへ採用することは絶対にしない
-        /// （TerrainManager瞬断時に0fがそのまま採用され地表の遥か下へテレポートする不具合の再発防止）。</summary>
+        /// （TerrainManager瞬断時に0fがそのまま採用され地表の遥か下へテレポートする不具合の再発防止）。
+        /// Task55（多層防御の追加段）: TrySampleHeightがtrueを返していても、値が渡されたy（補間済みY、
+        /// このユニットが既に持っているローカルな地表の目安）からMaxSurfaceDeviationを超えて乖離して
+        /// いれば、サンプリング値を信用せず補間済みyをそのまま採用する。IHeightSampler実装側が将来
+        /// また誤った座標系/APIで荒唐無稽な値を返しても（「ユニットが空中戦を始める」規模の不具合）、
+        /// Coreはこの1点で機械的に被害を止める。Task53が意図した小さな地表補正（盛土・橋など）は
+        /// 乖離が小さいためそのまま通る。</summary>
         private static WorldPos ResolvePosition(float x, float y, float z, IHeightSampler height)
         {
             float sampled;
-            if (height != null && height.TrySampleHeight(x, z, out sampled)) y = sampled;
+            if (height != null && height.TrySampleHeight(x, z, out sampled))
+            {
+                float deviation = sampled - y;
+                if (deviation < 0f) deviation = -deviation;
+                if (deviation <= MaxSurfaceDeviation) y = sampled;
+            }
             return new WorldPos(x, y, z);
         }
     }

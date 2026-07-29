@@ -31,6 +31,24 @@ public class MovementStepTests
         }
     }
 
+    // Task55: 「ユニットが空中戦を始める」不具合の再発防止（防御的多層化）。SurfaceHeightSamplerが
+    // 誤ったオーバーロード等で将来また荒唐無稽な高さを返しても、MovementStepがそれを鵜呑みにして
+    // ユニットを空へ打ち上げないようにする。TrySampleHeight自体は成功(true)を返すが、値が
+    // 補間済みY（従来のウェイポイント/直線補間の結果）からMaxSurfaceDeviationを超えて乖離していれば、
+    // 採用せず補間済みYを使う。offsetは常に補間済みYからの絶対乖離量として機能する
+    // （このテストで使う全ケースの補間済みYが0のため）。
+    private class OffsetHeightSampler : IHeightSampler
+    {
+        private readonly float _offset;
+        public OffsetHeightSampler(float offset) { _offset = offset; }
+
+        public bool TrySampleHeight(float x, float z, out float height)
+        {
+            height = _offset;
+            return true;
+        }
+    }
+
 
     private static WarState OneMovingUnit()
     {
@@ -703,5 +721,60 @@ public class MovementStepTests
         // （= state.Height == nullのときと同一の補間結果になっていることの確認）。
         Assert.Equal(39.7f, s.Units[0].Position.Y, 1);
         Assert.NotEqual(-9999f, s.Units[0].Position.Y);
+    }
+
+    // --- Task55: サンプリング高さの逸脱クランプ（MaxSurfaceDeviation） ---
+
+    // TrySampleHeightがtrueを返していても、値が補間済みYからMaxSurfaceDeviation(15f)を大幅に超えて
+    // 乖離していれば無視し、従来のY補間結果を採用すること（「サンプラーが荒唐無稽な値を返しても
+    // ユニットを空へ打ち上げない」防御）。OneMovingUnit()は始点・終点ともY=0のため、補間済みYは
+    // 常に0になる（部分移動中も収束）。
+    [Fact]
+    public void Advance_ignores_wildly_high_sampled_height_and_uses_interpolated_y_instead()
+    {
+        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0), 補間済みYは常に0
+        s.Height = new OffsetHeightSampler(9999f); // MaxSurfaceDeviation(15)を大幅に超える乖離
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.Y, 3);
+    }
+
+    // 乖離がMaxSurfaceDeviation(15f)以内であれば、従来どおりサンプリング値を採用する
+    // （Task53が導入した「盛土などの小さな地表変化を反映する」挙動を壊さない）。
+    [Fact]
+    public void Advance_applies_sampled_height_when_deviation_is_within_MaxSurfaceDeviation()
+    {
+        var s = OneMovingUnit(); // 補間済みYは常に0
+        s.Height = new OffsetHeightSampler(10f); // 15以内の乖離
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(10f, s.Units[0].Position.Y, 3);
+    }
+
+    // 境界値: ちょうどMaxSurfaceDeviation(15f)は「超えて」いないので採用される
+    // （仕様は「15fを超えたら」棄却＝15f自体は許容範囲の内側）。
+    [Fact]
+    public void Advance_applies_sampled_height_when_deviation_exactly_equals_MaxSurfaceDeviation()
+    {
+        var s = OneMovingUnit();
+        s.Height = new OffsetHeightSampler(MovementStep.MaxSurfaceDeviation);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(MovementStep.MaxSurfaceDeviation, s.Units[0].Position.Y, 3);
+    }
+
+    // 境界値: MaxSurfaceDeviation(15f)をわずかに超えたら棄却され、補間済みYに戻る。
+    [Fact]
+    public void Advance_ignores_sampled_height_when_deviation_slightly_exceeds_MaxSurfaceDeviation()
+    {
+        var s = OneMovingUnit();
+        s.Height = new OffsetHeightSampler(MovementStep.MaxSurfaceDeviation + 0.01f);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.Y, 3);
     }
 }
