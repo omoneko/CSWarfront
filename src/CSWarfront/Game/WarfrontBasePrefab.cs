@@ -67,6 +67,14 @@ namespace CSWarfront.Game
                 ModelColor = new Color(0.34f, 0.34f, 0.30f, 1f), // 軍用コンクリートグレー
                 LocaleTitleText = "CSWarfront 航空基地", LocaleDescText = "勢力の航空部隊拠点。戦闘機・爆撃機・自爆ドローンを生産する。"
             },
+            new Entry
+            {
+                // Task63: 弾道ミサイル基地。他3種と違いユニットを一切生産しない
+                // （MilitaryBase.SpawnableDomains=None、ミサイルはMissileStockpile経由で備蓄する）。
+                Type = BaseType.MissileBase, PrefabName = "CSWarfront Missile Base", ModelName = "Building_MissileBase",
+                ModelColor = new Color(0.32f, 0.29f, 0.20f, 1f), // 軍用カーキ
+                LocaleTitleText = "CSWarfront ミサイル基地", LocaleDescText = "勢力の弾道ミサイル拠点。ミサイルを備蓄し、遠方の敵拠点へ発射する。"
+            },
         };
 
         private static readonly Dictionary<BaseType, BuildingInfo> _prefabs = new Dictionary<BaseType, BuildingInfo>();

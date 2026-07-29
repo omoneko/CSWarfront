@@ -90,6 +90,13 @@ namespace CSWarfront.Game
         // CombatFx.SpawnKillSoundsへ渡す（_shotSnapshotと全く同じパターン）。
         private static readonly List<KillEvent> _killSnapshot = new List<KillEvent>();
 
+        // Task63: 同上、State.MissilesInFlight向けのスナップショット（MissileVisuals.Sync用）。
+        private static readonly List<MissileVisualState> _missileSnapshot = new List<MissileVisualState>();
+
+        // Task63: 同上、State.RecentImpactsの内容を_stateLock内でここへコピーしてから、ロック解放後に
+        // MissileVisuals.HandleImpactsへ渡す（_shotSnapshot/_killSnapshotと全く同じパターン）。
+        private static readonly List<MissileImpactEvent> _missileImpactSnapshot = new List<MissileImpactEvent>();
+
         // Task62: 同上、選択中ユニットの進撃/集結先（UI.OrderDestinationMarkers向け）。
         // UI.UnitBoxSelection.SelectedIds（Game層・main-thread専用の状態）を_stateLock内で参照するのは
         // OnMainVisualUpdate自体がメインスレッド専用のため問題ない（他のGame層main-thread状態と同じ扱い）。
@@ -310,6 +317,9 @@ namespace CSWarfront.Game
                 State.RecentShots.Clear();
                 // Task51: 撃破イベント(KillEvent)もRecentShotsと全く同じ理由・同じタイミングでクリアする。
                 State.RecentKills.Clear();
+                // Task63: ミサイルの着弾/迎撃イベント(RecentImpacts)もRecentShots/RecentKillsと全く同じ
+                // 理由・同じタイミングでクリアする（MissileStep.Advance自身はクリアしない契約）。
+                State.RecentImpacts.Clear();
 
                 // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
                 // （Task18）。CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
@@ -336,6 +346,9 @@ namespace CSWarfront.Game
                     var type = State.Types.Get(c.TypeKey);
                     State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
                 }
+                // Task63: 弾道ミサイルの備蓄建造の進捗（ProductionPlanning.Advanceが着手済みの基地のみ対象）。
+                // ユニット生産と同じ「生産計画→進捗消化」の並びに揃える。
+                MissileStockpile.Advance(State, dt);
 
                 // 道路網（State.Roads）の構築/再構築。InvasionOrdersが同tickで経路計算できるよう、
                 // 進軍命令より先に済ませる（Task23）。未供給ならここで即座に構築し、供給済みなら
@@ -418,6 +431,10 @@ namespace CSWarfront.Game
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id, dt);
 
+                // Task63: AI勢力の弾道ミサイル自動発射（宿敵優先/遠距離Hostile、基地ごとのクールダウン）。
+                // 通常のAI進軍命令の直後に判断させる（同じ「AIの意思決定」フェーズにまとめる）。
+                MissileDoctrine.Advance(State, dt);
+
                 // 遮蔽移動の意思決定（交戦中のユニットへ遮蔽物を活かした立ち位置を割り当てる、Task44）。
                 // MovementStepより前に呼ぶことで、このtickで決めた立ち位置へ同じtick内で動き出せるようにする。
                 CoverSeekStep.Advance(State, dt);
@@ -433,6 +450,11 @@ namespace CSWarfront.Game
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
                 ThreatCombatStep.Advance(State, dt);
+
+                // Task63: 弾道ミサイルの飛翔進捗・迎撃・着弾解決。仕様どおりThreatCombatStepの直後・
+                // 経済tickより前に実行する（着弾ダメージが同tickのOccupation/FactionStatus再導出に反映される）。
+                MissileStep.Advance(State, dt);
+
                 Occupation.ResolveCaptures(State);
                 FactionStatus.Refresh(State);
 
@@ -575,6 +597,8 @@ namespace CSWarfront.Game
             _shotSnapshot.Clear();
             _killSnapshot.Clear();
             _orderMarkerSnapshot.Clear();
+            _missileSnapshot.Clear();
+            _missileImpactSnapshot.Clear();
             lock (_stateLock)
             {
                 for (int i = 0; i < State.Units.Count; i++)
@@ -654,17 +678,39 @@ namespace CSWarfront.Game
                 // Task51: 撃破イベントも同じロック内・同じ理由でコピーする。
                 for (int i = 0; i < State.RecentKills.Count; i++)
                     _killSnapshot.Add(State.RecentKills[i]);
+
+                // Task63: 飛翔中ミサイルと着弾/迎撃イベントも同じロック内でスナップショットを組み立てる
+                // （State.MissilesInFlight/RecentImpactsはsimスレッドが書き込むため、ロック外で読むとレースになる）。
+                for (int i = 0; i < State.MissilesInFlight.Count; i++)
+                {
+                    MissileInFlight m = State.MissilesInFlight[i];
+                    _missileSnapshot.Add(new MissileVisualState
+                    {
+                        Id = m.Id,
+                        FactionId = m.FactionId,
+                        From = new Vector3(m.From.X, m.From.Y, m.From.Z),
+                        To = new Vector3(m.To.X, m.To.Y, m.To.Z),
+                        Progress = m.Progress
+                    });
+                }
+                for (int i = 0; i < State.RecentImpacts.Count; i++)
+                    _missileImpactSnapshot.Add(State.RecentImpacts[i]);
             }
 
             UnitVisuals.Sync(_visualSnapshot);
             BaseVisuals.Sync(_baseVisualSnapshot); // Task60: ロック解放後、Unity操作はここで行う
             UI.OrderDestinationMarkers.Sync(_orderMarkerSnapshot); // Task62: 同上
+            MissileVisuals.Sync(_missileSnapshot); // Task63: 同上
 
             // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
             CombatFx.Spawn(_shotSnapshot);
             CombatFx.SpawnKillSounds(_killSnapshot); // Task51: 撃破音（視覚エフェクトは無し）
             CombatFx.Update(Time.deltaTime);
+
+            // Task63: 着弾/迎撃の演出（フラッシュ/爆発+音）と、生存中の演出の実時間更新。
+            MissileVisuals.HandleImpacts(_missileImpactSnapshot);
+            MissileVisuals.UpdateFx(Time.deltaTime);
         }
 
         /// <summary>
@@ -683,6 +729,8 @@ namespace CSWarfront.Game
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 基地の勢力別オーバーレイもレベルアンロード時に破棄する。
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
+            MissileVisuals.DestroyAll(); // Task63: 飛翔中ミサイルの見た目もレベルアンロード時に破棄する。
+            MissileVisuals.DestroyAllFx(); // Task63: 着弾/迎撃の演出も同様。
             UI.OrderDestinationMarkers.DestroyAll(); // Task62: 目的地マーカーもレベルアンロード時に破棄する。
             UI.CommandToast.Destroy(); // Task62: トーストラベルもレベルアンロード時に破棄する。
             // Task54: このMODが封鎖した道路(PathFailedビット)を解除する。Reset()自体はOnLevelUnloading
@@ -722,6 +770,7 @@ namespace CSWarfront.Game
             UI.UnitSelection.Clear();
             UI.UnitBoxSelection.Destroy(); // Task48: 範囲選択の矩形/ハイライトGameObjectと選択状態
             UI.UnitCommandInput.Reset(); // Task48: 集結地点のターゲティング状態を持ち越さない
+            UI.MissileLaunchTargeting.Reset(); // Task63: ミサイル発射地点のターゲティング状態を持ち越さない
             UI.PanelChrome.ResetCache(); // Task56: キャッシュ済みPauseMenu/UIView参照を次セッションへ持ち越さない
         }
     }

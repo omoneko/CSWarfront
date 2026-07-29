@@ -79,6 +79,14 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("UnitCommandInput update: " + e); }
 
+            // Task63: 弾道ミサイルの発射地点指定（右クリックターゲティング）。UnitCommandInputと同じ
+            // 「選択/コマンド系ホットキー入力」フェーズにまとめる。
+            try
+            {
+                MissileLaunchTargeting.Update();
+            }
+            catch (System.Exception e) { ModConfig.LogError("MissileLaunchTargeting update: " + e); }
+
             // Task62: コマンド発行時の画面中央トースト。UnitCommandInputがShow()を呼ぶ側なので、
             // ここでは冪等な生成とフェード/非表示の時間経過管理だけを毎フレーム行う。
             try

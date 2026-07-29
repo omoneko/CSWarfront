@@ -170,6 +170,7 @@ namespace CSWarfront.Game.UI
                 if (_chrome != null && _chrome.DragHandle != null) _chrome.DragHandle.eventMouseDown -= OnTitleBarMouseDown;
                 DestroyModelButtonSection(); // Task36: イベント購読解除＋フィールドのリセット
                 DestroyProductionSection(); // Task34: イベント購読解除＋フィールドのリセット
+                DestroyMissileSection(); // Task63: イベント購読解除＋フィールドのリセット
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
             catch (Exception e)
@@ -266,6 +267,7 @@ namespace CSWarfront.Game.UI
             _statusLabel.relativePosition = new Vector3(Pad, y);
 
             BuildProductionSection(w); // Task34: 自動生産切替・発注・取消UI。BaseInfoPanelProduction.cs に分離。
+            BuildMissileSection(w); // Task63: 弾道ミサイル基地専用UI（備蓄/建造/発射）。BaseInfoPanelMissile.cs に分離。
 
             RecomputeExpandedHeight();
             _panel.isVisible = false;
@@ -288,7 +290,11 @@ namespace CSWarfront.Game.UI
             if (_factionDropdown != null) _factionDropdown.isVisible = !_collapsed;
             ApplyModelButtonCollapsedState(_collapsed); // Task36
             if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
+            // Task63: 折りたたみ中はどちらも隠す。展開時にどちらを実際に見せるかは、次の
+            // RefreshContents（RefreshProductionSection/RefreshMissileSection）が選択中の基地種別
+            // （_lastIsMissileBase）から都度正しく上書きする。
             ApplyProductionCollapsedState(_collapsed); // Task34
+            ApplyMissileSectionCollapsedState(_collapsed); // Task63
 
             _panel.height = _collapsed ? (Pad + TitleRowHeight + Pad) : _expandedHeight;
 
@@ -459,61 +465,10 @@ namespace CSWarfront.Game.UI
 
                 _statusLabel.text = sb.ToString();
                 RefreshProductionSection(snapshot); // Task34: ステータス行の下に生産セクションを再配置
+                // Task63: ミサイル基地専用セクション。ユニット生産セクションと同じ開始Y（ステータス行の
+                // 直下）から配置する（互いに排他表示のため、同じ位置から始めても重ならない）。
+                RefreshMissileSection(snapshot, _statusLabel.relativePosition.y + _statusLabel.height + ProductionRowGap);
                 RecomputeExpandedHeight();
-            }
-        }
-
-        /// <summary>Task61: BaseType→日本語ラベル（パネル表示用）。</summary>
-        private static string BaseTypeLabel(BaseType type)
-        {
-            switch (type)
-            {
-                case BaseType.Army: return "陸軍基地";
-                case BaseType.Navy: return "海軍基地";
-                case BaseType.AirForce: return "航空基地";
-                case BaseType.MissileBase: return "ミサイル基地";
-                default: return type.ToString();
-            }
-        }
-
-        /// <summary>Task61: DomainMask→日本語ラベル（パネル表示用、"陸上"/"海上"/"航空"をビットごとに列挙）。</summary>
-        private static string SpawnableDomainsLabel(DomainMask mask)
-        {
-            var parts = new System.Collections.Generic.List<string>(3);
-            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add("陸上");
-            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add("海上");
-            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add("航空");
-            return parts.Count > 0 ? string.Join("・", parts.ToArray()) : "なし";
-        }
-
-        /// <summary>
-        /// Task33: ステータスラベル（autoHeight有効）の実際の高さから展開時の全体パネル高さを算出し、
-        /// _expandedHeight キャッシュを更新する。折りたたみ→再展開時にここで求めた最新値へ正確に戻せる
-        /// よう、ハードコードされた定数ではなくこの計算を毎回の内容更新のたびにやり直す。
-        /// 値が変化した場合のみ _panel.height / _expandedHeight を書き換える（毎フレームの無駄な
-        /// レイアウト再計算・スレッド跨ぎではないが不要な再描画コストを避けるため）。
-        /// </summary>
-        private static void RecomputeExpandedHeight()
-        {
-            if (_statusLabel == null || _panel == null) return;
-
-            // Task34: 生産セクションが構築済みなら、その最下端（_productionBottomY、
-            // RefreshProductionSection/BuildProductionSectionが更新）を基準にする。
-            // 未構築（理論上は起きないが防御的に）ならステータスラベルの下端にフォールバックする。
-            float contentBottom = _productionBottomY > 0f
-                ? _productionBottomY
-                : _statusLabel.relativePosition.y + _statusLabel.height;
-            // 内容の実寸に対して縦方向へ余裕を持たせる（ユーザー要望: 建物ウィンドウは「大きさだけ縦に1.5倍」）。
-            // 文字サイズ・幅は変えず、パネルの高さのみ VerticalScale 倍にして窮屈さを解消する。
-            float newExpandedHeight = (contentBottom + Pad) * VerticalScale;
-            if (Mathf.Abs(newExpandedHeight - _expandedHeight) > 0.01f)
-            {
-                _expandedHeight = newExpandedHeight;
-            }
-
-            if (!_collapsed && Mathf.Abs(_panel.height - _expandedHeight) > 0.01f)
-            {
-                _panel.height = _expandedHeight;
             }
         }
 

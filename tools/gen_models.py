@@ -442,6 +442,20 @@ def build_military_base():
     return m
 
 
+def build_missile_base():
+    m = Mesh()
+    # reinforced bunker (control building): y 0..7.1, ~18x6.5x20m footprint
+    m.add_box(-6.0, 3.25, 0.0, 18.0, 6.5, 20.0)
+    # low flat roof cap for extra visual mass
+    m.add_box(-6.0, 6.8, 0.0, 16.0, 0.6, 18.0)
+    # 2 upright missile silo tubes standing beside the bunker (+X side), ~5.4m diameter, 9m tall
+    for cz in (7.0, -7.0):
+        m.add_prism(center=(10.0, 4.5, cz), axis_dir=(0.0, 1.0, 0.0), length=9.0, radius=2.7, sides=8)
+        # rim collar near the top (slightly wider disc, like a launch hatch ring)
+        m.add_prism(center=(10.0, 8.8, cz), axis_dir=(0.0, 1.0, 0.0), length=0.4, radius=3.0, sides=8)
+    return m
+
+
 MODELS = [
     ("Unit_Infantry", build_infantry, (0.30, 0.32, 0.22), "Infantry: torso+head+2 legs, ~0.8x0.8x2.2m"),
     ("Unit_MechInfantry", build_mech_infantry, (0.27, 0.30, 0.20), "Mechanized infantry carrier, ~5.5x2.4x2.6m"),
@@ -459,6 +473,8 @@ MODELS = [
     ("Unit_SuicideDrone", build_suicide_drone, (0.35, 0.12, 0.10), "Suicide drone: flat body+warhead bulge+4 rotors, ~3x3x0.8m"),
     ("Building_NavalBase", build_naval_base, (0.20, 0.28, 0.34), "Naval base: warehouse+quay+crane, ~40x30x14m"),
     ("Building_AirBase", build_air_base, (0.34, 0.34, 0.30), "Air base: hangar+control tower+apron, ~50x36x12m"),
+    # --- Task63: ballistic missile base ---
+    ("Building_MissileBase", build_missile_base, (0.32, 0.29, 0.20), "Missile base: bunker+2 silo tubes, ~30x24x10m"),
 ]
 
 

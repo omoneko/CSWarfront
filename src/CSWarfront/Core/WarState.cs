@@ -84,7 +84,47 @@ namespace CSWarfront.Core
         /// </summary>
         public List<ExternalThreat> Threats = new List<ExternalThreat>();
 
+        /// <summary>
+        /// Task63: 飛翔中の弾道ミサイル（実行時のみ・非永続化）。RoadGraph/Threatsと同じ「セーブに含めない」
+        /// 方針だが、こちらはGame層が再同期する対象ではなく、Core自身（BallisticMissiles.TryLaunch/
+        /// MissileStep.Advance）が発射〜着弾/迎撃までの一生を完結して管理する。セーブ/ロードで
+        /// 飛翔中のミサイルは失われる（着弾も迎撃もしないまま消える）— 意図的な既知の制約（MVP）。
+        /// </summary>
+        public List<MissileInFlight> MissilesInFlight = new List<MissileInFlight>();
+
+        /// <summary>Task63: 飛翔中ミサイルのID払い出し用カウンタ。UnitInstanceのNextInstanceIdとは別の
+        /// 名前空間（ミサイルはUnitInstanceではないため衝突しても実害は無いが、混同を避けるため分離した）。
+        /// 実行時のみ・非永続化（MissilesInFlight自体が非永続化のため、カウンタも保存する意味が無い）。</summary>
+        public uint NextMissileId = 1;
+
+        /// <summary>Task63: 決定的な迎撃判定（BallisticMissiles.TryIntercept）のハッシュ種に使う、
+        /// simtickごとに単調増加するカウンタ。実行時のみ・非永続化（セーブ/ロードのたびに0へ戻っても
+        /// 「同じ入力には同じ結果」という決定性の性質自体は変わらないため実害は無い）。</summary>
+        public uint TickCounter;
+
+        /// <summary>
+        /// Task63: 直近1tick分の「弾道ミサイルの着弾/迎撃」イベントのトランジェント・バッファ（非永続化）。
+        /// RecentShots/RecentKillsと同じ設計思想: MissileStep.Advanceが着弾/迎撃を解決したタイミングで
+        /// AddImpactを通じて積む。Game層（MissileVisuals想定）が毎フレームロック内でコピーしてから
+        /// 消費すること。WarStateSerializerには一切書き出さない（見た目・音専用データでセーブ不要）。
+        /// </summary>
+        public List<MissileImpactEvent> RecentImpacts = new List<MissileImpactEvent>();
+
+        /// <summary>1tickあたりRecentImpactsへ追加できる最大件数。RecentShots/RecentKillsと同じ防御的上限。</summary>
+        public const int MaxRecentImpactsPerTick = 200;
+
         public uint AllocInstanceId() { return NextInstanceId++; }
+
+        /// <summary>Task63: 飛翔中ミサイルのIDを1つ払い出す。</summary>
+        public uint AllocMissileId() { return NextMissileId++; }
+
+        /// <summary>ミサイルの着弾/迎撃イベントを1件積む（Task63）。MaxRecentImpactsPerTickに達していれば
+        /// 黙って捨てる（AddShot/AddKillと同じ防御方針）。</summary>
+        public void AddImpact(MissileImpactEvent e)
+        {
+            if (RecentImpacts.Count >= MaxRecentImpactsPerTick) return;
+            RecentImpacts.Add(e);
+        }
 
         /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる
         /// （例外にしない＝大規模乱戦でシミュレーションを止めないため）。</summary>

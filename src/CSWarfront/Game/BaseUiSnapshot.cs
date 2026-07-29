@@ -56,6 +56,16 @@ namespace CSWarfront.Game
         /// <summary>この基地が生産できる領域（MilitaryBase.SpawnableDomainsの写し、Task61）。
         /// BaseInfoPanelが「生産可能: 陸上」等の表示に使う。</summary>
         public DomainMask SpawnableDomains;
+
+        /// <summary>完成済みの弾道ミサイル備蓄数（Task63、MilitaryBase.StockpiledMissilesの写し）。
+        /// BaseType.MissileBase以外では常に0。</summary>
+        public int StockpiledMissiles;
+
+        /// <summary>現在建造中のミサイルの進捗（0..1、Task63、MilitaryBase.MissileBuildProgressの写し）。</summary>
+        public float MissileBuildProgress;
+
+        /// <summary>建造中か（MissileStockpile.IsBuildingの写し、Task63）。</summary>
+        public bool IsBuildingMissile;
     }
 
     /// <summary>
@@ -129,7 +139,10 @@ namespace CSWarfront.Game
                 OwnerUnlockedTier = ownerUnlockedTier,
                 OwnerNextTierCost = ownerNextTierCost,
                 Type = mb.Type,
-                SpawnableDomains = mb.SpawnableDomains
+                SpawnableDomains = mb.SpawnableDomains,
+                StockpiledMissiles = mb.StockpiledMissiles,
+                MissileBuildProgress = mb.MissileBuildProgress,
+                IsBuildingMissile = MissileStockpile.IsBuilding(mb)
             };
         }
     }

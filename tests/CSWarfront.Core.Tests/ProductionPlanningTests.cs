@@ -191,4 +191,40 @@ public class ProductionPlanningTests
         Assert.Equal(2, aiControlled.Queue.Count);
         Assert.Equal(80f, s.Factions[0].Treasury, 3); // 200 - 2*60, spent only on the AI base
     }
+
+    // --- Task63: MissileBase branches into MissileStockpile instead of the unit Queue ---
+
+    [Fact]
+    public void Advance_starts_a_missile_build_for_MissileBase_instead_of_queuing_units()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions[0].AddTreasury(1000f);
+        var missileBase = new MilitaryBase(300, BaseType.MissileBase, new WorldPos(0, 0, 0));
+        missileBase.OwnerFactionId = 0;
+        s.Bases.Add(missileBase);
+
+        ProductionPlanning.Advance(s);
+
+        Assert.Empty(missileBase.Queue); // never touches the unit queue
+        Assert.True(MissileStockpile.IsBuilding(missileBase));
+        Assert.Equal(1000f - MissileStockpile.MissileCost, s.Factions[0].Treasury, 3);
+    }
+
+    [Fact]
+    public void Advance_does_not_start_a_second_missile_build_while_one_is_in_progress()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions[0].AddTreasury(1000f);
+        var missileBase = new MilitaryBase(300, BaseType.MissileBase, new WorldPos(0, 0, 0));
+        missileBase.OwnerFactionId = 0;
+        s.Bases.Add(missileBase);
+
+        ProductionPlanning.Advance(s);
+        float afterFirst = s.Factions[0].Treasury;
+        ProductionPlanning.Advance(s); // called again in a later tick, still building
+
+        Assert.Equal(afterFirst, s.Factions[0].Treasury, 3); // no second spend
+    }
 }

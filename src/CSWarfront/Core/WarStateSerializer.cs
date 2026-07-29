@@ -10,8 +10,12 @@ namespace CSWarfront.Core
         // v4 -> v5: ペイロード全体の末尾に ThreatRelations（勢力5×ThreatKind2、int=(int)Relation）を
         //           追加（Task59）。v4以前を読んだ場合は追記ブロックが存在しないため、ThreatRelationsは
         //           コンストラクタ既定値の全Hostileのまま（Task58までの「常に無条件敵対」を維持）。
+        // v5 -> v6: 基地ブロックのさらに末尾に StockpiledMissiles (int) / MissileBuildProgress (float) を
+        //           追加（Task63：弾道ミサイル基地の備蓄・建造進捗）。v5以前を読んだ場合はどちらも
+        //           既定値0（備蓄0発・建造中でない）で復元される（MissileBaseはTask63以前は配置可能な
+        //           プレハブが存在しなかったため実害は無い）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 5;
+        private const int Version = 6;
 
         public static byte[] Serialize(WarState s)
         {
@@ -46,6 +50,7 @@ namespace CSWarfront.Core
                     foreach (var o in b.Queue) { w.Write(o.TypeKey ?? ""); w.Write(o.Cost); w.Write(o.BuildTime); w.Write(o.Progress); }
                     w.Write(b.CaptureGraceHours); // v2で追加。位置依存フォーマットのためブロック末尾に追記。
                     w.Write(b.AutoProduce); // v3で追加（Task34）。同じ理由でさらに末尾に追記。
+                    w.Write(b.StockpiledMissiles); w.Write(b.MissileBuildProgress); // v6で追加（Task63）。
                 }
                 // units
                 w.Write(s.Units.Count);
@@ -75,7 +80,7 @@ namespace CSWarfront.Core
             using (var ms = new MemoryStream(bytes))
             using (var r = new BinaryReader(ms))
             {
-                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）、v4以降（ResearchPoints/UnlockedTierの有無）、v5以降（ThreatRelationsの有無）
+                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）、v4以降（ResearchPoints/UnlockedTierの有無）、v5以降（ThreatRelationsの有無）、v6以降（StockpiledMissiles/MissileBuildProgressの有無）
                 int fcount = r.ReadInt32();
                 for (int i = 0; i < fcount; i++)
                 {
@@ -117,6 +122,16 @@ namespace CSWarfront.Core
                     }
                     b.CaptureGraceHours = version >= 2 ? r.ReadSingle() : 0f;
                     b.AutoProduce = version >= 3 ? r.ReadBoolean() : true; // v2以前は既定値true（従来の全自動挙動）
+                    if (version >= 6)
+                    {
+                        b.StockpiledMissiles = r.ReadInt32();
+                        b.MissileBuildProgress = r.ReadSingle();
+                    }
+                    else
+                    {
+                        b.StockpiledMissiles = 0; // v5以前は既定値0（備蓄0発）
+                        b.MissileBuildProgress = 0f; // v5以前は既定値0（建造中でない）
+                    }
                     s.Bases.Add(b);
                 }
                 int ucount = r.ReadInt32();

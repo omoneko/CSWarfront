@@ -279,4 +279,62 @@ public class WarStateSerializerTests
             Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(f, ThreatKind.Alien));
         }
     }
+
+    // --- Task63: v5 -> v6, StockpiledMissiles/MissileBuildProgress appended at the end of the per-base block ---
+
+    [Fact]
+    public void Roundtrip_v6_preserves_StockpiledMissiles_and_MissileBuildProgress()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Bases[0].StockpiledMissiles = 3;
+        s.Bases[0].MissileBuildProgress = 0.42f;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.Equal(3, r.Bases[0].StockpiledMissiles);
+        Assert.Equal(0.42f, r.Bases[0].MissileBuildProgress, 3);
+    }
+
+    /// <summary>旧形式（v5、基地ブロック末尾にStockpiledMissiles/MissileBuildProgressが無い）を読んでも
+    /// 例外にならず、両方とも既定値0で復元されることを保証する。</summary>
+    [Fact]
+    public void Deserialize_v5_format_defaults_StockpiledMissiles_and_MissileBuildProgress_to_zero()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(5); // version 5（StockpiledMissiles/MissileBuildProgress導入前）
+            w.Write(0); // factions count
+            for (int a = 0; a < 5; a++)
+                for (int b = 0; b < 5; b++)
+                    w.Write((int)Relation.Neutral);
+            w.Write(1); // bases count
+            w.Write((ushort)200); w.Write((int)BaseType.MissileBase);
+            w.Write(true); w.Write((byte)0); // owner
+            w.Write(40f); w.Write(0f); w.Write(5f); // pos
+            w.Write(500f); w.Write(false); // influence radius, isHq
+            w.Write(500f); w.Write(250f); // maxHp, currentHp
+            w.Write(0); // queue count
+            w.Write(0f); // CaptureGraceHours (v2 field)
+            w.Write(true); // AutoProduce (v3 field)
+            // 注意: v5にはStockpiledMissiles/MissileBuildProgressが無いのでここで終わり
+            w.Write(0); // units count
+            w.Write((uint)1); // nextInstanceId
+            for (int f = 0; f < 5; f++)
+                for (int k = 0; k < ThreatRelations.ThreatKindCount; k++)
+                    w.Write((int)Relation.Hostile); // ThreatRelations (v5 field)
+            w.Flush();
+            bytes = ms.ToArray();
+        }
+
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Single(r.Bases);
+        Assert.Equal(0, r.Bases[0].StockpiledMissiles);
+        Assert.Equal(0f, r.Bases[0].MissileBuildProgress, 3);
+    }
 }
