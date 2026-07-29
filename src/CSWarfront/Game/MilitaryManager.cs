@@ -139,6 +139,13 @@ namespace CSWarfront.Game
             // Task56レビュー: このコメントは元々あったが実際の呼び出しが抜けており、レベルアンロードでも
             // PathFailedビットが解除されないまま次セッションへ持ち越されうる欠落だったため追加した。
             CombatRoadBlocker.Reset();
+            // Task72: このMODが隠した基地建物(Hiddenビット)もレベルアンロード時に解除する。
+            // 従来はBaseVisuals.DestroyAll()がBaseHiddenSync.SetDesired(false)を積むだけで、
+            // 実際にCS建物バッファへ反映するApplyPendingはsimスレッドのOnSimTick経由でしか
+            // 呼ばれないため、アンロード後にOnSimTickが二度と回らなければ反映されないまま
+            // （次にこのbuildingIdへ乗る全く別の建物へHiddenが漏れうる）欠落だった。
+            // CombatRoadBlocker.Resetと同じ「メインスレッドから直接CSバッファへ書く」形で確実に戻す。
+            BaseHiddenSync.Reset();
             CombatCollateral.Reset(); // Task65: 抽選間引き用の内部状態もレベルアンロード時にクリアする。
 
             lock (_stateLock)

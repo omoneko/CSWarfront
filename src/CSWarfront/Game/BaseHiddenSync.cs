@@ -36,6 +36,15 @@ namespace CSWarfront.Game
         private static readonly object _lock = new object();
         private static readonly Dictionary<ushort, bool> _pending = new Dictionary<ushort, bool>();
 
+        // Task72: 現在このMODが Building.Flags.Hidden を立てていると認識している建物id集合
+        // （simスレッド専用、ロック不要＝MilitaryManager.OnSimTick/SerializeLocked経由の
+        // _stateLock内、またはReset()＝レベルアンロード時のメインスレッドからのみ触られる。
+        // CombatRoadBlocker._ownedと全く同じ所有権追跡パターン）。ApplyPendingが実際にフラグを
+        // 立てた/消した瞬間にだけ更新する。セーブ直前後のクリア/再アサート（UnhideAllForSave/
+        // ReapplyAfterSave）とレベルアンロード時の一括解除（Reset）は、この集合を頼りに
+        // 「今どの建物が隠れているか」を知る。
+        private static readonly HashSet<ushort> _hiddenIds = new HashSet<ushort>();
+
         /// <summary>メインスレッド専用。次回 <see cref="ApplyPending"/> で反映される「この拠点を
         /// 隠すべきか」の最新の希望状態を記録する（同一tick内に複数回呼ばれても最後の値だけが残る
         /// ＝上書きでよい）。</summary>
@@ -77,13 +86,121 @@ namespace CSWarfront.Game
                     BaseType ignored;
                     if (buf[id].Info == null || !WarfrontBasePrefab.TryMatch(buf[id].Info, out ignored)) continue;
 
-                    if (hidden) buf[id].m_flags |= Building.Flags.Hidden;
-                    else buf[id].m_flags &= ~Building.Flags.Hidden;
+                    if (hidden)
+                    {
+                        buf[id].m_flags |= Building.Flags.Hidden;
+                        _hiddenIds.Add(id);
+                    }
+                    else
+                    {
+                        buf[id].m_flags &= ~Building.Flags.Hidden;
+                        _hiddenIds.Remove(id);
+                    }
                 }
                 catch (Exception e)
                 {
                     ModConfig.LogError("BaseHiddenSync.ApplyPending: base " + kv.Key + " error: " + e);
                 }
+            }
+        }
+
+        /// <summary>
+        /// セーブ直前に呼ぶ（Task72）。このMODが立てたHiddenビットをセーブデータへ焼き込まないよう
+        /// 一時的に全部クリアする。<see cref="_hiddenIds"/> 自体はメモリ上に保持したままにし、
+        /// <see cref="ReapplyAfterSave"/> で同じ集合へ立て直す。呼び出し元
+        /// （MilitaryManager.SerializeLocked）が _stateLock を保持したまま呼ぶため、simスレッドとの
+        /// 競合は無い。CombatRoadBlocker.UnblockAllForSaveと全く同じパターン。
+        /// </summary>
+        public static void UnhideAllForSave()
+        {
+            try
+            {
+                if (_hiddenIds.Count == 0) return;
+                if (!Singleton<BuildingManager>.exists) return;
+                Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+                foreach (ushort id in _hiddenIds)
+                {
+                    if (id < buf.Length) buf[id].m_flags &= ~Building.Flags.Hidden;
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseHiddenSync.UnhideAllForSave exception: " + e);
+            }
+        }
+
+        /// <summary>
+        /// UnhideAllForSaveで外したHiddenビットを立て直す（Task72）。
+        ///
+        /// 重要: このメソッドは「WarStateSerializer.Serializeの直後」ではなく、必ず
+        /// 「バニラのBuildingManager.Data.Serializeが実際にBuilding.m_flagsをストリームへ書き終えた後」
+        /// に呼ばれるよう、呼び出し元（MilitaryManagerPersistence.SerializeLocked）が
+        /// Singleton&lt;SimulationManager&gt;.instance.AddAction で次のアクションとして遅延実行する
+        /// 契約になっている（ilspycmdでSimulationManager.Data.Serialize/LoadingManager.SaveSimulationData
+        /// を逆コンパイルして確認した実際のセーブ順序に基づく。詳細はSerializeLockedのコメント参照）。
+        /// 建物が解体済み（Created落ち）になっていれば、それは静かに諦めて集合から落とす
+        /// （CombatRoadBlocker.ReassertOwnedのstale処理と同じ）。
+        /// </summary>
+        public static void ReapplyAfterSave()
+        {
+            try
+            {
+                if (_hiddenIds.Count == 0) return;
+                if (!Singleton<BuildingManager>.exists) return;
+                Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+
+                List<ushort> stale = null;
+                foreach (ushort id in _hiddenIds)
+                {
+                    if (id >= buf.Length || (buf[id].m_flags & Building.Flags.Created) == 0)
+                    {
+                        (stale ?? (stale = new List<ushort>())).Add(id);
+                        continue;
+                    }
+                    buf[id].m_flags |= Building.Flags.Hidden;
+                }
+
+                if (stale != null)
+                {
+                    for (int i = 0; i < stale.Count; i++) _hiddenIds.Remove(stale[i]);
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseHiddenSync.ReapplyAfterSave exception: " + e);
+            }
+        }
+
+        /// <summary>
+        /// レベルアンロード時（MilitaryManager.Reset()から呼ばれる）：このMODがHiddenにした建物を
+        /// 全部素の見た目へ戻してから内部状態をクリアする（Task72）。CombatRoadBlocker.Resetと同じ
+        /// 理由・同じ形: Reset()はメインスレッド（OnLevelUnloading経由）から呼ばれ、以後simスレッドの
+        /// OnSimTick（延いてはApplyPendingによる_pendingの排出）はもう回らない可能性が高いため、
+        /// SetDesiredで_pendingへ積むだけでは戻す保証にならない。ここでCS建物バッファへ直接書き込む。
+        /// レベルがティアダウン中でBuildingManagerが既に無効化されているケースもありうるため、
+        /// 解除に失敗しても（ログするだけで）例外を外へ伝播しない。
+        /// </summary>
+        public static void Reset()
+        {
+            try
+            {
+                if (_hiddenIds.Count > 0 && Singleton<BuildingManager>.exists)
+                {
+                    Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+                    foreach (ushort id in _hiddenIds)
+                    {
+                        if (id < buf.Length) buf[id].m_flags &= ~Building.Flags.Hidden;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseHiddenSync.Reset: unhide-on-unload failed (harmless, level is tearing down): " + e);
+            }
+            finally
+            {
+                _hiddenIds.Clear();
+                lock (_lock) { _pending.Clear(); }
             }
         }
     }

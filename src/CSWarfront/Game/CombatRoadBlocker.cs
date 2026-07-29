@@ -234,7 +234,7 @@ namespace CSWarfront.Game
         /// <summary>
         /// セーブ直前に呼ぶ（Task54）。このMODが立てたPathFailedビットをセーブデータへ焼き込まないよう
         /// 一時的に全部クリアする。所有集合(_owned)自体はメモリ上に保持したままにし、
-        /// ReblockAfterSaveで同じ集合へ即座に立て直す。呼び出し元（MilitaryManager.SerializeLocked）が
+        /// ReblockAfterSaveで同じ集合へ立て直す。呼び出し元（MilitaryManager.SerializeLocked）が
         /// _stateLockを保持したまま呼ぶため、simスレッドとの競合は無い。
         /// </summary>
         public static void UnblockAllForSave()
@@ -255,8 +255,30 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>UnblockAllForSaveの直後、シリアライズが終わった後に呼ぶ。_owned集合をそのまま
-        /// 使って封鎖を立て直す（セーブは論理状態を変えない一時的な処理として扱う）。</summary>
+        /// <summary>
+        /// UnblockAllForSaveで外したPathFailedビットを立て直す。_owned集合をそのまま使って封鎖を
+        /// 立て直す（セーブは論理状態を変えない一時的な処理として扱う）。
+        ///
+        /// Task72で判明・修正した重要な契約: 呼び出し元は「WarStateSerializer.Serializeが返った直後」
+        /// に同期的にこれを呼んではならない。ilspycmdで
+        /// SimulationManager.Data.Serialize/LoadingManager.SaveSimulationData/AsyncTask.Executeを
+        /// 逆コンパイルして確認した結果、バニラの保存順序は
+        /// 「①全MODのISerializableDataExtension.OnSaveData()（＝WarStateDataExtension.OnSaveData、
+        /// このメソッドの旧呼び出し元を含む）を呼ぶ → ②その後で初めてBuildingManager.Data/
+        /// NetManager.Data等バニラの各マネージャのSerialize（実際にNetSegment.m_flags/
+        /// Building.m_flagsをストリームへ書く箇所）を呼ぶ」であり、しかもこの①②は同一の
+        /// AsyncTask.Execute()（seg内で完全に同期実行、yieldなし）の中で連続して起きる。
+        /// つまり「OnSaveData()の中でクリア→OnSaveData()の中のfinallyで即座に戻す」設計（旧実装）は、
+        /// バニラが②でNetSegment.m_flagsを読み取るより前に戻してしまうため、実際には
+        /// セーブファイルへPathFailedビットが焼き込まれ続けていた（無意味な対策だった）。
+        /// 正しい呼び出し方は、MilitaryManagerPersistence.SerializeLockedが
+        /// Singleton&lt;SimulationManager&gt;.instance.AddActionで「今のSaving AsyncTaskが完全に
+        /// 完了した後の次のアクション」としてこれを積むこと。SimulationManager.SimulationStep先頭の
+        /// `while(m_hasActions){...}`ループは、実行中のActionの中で新たにAddActionが呼ばれると
+        /// m_hasActionsが再びtrueになり、同フレーム内・かつ通常のOnSimTickより前に続けてそのActionも
+        /// 実行するため、バニラのNetSegment.m_flags書き込みが完全に終わった直後というタイミングを
+        /// 確実に取れる。
+        /// </summary>
         public static void ReblockAfterSave()
         {
             try
