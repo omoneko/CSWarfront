@@ -522,6 +522,8 @@ public class MovementStepTests
     }
 
     // 非交戦(進軍中)のbounding advanceは従来通り機能する（Task50でモード2のみを変更したことの回帰確認）。
+    // CoverHold==false（互換維持のフォールバック経路。現行のCoverSeekStepはもう作らない値だが、
+    // 手動で設定した呼び出し元のために挙動を維持する、Task52）。
     [Fact]
     public void Advance_non_engaging_unit_still_bounds_from_cover_to_cover()
     {
@@ -538,5 +540,34 @@ public class MovementStepTests
 
         Assert.False(s.Units[0].CoverDestination.HasValue); // cleared on arrival, ready for the next cover
         Assert.Equal(0f, s.Units[0].CoverReevaluateCooldown);
+    }
+
+    // --- Task52: 遮蔽保持(CoverHold==true)の時間上限（MaxCoverHoldHours） ---
+
+    // rule2 TDD: Task52でモード3(進軍中のbounding advance)もCoverHold=trueで「保持」するようになった
+    // （実際に隠れて一時停止する演出のため）。MaxCoverHoldHoursを超えて静止し続けたら、
+    // CoverDestinationを解放し、通常のOrderTargetPosへの前進を再開する（無期限には止まらない）。
+    [Fact]
+    public void Advance_releases_bounding_CoverHold_after_MaxCoverHoldHours_and_resumes_toward_OrderTargetPos()
+    {
+        var s = OneMovingUnit(); // State=Moving, OrderTargetPos=(1000,0,0)
+        var u = s.Units[0];
+        u.CoverDestination = new WorldPos(1f, 0, 0); // within CoverArrivalDistance(3)
+        u.CoverHold = true; // Task52: bounding cover now also holds briefly
+
+        // Arrival tick: within MaxCoverHoldHours(1h), the hold timer only just started.
+        MovementStep.Advance(s, 0.5f);
+        Assert.True(s.Units[0].CoverDestination.HasValue);
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+
+        // Exceed the cap while still sitting at the cover point.
+        MovementStep.Advance(s, MovementStep.MaxCoverHoldHours + 0.1f);
+        Assert.False(s.Units[0].CoverDestination.HasValue);
+
+        // Now free to resume toward OrderTargetPos.
+        var beforeX = s.Units[0].Position.X;
+        MovementStep.Advance(s, 1f);
+        Assert.True(s.Units[0].Position.X > beforeX,
+            "expected the unit to resume advancing once MaxCoverHoldHours elapsed");
     }
 }

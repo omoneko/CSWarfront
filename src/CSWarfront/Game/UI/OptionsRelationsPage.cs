@@ -20,8 +20,34 @@ namespace CSWarfront.Game.UI
     /// 無効化し、その旨を説明する注記ラベルを表示するに留める。
     ///
     /// OptionsModelAssignPage と同じ規約: 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
-    /// Build() は Options 画面を開くたびに再実行されうるため、毎回すべてのコントロールを新規生成する
-    /// 前提で書かれている（古い参照は次の Build() 呼び出しで上書きされる）。
+    ///
+    /// Task52バグ修正: 「勢力の関係がOptionsから変更できない」不具合の根本原因は、CSの
+    /// OptionsMainPanel（Assembly-CSharp.dll、ILSpyで逆コンパイルして確認済み）が各MODの
+    /// OnSettingsUI を「Options画面を開くたび」ではなく、OptionsMainPanel.Awake()（＝Options画面の
+    /// プレハブが最初にインスタンス化された、通常は都市読み込み前のメインメニューの時点）で
+    /// ただ一度だけ呼び、以後はロケール変更(OnLocaleChanged)かMOD有効/無効の変更
+    /// (RefreshPlugins、eventPluginsChanged/eventPluginsStateChanged)の時だけ再構築する、という
+    /// 実装だったこと。つまりBuild()（＝このOnSettingsUI呼び出し）はMilitaryManager.Stateがまだnull
+    /// （都市未読み込み）の状態で一度だけ実行され、10個のドロップダウンはそのタイミングの
+    /// stateReady(false)を元にisEnabled=falseへ固定される。その後、都市を読み込んでStateが
+    /// 用意されても、Options画面を開き直すだけではBuild()は二度と呼ばれない（前述の通り
+    /// Awake/ロケール変更/MOD有効化変更でしか再実行されない）ため、ドロップダウンは
+    /// 無効化されたまま＝ユーザーからは「敵対から変更できない」ように見え続ける。
+    /// このコメント自体も含め、旧実装は「Build()はOptions画面を開くたびに再実行されうる」という
+    /// 誤った前提で書かれていた（OptionsModelAssignPage.csにも同じ誤った前提のコメントがあるが、
+    /// そちらは本タスクのスコープ外）。
+    ///
+    /// 修正: Unity/CSのUIComponentは、祖先のisVisibleが変化すると子孫までOnVisibilityChanged()を
+    /// 再帰的に伝播し、各階層でeventVisibilityChangedを発火する（UIComponent、ColossalManaged.dllを
+    /// 逆コンパイルして確認済み）。Options画面でタブを切り替える際、UITabContainer.SelectPageByIndex
+    /// は選択された1個の子（＝このMODの全グループを内包する単一のUIComponent）のisVisibleを
+    /// true/falseへ切り替えるだけだが、それが配下の「勢力の関係」グループのパネルまで伝播するため、
+    /// グループパネル自身のeventVisibilityChangedを購読すれば「このMODのOptionsタブが選択される
+    /// たび」に確実にフックできる（Build()自体が再実行されるかどうかに依存しない）。
+    /// RefreshFromState() がこのイベントで毎回、(1) 現在のStateから10個のドロップダウンの選択値を
+    /// 読み直し、(2) isEnabledをstateReadyへ同期し、(3) 注記ラベルを更新する。これにより
+    /// 「都市未読み込みで一度だけ構築された古いUI」が残っていても、次に都市を読み込んでOptionsの
+    /// このタブを開いた瞬間に正しい状態へ更新される。
     /// </summary>
     internal static class OptionsRelationsPage
     {
@@ -88,6 +114,15 @@ namespace CSWarfront.Game.UI
                     _noteLabel.text = stateReady
                         ? ""
                         : "都市が読み込まれていないため、勢力の関係を編集できません。都市を読み込んだ後にもう一度開いてください。";
+
+                    // Task52バグ修正: CSはこのMOD全体のOnSettingsUIをOptions画面を開くたびには
+                    // 再実行しない（クラス冒頭のコメント参照）。代わりに、Options内でこのMODのタブが
+                    // 選択される（＝祖先コンポーネントのisVisibleがtrueへ変わり、それがこの
+                    // グループパネルまで伝播する）たびに発火するeventVisibilityChangedを購読し、
+                    // その時点のMilitaryManager.Stateを元にドロップダウンの選択値・有効/無効・
+                    // 注記ラベルを再同期する。これにより「都市未読み込み時に一度だけ無効化された
+                    // まま固定される」不具合を、Build()自体の再実行に頼らずに解消する。
+                    groupPanel.eventVisibilityChanged += OnGroupVisibilityChanged;
                 }
             }
             catch (Exception e)
@@ -116,19 +151,63 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正）。
+        /// isVisible==trueの時だけ（＝Options内でこのMODのタブが選択された/表示された時だけ）
+        /// RefreshFromStateを呼ぶ。非表示化(false)の際は何もしない。</summary>
+        private static void OnGroupVisibilityChanged(UIComponent component, bool isVisible)
+        {
+            if (!isVisible) return;
+            RefreshFromState();
+        }
+
+        /// <summary>現在のMilitaryManager.Stateを元に、10行のドロップダウンの選択値・isEnabled、
+        /// および注記ラベルを再同期する（Task52バグ修正）。都市を読み込んだ後にOptionsのこのタブを
+        /// 開き直した時、あるいは「全て敵対に戻す」ボタンを押した後の再同期の両方で使う共通処理。
+        /// 例外はここで握りつぶし、UIコールバックからゲームループへ例外を伝播させない。</summary>
+        private static void RefreshFromState()
+        {
+            try
+            {
+                bool stateReady = MilitaryManager.State != null;
+
+                for (int i = 0; i < _dropdowns.Count; i++)
+                {
+                    UIDropDown dd = _dropdowns[i];
+                    if (dd == null) continue;
+
+                    dd.isEnabled = stateReady;
+
+                    Relation current;
+                    if (!MilitaryManager.TryGetRelation(_pairA[i], _pairB[i], out current)) current = Relation.Hostile;
+                    int idx = IndexOfRelation(current);
+                    // 値が変わっていない時にselectedIndexへ書き戻すとeventSelectedIndexChanged経由で
+                    // OnRelationChangedが不要に再発火する（ログが増えるだけで実害は無いが避ける）。
+                    if (dd.selectedIndex != idx) dd.selectedIndex = idx;
+                }
+
+                if (_noteLabel != null)
+                {
+                    _noteLabel.text = stateReady
+                        ? ""
+                        : "都市が読み込まれていないため、勢力の関係を編集できません。都市を読み込んだ後にもう一度開いてください。";
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("OptionsRelationsPage.RefreshFromState error: " + e);
+            }
+        }
+
         /// <summary>「全て敵対に戻す」ボタン。MilitaryManager.TryResetRelationsToAllHostile
-        /// （Core.RelationPresets.ApplyAllHostileへの薄いラッパー）を呼んでから、10行のドロップダウンの
-        /// 選択表示を敵対へ再同期する。State未初期化なら何もしない（ラッパーがfalseを返すのみ）。</summary>
+        /// （Core.RelationPresets.ApplyAllHostileへの薄いラッパー）を呼んでから、RefreshFromStateで
+        /// 10行のドロップダウンの選択表示を（すべて敵対になったはずの）現在値へ再同期する。
+        /// State未初期化なら何もしない（ラッパーがfalseを返すのみ）。</summary>
         private static void OnResetAllClick()
         {
             try
             {
                 if (!MilitaryManager.TryResetRelationsToAllHostile()) return;
-
-                for (int i = 0; i < _dropdowns.Count; i++)
-                {
-                    if (_dropdowns[i] != null) _dropdowns[i].selectedIndex = IndexOfRelation(Relation.Hostile);
-                }
+                RefreshFromState();
             }
             catch (Exception e)
             {

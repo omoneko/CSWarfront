@@ -81,6 +81,37 @@ namespace CSWarfront.Core
         /// 次の交戦開始時に改めて評価される。</summary>
         public uint? CoverTargetId;
 
+        /// <summary>CoverDestinationでCoverHold==trueのまま実際に静止し続けている経過ゲーム内時間
+        /// （実行時のみ・非永続化、Task52）。MovementStep.AdvanceTowardCoverが計測し、
+        /// MovementStep.MaxCoverHoldHoursを超えたら強制的にCoverDestinationを解放する
+        /// （「隠れている間は動かないが、いつまでも隠れ続けはしない」というTask52の保証）。
+        /// 移動中（まだCoverDestinationへ到達していない間）は0のまま維持され、到達後の静止時間だけを
+        /// 計測する。新しい遮蔽が決定された瞬間（CoverSeekStep）に0へリセットされる。</summary>
+        public float CoverHoldTimer;
+
+        /// <summary>State==EngagingでTargetIdが同じ相手を指し続けている経過ゲーム内時間
+        /// （実行時のみ・非永続化、Task52）。CoverSeekStepが毎tick加算/リセットし、
+        /// CoverSeekStep.MaxEngageHoldHoursを超えるとMovementStepはEngagingのままでも
+        /// OrderTargetPos/Pathへの移動を許可する（射程内ならCombatStepが移動しながらでも
+        /// 撃ち合いを継続する）。TargetIdが変わった、または交戦が終わった瞬間に0へリセットされる。</summary>
+        public float EngageHoldTimer;
+
+        /// <summary>膠着ウォッチドッグ（実行時のみ・非永続化、Task52）: 直近のチェックポイント時点での
+        /// OrderTargetPosまでの水平距離。nullは未計測（次tickで初期化される）を表す。
+        /// CoverSeekStep.StallEpsilon以上縮まるたびに更新され、StallTimerも同時に0へリセットされる。</summary>
+        public float? LastObjectiveDistance;
+
+        /// <summary>膠着ウォッチドッグ（実行時のみ・非永続化、Task52）: LastObjectiveDistanceから
+        /// CoverSeekStep.StallEpsilon以上前進できていない経過ゲーム内時間。
+        /// CoverSeekStep.StallTimeoutHoursを超えるとCoverSuppressionRemainingがセットされる。</summary>
+        public float StallTimer;
+
+        /// <summary>膠着ウォッチドッグが発動した後、遮蔽探索を完全に無視して道路経路のみに従う
+        /// 残りゲーム内時間（実行時のみ・非永続化、Task52）。CoverSeekStep.Advanceが毎tick
+        /// dt分だけ減算し、0になったら通常の遮蔽ロジックへ自動的に戻る
+        /// （「suppresses cover after a stall and re-enables it later」の実装）。</summary>
+        public float CoverSuppressionRemaining;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;

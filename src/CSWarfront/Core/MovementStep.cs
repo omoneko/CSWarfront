@@ -6,39 +6,50 @@ namespace CSWarfront.Core
     /// Path（道路経路）があればウェイポイントを順に消化し、尽きたらOrderTargetPosへの直線移動にフォールバックする。
     /// Task44/Task45: CoverDestinationが設定されているユニットは、State(Engaging/Moving)に関わらず
     /// Path/OrderTargetPosを無視してCoverDestinationへ向けて進む（遮蔽を取りに行く動き）。
-    /// 旧仕様(Task44)は「State==Engagingの時だけ」honorしていたが、Task45でCoverSeekStepが
-    /// 進軍中（交戦前、自勢力圏の外）のユニットにもCoverDestinationを設定するようになったため、
-    /// このガードは撤廃した。CoverArrivalDistance以内に入った時の挙動はUnitInstance.CoverHoldで分岐する：
-    ///   - CoverHold==true（交戦中）: その場で停止し、そこから撃ち続ける（従来通り）。
-    ///   - CoverHold==false（進軍中のbounding advance）: CoverDestinationをクリアして即座に
-    ///     Path/OrderTargetPosへの追従を再開する。CoverReevaluateCooldownも0へリセットするため、
-    ///     同じtick内の次のCoverSeekStep評価（次tick）で次の遮蔽が選ばれ、遮蔽から遮蔽へ「跳ぶ」ように
-    ///     前進する（半開けた場所で立ち止まって次の評価まで待つことがない）。
+    /// CoverArrivalDistance以内に入った時の挙動はUnitInstance.CoverHoldで分岐する：
+    ///   - CoverHold==true（交戦中、またはTask52以降はMode3のbounding advanceも）: その場で停止し、
+    ///     そこから撃ち続ける/隠れる。ただしTask52のMaxCoverHoldHoursで頭打ちにする（後述）。
+    ///   - CoverHold==false（互換維持用のフォールバック。現行のCoverSeekStepはもう作らないが、
+    ///     手動でCoverHold=falseを設定した呼び出し元のために挙動を維持する）: 到達したら即座に
+    ///     CoverDestinationをクリアしてPath/OrderTargetPosへの追従を再開する。
     /// CoverDestinationが無いユニットは従来通りの経路/直線移動のまま変わらない。
     ///
     /// Task48: UnitInstance.Order による分岐を追加した。
-    ///   - Hold: ループの先頭で即continueし、一切移動しない（CoverDestination等の取り残しがあっても
-    ///     無視する。停止命令の定義そのもの）。
+    ///   - Hold: ループの先頭で即continueし、一切移動しない。
     ///   - RallyHold: CoverSeekStepがCoverDestinationを一切設定しないため上のCoverDestination分岐は
     ///     通らない。代わりにOrderTargetPosの代わりにRallyPointへ向け、Path（UnitCommands.ApplyRallyが
     ///     RallyPoint宛に計算済み）があれば消化してから直線移動でフォールバックする。CoverArrivalDistance
-    ///     以内まで近づいたら停止する（新規の定数を増やさず、Cover到達判定と同じ基準を再利用する）。
-    ///     RallyHoldは移動中・停止後を問わず射程内の敵に応戦する設計（UnitInstance.Order参照）のため、
-    ///     State==Engagingであっても下のTask50ガードより先に判定し、RallyPointへの移動は続ける
+    ///     以内まで近づいたら停止する。RallyHoldは移動中・停止後を問わず射程内の敵に応戦する設計のため、
+    ///     State==Engagingであっても下のTask50/52ガードより先に判定し、RallyPointへの移動は続ける
     ///     （「持ち場へ向かいながら応戦する」という意図的な仕様。ここは変更しない）。
     ///   - FreeAdvance/AiControlled: 従来通りOrderTargetPos/Pathで移動する（挙動変更なし）。
     ///
     /// Task50: 「建物の陰に隠れながら戦闘するときは停車する」フィードバック対応。CoverDestinationを
     /// 持たない（＝適した遮蔽が見つからなかった、または自勢力圏内で遮蔽移動そのものの対象外の）
     /// Engagingユニットは、Order==RallyHoldでない限り一切移動しない（OrderTargetPos/Pathへ進まない）。
-    /// State列挙体はEngaging/Movingが排他のため、この分岐が無くても下のMoving判定だけで実質的には
-    /// 同じ結果になっていたが、意図を明示するため独立したガードとして残す（「交戦中は遮蔽位置以外へは
-    /// 絶対に動かない」という要件を、将来Stateの意味が広がっても壊れない形で保証する）。</summary>
+    ///
+    /// Task52（「敵拠点への進軍が途中でスタックする」不具合の修正）: Task50の「交戦中は遮蔽位置以外へは
+    /// 絶対に動かない」は、遮蔽が見つからない/倒しきれない相手と長時間睨み合うケースで恒久的な
+    /// フリーズを引き起こしていた。以下の2つの独立したタイマーで「進軍は必ず再開される」ことを保証する：
+    ///   - MaxCoverHoldHours: CoverDestinationで実際に静止し続けている時間の上限（UnitInstance.
+    ///     CoverHoldTimerで計測、AdvanceTowardCoverが管理）。超えたらCoverDestinationを解放する。
+    ///   - CoverSeekStep.MaxEngageHoldHours: 同じ相手と交戦し続けている時間の上限
+    ///     （UnitInstance.EngageHoldTimerで計測、CoverSeekStepが管理）。超えたら、CoverDestinationの
+    ///     有無に関わらずEngaging中でもOrderTargetPos/Pathへの移動を許可する（射程内ならCombatStepが
+    ///     移動しながらでも撃ち合いを継続する＝「it may keep firing while moving」）。
+    /// どちらか一方でも条件を満たせば、Engaging中でも移動を再開する（詳細はAdvanceの本体を参照）。</summary>
     public static class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
         /// Task48: RallyPointへの到達判定にも同じ閾値を再利用する。</summary>
         public const float CoverArrivalDistance = 3f;
+
+        /// <summary>CoverHold==trueで静止し続けられる最大時間（ゲーム内時間、Task52）。
+        /// UnitInstance.CoverHoldTimerがこれを超えたらCoverDestinationを解放し、次tickから
+        /// 通常の経路/直線移動（Engaging中でもCoverSeekStep.MaxEngageHoldHoursの条件次第で）を
+        /// 再開できるようにする。これが「隠れている間は動かないが、いつまでも隠れ続けはしない」
+        /// というユーザー要件のガードレールになる。</summary>
+        public const float MaxCoverHoldHours = 1.0f;
 
         public static void Advance(WarState state, float dt)
         {
@@ -56,7 +67,7 @@ namespace CSWarfront.Core
 
                 if (u.CoverDestination.HasValue)
                 {
-                    AdvanceTowardCover(u, stepLen);
+                    AdvanceTowardCover(u, stepLen, dt);
                     continue;
                 }
 
@@ -66,10 +77,22 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // Task50: 遮蔽位置を持たない交戦中ユニットは停車したまま応戦する（RallyHoldは上で処理済み）。
-                if (u.State == UnitState.Engaging) continue;
+                // Task50/52: 遮蔽位置を持たない交戦中ユニットは、原則停車したまま応戦する
+                // （RallyHoldは上で処理済み）。ただしMaxCoverHoldHours（直前まで保持していた遮蔽から
+                // 解放された）またはCoverSeekStep.MaxEngageHoldHours（同じ相手との交戦が長引きすぎた）
+                // のいずれかを満たしていれば、Engagingのままでも移動を再開させる（Task52）。
+                if (u.State == UnitState.Engaging)
+                {
+                    bool releasedFromCoverHold = u.CoverHoldTimer > MaxCoverHoldHours;
+                    bool engageHoldExpired = u.EngageHoldTimer >= CoverSeekStep.MaxEngageHoldHours;
+                    if (!releasedFromCoverHold && !engageHoldExpired) continue;
+                }
+                else if (u.State != UnitState.Moving)
+                {
+                    continue;
+                }
 
-                if (u.State != UnitState.Moving || !u.OrderTargetPos.HasValue) continue;
+                if (!u.OrderTargetPos.HasValue) continue;
 
                 stepLen = ConsumePath(u, stepLen);
                 if (stepLen > 0f)
@@ -79,7 +102,7 @@ namespace CSWarfront.Core
 
         /// <summary>Task48: RallyPointへ向けたキネマティック移動。UnitCommands.ApplyRallyがRallyPoint宛に
         /// 計算した道路経路(Path)があればまずそれを消化し、残りは直線移動でフォールバックする
-        /// （ConsumePath/AdvanceStraightは通常のOrderTargetPos移動と全く同じヘルパーを再利用）。
+        /// （ConsumePath/AdvanceStraightは通常のOrderTargetPos移動と全く同じヘルパーを再利用する）。
         /// CoverArrivalDistance以内まで近づいたら以後は何もしない（その場に留まる）。</summary>
         private static void AdvanceTowardRally(UnitInstance u, float stepLen)
         {
@@ -93,14 +116,16 @@ namespace CSWarfront.Core
         }
 
         /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内に入ったら、
-        /// CoverHoldに応じて「その場で停止し続ける」(true)か「CoverDestinationをクリアして
-        /// 次tickから通常の経路/直線移動または次の遮蔽評価へ委ねる」(false、Task45のbounding advance)
-        /// かを分岐する。それ以外の距離ではAdvanceStraightと同じ補間で進む。</summary>
-        private static void AdvanceTowardCover(UnitInstance u, float stepLen)
+        /// CoverHoldに応じて「その場で停止し続ける」(true、Task52でMaxCoverHoldHoursの上限つき)か
+        /// 「CoverDestinationをクリアして次tickから通常の経路/直線移動または次の遮蔽評価へ委ねる」
+        /// (false、互換維持用のフォールバック経路)かを分岐する。それ以外の距離ではAdvanceStraightと
+        /// 同じ補間で進む（この間はCoverHoldTimerを0のまま維持し、実際に静止した時間だけを計測する）。</summary>
+        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt)
         {
             WorldPos coverPos = u.CoverDestination.Value;
-            float dist = u.Position.HorizontalDistanceTo(coverPos);
-            if (dist <= CoverArrivalDistance)
+            float distBefore = u.Position.HorizontalDistanceTo(coverPos);
+
+            if (distBefore <= CoverArrivalDistance)
             {
                 if (!u.CoverHold)
                 {
@@ -108,9 +133,28 @@ namespace CSWarfront.Core
                     // 次のCoverSeekStep評価がすぐ走るようクールダウンをリセットして手放す。
                     u.CoverDestination = null;
                     u.CoverReevaluateCooldown = 0f;
+                    u.CoverHoldTimer = 0f;
+                    return;
+                }
+
+                // Task52: 保持中の静止時間を計測し、MaxCoverHoldHoursを超えたら強制的に解放する
+                // （交戦中でも「resumes advancing — even if it is still engaging」）。到着した
+                // まさにこのtickではまだ0のままなので、静止1回分としてカウントされ始めるのは
+                // 次tick以降になる（巨大なdtで一気に到着したケースでも即座に頭打ちにならないため）。
+                u.CoverHoldTimer += dt;
+                if (u.CoverHoldTimer > MaxCoverHoldHours)
+                {
+                    u.CoverDestination = null;
+                    u.CoverHold = false;
+                    // CoverHoldTimerはあえてリセットしない: 同じ交戦（CoverTargetId不変）が続く限り
+                    // MovementStep側のreleasedFromCoverHold判定がtrueであり続け、以後このtargetとの
+                    // 交戦中は再度足止めされない（新しい交戦/新しい遮蔽決定でCoverSeekStepが0へ戻す）。
                 }
                 return;
             }
+
+            // まだ到達していない＝保持はまだ始まっていないのでタイマーは0のまま。
+            u.CoverHoldTimer = 0f;
             AdvanceStraight(u, coverPos, stepLen);
         }
 

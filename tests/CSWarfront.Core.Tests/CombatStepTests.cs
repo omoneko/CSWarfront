@@ -335,4 +335,66 @@ public class CombatStepTests
 
         Assert.Equal(WarState.MaxRecentKillsPerTick, s.RecentKills.Count);
     }
+
+    // --- Task52: Options画面の勢力関係変更がシミュレーションへ即座に効くことのCoreレベル検証 ---
+    // TargetSearch/CombatStep/BaseCombatStep/AiTargetingは全てRelation.Hostileでゲートしているため、
+    // ペアをNeutral/Alliedへ切り替えれば、それまで交戦していたユニット同士も即座に無視し合うはず。
+    // MilitaryManager.TrySetRelationはCore.RelationMatrix.Setへ委譲するだけの薄いラッパーのため、
+    // ここではWarState.Relations.Setを直接呼んで同じ経路を検証する。
+
+    [Fact]
+    public void Flipping_a_hostile_pair_to_Neutral_makes_units_stop_engaging_each_other()
+    {
+        var s = TwoHostileTanks(50f); // range 60 内、Hostileなので交戦する
+
+        // まず敵対のままだと交戦してダメージが出ることを確認する（前提の確認）。
+        var warmup = TwoHostileTanks(50f);
+        CombatStep.Advance(warmup, 1f);
+        Assert.True(warmup.FindUnit(1).CurrentHP < 100f, "sanity check: hostile units should engage");
+
+        // Options画面から「中立」に変更した操作を模して、両勢力の関係をNeutralへ切り替える
+        // （MilitaryManager.TrySetRelationが実際に呼ぶのと同じRelationMatrix.Set）。
+        s.Relations.Set(0, 1, Relation.Neutral);
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(100f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(100f, s.FindUnit(2).CurrentHP, 3);
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(1).State);
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(2).State);
+    }
+
+    [Fact]
+    public void Flipping_a_hostile_pair_to_Allied_makes_units_stop_engaging_each_other()
+    {
+        var s = TwoHostileTanks(50f); // range 60 内、Hostileなので交戦する
+
+        s.Relations.Set(0, 1, Relation.Allied);
+
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(100f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(100f, s.FindUnit(2).CurrentHP, 3);
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(1).State);
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(2).State);
+    }
+
+    // Task52: 既に交戦中(State==Engaging)だったペアがNeutralへ切り替わった場合も、次tickで
+    // 即座にIdleへ戻り、以後ダメージを与え合わない（「敵対から中立/同盟に変更したら戦闘を止める」
+    // というユーザー要件の直接確認、CombatStepが毎tick TargetSearch で再判定するため自動的に成立する）。
+    [Fact]
+    public void Already_engaging_units_stop_fighting_the_tick_after_relation_becomes_Neutral()
+    {
+        var s = TwoHostileTanks(50f);
+        CombatStep.Advance(s, 1f); // both start Engaging and take damage
+        Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
+        float hpAfterFirstHit = s.FindUnit(1).CurrentHP;
+        Assert.True(hpAfterFirstHit < 100f);
+
+        s.Relations.Set(0, 1, Relation.Neutral);
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(hpAfterFirstHit, s.FindUnit(1).CurrentHP, 3); // no further damage
+        Assert.Equal(UnitState.Idle, s.FindUnit(1).State);
+    }
 }

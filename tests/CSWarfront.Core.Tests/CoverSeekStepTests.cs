@@ -164,10 +164,11 @@ public class CoverSeekStepTests
         var firstDestination = self.CoverDestination.Value;
         Assert.Equal(enemy.InstanceId, self.CoverTargetId);
 
-        // 遮蔽物を全て取り除き、旧クールダウン(0.5h)を大きく超える時間を進めても、
-        // 同じ相手と交戦し続けている限りCoverDestinationは変わらない。
+        // 遮蔽物を全て取り除き、Task52のMaxEngageHoldHours(3h)を大きく超える時間を進めても、
+        // 同じ相手と交戦し続けている限りCoverDestinationは変わらない（MaxEngageHoldHoursは
+        // MovementStepの移動再開にのみ影響し、CoverSeekStep自体の再評価ロックは解かない）。
         s.Cover = new CoverMap();
-        CoverSeekStep.Advance(s, CoverSeekStep.CoverReevaluateHours * 10f);
+        CoverSeekStep.Advance(s, CoverSeekStep.MaxEngageHoldHours * 10f);
 
         Assert.True(self.CoverDestination.HasValue);
         Assert.Equal(firstDestination.X, self.CoverDestination.Value.X, 3);
@@ -191,7 +192,7 @@ public class CoverSeekStepTests
 
         // Cover appears later, but the target hasn't changed -> still must not re-pick.
         s.Cover.Add(new WorldPos(50, 0, 0), 5f);
-        CoverSeekStep.Advance(s, CoverSeekStep.CoverReevaluateHours * 10f);
+        CoverSeekStep.Advance(s, CoverSeekStep.MaxEngageHoldHours * 10f);
 
         Assert.False(self.CoverDestination.HasValue);
     }
@@ -228,10 +229,10 @@ public class CoverSeekStepTests
         Assert.Equal(enemy2.InstanceId, self.CoverTargetId);
     }
 
-    // Task50: 到達済み（またはそもそも遮蔽が無い）の交戦ユニットは、以後のtickで一切動かない
-    // （CoverSeekStep→MovementStepの連携を統合的に確認する）。
+    // Task50/52: 到達済み（またはそもそも遮蔽が無い）の交戦ユニットは、MaxEngageHoldHoursに
+    // 達するまでは一切動かない（CoverSeekStep→MovementStepの連携を統合的に確認する）。
     [Fact]
-    public void Advance_engaging_unit_with_no_cover_never_moves_on_subsequent_ticks()
+    public void Advance_engaging_unit_with_no_cover_does_not_move_within_MaxEngageHoldHours()
     {
         var s = BaseState();
         var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
@@ -245,10 +246,37 @@ public class CoverSeekStepTests
         MovementStep.Advance(s, 1f);
         Assert.Equal(0f, self.Position.X, 3);
 
-        CoverSeekStep.Advance(s, 5f); // several ticks later, still the same target
-        MovementStep.Advance(s, 5f);
+        // Still well within MaxEngageHoldHours(3h) total.
+        CoverSeekStep.Advance(s, 1f);
+        MovementStep.Advance(s, 1f);
         Assert.Equal(0f, self.Position.X, 3);
         Assert.False(self.CoverDestination.HasValue);
+    }
+
+    // Task52 rule3 TDD: 遮蔽が全く見つからない（探索半径はあるが候補が無い/CoverMap無し）まま
+    // 同じ相手と交戦し続けるユニットは、MaxEngageHoldHoursを超えた時点でEngagingのままでも
+    // OrderTargetPosへの進軍を再開する（「敵を倒しきれず永久にスタックする」不具合の直接の修正）。
+    [Fact]
+    public void Advance_engaging_unit_with_no_cover_resumes_advancing_after_MaxEngageHoldHours()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0);
+        // s.Cover left null -> no cover map at all, so this unit can never find cover to hide behind.
+
+        CoverSeekStep.Advance(s, 0.01f);
+        MovementStep.Advance(s, 1f);
+        Assert.Equal(0f, self.Position.X, 3); // still pinned, well under MaxEngageHoldHours
+
+        // Cross the MaxEngageHoldHours(3h) threshold while still engaging the same target.
+        CoverSeekStep.Advance(s, CoverSeekStep.MaxEngageHoldHours);
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(self.Position.X > 0f, "expected the unit to resume advancing once MaxEngageHoldHours elapsed");
+        Assert.Equal(UnitState.Engaging, self.State); // Task52: may keep "fighting" (state-wise) while moving
     }
 
     // --- Task45: IsInFriendlyTerritory ---
@@ -327,7 +355,8 @@ public class CoverSeekStepTests
         self.OrderTargetPos = new WorldPos(200, 0, 0); // 進軍先(敵基地)の方向
 
         s.Cover = new CoverMap();
-        s.Cover.Add(new WorldPos(50, 0, 0), 5f); // 進軍方向にある遮蔽物
+        // MaxCoverDetour(40)以内、かつMinForwardProgress(5)を満たす候補。
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // 進軍方向にある遮蔽物
 
         float distBefore = self.Position.HorizontalDistanceTo(self.OrderTargetPos.Value);
 
@@ -337,8 +366,27 @@ public class CoverSeekStepTests
         float distAfter = self.CoverDestination.Value.HorizontalDistanceTo(self.OrderTargetPos.Value);
         Assert.True(distAfter < distBefore - CoverSeekStep.MinForwardProgress,
             "expected the chosen cover to make forward progress toward the objective");
-        // Task45: 進軍中(bounding advance)の遮蔽は「保持」しない＝到着したら次の遮蔽へ進む。
-        Assert.False(self.CoverHold);
+        // Task52: 進軍中(bounding advance)の遮蔽も、到着したら「保持」して少しだけ隠れる
+        // （MovementStep.MaxCoverHoldHoursで自動的に前進を再開する、無期限には止まらない）。
+        Assert.True(self.CoverHold);
+    }
+
+    // Task52 rule1: 現在地からMaxCoverDetourを超える遠回りな遮蔽は、前進条件を満たしていても却下される。
+    [Fact]
+    public void Advance_rejects_forward_progressing_cover_beyond_MaxCoverDetour()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(200, 0, 0);
+
+        s.Cover = new CoverMap();
+        // 前進条件(MinForwardProgress)は満たすが、現在地からの距離がMaxCoverDetour(40)を超える。
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
     }
 
     [Fact]
@@ -381,10 +429,45 @@ public class CoverSeekStepTests
         Assert.True(self.Position.HorizontalDistanceTo(self.CoverDestination.Value) <= MovementStep.CoverArrivalDistance);
 
         var posAfterArrival = self.Position;
-        MovementStep.Advance(s, 1f); // さらに進めても、保持モードなので停止したまま
+        // Task52: MaxCoverHoldHours(1h)より十分短い時間だけ進めれば、保持モードなので停止したまま。
+        MovementStep.Advance(s, 0.2f);
         Assert.Equal(posAfterArrival.X, self.Position.X, 2);
         Assert.Equal(posAfterArrival.Z, self.Position.Z, 2);
         Assert.True(self.CoverDestination.HasValue); // 保持モードなのでクリアされない
+    }
+
+    // Task52 rule2 TDD: CoverHold==trueで静止し続けたユニットは、MaxCoverHoldHoursを超えたら
+    // CoverDestinationを解放し、Engagingのままでも移動を再開する（MovementStepTestsとの統合確認）。
+    [Fact]
+    public void Advance_engaging_unit_resumes_advancing_after_MaxCoverHoldHours_even_while_still_engaging()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Tank, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Tank, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0);
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(30, 0, 0), 6f);
+
+        CoverSeekStep.Advance(s, 0.01f);
+        MovementStep.Advance(s, 10f); // arrive at the cover point
+        Assert.True(self.Position.HorizontalDistanceTo(self.CoverDestination.Value) <= MovementStep.CoverArrivalDistance);
+
+        // Advance well past MaxCoverHoldHours(1h) while remaining locked onto the same target
+        // (CoverSeekStep must not re-pick cover; MovementStep alone must force the release).
+        CoverSeekStep.Advance(s, 0.01f);
+        MovementStep.Advance(s, MovementStep.MaxCoverHoldHours + 0.5f);
+
+        Assert.False(self.CoverDestination.HasValue);
+
+        // One more tick: still Engaging, but now free to move toward its objective.
+        var beforeX = self.Position.X;
+        CoverSeekStep.Advance(s, 0.01f);
+        MovementStep.Advance(s, 1f);
+        Assert.True(self.Position.X > beforeX, "expected the unit to resume advancing after the cover-hold cap");
+        Assert.Equal(UnitState.Engaging, self.State);
     }
 
     [Fact]
@@ -456,5 +539,124 @@ public class CoverSeekStepTests
 
         Assert.False(self.CoverDestination.HasValue);
         Assert.False(self.CoverHold);
+    }
+
+    // --- Task52: 「敵拠点への進軍が途中でスタックする」不具合の修正 ---
+
+    // rule1 TDD: モード3(進軍中)は、CoverUseIntervalHoursの間隔が空くまで遮蔽探索そのものをしない
+    // （良い候補が新たに現れても、クールダウン中は拾わない＝道路経路をそのまま進む）。
+    [Fact]
+    public void Advance_skips_cover_seeking_while_CoverUseIntervalHours_cooldown_is_unexpired()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(200, 0, 0);
+        s.Cover = new CoverMap(); // no candidates yet
+
+        // First tick: cooldown was 0 (default), so this attempt happens immediately and starts a
+        // fresh CoverUseIntervalHours cooldown. No candidate exists yet, so nothing is picked.
+        CoverSeekStep.Advance(s, 0.01f);
+        Assert.False(self.CoverDestination.HasValue);
+
+        // A perfectly good candidate appears, but the per-unit cooldown is still running. Nudge the
+        // unit a little closer each tick (as MovementStep would along the road path) so the rule4
+        // stall watchdog stays satisfied and doesn't interfere with what this test checks; the nudge
+        // is small enough to stay well short of the candidate so forward-progress math is unaffected.
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f);
+        self.Position = new WorldPos(6, 0, 0);
+        CoverSeekStep.Advance(s, 1f); // well under the remaining CoverUseIntervalHours(3f)
+        Assert.False(self.CoverDestination.HasValue,
+            "expected cover-seeking to be skipped entirely while the cooldown is unexpired");
+
+        // Cross the remaining cooldown -> now it is allowed to evaluate again and picks the candidate.
+        self.Position = new WorldPos(12, 0, 0);
+        CoverSeekStep.Advance(s, CoverSeekStep.CoverUseIntervalHours);
+        Assert.True(self.CoverDestination.HasValue);
+    }
+
+    // rule4 TDD: OrderTargetPosまでの距離がStallTimeoutHoursの間StallEpsilon以上縮まらなければ、
+    // 膠着とみなしCoverSuppressionRemainingをセットする。以後その時間は、良い候補があっても
+    // 遮蔽探索そのものを完全に無視して道路経路のみに任せる。suppression自体は時間経過で自然に
+    // 0へ戻り（「再有効化」）、その後は通常どおり遮蔽を評価できる。
+    [Fact]
+    public void Advance_watchdog_suppresses_cover_after_a_stall_and_re_enables_it_later()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0);
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // valid, forward-progressing, in-detour candidate
+
+        // Tick 1: initializes the watchdog checkpoint (no MovementStep is invoked in this test, so
+        // the unit's Position never actually advances -> it will look "stalled" from here on).
+        CoverSeekStep.Advance(s, 0.01f);
+        Assert.Equal(0f, self.CoverSuppressionRemaining);
+
+        // No progress for exactly StallTimeoutHours -> the watchdog trips.
+        CoverSeekStep.Advance(s, CoverSeekStep.StallTimeoutHours);
+        Assert.True(self.CoverSuppressionRemaining > 0f, "expected the stall watchdog to trip");
+
+        // While suppressed, cover is ignored entirely (even a stray pre-existing CoverDestination
+        // gets cleared, and a perfectly good candidate is not picked up).
+        self.CoverDestination = new WorldPos(999, 0, 0);
+        CoverSeekStep.Advance(s, 0.5f); // small step: stays within the stall window, no re-trigger
+        Assert.False(self.CoverDestination.HasValue,
+            "expected cover to stay suppressed for the rest of the CoverSuppressedHours window");
+
+        // Simulate the unit actually marching (as required: "ignores cover entirely and marches
+        // straight along its path") by moving it closer to the objective, which both breaks the
+        // stall and, combined with enough elapsed time, lets the suppression window fully elapse.
+        self.Position = new WorldPos(500, 0, 0);
+        CoverSeekStep.Advance(s, CoverSeekStep.CoverSuppressedHours);
+        Assert.Equal(0f, self.CoverSuppressionRemaining); // expected suppression to re-enable itself over time
+    }
+
+    // rule4 TDD: 距離が着実に縮まり続けている限り、StallTimeoutHours分の大きなdtを一度に渡しても
+    // ウォッチドッグは絶対に発動しない（進捗があるたびにチェックポイントとタイマーがリセットされるため）。
+    [Fact]
+    public void Advance_steady_progress_never_trips_the_stall_watchdog()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0);
+        s.Cover = new CoverMap(); // isolate the watchdog from cover-picking noise
+
+        float x = 0f;
+        for (int tick = 0; tick < 5; tick++)
+        {
+            x += 200f; // far more than StallEpsilon(5) of progress each window
+            self.Position = new WorldPos(x, 0, 0);
+            CoverSeekStep.Advance(s, CoverSeekStep.StallTimeoutHours); // a full stall-timeout window each time
+            Assert.Equal(0f, self.CoverSuppressionRemaining);
+        }
+    }
+
+    // rule2/3/5: プレイヤーのHold命令は、Task52で追加した各種タイマー・ウォッチドッグの影響を
+    // 一切受けない（どれだけ時間を進めても遮蔽移動もタイマー蓄積も一切起きず、常に不動のまま）。
+    [Fact]
+    public void Advance_Hold_order_unit_is_unaffected_by_every_Task52_timer()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+        self.Order = UnitOrder.Hold;
+        self.OrderTargetPos = new WorldPos(1000, 0, 0); // stray; Hold must still never move
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+
+        CoverSeekStep.Advance(s, CoverSeekStep.MaxEngageHoldHours * 5f); // far beyond every Task52 threshold
+        MovementStep.Advance(s, 10f);
+
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.Equal(0f, self.EngageHoldTimer);
+        Assert.Equal(0f, self.StallTimer);
+        Assert.Equal(0f, self.CoverSuppressionRemaining);
+        Assert.Equal(0f, self.Position.X, 3); // Hold: never moves, regardless of any Task52 timer
     }
 }
