@@ -20,7 +20,7 @@ namespace CSWarfront.Core
                 {
                     var u = state.Units[i];
                     if (!u.IsAlive) continue;
-                    if (state.Relations.Get(oldOwner, u.FactionId) != Relation.Hostile) continue;
+                    if (!state.Relations.Get(oldOwner, u.FactionId).IsHostile()) continue; // Task59: Nemesisも敵対として扱う
                     float d = b.Position.HorizontalDistanceTo(u.Position);
                     if (d > b.InfluenceRadius) continue;
                     if (d < best) { best = d; nearest = u; }

@@ -59,6 +59,14 @@ namespace CSWarfront.Game
 
         /// <summary>simスレッド・_stateLock内から毎tick呼ぶ。内部で間引くため、呼び出し側は間隔を
         /// 気にしなくてよい。</summary>
+        /// <summary>Task59: GodzillaDisasterが導入されている（アセンブリ+想定メンバが解決できた）か。
+        /// OptionsRelationsPageがKAIJU関係の行を表示するかどうかの判定に使う。初回アクセス時に
+        /// リフレクション解決を1回だけ行い（未導入なら失敗のみキャッシュ）、以後はその結果を返す。</summary>
+        public static bool IsGodzillaModPresent { get { return _godzilla.IsAvailable(); } }
+
+        /// <summary>Task59: 上と同じくAlienInvasionの導入判定（Options画面のAlien関係行の表示用）。</summary>
+        public static bool IsAlienModPresent { get { return _alien.IsAvailable(); } }
+
         public static void Advance(WarState state, float dt)
         {
             _accum += dt;
@@ -67,7 +75,7 @@ namespace CSWarfront.Game
 
             try
             {
-                SyncOne(state, _godzilla, "Godzilla", GodzillaMaxHP, GodzillaRadius, ref _godzillaThreatId);
+                SyncOne(state, _godzilla, "Godzilla", ThreatKind.Kaiju, GodzillaMaxHP, GodzillaRadius, ref _godzillaThreatId);
             }
             catch (Exception e)
             {
@@ -76,7 +84,7 @@ namespace CSWarfront.Game
 
             try
             {
-                SyncOne(state, _alien, "Alien", AlienMaxHP, AlienRadius, ref _alienThreatId);
+                SyncOne(state, _alien, "Alien", ThreatKind.Alien, AlienMaxHP, AlienRadius, ref _alienThreatId);
             }
             catch (Exception e)
             {
@@ -84,7 +92,7 @@ namespace CSWarfront.Game
             }
         }
 
-        private static void SyncOne(WarState state, MonsterModAdapter adapter, string kind, float maxHp,
+        private static void SyncOne(WarState state, MonsterModAdapter adapter, string label, ThreatKind kind, float maxHp,
             float radius, ref uint threatId)
         {
             bool isActive;
@@ -114,7 +122,7 @@ namespace CSWarfront.Game
                 };
                 state.Threats.Add(threat);
                 threatId = threat.Id;
-                ModConfig.Log("ExternalThreatBridge: " + kind + " 出現（HP=" + maxHp.ToString("0") + "）。");
+                ModConfig.Log("ExternalThreatBridge: " + label + " 出現（HP=" + maxHp.ToString("0") + "）。");
                 return;
             }
 
@@ -124,7 +132,7 @@ namespace CSWarfront.Game
             {
                 float totalDamage = threat.MaxHP; // MaxHPから0まで削られた＝与えた総ダメージ
                 adapter.Despawn();
-                ModConfig.Log("ExternalThreatBridge: " + kind + " 撃退（総ダメージ" + totalDamage.ToString("0") + "）。");
+                ModConfig.Log("ExternalThreatBridge: " + label + " 撃退（総ダメージ" + totalDamage.ToString("0") + "）。");
                 RemoveThreat(state, ref threatId);
             }
         }
@@ -166,6 +174,13 @@ namespace CSWarfront.Game
                 _assemblyName = assemblyName;
                 _typeName = typeName;
                 _positionMethodName = positionMethodName;
+            }
+
+            /// <summary>Task59: このMODが導入されている（型・メンバの解決に成功した）かどうか。
+            /// EnsureResolvedは既に「1回だけ試みて以後はキャッシュを返す」実装のため、そのまま公開する。</summary>
+            public bool IsAvailable()
+            {
+                return EnsureResolved();
             }
 
             /// <summary>IsActive/位置を取得する。戻り値falseは「このMODとの橋渡しが使えない」

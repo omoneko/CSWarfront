@@ -8,7 +8,7 @@ public class InvasionOrdersThreatDivertTests
 {
     private static ExternalThreat Threat(float x, float z = 0f)
     {
-        return new ExternalThreat { Id = 1, Kind = "Godzilla", Position = new WorldPos(x, 0f, z), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f };
+        return new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(x, 0f, z), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f };
     }
 
     [Fact]
@@ -112,6 +112,51 @@ public class InvasionOrdersThreatDivertTests
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
         Assert.Equal(300f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // ...defeated threats no longer divert
+    }
+
+    // --- Task59: WarState.ThreatRelations gating + Nemesis priority for diversion ---
+
+    [Fact]
+    public void Unit_does_not_divert_to_a_threat_its_faction_is_not_hostile_to()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(300, 0, 0)) { OwnerFactionId = 1 };
+        s.Bases.Add(ownBase); s.Bases.Add(enemyBase);
+        s.Threats.Add(Threat(50f)); // near own base, but faction 0 is set to Neutral toward Kaiju below
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Neutral);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(300f, u.OrderTargetPos.Value.X, 3); // ignores the threat, marches on the enemy base instead
+    }
+
+    [Fact]
+    public void Unit_prefers_a_nemesis_threat_over_a_closer_ordinary_hostile_threat()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        s.Bases.Add(ownBase);
+
+        var closeKaiju = Threat(30f); // closer, but ordinary Hostile
+        var fartherAlien = new ExternalThreat { Id = 2, Kind = ThreatKind.Alien, Position = new WorldPos(200f, 0f, 0f), Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f }; // farther, but Nemesis
+        s.Threats.Add(closeKaiju);
+        s.Threats.Add(fartherAlien);
+        s.ThreatRelations.Set(0, ThreatKind.Alien, Relation.Nemesis);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.Equal(200f, u.OrderTargetPos.Value.X, 3); // the farther Nemesis threat wins over the closer ordinary Hostile one
     }
 
     [Fact]

@@ -223,4 +223,60 @@ public class WarStateSerializerTests
         Assert.Equal(0f, r.FindFaction(0).ResearchPoints, 3);
         Assert.Equal((byte)1, r.FindFaction(0).UnlockedTier);
     }
+
+    // --- Task59: v4 -> v5, ThreatRelations (5 factions x ThreatKind) appended at the very end ---
+
+    [Fact]
+    public void Roundtrip_v5_preserves_ThreatRelations()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Neutral);
+        s.ThreatRelations.Set(1, ThreatKind.Alien, Relation.Nemesis);
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.Equal(Relation.Neutral, r.ThreatRelations.Get(0, ThreatKind.Kaiju));
+        Assert.Equal(Relation.Nemesis, r.ThreatRelations.Get(1, ThreatKind.Alien));
+        // untouched entries keep their default (Hostile)
+        Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(0, ThreatKind.Alien));
+        Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(2, ThreatKind.Kaiju));
+    }
+
+    /// <summary>旧形式（v4、ペイロード末尾にThreatRelationsが無い）を読んでも例外にならず、
+    /// 全エントリが既定値Hostile（Task58までの「常に無条件敵対」）で復元されることを保証する。</summary>
+    [Fact]
+    public void Deserialize_v4_format_defaults_ThreatRelations_to_hostile()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var w = new BinaryWriter(ms))
+        {
+            w.Write(4); // version 4（ThreatRelations導入前）
+            w.Write(1); // factions count
+            w.Write((byte)0); w.Write("Red");
+            w.Write(50f); // treasury
+            w.Write(false); w.Write((ushort)0); // no home base
+            w.Write(true); w.Write(false); // isPlayer, eliminated
+            w.Write(0f); w.Write((byte)1); // ResearchPoints, UnlockedTier (v4 fields)
+            for (int a = 0; a < 5; a++)
+                for (int b = 0; b < 5; b++)
+                    w.Write((int)Relation.Neutral);
+            w.Write(0); // bases count
+            w.Write(0); // units count
+            w.Write((uint)1); // nextInstanceId
+            // 注意: v4にはThreatRelationsが無いのでここで終わり
+            w.Flush();
+            bytes = ms.ToArray();
+        }
+
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        for (byte f = 0; f < 5; f++)
+        {
+            Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(f, ThreatKind.Kaiju));
+            Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(f, ThreatKind.Alien));
+        }
+    }
 }

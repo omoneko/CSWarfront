@@ -7,6 +7,11 @@ namespace CSWarfront.Core
     {
         public List<Faction> Factions = new List<Faction>();
         public RelationMatrix Relations = new RelationMatrix(5);
+
+        /// <summary>勢力ごとの外部脅威（KAIJU/Alien、Task59）との関係。既定は全てHostile
+        /// （ゴジラ/エイリアンMOD導入前・v4以前のセーブロード時の後方互換に合わせた既定値）。
+        /// WarStateSerializerがformat v5でこの表を末尾に永続化する。</summary>
+        public ThreatRelations ThreatRelations = new ThreatRelations(5);
         public List<UnitInstance> Units = new List<UnitInstance>();
         public List<MilitaryBase> Bases = new List<MilitaryBase>();
         public UnitTypeRegistry Types = new UnitTypeRegistry();

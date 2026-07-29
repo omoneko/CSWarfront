@@ -61,5 +61,36 @@ namespace CSWarfront.Game
                 return true;
             }
         }
+
+        /// <summary>
+        /// Task59: 勢力 factionId と外部脅威 kind（KAIJU/Alien）の関係を r に設定する。
+        /// State未初期化（メインメニューから開いた場合など）なら false を返し、何もしない。
+        /// </summary>
+        public static bool TrySetThreatRelation(byte factionId, ThreatKind kind, Relation r)
+        {
+            lock (_stateLock)
+            {
+                if (State == null) return false;
+
+                State.ThreatRelations.Set(factionId, kind, r);
+                ModConfig.Log("MilitaryManager: threat relation faction " + factionId + " <-> " + kind + " set to " + r);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Task59: 現在の勢力 factionId - 外部脅威 kind 間の関係を取得する（Options UI の初期表示用）。
+        /// State未初期化なら false を返し、out引数は既定値（Hostile、ThreatRelationsのデフォルトと同じ）のままにする。
+        /// </summary>
+        public static bool TryGetThreatRelation(byte factionId, ThreatKind kind, out Relation r)
+        {
+            lock (_stateLock)
+            {
+                if (State == null) { r = Relation.Hostile; return false; }
+
+                r = State.ThreatRelations.Get(factionId, kind);
+                return true;
+            }
+        }
     }
 }

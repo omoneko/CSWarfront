@@ -2,18 +2,31 @@ namespace CSWarfront.Core
 {
     public static class AiTargeting
     {
+        /// <summary>Task59: 宿敵(Nemesis)勢力が所有する基地が1つでもあれば、その中で最近接のものを
+        /// 通常のHostile所有基地より優先して返す。宿敵所有基地が無ければ従来通り最近接のHostile所有
+        /// 基地を返す（宿敵が存在しない場合は挙動が完全に従来のまま）。</summary>
         public static MilitaryBase ChooseTargetBase(WarState state, byte factionId, WorldPos from)
         {
-            MilitaryBase best = null; float bestDist = float.MaxValue;
+            MilitaryBase bestHostile = null; float bestHostileDist = float.MaxValue;
+            MilitaryBase bestNemesis = null; float bestNemesisDist = float.MaxValue;
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 var b = state.Bases[j];
                 if (b.OwnerFactionId == null) continue;
-                if (state.Relations.Get(factionId, b.OwnerFactionId.Value) != Relation.Hostile) continue;
+                Relation r = state.Relations.Get(factionId, b.OwnerFactionId.Value);
+                if (!r.IsHostile()) continue;
                 float d = from.HorizontalDistanceTo(b.Position);
-                if (d < bestDist) { bestDist = d; best = b; }
+
+                if (r == Relation.Nemesis)
+                {
+                    if (d < bestNemesisDist) { bestNemesisDist = d; bestNemesis = b; }
+                }
+                else
+                {
+                    if (d < bestHostileDist) { bestHostileDist = d; bestHostile = b; }
+                }
             }
-            return best;
+            return bestNemesis != null ? bestNemesis : bestHostile;
         }
     }
 
@@ -100,25 +113,45 @@ namespace CSWarfront.Core
         }
 
         /// <summary>Task58: factionIdが所有する基地のいずれかからThreatDivertRadius以内（水平距離）に
-        /// 生きている（未撃破の）外部脅威が1体でもいれば、その脅威の位置を返す。複数該当する場合は
-        /// state.Threats走査順で最初に見つかったもの（優先順位付けは行わない、単純さ優先）。
-        /// 無ければnull（＝通常の敵基地進軍のまま）。</summary>
+        /// 生きている（未撃破の）、かつ当該勢力にとって敵対（Task59: WarState.ThreatRelationsが
+        /// Hostile/Nemesis）な外部脅威が1体でもいれば、その脅威の位置を返す。
+        /// Task59: 宿敵(Nemesis)関係の脅威が対象内に1体でもあれば、通常のHostile脅威より優先し、
+        /// 自勢力の基地への最短距離が最小のものを返す。宿敵が無ければ、従来通り同条件で最短距離が
+        /// 最小の通常Hostile脅威を返す（宿敵が存在しない場合は挙動が完全に従来のまま）。
+        /// どちらも無ければnull（＝通常の敵基地進軍のまま）。</summary>
         private static WorldPos? FindNearbyThreatToOwnTerritory(WarState state, byte factionId)
         {
+            WorldPos? bestHostile = null; float bestHostileDist = float.MaxValue;
+            WorldPos? bestNemesis = null; float bestNemesisDist = float.MaxValue;
+
             for (int t = 0; t < state.Threats.Count; t++)
             {
                 var threat = state.Threats[t];
                 if (threat.IsDefeated) continue;
 
+                Relation rel = state.ThreatRelations.Get(factionId, threat.Kind);
+                if (!rel.IsHostile()) continue;
+
+                float nearestOwnedBaseDist = float.MaxValue;
                 for (int b = 0; b < state.Bases.Count; b++)
                 {
                     var ownedBase = state.Bases[b];
                     if (ownedBase.OwnerFactionId != factionId) continue;
-                    if (threat.Position.HorizontalDistanceTo(ownedBase.Position) <= ThreatDivertRadius)
-                        return threat.Position;
+                    float d = threat.Position.HorizontalDistanceTo(ownedBase.Position);
+                    if (d < nearestOwnedBaseDist) nearestOwnedBaseDist = d;
+                }
+                if (nearestOwnedBaseDist > ThreatDivertRadius) continue;
+
+                if (rel == Relation.Nemesis)
+                {
+                    if (nearestOwnedBaseDist < bestNemesisDist) { bestNemesisDist = nearestOwnedBaseDist; bestNemesis = threat.Position; }
+                }
+                else
+                {
+                    if (nearestOwnedBaseDist < bestHostileDist) { bestHostileDist = nearestOwnedBaseDist; bestHostile = threat.Position; }
                 }
             }
-            return null;
+            return bestNemesis ?? bestHostile;
         }
 
         private static bool IsSameTarget(WorldPos a, WorldPos b)

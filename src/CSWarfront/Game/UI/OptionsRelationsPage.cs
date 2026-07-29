@@ -52,14 +52,24 @@ namespace CSWarfront.Game.UI
     internal static class OptionsRelationsPage
     {
         private const string GroupTitle = "勢力の関係";
-        private static readonly string[] RelationLabels = { "敵対", "中立", "同盟" }; // Relation enum の宣言順と一致させる
-        private static readonly Relation[] RelationValues = { Relation.Hostile, Relation.Neutral, Relation.Allied };
+        // Task59: 宿敵(Nemesis)を末尾に追加。Relation enumの宣言順（Hostile, Neutral, Allied, Nemesis）と一致させる。
+        private static readonly string[] RelationLabels = { "敵対", "中立", "同盟", "宿敵" };
+        private static readonly Relation[] RelationValues = { Relation.Hostile, Relation.Neutral, Relation.Allied, Relation.Nemesis };
 
         // Build() 実行中に生成した10行分のドロップダウンと、対応する (a,b) ペア。
         // 「全て敵対に戻す」ボタン(OnResetAllClick)が押された際に選択値を再同期するために保持する。
         private static readonly List<UIDropDown> _dropdowns = new List<UIDropDown>();
         private static readonly List<byte> _pairA = new List<byte>();
         private static readonly List<byte> _pairB = new List<byte>();
+
+        // Task59: KAIJU/Alienとの関係ドロップダウン。ゴジラ災害/エイリアン侵略MODが実際に導入されている
+        // 場合のみ、それぞれ最大5行（勢力ごと）構築する（ExternalThreatBridge.IsGodzillaModPresent /
+        // IsAlienModPresentで判定、Build()時点で1回だけ確認すれば十分＝MOD導入状態はゲーム再起動なしに
+        // 変わらないため、勢力関係(State)のような「都市未読み込みでは無効」という時間的な変化は無い）。
+        private static readonly List<UIDropDown> _threatDropdowns = new List<UIDropDown>();
+        private static readonly List<byte> _threatFactionId = new List<byte>();
+        private static readonly List<ThreatKind> _threatKind = new List<ThreatKind>();
+
         private static UILabel _noteLabel;
 
         /// <summary>Mod.OnSettingsUIから呼ぶ。渡された helper 配下に「勢力の関係」グループを構築する。</summary>
@@ -70,6 +80,9 @@ namespace CSWarfront.Game.UI
                 _dropdowns.Clear();
                 _pairA.Clear();
                 _pairB.Clear();
+                _threatDropdowns.Clear();
+                _threatFactionId.Clear();
+                _threatKind.Clear();
 
                 UIHelperBase group = helper.AddGroup(GroupTitle);
                 UIComponent groupPanel = (group as UIHelper) != null ? ((UIHelper)group).self as UIComponent : null;
@@ -101,6 +114,13 @@ namespace CSWarfront.Game.UI
                     }
                 }
 
+                // Task59: KAIJU/Alienとの関係。導入されているMODのぶんだけ（0/1/2個）行を追加する。
+                bool godzillaPresent = ExternalThreatBridge.IsGodzillaModPresent;
+                bool alienPresent = ExternalThreatBridge.IsAlienModPresent;
+
+                if (godzillaPresent) BuildThreatRows(group, names, ThreatKind.Kaiju, "KAIJU", stateReady);
+                if (alienPresent) BuildThreatRows(group, names, ThreatKind.Alien, "Alien", stateReady);
+
                 object resetButtonObj = group.AddButton("全て敵対に戻す", OnResetAllClick);
 
                 if (groupPanel != null)
@@ -131,6 +151,32 @@ namespace CSWarfront.Game.UI
             }
         }
 
+        /// <summary>Task59: 指定したThreatKindについて、勢力の数(WarfrontSettings.MaxFactions)ぶんの
+        /// 「勢力名 ↔ 表示名」行を1本ずつ構築する。呼び出し元(Build)がMODの導入を確認済みの場合のみ呼ぶ。</summary>
+        private static void BuildThreatRows(UIHelperBase group, string[] names, ThreatKind kind, string displayName, bool stateReady)
+        {
+            for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
+            {
+                byte factionId = f; // クロージャ捕獲対策
+                ThreatKind capturedKind = kind;
+
+                Relation current;
+                if (!MilitaryManager.TryGetThreatRelation(factionId, capturedKind, out current)) current = Relation.Hostile;
+
+                string label = names[factionId] + " ↔ " + displayName;
+                UIDropDown dd = group.AddDropdown(label, RelationLabels, IndexOfRelation(current),
+                    i => OnThreatRelationChanged(factionId, capturedKind, i)) as UIDropDown;
+
+                if (dd != null)
+                {
+                    dd.isEnabled = stateReady;
+                    _threatDropdowns.Add(dd);
+                    _threatFactionId.Add(factionId);
+                    _threatKind.Add(capturedKind);
+                }
+            }
+        }
+
         private static int IndexOfRelation(Relation r)
         {
             for (int i = 0; i < RelationValues.Length; i++)
@@ -148,6 +194,19 @@ namespace CSWarfront.Game.UI
             catch (Exception e)
             {
                 ModConfig.LogError("OptionsRelationsPage.OnRelationChanged error: " + e);
+            }
+        }
+
+        private static void OnThreatRelationChanged(byte factionId, ThreatKind kind, int selectedIndex)
+        {
+            try
+            {
+                if (selectedIndex < 0 || selectedIndex >= RelationValues.Length) return;
+                MilitaryManager.TrySetThreatRelation(factionId, kind, RelationValues[selectedIndex]);
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("OptionsRelationsPage.OnThreatRelationChanged error: " + e);
             }
         }
 
@@ -182,6 +241,21 @@ namespace CSWarfront.Game.UI
                     int idx = IndexOfRelation(current);
                     // 値が変わっていない時にselectedIndexへ書き戻すとeventSelectedIndexChanged経由で
                     // OnRelationChangedが不要に再発火する（ログが増えるだけで実害は無いが避ける）。
+                    if (dd.selectedIndex != idx) dd.selectedIndex = idx;
+                }
+
+                // Task59: KAIJU/Alien行も同じ規約で再同期する（構築済みの行のみ＝MOD導入判定はBuild()時点で
+                // 固定されているため、ここではドロップダウンの個数自体は増減しない）。
+                for (int i = 0; i < _threatDropdowns.Count; i++)
+                {
+                    UIDropDown dd = _threatDropdowns[i];
+                    if (dd == null) continue;
+
+                    dd.isEnabled = stateReady;
+
+                    Relation current;
+                    if (!MilitaryManager.TryGetThreatRelation(_threatFactionId[i], _threatKind[i], out current)) current = Relation.Hostile;
+                    int idx = IndexOfRelation(current);
                     if (dd.selectedIndex != idx) dd.selectedIndex = idx;
                 }
 

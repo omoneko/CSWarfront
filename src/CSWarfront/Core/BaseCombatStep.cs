@@ -36,7 +36,7 @@ namespace CSWarfront.Core
                     if (b.CaptureGraceHours > 0f) continue; // 猶予中は無敵
                     if (b.OwnerFactionId == null) continue;
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
-                    if (state.Relations.Get(u.FactionId, b.OwnerFactionId.Value) != Relation.Hostile) continue;
+                    if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue; // Task59: Nemesisも敵対として扱う
                     if (u.Position.HorizontalDistanceTo(b.Position) > type.Range) continue;
                     // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
                     // 命中率(Task38)に比例する。ただし静止した建物は動くユニットより狙いやすい格好の的なので、

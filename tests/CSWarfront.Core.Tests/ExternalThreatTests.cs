@@ -8,21 +8,21 @@ public class ExternalThreatTests
     [Fact]
     public void IsDefeated_is_false_while_hp_remains()
     {
-        var t = new ExternalThreat { Id = 1, Kind = "Godzilla", CurrentHP = 1f };
+        var t = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, CurrentHP = 1f };
         Assert.False(t.IsDefeated);
     }
 
     [Fact]
     public void IsDefeated_becomes_true_once_hp_reaches_zero()
     {
-        var t = new ExternalThreat { Id = 1, Kind = "Godzilla", CurrentHP = 0f };
+        var t = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, CurrentHP = 0f };
         Assert.True(t.IsDefeated);
     }
 
     [Fact]
     public void IsDefeated_is_true_below_zero_too()
     {
-        var t = new ExternalThreat { Id = 1, Kind = "Godzilla", CurrentHP = -5f };
+        var t = new ExternalThreat { Id = 1, Kind = ThreatKind.Kaiju, CurrentHP = -5f };
         Assert.True(t.IsDefeated);
     }
 

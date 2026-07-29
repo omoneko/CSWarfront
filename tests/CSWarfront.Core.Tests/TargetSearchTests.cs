@@ -42,4 +42,59 @@ public class TargetSearchTests
         var all = new List<UnitInstance> { self, dead };
         Assert.Null(TargetSearch.FindNearestHostile(self, all, rel, 60f));
     }
+
+    // --- Task59: Nemesis (宿敵) ---
+
+    [Fact]
+    public void Nemesis_counts_as_hostile_for_targeting()
+    {
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Nemesis);
+        var self = U(1, 0, 0f);
+        var nemesis = U(2, 1, 30f);
+        var all = new List<UnitInstance> { self, nemesis };
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f);
+        Assert.Equal((uint)2, t.InstanceId);
+    }
+
+    [Fact]
+    public void Prefers_a_farther_nemesis_over_a_closer_ordinary_hostile()
+    {
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile); // faction 1: ordinary hostile
+        rel.Set(0, 2, Relation.Nemesis); // faction 2: nemesis
+        var self = U(1, 0, 0f);
+        var closeHostile = U(2, 1, 10f);
+        var fartherNemesis = U(3, 2, 40f);
+        var all = new List<UnitInstance> { self, closeHostile, fartherNemesis };
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f);
+        Assert.Equal((uint)3, t.InstanceId);
+    }
+
+    [Fact]
+    public void Among_multiple_nemesis_candidates_picks_the_nearest_one()
+    {
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Nemesis);
+        var self = U(1, 0, 0f);
+        var farNemesis = U(2, 1, 40f);
+        var nearNemesis = U(3, 1, 15f);
+        var all = new List<UnitInstance> { self, farNemesis, nearNemesis };
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f);
+        Assert.Equal((uint)3, t.InstanceId);
+    }
+
+    [Fact]
+    public void Falls_back_to_nearest_ordinary_hostile_when_no_nemesis_in_range()
+    {
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        rel.Set(0, 2, Relation.Nemesis);
+        var self = U(1, 0, 0f);
+        var hostile = U(2, 1, 20f);
+        var nemesisOutOfRange = U(3, 2, 500f); // beyond range, must not affect the fallback
+        var all = new List<UnitInstance> { self, hostile, nemesisOutOfRange };
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 60f);
+        Assert.Equal((uint)2, t.InstanceId);
+    }
 }

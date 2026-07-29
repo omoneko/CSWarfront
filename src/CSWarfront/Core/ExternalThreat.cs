@@ -15,8 +15,9 @@ namespace CSWarfront.Core
     {
         public uint Id;
 
-        /// <summary>"Godzilla" / "Alien"（Game層のExternalThreatBridgeが設定する）。</summary>
-        public string Kind;
+        /// <summary>Kaiju(ゴジラ) / Alien（Game層のExternalThreatBridgeが設定する）。Task59:
+        /// WarState.ThreatRelationsの検索キーとして使うため文字列からThreatKind enumへ変更した。</summary>
+        public ThreatKind Kind;
 
         public WorldPos Position;
 

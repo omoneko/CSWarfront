@@ -32,6 +32,34 @@ public class AiTargetingTests
         Assert.Null(AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0)));
     }
 
+    // --- Task59: Nemesis (宿敵) ---
+
+    [Fact]
+    public void ChooseTargetBase_counts_nemesis_owned_base_as_hostile()
+    {
+        var s = TwoEnemyBases();
+        s.Relations.Set(0, 1, Relation.Nemesis);
+        var t = AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0));
+        Assert.Equal((ushort)10, t.BaseId);
+    }
+
+    [Fact]
+    public void ChooseTargetBase_prefers_a_farther_nemesis_base_over_a_closer_ordinary_hostile_base()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Factions.Add(new Faction(2, "Nemesis"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Relations.Set(0, 2, Relation.Nemesis);
+        var closeHostile = new MilitaryBase(10, BaseType.Army, new WorldPos(50, 0, 0)); closeHostile.OwnerFactionId = 1;
+        var fartherNemesis = new MilitaryBase(11, BaseType.Army, new WorldPos(200, 0, 0)); fartherNemesis.OwnerFactionId = 2;
+        s.Bases.Add(closeHostile); s.Bases.Add(fartherNemesis);
+
+        var t = AiTargeting.ChooseTargetBase(s, 0, new WorldPos(0, 0, 0));
+        Assert.Equal((ushort)11, t.BaseId);
+    }
+
     [Fact]
     public void AssignAdvance_sets_moving_orders_for_faction_units()
     {

@@ -18,7 +18,7 @@ public class ThreatCombatStepTests
         s.Threats.Add(new ExternalThreat
         {
             Id = 1,
-            Kind = "Godzilla",
+            Kind = ThreatKind.Kaiju,
             Position = new WorldPos(distance, 0f, 0f),
             Radius = radius,
             MaxHP = threatHp,
@@ -68,7 +68,7 @@ public class ThreatCombatStepTests
         infantryState.Units.Add(new UnitInstance(1, "Infantry_T1", 0, 60f, new WorldPos(0f, 0f, 0f)));
         infantryState.Threats.Add(new ExternalThreat
         {
-            Id = 1, Kind = "Godzilla", Position = new WorldPos(45f, 0f, 0f), // Range(40)+Radius(10)=50 >= 45
+            Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(45f, 0f, 0f), // Range(40)+Radius(10)=50 >= 45
             Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f
         });
         ThreatCombatStep.Advance(infantryState, 1f);
@@ -127,5 +127,42 @@ public class ThreatCombatStepTests
         Assert.Equal(1u, shot.AttackerId);
         Assert.Equal(0u, shot.TargetId); // threats are not logical units, same convention as base attacks
         Assert.Equal(ShotKind.DirectFire, shot.Kind); // Tank
+    }
+
+    // --- Task59: WarState.ThreatRelations gating ---
+
+    [Fact]
+    public void Neutral_relation_to_the_threat_kind_prevents_damage()
+    {
+        var s = OneTankOneThreat(65f);
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Neutral);
+        ThreatCombatStep.Advance(s, 1f);
+        Assert.Equal(1000f, s.Threats[0].CurrentHP, 3);
+    }
+
+    [Fact]
+    public void Allied_relation_to_the_threat_kind_prevents_damage()
+    {
+        var s = OneTankOneThreat(65f);
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Allied);
+        ThreatCombatStep.Advance(s, 1f);
+        Assert.Equal(1000f, s.Threats[0].CurrentHP, 3);
+    }
+
+    [Fact]
+    public void Nemesis_relation_to_the_threat_kind_still_damages_it()
+    {
+        var s = OneTankOneThreat(65f);
+        s.ThreatRelations.Set(0, ThreatKind.Kaiju, Relation.Nemesis);
+        ThreatCombatStep.Advance(s, 1f);
+        Assert.Equal(986f, s.Threats[0].CurrentHP, 3); // same 14 dmg as the default Hostile case
+    }
+
+    [Fact]
+    public void Default_relation_is_hostile_when_untouched()
+    {
+        var s = OneTankOneThreat(65f); // ThreatRelations left at its default (all Hostile)
+        ThreatCombatStep.Advance(s, 1f);
+        Assert.Equal(986f, s.Threats[0].CurrentHP, 3);
     }
 }

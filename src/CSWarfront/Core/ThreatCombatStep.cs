@@ -4,8 +4,10 @@ namespace CSWarfront.Core
     /// 外部MOD（ゴジラ災害/エイリアン侵略）が生成する脅威(ExternalThreat)との交戦（純ロジック、Task58）。
     ///
     /// 設計上の注意:
-    ///  - 脅威はどの勢力とも「関係」を持たない。全勢力に対して常に敵対する固定ルールなので、
-    ///    RelationMatrixは一切引かない（CombatStep/BaseCombatStepと異なる点）。
+    ///  - Task59: 脅威との関係は WarState.ThreatRelations（勢力×ThreatKind、既定Hostile）で
+    ///    勢力ごとに設定できる。ダメージを与えるのはIsHostile()（Hostile/Nemesis）な組み合わせのみで、
+    ///    Neutral/Alliedに設定した勢力のユニットはその脅威にダメージを与えない
+    ///    （Task58時点の「全勢力に対して常に無条件敵対」はThreatRelationsの既定値として残る）。
     ///  - このstepは通常のCombatStep/BaseCombatStepに「加えて」毎tick実行される。ターゲット選定の
     ///    奪い合いはしない＝射程内に脅威と通常の敵の両方がいるユニットは、両方を同時に攻撃する
     ///    （単純さ・予測可能性を優先した意図的な設計。ExternalThreatCombatStepTests参照）。
@@ -33,6 +35,10 @@ namespace CSWarfront.Core
                 {
                     var threat = state.Threats[j];
                     if (threat.IsDefeated) continue; // 撃破済みは以後ダメージを受けない（Game層の除去待ち）
+
+                    // Task59: このユニットの勢力にとってこの脅威が敵対（Hostile/Nemesis）でなければ
+                    // ダメージを与えない（Options画面「勢力の関係」でNeutral/Alliedに設定できる）。
+                    if (!state.ThreatRelations.Get(self.FactionId, threat.Kind).IsHostile()) continue;
 
                     // 大型の脅威なので、通常の射程(unitType.Range)に脅威の当たり半径を加えた距離を
                     // 実効射程として扱う（CombatStep/BaseCombatStepは相手のサイズを考慮しないが、
