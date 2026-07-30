@@ -38,6 +38,8 @@ namespace CSWarfront.Game
 
                 AddSoundUI(helper);
 
+                OptionsBaseBuildingPage.Build(helper); // Task74: 指定した建物を建てるとその種別の基地として機能する方式
+
                 OptionsModelAssignPage.Build(helper);
             }
             catch (Exception e)

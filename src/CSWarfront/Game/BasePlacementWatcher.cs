@@ -142,9 +142,13 @@ namespace CSWarfront.Game
         private static void ProcessCreated(WarState state, List<ushort> ids)
         {
             // デバッグ計装（一時的）: 早期returnも含め、なぜ基地が登録されないかを追えるようにする。
-            if (!WarfrontBasePrefab.IsAnyRegistered) // マッチ対象のプレハブが1つも無ければ何もできない
+            // Task74: マッチ対象は「電力タブの複製プレハブ」(WarfrontBasePrefab)に加え、Optionsで指定した
+            // 建物アセット(BaseBuildingDesignation)の2経路になった。どちらか一方でも候補があれば処理を続ける
+            // （複製プレハブの登録がたまたま失敗していても、指定建物経路だけは動くようにするための変更。
+            // 以前は WarfrontBasePrefab.IsAnyRegistered のみで判定していた）。
+            if (!WarfrontBasePrefab.IsAnyRegistered && !BaseBuildingDesignation.HasAny)
             {
-                ModConfig.Log("BasePlacementWatcher: ProcessCreated: WarfrontBasePrefab.IsAnyRegistered=False; skipping " + ids.Count + " id(s)");
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: no clone prefabs and no designated buildings; skipping " + ids.Count + " id(s)");
                 return;
             }
 
@@ -171,6 +175,15 @@ namespace CSWarfront.Game
                 // 委譲する（参照一致優先、ダメなら名前一致。ゲームがプレハブを再インスタンス化した場合の保険）。
                 BaseType matchedType = default(BaseType);
                 bool match = b.Info != null && WarfrontBasePrefab.TryMatch(b.Info, out matchedType);
+
+                // Task74: クローンプレハブに一致しなかった場合のみ、Optionsで指定した建物アセット名
+                // （BaseBuildingDesignation）とInfo.nameを比較する。クローンプレハブ自身の名前が偶然
+                // 指定名と同じ場合（設計上の縮退ケース）は、上のTryMatchが先に（参照一致で）trueを
+                // 返しているため、ここには到達せず二重登録は起きない。
+                if (!match && infoName != null)
+                {
+                    match = BaseBuildingDesignation.TryMatch(infoName, out matchedType);
+                }
 
                 if (!flagsCreated)
                 {
@@ -264,7 +277,9 @@ namespace CSWarfront.Game
         public static void ReconcileBases(WarState state)
         {
             if (state == null) return;
-            if (!WarfrontBasePrefab.IsAnyRegistered) return; // マッチ対象のプレハブが1つも無ければ比較できない
+            // Task74: ProcessCreatedと同じ理由で、クローンプレハブ・指定建物のどちらか一方でも比較対象が
+            // あれば続行する（以前は WarfrontBasePrefab.IsAnyRegistered のみで判定していた）。
+            if (!WarfrontBasePrefab.IsAnyRegistered && !BaseBuildingDesignation.HasAny) return;
             if (!Singleton<BuildingManager>.exists) return;
 
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
@@ -287,9 +302,24 @@ namespace CSWarfront.Game
                     // （以前は常にArmyのプレハブとしか比較しておらず、海軍/航空基地が常にゴースト扱いに
                     // なってしまう回帰があったため、必ずmb.Type別に比較する）。
                     BuildingInfo expected;
-                    bool match = flagsCreated && b.Info != null &&
+                    bool cloneMatch = flagsCreated && b.Info != null &&
                         WarfrontBasePrefab.TryGetPrefab(mb.Type, out expected) && ReferenceEquals(b.Info, expected);
-                    isGhost = !match;
+
+                    // Task74: クローンに一致しなければ、mb.Typeの現在の指定建物（BaseBuildingDesignation）
+                    // のInfo.nameと一致するかも見る。これにより、Optionsで指定した建物として登録された
+                    // 基地が、電力タブのクローンではないというだけの理由でゴースト扱いされて削除される
+                    // ことを防ぐ。逆に言えば、登録後に該当種別の指定を変更/解除すると、次回の
+                    // ReconcileBasesでこの基地はどちらの条件も満たさなくなりゴースト削除される
+                    // （指定は常に「現在の設定」で評価するため。設計上の既知の挙動）。
+                    bool designationMatch = false;
+                    if (!cloneMatch && flagsCreated && b.Info != null)
+                    {
+                        string designatedName;
+                        designationMatch = BaseBuildingDesignation.TryGet(mb.Type, out designatedName) &&
+                            b.Info.name == designatedName;
+                    }
+
+                    isGhost = !(cloneMatch || designationMatch);
                 }
                 if (isGhost)
                 {

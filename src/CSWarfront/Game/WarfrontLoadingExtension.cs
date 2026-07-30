@@ -56,7 +56,8 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// Task36: UnitAssetBindings（TypeKey→サブスクライブ済みプロップ名の割り当て）を、Task51:
-        /// WarfrontSounds（発砲音・撃破音のwav読込）を、それぞれMODディレクトリから読み込む/初期化する。
+        /// WarfrontSounds（発砲音・撃破音のwav読込）を、Task74: BaseBuildingDesignation
+        /// （基地種別→指定建物アセット名の割り当て）を、それぞれMODディレクトリから読み込む/初期化する。
         /// Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
         /// 本クラスが既に WarfrontBasePrefab.EnsureRegistered() と同じタイミング（ゲームプレイ可能な
         /// LoadModeでのOnLevelLoaded）でプレハブ登録を行っており、資産読み込みも同じタイミングで
@@ -75,6 +76,7 @@ namespace CSWarfront.Game
                 }
                 string modPath = info != null ? info.modPath : null;
                 UnitAssetBindings.Load(modPath);
+                BaseBuildingDesignation.Load(modPath); // Task74: Optionsで指定した基地用建物アセットの割り当て
                 WarfrontSounds.Initialize(modPath); // Task51
                 WarfrontModelProvider.Initialize(modPath); // Task57
             }
