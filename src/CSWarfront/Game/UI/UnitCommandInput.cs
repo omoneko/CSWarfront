@@ -81,15 +81,15 @@ namespace CSWarfront.Game.UI
                     return; // ターゲティング中は他のホットキーを無視（誤操作防止）
                 }
 
-                if (IsCommandKeyDown(WarfrontSettings.FreeAdvanceKey))
+                if (IsHotkeyDown(WarfrontSettings.FreeAdvanceKey))
                 {
                     IssueFreeAdvance();
                 }
-                else if (IsCommandKeyDown(WarfrontSettings.HoldKey))
+                else if (IsHotkeyDown(WarfrontSettings.HoldKey))
                 {
                     IssueHold();
                 }
-                else if (IsCommandKeyDown(WarfrontSettings.RallyKey))
+                else if (IsHotkeyDown(WarfrontSettings.RallyKey))
                 {
                     BeginRallyTargeting();
                 }
@@ -115,8 +115,10 @@ namespace CSWarfront.Game.UI
         /// 一切反応しない既知の問題がある。対策として、テンキーが割り当てられている場合は対応する
         /// 最上段の数字キー（Alpha0〜9）も常にフォールバックとして受け付ける
         /// （両方のキーで反応する＝害はなく、NumLock状態を問わず必ずどちらかで発火する）。
-        /// テンキー以外（F5〜F12等）が割り当てられている場合は従来通り単純に GetKeyDown するだけ。</summary>
-        private static bool IsCommandKeyDown(KeyCode key)
+        /// テンキー以外（F5〜F12等）が割り当てられている場合は従来通り単純に GetKeyDown するだけ。
+        /// Task76: internal化してUnitBoxSelectionの部隊選択モードキー（既定Numpad0、同じKeyOptions
+        /// テンキー候補群）からも再利用する（NumLock対策ロジックを重複させないため）。</summary>
+        internal static bool IsHotkeyDown(KeyCode key)
         {
             if (Input.GetKeyDown(key)) return true;
 

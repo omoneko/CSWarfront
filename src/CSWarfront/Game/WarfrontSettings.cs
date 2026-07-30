@@ -58,6 +58,21 @@ namespace CSWarfront.Game
         private static KeyCode _holdKey = KeyCode.Keypad2;
         private static KeyCode _rallyKey = KeyCode.Keypad3;
 
+        // --- Task76: 部隊選択モードの有効/無効を切り替えるホットキー ---
+
+        private static KeyCode _selectionModeKey = KeyCode.Keypad0;
+
+        /// <summary>押すたびに部隊選択モード（ボックスドラッグでの範囲選択）のON/OFFをトグルする。
+        /// ONの間だけドラッグによる範囲選択が働く。単発クリックでの選択（Game/UI/UnitSelection）は
+        /// このモードの状態に関わらず常時動作する。既定 Numpad 0。実際のトグル処理は
+        /// Game/UI/UnitBoxSelection が持つ（KeyOptionsの一覧から選ぶだけの他のコマンドキーと同じ
+        /// パターン、Game/Mod.csのOnSettingsUI参照）。</summary>
+        public static KeyCode SelectionModeKey
+        {
+            get { return _selectionModeKey; }
+            set { _selectionModeKey = value; }
+        }
+
         /// <summary>自由進撃（選択部隊を各自の最高速度で最寄りの敵拠点へ進撃させる）。既定 Numpad 1。</summary>
         public static KeyCode FreeAdvanceKey
         {

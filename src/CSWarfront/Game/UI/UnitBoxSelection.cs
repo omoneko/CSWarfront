@@ -27,14 +27,36 @@ namespace CSWarfront.Game.UI
     /// 矩形の当たり判定はスクリーン座標系（Camera.WorldToScreenPoint と Input.mousePosition、どちらも
     /// 左下原点・実ピクセル）で完結させ、ColossalFramework の UIView 仮想GUI解像度（UIスケール設定次第で
     /// 実ピクセルと一致しない）を一切経由しない。これにより選択判定自体はUIスケール設定に左右されない。
-    /// 矩形の「見た目」（下記UpdateRectVisual）だけは、既存の描画APIを再利用するためUIView.ScreenPointToGUI
-    /// を経由しており、そちらはUIスケールが既定(100%)以外だと見た目の位置に多少のズレが出ることがある
-    /// （選択の正しさには影響しない、見た目のみの既知の制約）。
+    ///
+    /// 矩形の「見た目」（下記UpdateRectVisual）はUIPanel.relativePositionを使うため、UIViewのGUI座標系
+    /// （UIView.fixedHeight/UIスケールを反映した解像度、左上原点）へ変換する必要がある。
+    /// Task76（実機で「ドラッグした場所と矩形がズレる」と報告された不具合の修正）: 旧実装は
+    /// view.ScreenPointToGUI(rawScreenPos) をそのまま呼んでいたが、ilspycmdでColossalManaged.dllを
+    /// 逆コンパイルして確認したところ ScreenPointToGUI 自体は
+    /// `position.y = GetScreenResolution().y - position.y; return position;` というY反転のみの実装で、
+    /// スクリーン実ピクセル→GUI解像度のスケール変換は一切行っていない。そのスケール変換は
+    /// UIView.WorldPointToGUI が内部で別途行っている
+    /// （`screenResolution.x * (rawX / uiCamera.pixelWidth)` 等）。つまり旧実装は「スケール変換をせずに
+    /// Y反転だけ」しており、fixedHeight（既定1080）と実解像度が一致しない、またはUIスケールが既定(100%)
+    /// でない環境では常にズレが生じていた（原点からの距離に比例して拡大するため、遠くにドラッグするほど
+    /// 顕著になる）。当たり判定側（FinishBoxSelect、上記）はスクリーン実ピクセル空間のみで完結しており
+    /// この変換を経由しないため、選択そのものはこのバグの影響を受けていなかった。
+    /// 修正: 下記ScreenToGuiPointが、UIView.WorldPointToGUIと同一のスケール変換
+    /// （GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight 比）をScreenPointToGUIの前段で行う
+    /// （UIView自身が使っている検証済みの変換と同じ式に統一する）。UpdateRectVisualの開始点・現在点の
+    /// 両方をこのヘルパー経由に統一した。
     ///
     /// 選択ユニットのハイライト: 各選択ユニットの位置へ毎フレーム追従する薄い円柱プリミティブ
     /// （コライダーは除去し、Physics.Raycastによるクリック判定を一切邪魔しない）。安価な視覚的合図として
     /// 採用した。共有マテリアルを1つだけ生成して全ハイライトで使い回す（ユニット本体のマテリアル/勢力色は
     /// 一切変更しない）。
+    ///
+    /// 部隊選択モード（Task76、WarfrontSettings.SelectionModeKey、既定Numpad0）: このホットキーを押すたびに
+    /// ON/OFFがトグルする。ONの間だけボックスドラッグによる範囲選択（本クラスの主機能）が働く。
+    /// 単発クリックでの選択（UnitSelection.Update、および上のmouse down分岐でのSelectedIds追従）は
+    /// モードの状態に関わらず常時動作する。モードがONの間にUI上でmouse downした場合は従来通りドラッグ候補
+    /// にしない（_pendingDragCandidate、下記）。もう一度SelectionModeKeyを押す、またはEscでOFFに戻る
+    /// （ドラッグ中にOFFへ切り替えた場合は進行中のドラッグも即座に破棄する）。
     ///
     /// メインスレッド専用（Unity/ColossalFramework UI API呼び出しのため）。WarfrontThreadingExtension.OnUpdate
     /// から、位置同期（MilitaryManager.OnMainVisualUpdate）より後・UnitInfoPanelより前に呼ぶこと。
@@ -67,6 +89,12 @@ namespace CSWarfront.Game.UI
         private static bool _pendingDragCandidate; // mouse down がUI外で起きた＝ドラッグに発展しうる
         private static bool _dragging;              // DragThresholdPixelsを超えて確定した
         private static Vector2 _dragStartScreen;
+
+        private static bool _selectionModeActive; // Task76: WarfrontSettings.SelectionModeKeyでトグル。ONの間だけボックスドラッグを許可する
+
+        /// <summary>部隊選択モード（Task76）が現在ONか。単発クリック選択には影響しない
+        /// （常時動作、上のクラス冒頭コメント参照）。UI側でヒント表示等に使ってよい、Task76時点は未使用。</summary>
+        public static bool IsSelectionModeActive { get { return _selectionModeActive; } }
 
         /// <summary>直前フレーム終了時点の UnitSelection.SelectedInstanceId（Task48）。mouse down 時点で
         /// これと異なっていれば「この押し下げでUnitSelection.Update（同フレーム内で先に実行済み）が
@@ -136,6 +164,8 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
+                HandleSelectionModeToggle(); // Task76: 単発クリック選択より前に判定してよい（同じフレームでもトグル即反映で問題ない）
+
                 if (Input.GetMouseButtonDown(0))
                 {
                     // UI上で始まった押し下げはドラッグ候補にしない（UnitSelection.Updateと同じガード）。
@@ -158,8 +188,12 @@ namespace CSWarfront.Game.UI
                         }
                     }
                 }
-                else if (_pendingDragCandidate && Input.GetMouseButton(0))
+                else if (_selectionModeActive && _pendingDragCandidate && Input.GetMouseButton(0))
                 {
+                    // Task76: 部隊選択モードがONの間だけドラッグ確定（矩形描画）へ進む。OFFの間は
+                    // _pendingDragCandidate/_dragStartScreenの記録自体は素通しするが、この分岐に入らない
+                    // ため矩形は一切出ず_draggingもtrueにならない＝mouse up時のFinishBoxSelectも呼ばれない
+                    // （単発クリックの選択反映は上のmouse down分岐で完結済みなのでモードの影響を受けない）。
                     Vector2 cur = Input.mousePosition;
                     if (!_dragging && Vector2.Distance(cur, _dragStartScreen) >= DragThresholdPixels)
                     {
@@ -212,6 +246,7 @@ namespace CSWarfront.Game.UI
                 _pendingDragCandidate = false;
                 _dragging = false;
                 _lastSeenSelectedInstanceId = 0;
+                _selectionModeActive = false; // Task76: セッションをまたいだ既定値(OFF)へのリセットは許容（他のWarfrontSettingsと同じMVP方針）
             }
         }
 
@@ -222,14 +257,62 @@ namespace CSWarfront.Game.UI
             if (_rectPanel != null && _rectPanel.isVisible) _rectPanel.Hide();
         }
 
+        /// <summary>Task76: WarfrontSettings.SelectionModeKey（既定Numpad0）のポーリングとトグル処理。
+        /// テキスト入力欄にフォーカスがある間は無視する（Game/UI/UnitCommandInput.Updateの
+        /// UIView.HasInputFocus()ガードと同じ理由）。ONの間にEscを押しても即OFFへ戻れる
+        /// （HandleRallyTargeting同様、バニラのEscメニュー自体を消費/妨害するわけではない）。</summary>
+        private static void HandleSelectionModeToggle()
+        {
+            if (UIView.HasInputFocus()) return;
+
+            if (UnitCommandInput.IsHotkeyDown(WarfrontSettings.SelectionModeKey))
+            {
+                SetSelectionModeActive(!_selectionModeActive);
+                return;
+            }
+            if (_selectionModeActive && Input.GetKeyDown(KeyCode.Escape))
+            {
+                SetSelectionModeActive(false);
+            }
+        }
+
+        private static void SetSelectionModeActive(bool active)
+        {
+            if (_selectionModeActive == active) return;
+            _selectionModeActive = active;
+            if (!active) CancelDrag(); // ドラッグ中にOFFへ切り替えた場合は即座に破棄する（矩形も消す）
+            ModConfig.Log("UnitBoxSelection: selection mode " + (active ? "ON" : "OFF"));
+            CommandToast.Show(active ? "部隊選択モード ON（ドラッグで範囲選択）" : "部隊選択モード OFF");
+        }
+
+        /// <summary>スクリーン実ピクセル座標（Input.mousePositionと同じ空間、左下原点）をUIViewのGUI座標
+        /// （UIPanel.relativePositionが期待する空間、左上原点）へ変換する。クラス冒頭コメント参照：
+        /// UIView.ScreenPointToGUI自体はY反転のみでスケール変換を行わないため、UIView.WorldPointToGUIが
+        /// 内部で使っているのと同じスケール変換（GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight）
+        /// を先に適用してからScreenPointToGUIを呼ぶ。uiCameraが取得できない場合（起動直後等の異常系）は
+        /// 従来のフォールバックとして無変換でScreenPointToGUIへ渡す（例外を投げない）。</summary>
+        private static Vector2 ScreenToGuiPoint(UIView view, Vector2 screenPoint)
+        {
+            Camera cam = view.uiCamera;
+            if (cam == null || cam.pixelWidth <= 0 || cam.pixelHeight <= 0)
+            {
+                return view.ScreenPointToGUI(screenPoint);
+            }
+            Vector2 screenResolution = view.GetScreenResolution();
+            Vector2 scaled = new Vector2(
+                screenResolution.x * (screenPoint.x / (float)cam.pixelWidth),
+                screenResolution.y * (screenPoint.y / (float)cam.pixelHeight));
+            return view.ScreenPointToGUI(scaled);
+        }
+
         private static void UpdateRectVisual(Vector2 startScreen, Vector2 curScreen)
         {
             if (_rectPanel == null) return;
             UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
             if (view == null) return;
 
-            Vector2 a = view.ScreenPointToGUI(startScreen);
-            Vector2 b = view.ScreenPointToGUI(curScreen);
+            Vector2 a = ScreenToGuiPoint(view, startScreen);
+            Vector2 b = ScreenToGuiPoint(view, curScreen);
 
             float x = Mathf.Min(a.x, b.x);
             float y = Mathf.Min(a.y, b.y);

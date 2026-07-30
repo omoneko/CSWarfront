@@ -60,6 +60,12 @@ namespace CSWarfront.Game
             for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
                 keyNames[i] = WarfrontSettings.KeyOptions[i].ToString();
 
+            // Task76: 部隊選択モードのON/OFFトグルキー。ONの間だけドラッグでの範囲選択が働く
+            // （単発クリック選択は常時有効、Game/UI/UnitBoxSelection参照）。
+            group.AddDropdown("Toggle unit selection mode (drag-box select; single click always works)",
+                keyNames, IndexOf(WarfrontSettings.SelectionModeKey),
+                i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.SelectionModeKey = WarfrontSettings.KeyOptions[i]; });
+
             group.AddDropdown("Free advance (march at full speed toward the nearest hostile base)",
                 keyNames, IndexOf(WarfrontSettings.FreeAdvanceKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.FreeAdvanceKey = WarfrontSettings.KeyOptions[i]; });
