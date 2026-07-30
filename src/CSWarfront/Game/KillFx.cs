@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ColossalFramework;
 using CSWarfront.Core;
 using UnityEngine;
 
@@ -13,10 +14,17 @@ namespace CSWarfront.Game
     /// （Task51の「生身の歩兵が爆発するのは演出として不自然」というルールを、音とエフェクトの
     /// 両方で一貫させるため、カテゴリ一覧を複製しない）。
     ///
-    /// 見た目: 素早く膨らんで消える火球（primitive球を数個、オフセットして「塊」に見せる）＋
-    /// やや遅れて始まりゆっくり薄れる黒煙puff。合計寿命は SmokeStartDelay+SmokeDuration ≈ 1.5秒。
-    /// CombatFx.csと同じ方針を踏襲する: 戦略ビューであることを踏まえ派手すぎない、CS由来の
-    /// マテリアルは一切借用せず自前の固定色sharedMaterial（Shader.Find("Standard")等）を使う。
+    /// 見た目（Task84、ユーザー要望「撃破時の爆発をもう少しリアルに。CS内のエフェクトも使っていい。
+    /// 規模は今くらい」）: CS標準の爆発エフェクト DisasterProperties.m_mediumExplosion を
+    /// EffectManager.DispatchEffect で再生する（AlienInvasionのEffects.PlayImpactBurstで実績のある
+    /// 経路。パーティクルの火球・煙・光を含む本物の爆発になる）。magnitudeは従来の火球サイズ
+    /// （ピーク約5.5m）と釣り合う控えめな値に較正する（Alienのレーザー着弾0.7より小さい0.5）。
+    /// EffectInfoが解決できない環境では、従来のprimitive球ベースの簡易爆発（下のフォールバック実装、
+    /// Task65の実装そのまま）へ自動フォールバックする。
+    ///
+    /// 旧来の方針（CS由来のリソースを借りない）はマテリアル借用の不可視バグ（cs-mesh-material-
+    /// rendering）に対するものであり、EffectManagerへのdispatchはCS自身が描画まで面倒を見るため
+    /// この問題とは無関係（Alien/Godzilla MODで実機実績あり）。
     ///
     /// CombatFx.cs（577行、Task65時点で500行近く）を肥大化させないよう別ファイル・別クラスとして
     /// 新設した（CombatFxSoundのような partial 分割ではなく独立クラス。公開APIはSpawn/Update/
@@ -62,6 +70,17 @@ namespace CSWarfront.Game
 
         private static readonly List<Effect> _effects = new List<Effect>();
 
+        /// <summary>Task84: CS標準爆発の再生強度。EffectManager.DispatchEffectのmagnitude引数。
+        /// Alienのレーザー着弾(0.7)より控えめにして、従来の小爆発と同程度の規模に合わせる。</summary>
+        private const float CsExplosionMagnitude = 0.5f;
+
+        /// <summary>Task84: 1回のSpawn呼び出し（=1フレーム）でdispatchするCS爆発の上限。
+        /// 大量殲滅時のパーティクル過剰を防ぐ（MaxLiveEffectsと同じ防御的上限の考え方）。</summary>
+        private const int MaxCsDispatchPerFrame = 16;
+
+        private static EffectInfo _csEffect;
+        private static bool _csEffectResolveAttempted;
+
         private static Shader _shader;
         private static bool _shaderResolved;
         private static Material _fireballMaterial;
@@ -79,10 +98,9 @@ namespace CSWarfront.Game
                 Camera cam = Camera.main;
                 Vector3? cameraPos = cam != null ? (Vector3?)cam.transform.position : null;
 
+                int dispatched = 0;
                 for (int i = 0; i < kills.Count; i++)
                 {
-                    if (_effects.Count >= MaxLiveEffects) break;
-
                     KillEvent k = kills[i];
                     // Task51/65共通ルール: 歩兵・ドローン兵の撃破では爆発を出さない（撃破音と同じ判定）。
                     if (!CombatFx.IsVehicleDestructionCategory(k.Category)) continue;
@@ -94,6 +112,15 @@ namespace CSWarfront.Game
                         if (distSqr > MaxSpawnDistanceFromCamera * MaxSpawnDistanceFromCamera) continue;
                     }
 
+                    // Task84: CS標準爆発が使えるならそちらを再生（リアルなパーティクル爆発）。
+                    // 解決できない環境でのみ従来のprimitive球フォールバックを使う。
+                    if (TryDispatchCsExplosion(pos))
+                    {
+                        if (++dispatched >= MaxCsDispatchPerFrame) break;
+                        continue;
+                    }
+
+                    if (_effects.Count >= MaxLiveEffects) break;
                     SpawnOne(pos);
                 }
             }
@@ -153,7 +180,87 @@ namespace CSWarfront.Game
             finally
             {
                 _effects.Clear();
+                // Task84: EffectInfoはプレハブ参照であり、レベル再読込後は破棄済みUnityオブジェクトに
+                // なりうる（==nullのfake-null自己修復も静的キャッシュには効かない、
+                // cs-static-unity-object-cacheの教訓）。次レベルで必ず再解決させる。
+                _csEffect = null;
+                _csEffectResolveAttempted = false;
             }
+        }
+
+        /// <summary>Task84: CS標準の爆発エフェクトを撃破位置で再生する。解決できなければfalseを返し、
+        /// 呼び出し元が従来のフォールバック爆発を使う。dispatch自体が例外を投げた場合はこのセッション中
+        /// CS爆発を諦めてフォールバックに切り替える（毎フレームのエラーログ連発を防ぐ）。</summary>
+        private static bool TryDispatchCsExplosion(Vector3 pos)
+        {
+            EffectInfo effect = ResolveCsEffect();
+            if (effect == null) return false;
+
+            try
+            {
+                var spawnArea = new EffectInfo.SpawnArea(pos, Vector3.up, 0f);
+                Singleton<EffectManager>.instance.DispatchEffect(
+                    effect, default(InstanceID), spawnArea, Vector3.zero, 0f, CsExplosionMagnitude,
+                    Singleton<VehicleManager>.instance.m_audioGroup);
+                return true;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("KillFx.TryDispatchCsExplosion error (falling back to simple effect): " + e);
+                _csEffect = null; // 以後このセッションはフォールバック（_csEffectResolveAttemptedは立ったまま）
+                return false;
+            }
+        }
+
+        /// <summary>CS標準爆発のEffectInfoを解決する（AlienInvasion Effects.ResolveImpactEffectと同じ
+        /// 解決順: DisasterProperties.m_mediumExplosion → 隕石着弾エフェクト）。プロセス中1回だけ試み、
+        /// 結果（失敗含む）をキャッシュする。EffectInfoはプレハブ参照でレベル再読込で無効になりうるため、
+        /// DestroyAll（レベルアンロード）でキャッシュを破棄して次レベルで再解決する
+        /// （[[cs-static-unity-object-cache]]のfake-null問題を避けるため、静的キャッシュを跨がせない）。</summary>
+        private static EffectInfo ResolveCsEffect()
+        {
+            if (_csEffectResolveAttempted) return _csEffect;
+            _csEffectResolveAttempted = true;
+
+            try
+            {
+                DisasterProperties dp = Singleton<DisasterManager>.instance.m_properties;
+                if (dp != null && dp.m_mediumExplosion != null)
+                {
+                    _csEffect = dp.m_mediumExplosion;
+                    ModConfig.Log("KillFx: using DisasterProperties.m_mediumExplosion for kill explosions.");
+                    return _csEffect;
+                }
+            }
+            catch (Exception)
+            {
+                // フォールバックへ
+            }
+
+            try
+            {
+                int count = PrefabCollection<VehicleInfo>.LoadedCount();
+                for (int i = 0; i < count; i++)
+                {
+                    VehicleInfo info = PrefabCollection<VehicleInfo>.GetLoaded((uint)i);
+                    if (info == null) continue;
+                    MeteorAI ai = info.m_vehicleAI as MeteorAI;
+                    if (ai != null && ai.m_impactEffect != null)
+                    {
+                        _csEffect = ai.m_impactEffect;
+                        ModConfig.Log("KillFx: using meteor impact effect for kill explosions.");
+                        return _csEffect;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("KillFx.ResolveCsEffect error: " + e);
+            }
+
+            ModConfig.Log("KillFx: no CS explosion effect available; using simple fallback explosions.");
+            _csEffect = null;
+            return null;
         }
 
         private static void SpawnOne(Vector3 pos)
