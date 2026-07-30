@@ -131,6 +131,36 @@ public class TargetingRulesTests
         Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
     }
 
+    // --- Task88: HP床に達した拠点への攻撃停止 ---
+
+    [Fact]
+    public void Bomber_stops_shooting_a_base_already_at_the_floor()
+    {
+        // 実機報告「爆撃機が敵拠点HPが1になっても攻撃をやめない」の修正。床(1)に達した拠点へは
+        // ダメージも発砲イベントも一切発生させない（無意味な爆撃を延々と続けない）。
+        var s = StateWithHostileBase(1f);
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.TacticalBomber, 1));
+        s.Units.Add(new UnitInstance(1, "TacticalBomber_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 5f);
+
+        Assert.Equal(1f, s.Bases[0].CurrentHP, 3);
+        Assert.Empty(s.RecentShots); // 発砲の見た目も出さない
+    }
+
+    [Fact]
+    public void Land_unit_still_finishes_a_base_at_one_hp()
+    {
+        // 陸上の床は0なので、HP1の拠点は引き続き攻撃・占領対象。
+        var s = StateWithHostileBase(1f);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
+    }
+
     // --- ThreatCombatStep への適用 ---
 
     [Fact]

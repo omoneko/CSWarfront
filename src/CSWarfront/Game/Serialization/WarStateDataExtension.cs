@@ -30,6 +30,14 @@ namespace CSWarfront.Game.Serialization
                 NavalUnitRoster.RegisterAll(types); // 海上2種×Tier1〜5（Task61）。海上/航空ユニットを含むセーブの復元に必要。
                 AirUnitRoster.RegisterAll(types);   // 航空3種×Tier1〜5（Task61）。
                 WarState restored = WarStateSerializer.Deserialize(bytes, types);
+                // Task88: 勢力名は表示専用のMOD定義（色名）なので、セーブに残っている旧名
+                // （"Faction 3"等）は常に現行のWarfrontSettings.FactionNamesで上書きする。
+                string[] names = WarfrontSettings.FactionNames;
+                for (int i = 0; i < restored.Factions.Count; i++)
+                {
+                    var f = restored.Factions[i];
+                    if (f.Id < names.Length) f.Name = names[f.Id];
+                }
                 // State差し替えと表現（車両）再生成を同一ロック内で行う（MilitaryManager参照）。
                 MilitaryManager.LoadAndRebuild(restored);
             }

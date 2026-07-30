@@ -163,9 +163,11 @@ public class TargetSearchTests
         Assert.Equal((uint)4, nearest.InstanceId); // 最寄りの戦車・駆逐艦は無視し、航空(爆撃機)だけを狙う
     }
 
-    // Task85: 爆撃機は地上目標のみ（航空・海上は標的にしない）。
+    // Task85→Task88改訂: 爆撃機は地上・海上目標（航空だけは標的にしない）。
+    // 当初のTask85は地上のみだったが、実機で「爆撃機が敵海上ユニットを無視する」とユーザーが
+    // 指摘したため、対艦爆撃を許可する形へ変更した。
     [Fact]
-    public void Bomber_targets_only_land_hostiles_ignoring_closer_air_and_sea()
+    public void Bomber_targets_land_and_sea_hostiles_ignoring_closer_air()
     {
         var types = new UnitTypeRegistry();
         LandUnitRoster.RegisterAll(types);
@@ -174,7 +176,7 @@ public class TargetSearchTests
 
         var rel = new RelationMatrix(5);
         rel.Set(0, 1, Relation.Hostile);
-        var self = UOf(1, 0, 0f, "TacticalBomber_T1"); // CanTargetDomains=Land（Task85）
+        var self = UOf(1, 0, 0f, "TacticalBomber_T1"); // CanTargetDomains=Land|Sea（Task88）
         var fighter = UOf(2, 1, 5f, "AirSuperiority_T1");
         var destroyer = UOf(3, 1, 30f, "Destroyer_T1");
         var tank = UOf(4, 1, 55f, "Tank_T1");
@@ -182,7 +184,7 @@ public class TargetSearchTests
 
         UnitType bomberType = types.Get("TacticalBomber_T1");
         var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, bomberType.CanTargetDomains, types);
-        Assert.Equal((uint)4, nearest.InstanceId); // 最寄りの戦闘機・駆逐艦は無視し、地上(戦車)だけを狙う
+        Assert.Equal((uint)3, nearest.InstanceId); // 最寄りの戦闘機は無視し、次に近い海上(駆逐艦)を狙う
     }
 
     // Task85: 空母は何も攻撃しない（発着艦プラットフォーム専任、CanTargetDomains=None）。

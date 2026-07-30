@@ -50,6 +50,12 @@ namespace CSWarfront.Core
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
                     if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue; // Task59: Nemesisも敵対として扱う
                     if (u.Position.HorizontalDistanceTo(b.Position) > type.Range) continue;
+
+                    // Task88: 既にこの攻撃側のHP床（航空/海上=1）に達している拠点へは攻撃しない
+                    // （ダメージ0の爆撃を延々と続け、発砲エフェクトだけが出続けるのを防ぐ。
+                    // 実機報告「爆撃機が敵拠点HPが1になっても攻撃をやめない」の修正）。
+                    float hpFloor = TargetingRules.BaseHpFloor(type.Domain);
+                    if (b.CurrentHP <= hpFloor) continue;
                     // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
                     // 命中率(Task38)に比例する。ただし静止した建物は動くユニットより狙いやすい格好の的なので、
                     // 命中率にはSiegeAccuracyFloor(0.8)の下限を設ける（例: 命中率0.35の砲兵でも基地攻めでは

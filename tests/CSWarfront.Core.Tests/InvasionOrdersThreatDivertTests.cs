@@ -30,6 +30,62 @@ public class InvasionOrdersThreatDivertTests
         Assert.Equal(100f, u.OrderTargetPos.Value.X, 3);
     }
 
+    // --- Task88: 脅威追撃も可能な限り道路経路を使う（宿敵への移動が全行程オフロードになる問題の修正） ---
+
+    [Fact]
+    public void Land_unit_gets_a_road_path_toward_a_threat_far_from_any_road()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
+        s.Bases.Add(ownBase);
+        // 道路はX軸沿い。脅威は最後の道路ノード(200,0,0)から約360離れた位置＝従来の
+        // PathSnapRadius(200)ではスナップ失敗し、経路nullで全行程オフロード直線になっていた。
+        var roads = new RoadGraph();
+        roads.AddNode(1, new WorldPos(0, 0, 0));
+        roads.AddNode(2, new WorldPos(100, 0, 0));
+        roads.AddNode(3, new WorldPos(200, 0, 0));
+        roads.AddEdge(1, 2);
+        roads.AddEdge(2, 3);
+        s.Roads = roads;
+        s.Threats.Add(Threat(500f, 200f)); // own baseから約538 <= ThreatDivertRadius(600)
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(10, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var u = s.FindUnit(1);
+        Assert.NotNull(u.Path); // 目的地側スナップ無制限により、脅威に最も近いノードまでの道路経路が付く
+        Assert.Equal(200f, u.Path[u.Path.Count - 1].X, 1); // 経路末端は脅威に最も近い道路ノード
+    }
+
+    [Fact]
+    public void Threat_path_is_not_recomputed_for_small_threat_movement()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Bases.Add(new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 });
+        var roads = new RoadGraph();
+        roads.AddNode(1, new WorldPos(0, 0, 0));
+        roads.AddNode(2, new WorldPos(100, 0, 0));
+        roads.AddEdge(1, 2);
+        s.Roads = roads;
+        var threat = Threat(400f);
+        s.Threats.Add(threat);
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(10, 0, 0)));
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+        var u = s.FindUnit(1);
+        var firstPath = u.Path;
+        Assert.NotNull(firstPath);
+
+        // 脅威がわずかに動いた（<ThreatTargetChangeEpsilon=100）だけでは経路を組み直さない。
+        threat.Position = new WorldPos(430f, 0f, 0f);
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+        Assert.Same(firstPath, s.FindUnit(1).Path);
+    }
+
     // --- Task61: Sea/Air units never attempt road pathfinding (they ignore RoadGraph entirely) ---
 
     [Fact]

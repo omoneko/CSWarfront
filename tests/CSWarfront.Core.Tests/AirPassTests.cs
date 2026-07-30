@@ -129,6 +129,33 @@ public class AirPassTests
     }
 
     [Fact]
+    public void Bomber_does_not_keep_passing_over_a_base_already_at_the_floor()
+    {
+        // Task88: HP1（航空の床）に達した拠点はもう航過アンカーにしない＝爆撃機は離脱して
+        // 通常の目的地移動へ戻る（実機報告「HP1になっても攻撃をやめない」の移動面の対処）。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        AirUnitRoster.RegisterAll(s.Types);
+
+        var bomber = new UnitInstance(1, "TacticalBomber_T1", 0, 100f, new WorldPos(0, 0, 0));
+        bomber.State = UnitState.Moving;
+        bomber.OrderTargetPos = new WorldPos(100, 0, 0);
+        s.Units.Add(bomber);
+
+        var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(100, 0, 0));
+        enemyBase.OwnerFactionId = 1;
+        enemyBase.CurrentHP = 1f; // 既に床
+        s.Bases.Add(enemyBase);
+
+        for (int i = 0; i < 300; i++) MovementStep.Advance(s, 0.05f);
+
+        Assert.False(bomber.AirPassEgress.HasValue); // 航過は発生しない
+        Assert.Equal(100f, bomber.Position.X, 0);    // 目的地でホバリング（従来の到着挙動）
+    }
+
+    [Fact]
     public void Fighter_does_not_pass_over_bases_it_cannot_attack()
     {
         var s = new WarState();

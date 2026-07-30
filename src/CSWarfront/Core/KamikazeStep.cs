@@ -143,6 +143,9 @@ namespace CSWarfront.Core
                 if (b.OwnerFactionId.Value == self.FactionId) continue;
                 Relation r = state.Relations.Get(self.FactionId, b.OwnerFactionId.Value);
                 if (!r.IsHostile()) continue;
+                // Task88: 既にHP床（自爆ドローンは航空なので1）に達した拠点へは体当たりしない
+                // （ダメージ0の自爆で機体だけ失うのを防ぐ。BaseCombatStepの攻撃停止と同じ規則）。
+                if (b.CurrentHP <= TargetingRules.BaseHpFloor(type.Domain)) continue;
 
                 float d = self.Position.HorizontalDistanceTo(b.Position);
                 if (d > type.Range) continue;

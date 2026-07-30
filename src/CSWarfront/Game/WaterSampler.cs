@@ -30,6 +30,14 @@ namespace CSWarfront.Game
     /// </summary>
     internal sealed class WaterSampler : IWaterSampler
     {
+        /// <summary>Task88（ユーザー要望「海上戦力について、喫水を考慮した行動範囲に」）: 艦艇が
+        /// 航行可能とみなす最低水深（メートル）。IsWaterはHasWater（水があるか、閾値は僅か約0.125m）
+        /// に加えて「水面高さ − 水底の地形高さ >= この値」を要求する。これにより波打ち際・浅瀬には
+        /// 進入できず、艦艇はある程度深い水域だけを行動範囲にする（岸に張り付く見た目の防止）。
+        /// 実機の海岸勾配に合わせた較正値（深すぎると既存の海軍基地沖でスポーン地点が見つからなく
+        /// なるため控えめに設定。プレイテストで要調整）。</summary>
+        internal const float MinNavigableDepth = 2f;
+
         private static bool _failureAlreadyLogged;
 
         public bool IsWater(float x, float z)
@@ -42,9 +50,21 @@ namespace CSWarfront.Game
 
             try
             {
-                bool result = Singleton<TerrainManager>.instance.HasWater(new Vector2(x, z));
+                TerrainManager tm = Singleton<TerrainManager>.instance;
+                Vector2 pos = new Vector2(x, z);
+                if (!tm.HasWater(pos))
+                {
+                    _failureAlreadyLogged = false;
+                    return false;
+                }
+
+                // Task88: 喫水チェック。水深 = 水面高さ − 水底（地形）高さ。SampleDetailHeight(Vector3)は
+                // 水底でも地形の高さを返す（水面ではない。SurfaceHeightSamplerと同じ検証済みAPI）。
+                float waterLevel = tm.WaterLevel(pos);
+                float seabed = tm.SampleDetailHeight(new Vector3(x, 0f, z));
+                bool navigable = (waterLevel - seabed) >= MinNavigableDepth;
                 _failureAlreadyLogged = false;
-                return result;
+                return navigable;
             }
             catch (System.Exception e)
             {

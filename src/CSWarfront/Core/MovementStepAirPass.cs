@@ -102,6 +102,9 @@ namespace CSWarfront.Core
                     if (b.OwnerFactionId == null) continue;
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
                     if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue;
+                    // Task88: この攻撃側のHP床（航空=1）に達した拠点はもう航過アンカーにしない
+                    // （BaseCombatStepの攻撃停止と対で、爆撃機がHP1の拠点上空を回り続けるのを防ぐ）。
+                    if (b.CurrentHP <= TargetingRules.BaseHpFloor(type.Domain)) continue;
                     float d = u.Position.HorizontalDistanceTo(b.Position);
                     if (d > type.Range) continue;
                     if (d < bestDist) { bestDist = d; bestBase = b; }

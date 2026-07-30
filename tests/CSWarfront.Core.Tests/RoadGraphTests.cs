@@ -33,6 +33,41 @@ public class RoadGraphTests
         return g;
     }
 
+    // Task88: 目的地側スナップ半径の独立指定（宿敵追撃の道路経路化）。
+    [Fact]
+    public void FindPath_with_unlimited_dest_snap_reaches_the_node_nearest_a_far_target()
+    {
+        var g = new RoadGraph();
+        g.AddNode(1, new WorldPos(0, 0, 0));
+        g.AddNode(2, new WorldPos(100, 0, 0));
+        g.AddNode(3, new WorldPos(200, 0, 0));
+        g.AddEdge(1, 2);
+        g.AddEdge(2, 3);
+
+        // 目的地(600,0,0)は最寄りノード(200,0,0)から400離れている＝従来のsnapRadius(200)では
+        // スナップ失敗でnullだったケース。
+        var strict = g.FindPath(new WorldPos(10, 0, 0), new WorldPos(600, 0, 0), 200f, 0u, 0f);
+        Assert.Null(strict);
+
+        var relaxed = g.FindPath(new WorldPos(10, 0, 0), new WorldPos(600, 0, 0), 200f, 0u, 0f, float.MaxValue);
+        Assert.NotNull(relaxed);
+        // 経路の末端は目的地に最も近いノード(200,0,0)。残り区間は呼び出し側の直線フォールバックが担う。
+        Assert.Equal(200f, relaxed[relaxed.Count - 1].X, 1);
+    }
+
+    [Fact]
+    public void FindPath_unlimited_dest_snap_still_requires_origin_within_snap_radius()
+    {
+        var g = new RoadGraph();
+        g.AddNode(1, new WorldPos(0, 0, 0));
+        g.AddNode(2, new WorldPos(100, 0, 0));
+        g.AddEdge(1, 2);
+
+        // 出発点が道路から遠い（>200）場合は従来どおりnull（直線移動が正しい）。
+        var path = g.FindPath(new WorldPos(0, 0, 500), new WorldPos(100, 0, 0), 200f, 0u, 0f, float.MaxValue);
+        Assert.Null(path);
+    }
+
     [Fact]
     public void AddNode_is_idempotent_for_repeated_id()
     {

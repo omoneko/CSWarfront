@@ -77,8 +77,22 @@ namespace CSWarfront.Core
         /// </summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius, uint seed, float jitter)
         {
+            return FindPath(from, to, snapRadius, seed, jitter, snapRadius);
+        }
+
+        /// <summary>Task88（ユーザー要望「宿敵への陸上経路は可能な限り道路上を」）: 目的地側の
+        /// スナップ半径だけを独立に指定できる版。徘徊する脅威（ゴジラ等）は道路から
+        /// snapRadius(200)以上離れていることが多く、従来はスナップ失敗→経路null→全行程が
+        /// 直線移動（オフロード）になっていた。destSnapRadiusにfloat.MaxValueを渡せば
+        /// 「目的地に最も近い道路ノードまでは必ず道路で行き、残りだけ直線」になる
+        /// （経路が尽きた後の直線フォールバックはMovementStepの既存挙動）。
+        /// 出発側のスナップは従来どおりsnapRadiusのまま（ユニット自身が道路から遠い場合は
+        /// 直線移動が正しい）。</summary>
+        public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius, uint seed, float jitter,
+            float destSnapRadius)
+        {
             if (!TryFindNearestNode(from, snapRadius, out ushort startId)) return null;
-            if (!TryFindNearestNode(to, snapRadius, out ushort goalId)) return null;
+            if (!TryFindNearestNode(to, destSnapRadius, out ushort goalId)) return null;
 
             if (startId == goalId) return new List<WorldPos>();
 

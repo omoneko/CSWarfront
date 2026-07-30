@@ -213,6 +213,15 @@ namespace CSWarfront.Game.UI
                     CancelDrag();
                 }
 
+                // Task88（「緑の縁が選択解除後も残る」バグ修正）: 単発選択が外部で解除された
+                // （UnitInfoPanelの閉じるボタン/ESC/選択ユニットの死亡等がUnitSelection.Clearを呼んだ）
+                // 場合、複数選択リストも連動して解除する。従来はSelectedIdsを消す経路がここに無く、
+                // SyncHighlightsが選択解除後もハイライトを描き続けていた。
+                if (UnitSelection.SelectedInstanceId == 0 && _lastSeenSelectedInstanceId != 0 && SelectedIds.Count > 0)
+                {
+                    SelectedIds.Clear();
+                }
+
                 SyncHighlights();
                 _lastSeenSelectedInstanceId = UnitSelection.SelectedInstanceId;
             }
@@ -382,11 +391,21 @@ namespace CSWarfront.Game.UI
                 _highlightMarkers.Remove(_staleHighlightIds[i]);
             }
 
-            for (int i = 0; i < SelectedIds.Count; i++)
+            for (int i = SelectedIds.Count - 1; i >= 0; i--)
             {
                 uint id = SelectedIds[i];
                 Vector3 pos;
-                if (!UnitVisuals.TryGetPosition(id, out pos)) continue; // 見た目未生成/破棄済み。次フレーム再試行。
+                if (!UnitVisuals.TryGetPosition(id, out pos))
+                {
+                    // Task88: 見た目が破棄済み（＝ユニット死亡）の選択IDはリストからも外し、残っている
+                    // ハイライトも即座に破棄する（従来はcontinueで放置され、死亡地点に緑の縁が残り続けた）。
+                    GameObject dead;
+                    if (_highlightMarkers.TryGetValue(id, out dead) && dead != null)
+                        UnityEngine.Object.Destroy(dead);
+                    _highlightMarkers.Remove(id);
+                    SelectedIds.RemoveAt(i);
+                    continue;
+                }
 
                 GameObject marker;
                 if (!_highlightMarkers.TryGetValue(id, out marker) || marker == null)

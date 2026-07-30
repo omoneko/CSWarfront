@@ -47,6 +47,14 @@ namespace CSWarfront.Core
         /// <summary>目的地が変わったとみなす閾値（X/Z）。これ未満の差は同一目的地として扱い経路を再利用する。</summary>
         private const float TargetChangeEpsilon = 1f;
 
+        /// <summary>Task88: 移動する脅威（宿敵KAIJU等）を追う場合の経路再計算閾値。脅威は毎tick
+        /// 少しずつ動くため、TargetChangeEpsilon(1m)のままでは呼び出しのたびにClearPath→再探索の
+        /// 繰り返しになり、経路が定着せずほぼ常時オフロード直線移動になっていた（ユーザー報告
+        /// 「宿敵への移動が道路上を通らない」の一因）。脅威がこの距離を超えて動いたときだけ
+        /// 再計算する——経路の末端は多少古い位置になるが、経路が尽きた後の直線フォールバックが
+        /// 常に最新のOrderTargetPosへ向かうため実害はない。</summary>
+        private const float ThreatTargetChangeEpsilon = 100f;
+
         /// <summary>FindPath失敗後、同じユニットで再試行するまでのクールダウン（ゲーム内時間）。
         /// 到達不能なユニットが毎tickフルA*を再実行して予算を独占するのを防ぐ（Task23レビューImportant）。</summary>
         public const float PathRetryFailCooldownHours = 2f;
@@ -142,7 +150,10 @@ namespace CSWarfront.Core
                 u.OrderTargetPos = targetPos;
                 u.State = UnitState.Moving;
 
-                if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value))
+                // Task88: 移動する脅威を追っている間は、脅威が大きく動いたときだけ経路を組み直す
+                // （閾値のコメント参照。基地目標は従来どおり1mで再計算＝挙動変更なし）。
+                float sameTargetEps = divertTarget.HasValue ? ThreatTargetChangeEpsilon : TargetChangeEpsilon;
+                if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value, sameTargetEps))
                     u.ClearPath();
 
                 if (isLand && state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
@@ -153,7 +164,13 @@ namespace CSWarfront.Core
                     // InstanceIdをseedにすることでユニットごとに安定した「好みの遠回り」を持たせる。
                     // InstanceIdは一意かつユニットの生存中不変なので、同じユニットが再試行しても
                     // 同じ経路を選び続け、フリップフロップ（毎回別の経路を選び直す）が起きない。
-                    var path = state.Roads.FindPath(u.Position, u.OrderTargetPos.Value, PathSnapRadius, u.InstanceId, PathJitter);
+                    // Task88: 脅威追撃時は目的地側のスナップ半径を無制限にする——脅威は道路から
+                    // PathSnapRadius(200)以上離れていることが多く、従来はスナップ失敗→経路null→
+                    // 全行程オフロード直線になっていた。無制限スナップなら「脅威に最も近い道路
+                    // ノードまでは道路で行き、残りだけ直線」になる（ユーザー要望「可能な限り道路上を」）。
+                    float destSnap = divertTarget.HasValue ? float.MaxValue : PathSnapRadius;
+                    var path = state.Roads.FindPath(u.Position, u.OrderTargetPos.Value, PathSnapRadius,
+                        u.InstanceId, PathJitter, destSnap);
                     u.Path = path;
                     u.PathIndex = 0;
                     u.PathTarget = u.OrderTargetPos;
@@ -222,7 +239,12 @@ namespace CSWarfront.Core
 
         private static bool IsSameTarget(WorldPos a, WorldPos b)
         {
-            return System.Math.Abs(a.X - b.X) < TargetChangeEpsilon && System.Math.Abs(a.Z - b.Z) < TargetChangeEpsilon;
+            return IsSameTarget(a, b, TargetChangeEpsilon);
+        }
+
+        private static bool IsSameTarget(WorldPos a, WorldPos b, float epsilon)
+        {
+            return System.Math.Abs(a.X - b.X) < epsilon && System.Math.Abs(a.Z - b.Z) < epsilon;
         }
 
         /// <summary>Task78: factionIdが所有する基地のうち、fromに最も近いものを返す（1つも所有していなければnull）。

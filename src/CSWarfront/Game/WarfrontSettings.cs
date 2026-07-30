@@ -27,10 +27,11 @@ namespace CSWarfront.Game
             _buildFactionId = id;
         }
 
-        /// <summary>MVPではRed/Blueのみが実在勢力。3〜5はUI表示上のプレースホルダ。</summary>
+        /// <summary>Task88（ユーザー要望）: 勢力名は球アイコン/勢力色（UnitMaterialFactory.FactionColors:
+        /// 0=赤,1=青,2=緑,3=黄,4=マゼンタ）と揃えた色名にする。</summary>
         public static string[] FactionNames
         {
-            get { return new[] { "Red", "Blue", "Faction 3", "Faction 4", "Faction 5" }; }
+            get { return new[] { "Red", "Blue", "Green", "Yellow", "Magenta" }; }
         }
 
         // --- Task49: ユニット上の勢力アイコン（小さな球、Game/UnitVisuals）表示切り替え ---

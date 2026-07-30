@@ -107,6 +107,7 @@ namespace CSWarfront.Game.Audio
                     return MgVariants[NextIndex(ref _mgIndex, MgVariants.Length)];
                 case UnitCategory.Tank:
                 case UnitCategory.Artillery:
+                case UnitCategory.Destroyer: // Task88: 駆逐艦の艦砲/ミサイルにも砲撃音を当てる（従来は未マッピング＝無音）
                     return CannonVariants[NextIndex(ref _cannonIndex, CannonVariants.Length)];
                 case UnitCategory.AntiAir:
                     return AaMissile;
