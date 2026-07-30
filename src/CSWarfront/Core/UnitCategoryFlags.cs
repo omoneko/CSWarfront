@@ -18,5 +18,26 @@ namespace CSWarfront.Core
         {
             return category == UnitCategory.SuicideDrone;
         }
+
+        /// <summary>航空機のカテゴリか（Task86）。Game層のUnitVisualsが「発砲時に攻撃方向を向く」
+        /// 対象から航空機を除外する（飛行方向と別方向を向いたまま飛ぶ横滑りの見た目を防ぐ——
+        /// 航空機は常に進行方向を向き、パス航過のすれ違いで機動を表現する）判定に使う。
+        /// 未実装のプレースホルダ（GroundAttack等）も将来の追加に備えて含める。</summary>
+        public static bool IsAircraft(this UnitCategory category)
+        {
+            switch (category)
+            {
+                case UnitCategory.AirSuperiority:
+                case UnitCategory.GroundAttack:
+                case UnitCategory.TacticalBomber:
+                case UnitCategory.StrategicBomber:
+                case UnitCategory.ElectronicWarfare:
+                case UnitCategory.Awacs:
+                case UnitCategory.SuicideDrone:
+                    return true;
+                default:
+                    return false;
+            }
+        }
     }
 }

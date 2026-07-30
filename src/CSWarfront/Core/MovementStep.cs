@@ -177,6 +177,12 @@ namespace CSWarfront.Core
                         }
                     }
 
+                    // Task86: 航空ユニットの交戦パス移動（レーストラック航過、MovementStepAirPass.cs）。
+                    // 交戦アンカーがある間は目的地移動より優先する（目的地に到達済み＝objectiveが
+                    // null でもパスは飛ぶため、ResolveDomainObjectiveより前に判定する）。
+                    if (type.Domain == Domain.Air && AdvanceAirPass(state, u, type, stepLen, height))
+                        continue;
+
                     WorldPos? objective = ResolveDomainObjective(u);
                     if (!objective.HasValue) continue;
 

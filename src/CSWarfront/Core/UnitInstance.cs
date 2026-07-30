@@ -42,6 +42,12 @@ namespace CSWarfront.Core
 
         public WorldPos? OrderTargetPos;
 
+        /// <summary>Task86: 航空ユニットの交戦パス移動（レーストラック航過）の離脱点
+        /// （実行時のみ・非永続化）。MovementStepAirPass.AdvanceAirPassが設定/消費する。
+        /// 設定されている間は交戦アンカーの有無に関わらずこの点まで飛び切る（境界での
+        /// ふらつき防止）。航空以外のカテゴリでは常にnullのまま無視される。</summary>
+        public WorldPos? AirPassEgress;
+
         /// <summary>プレイヤーの指揮コマンド（実行時のみ・非永続化、Task48）。既定はAiControlled。
         /// セーブ/ロードでは常にAiControlledへ戻る（WarStateSerializerには一切書き出さない）。</summary>
         public UnitOrder Order;

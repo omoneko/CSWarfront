@@ -495,6 +495,9 @@ namespace CSWarfront.Game
                 {
                     ShotEvent shot = shots[i];
                     if (shot.AttackerId == 0) continue;
+                    // Task86: 航空機は常に進行方向を向く（射撃方向を向くと飛行方向と別方向を向いた
+                    // まま飛ぶ「横滑り」の見た目になるため。機動はパス航過のすれ違いで表現する）。
+                    if (shot.Category.IsAircraft()) continue;
 
                     VisualEntry entry;
                     if (!_visuals.TryGetValue(shot.AttackerId, out entry)) continue;

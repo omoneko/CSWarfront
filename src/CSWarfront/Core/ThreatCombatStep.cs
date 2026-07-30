@@ -78,7 +78,9 @@ namespace CSWarfront.Core
                     // CombatMatchup（兵科相性）は脅威には適用しない：脅威はUnitCategoryを持たない
                     // 独立した存在なので、装甲(ThreatArmor)のみが唯一の防御要因になる。
                     float accuracy = CombatSynergy.AccuracyFor(state, self, type);
-                    float dmg = CombatMath.DamagePerHit(type.Attack, ThreatArmor) * dt * accuracy;
+                    // Task86: 航空ユニットはパス移動で射程内滞在時間が減るぶん補正する（対脅威も同様）。
+                    float dmg = CombatMath.DamagePerHit(type.Attack, ThreatArmor) * dt * accuracy
+                        * AirCombat.DamageMultiplier(type);
                     threat.CurrentHP -= dmg;
                     if (threat.CurrentHP < 0f) threat.CurrentHP = 0f;
 

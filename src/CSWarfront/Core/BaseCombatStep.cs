@@ -56,7 +56,9 @@ namespace CSWarfront.Core
                     // 0.8として扱う＝素の命中率が低くても砲兵は依然として有効な攻城兵器のままにする）。
                     float accuracy = CombatSynergy.AccuracyFor(state, u, type);
                     float siegeAccuracy = Math.Max(accuracy, SiegeAccuracyFloor);
-                    b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy;
+                    // Task86: 航空（爆撃機）はパス移動で射程内滞在時間が減るぶんAirCombat側の倍率で補正する。
+                    b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy
+                        * AirCombat.DamageMultiplier(type);
                     // Task85: 拠点をHP0（＝占領）まで削れるのは地上戦力のみ。航空・海上の攻撃は
                     // HP1で頭打ちにする（最後の1は必ず陸上部隊が削る）。
                     float floor = TargetingRules.BaseHpFloor(type.Domain);
