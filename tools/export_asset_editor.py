@@ -107,6 +107,13 @@ NAME_MAP = {
     'missiledestroyer': 'MissileDestroyer',
     # 空母
     'carrier': 'Carrier',
+    # 2026-07-30 追加分（基地3種はTask68でフォールバック名が付いたが、以後は明示マッピング）
+    'basearmy': 'BaseArmy',
+    'basenavy': 'BaseNavy',
+    'baseair': 'BaseAir',
+    'spaag': 'SPAAG',
+    'loiteringdrone': 'LoiteringDrone',
+    'basemissile': 'BaseMissile',
 }
 
 DEFAULT_BASE_COLOR = (0.8, 0.8, 0.8)  # Blender's untouched Principled default

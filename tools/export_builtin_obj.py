@@ -131,12 +131,17 @@ NAME_MAP = {
     'basearmy': 'Building_MilitaryBase',
     'basenavy': 'Building_NavalBase',
     'baseair': 'Building_AirBase',
+    # 2026-07-30 ユーザーがmodels.blendへ追加した3種（従来は自動生成モデルで代用していた最後の3つ）
+    'spaag': 'Unit_AntiAir',
+    'loiteringdrone': 'Unit_SuicideDrone',
+    'basemissile': 'Building_MissileBase',
 }
 
 # Built-in models that intentionally have NO Blender counterpart and must be
 # left untouched (still produced by tools/gen_models.py). Listed here only
 # for the sanity check at the end of main() -- this script never writes them.
-NO_BLENDER_COUNTERPART = ['Unit_AntiAir', 'Unit_SuicideDrone', 'Building_MissileBase']
+# 2026-07-30: 全16種がBlenderモデルで揃ったため空になった。
+NO_BLENDER_COUNTERPART = []
 
 DEFAULT_BASE_COLOR = (0.8, 0.8, 0.8)  # Blender's untouched Principled default
 
