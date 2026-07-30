@@ -52,7 +52,23 @@ namespace CSWarfront.Game
     /// WarfrontBasePrefabVisualSwap参照）ではなく割り当てられたアセットのみが見える
     /// （スタッキングは発生しない）。
     ///
-    /// 割り当てが無い勢力の拠点にはオーバーレイを一切生成しない（要件: 「割り当てのある拠点だけ」）。
+    /// Task75（基地二重表示バグの修正、詳細は task-75-report.md）:
+    ///   実機ログで確認した根本原因は BaseHiddenSync.ApplyPending 側にあった（Task74で追加された
+    ///   「Optionsで指定した建物アセット」経由の基地で、保険チェックがWarfrontBasePrefabのプレハブしか
+    ///   見ておらずHiddenが永久に立たなかった。修正はBaseHiddenSync.csのコメント参照）。
+    ///   これに加え、理論上残っていた「オーバーレイ生成とHidden反映の1tick分のギャップ」も本クラスで
+    ///   閉じた: 割り当てを検出した最初のSyncではオーバーレイのGameObjectをまだ作らず、
+    ///   BaseHiddenSync.SetDesired(id, true) の要求だけを出して <see cref="_pendingOverlays"/> に
+    ///   記録する。以後のSyncは BaseHiddenSync.IsHiddenApplied(id) がtrueを返す（＝simスレッドが
+    ///   実際にBuilding.Flags.Hiddenを立てたとApplyPendingが確認した）まで待ち、確認が取れて初めて
+    ///   CreateVisualでGameObjectを生成する。これにより「バニラの実体とオーバーレイが同一フレームに
+    ///   同時に見える」瞬間が構造的に発生しなくなる（通常は次のOnSimTickで即座に確認が取れるため、
+    ///   体感できる遅延にはならない）。
+    ///
+    ///   「割り当てが無い拠点は既定モデル（プレハブ自身の差し替え済み見た目）だけが見える」という
+    ///   不変条件は、下の Sync() 冒頭の `if (!hasAssignment)` 分岐（割り当てが無ければ
+    ///   CreateVisual自体を一切呼ばない・既存オーバーレイがあれば破棄する）1箇所だけで担保される。
+    ///   割り当てが無い勢力の拠点にはオーバーレイを一切生成しない（要件: 「割り当てのある拠点だけ」）。
     /// Task60では基地種別を区別しない単一キー（<see cref="UnitAssetBindings.BaseTypeKey"/>、"MilitaryBase"）
     /// のみで (勢力, "MilitaryBase") → アセットを解決していたが、Task66で基地種別ごとの専用キー
     /// （<see cref="UnitAssetBindings.BaseTypeKeyFor"/>）に対応した <see cref="UnitAssetBindings.TryGetForBase"/>
@@ -87,10 +103,16 @@ namespace CSWarfront.Game
         // 一度失敗したidはここに記録し、以後 Sync() でスキップする（UnitVisuals._failedInstancesと同じ方針）。
         private static readonly HashSet<ushort> _failedInstances = new HashSet<ushort>();
 
+        // Task75: 割り当てを検出しBaseHiddenSync.SetDesired(id, true)を要求済みだが、まだ
+        // BaseHiddenSync.IsHiddenApplied(id)がtrueを返さない（＝Hidden未確認）ためGameObjectを
+        // 生成していないbaseIdの集合。メインスレッド専用アクセス。
+        private static readonly HashSet<ushort> _pendingOverlays = new HashSet<ushort>();
+
         // Sync() 実行毎に使い回すワーク領域（GC回避）。
         private static readonly HashSet<ushort> _seenIds = new HashSet<ushort>();
         private static readonly List<ushort> _staleIds = new List<ushort>();
         private static readonly List<ushort> _staleFailedIds = new List<ushort>();
+        private static readonly List<ushort> _stalePendingIds = new List<ushort>();
 
         public static int Count { get { return _visuals.Count; } }
 
@@ -121,7 +143,14 @@ namespace CSWarfront.Game
                     {
                         // 割り当てが無い（既定モデルのまま）。以前オーバーレイを持っていればここで破棄し、
                         // バニラ/既定built-inの見た目へ戻す（勢力の所属変更・割り当て解除の両方で通る経路）。
+                        // これが「割り当てが無い拠点はプレハブ自身の見た目だけになる」不変条件の実体。
                         if (_visuals.ContainsKey(s.BaseId)) DestroyVisual(s.BaseId);
+                        if (_pendingOverlays.Remove(s.BaseId))
+                        {
+                            // Task75: Hidden確認待ち中に割り当てが外れた（稀なタイミング）。
+                            // まだ何も生成していないので、出していた隠す要求を取り消すだけでよい。
+                            BaseHiddenSync.SetDesired(s.BaseId, false);
+                        }
                         continue;
                     }
 
@@ -131,26 +160,43 @@ namespace CSWarfront.Game
                     }
 
                     VisualEntry entry;
-                    if (!_visuals.TryGetValue(s.BaseId, out entry) || entry.GameObject == null)
-                    {
-                        entry = CreateVisual(s, kind, name);
-                        if (entry == null)
-                        {
-                            _failedInstances.Add(s.BaseId);
-                            continue;
-                        }
-                        _visuals[s.BaseId] = entry;
-                        // Task71: オーバーレイが実際に生成できた拠点のみ、バニラ/既定モデルの建物
-                        // メッシュを隠す（要件2、スタッキング防止）。simスレッドへはペンディング経由
-                        // で反映される（BaseHiddenSync参照）。
-                        BaseHiddenSync.SetDesired(s.BaseId, true);
-                    }
-                    else
+                    if (_visuals.TryGetValue(s.BaseId, out entry) && entry.GameObject != null)
                     {
                         // 拠点（バニラ建物）は配置後に移動しないが、念のため毎回位置だけ同期する
                         // （回転は生成時の値のまま固定＝建物が向きを変えることは無い）。
                         entry.GameObject.transform.position = s.Position;
+                        continue;
                     }
+                    if (entry != null)
+                    {
+                        // GameObjectが（このクラス外の要因で）破棄済み。古いエントリを捨てて
+                        // 下の生成経路へ合流する（Hiddenは既に立っているはずなので即座に確認が取れる）。
+                        _visuals.Remove(s.BaseId);
+                    }
+
+                    // Task75: オーバーレイのGameObjectはまだ作らない。先にバニラ実体を隠す要求だけを
+                    // 出し、simスレッドが実際にBuilding.Flags.Hiddenを立てたと確認できるまで待つ。
+                    // これにより「バニラ実体とオーバーレイが同一フレームで両方見える」瞬間
+                    // （報告された二重表示バグ）が構造的に起こらなくなる。
+                    if (!BaseHiddenSync.IsHiddenApplied(s.BaseId))
+                    {
+                        BaseHiddenSync.SetDesired(s.BaseId, true); // 冪等：待機中は毎フレーム呼んでよい
+                        _pendingOverlays.Add(s.BaseId);
+                        continue;
+                    }
+
+                    // Hidden確認済み。ここで初めてオーバーレイを生成する（要件2、スタッキング防止）。
+                    _pendingOverlays.Remove(s.BaseId);
+                    entry = CreateVisual(s, kind, name);
+                    if (entry == null)
+                    {
+                        _failedInstances.Add(s.BaseId);
+                        // 生成に失敗したのでオーバーレイはこの拠点を代表しない。隠したままにすると
+                        // 拠点が何も見えなくなってしまうため、隠す要求を取り消して既定の見た目へ戻す。
+                        BaseHiddenSync.SetDesired(s.BaseId, false);
+                        continue;
+                    }
+                    _visuals[s.BaseId] = entry;
                 }
                 catch (Exception e)
                 {
@@ -179,6 +225,19 @@ namespace CSWarfront.Game
             {
                 _failedInstances.Remove(_staleFailedIds[i]);
             }
+
+            // Task75: スナップショットに無いidはHidden確認待ちも打ち切る（拠点解体等でSyncの対象から
+            // 外れた場合、待機したまま残り続けないように。出していた隠す要求も取り消す）。
+            _stalePendingIds.Clear();
+            foreach (var pendingId in _pendingOverlays)
+            {
+                if (!_seenIds.Contains(pendingId)) _stalePendingIds.Add(pendingId);
+            }
+            for (int i = 0; i < _stalePendingIds.Count; i++)
+            {
+                BaseHiddenSync.SetDesired(_stalePendingIds[i], false);
+                _pendingOverlays.Remove(_stalePendingIds[i]);
+            }
         }
 
         /// <summary>追跡中の全オーバーレイを破棄する（レベルアンロード時、および割り当て変更の反映時、
@@ -200,6 +259,14 @@ namespace CSWarfront.Game
                     // 残っている拠点はこの直後のCreateVisualで即座にtrueへ戻るため実質フリッカーのみ。
                     BaseHiddenSync.SetDesired(kv.Key, false);
                 }
+                // Task75: Hidden確認待ち中の拠点（まだGameObjectを持たない）も同様に隠す要求を
+                // 取り消す。呼び出し元がこの直後にSyncし直す場合、割り当てが残っていれば
+                // またSetDesired(true)から待機し直すだけ（DestroyAllは頻繁に呼ばれる操作ではないため
+                // この程度の待ち直しは許容する、既存のオーバーレイ側フリッカー許容方針と同じ）。
+                foreach (var pendingId in _pendingOverlays)
+                {
+                    BaseHiddenSync.SetDesired(pendingId, false);
+                }
             }
             catch (Exception e)
             {
@@ -208,6 +275,7 @@ namespace CSWarfront.Game
             finally
             {
                 _visuals.Clear();
+                _pendingOverlays.Clear();
                 _failedInstances.Clear();
             }
         }

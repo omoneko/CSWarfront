@@ -30,11 +30,45 @@ namespace CSWarfront.Game
     ///     （BasePlacementWatcher._pendingCreated/_pendingReleasedと全く同じブリッジパターン）。
     ///   - <see cref="ApplyPending"/> はsimスレッド専用（MilitaryManager.OnSimTick、_stateLock
     ///     保持中）から呼び、ペンディングを排出してCS建物バッファへ実際に書き込む。
+    ///   - <see cref="IsHiddenApplied"/> はメインスレッド専用。Hiddenが実際にCS建物バッファへ
+    ///     反映済みかどうかを _lock 経由で安全に読む（Task75、BaseVisuals参照）。
+    ///
+    /// Task75（基地二重表示バグの根本原因と修正）:
+    ///   実機ログ（output_log.txt）で確認したところ、このMODで実際に配置された基地は全て
+    ///   Task74の「Optionsで指定した建物アセット」経路（<see cref="BaseBuildingDesignation"/>）
+    ///   で登録されていた（例: Info.name="MilitaryBase_Army.MilitaryBase_Army_Data"、電力タブの
+    ///   複製プレハブ名"CSWarfront Military Base"等ではない）。ところが旧実装の
+    ///   <see cref="ApplyPending"/> は「対象は必ず WarfrontBasePrefab が登録した自MOD基地プレハブと
+    ///   一致するidのみに限定する」保険チェックとして <see cref="WarfrontBasePrefab.TryMatch"/> のみを
+    ///   見ており、Task74で追加されたもう一方の正規登録経路（BaseBuildingDesignation）を見ていなかった
+    ///   （Task61時点のコメントのまま更新されていなかった）。
+    ///   結果、BaseBuildingDesignation経由で登録された基地は BaseVisuals.Sync がオーバーレイを生成し
+    ///   SetDesiredで「隠すべき」と要求しても、ApplyPendingのTryMatchが常にfalseを返すため
+    ///   Building.Flags.Hidden が永久に立たない＝バニラの実体とオーバーレイが同時に描画され続ける
+    ///   （プレイヤーが割り当てたオーバーレイのアセット名と配置に使ったアセット名が一致していれば、
+    ///   文字通り「同じ建物」が重なって見える。占領等でそのオーバーレイが破棄されるまで消えない
+    ///   ＝ユーザー報告の「一定時間」と一致）。修正: BasePlacementWatcher.ProcessCreatedと全く同じ
+    ///   2経路判定（WarfrontBasePrefab.TryMatch → BaseBuildingDesignation.TryMatch）へ揃えた。
+    ///
+    ///   加えて、これとは独立した理論上の競合（メインスレッドでオーバーレイ生成 → 次のsimスレッド
+    ///   tickでHidden反映、の1tick分のギャップ）も閉じる。<see cref="_confirmedHidden"/>
+    ///   （ApplyPendingが実際にHiddenを立てた瞬間だけ追加）を新設し、BaseVisuals.Syncは
+    ///   IsHiddenAppliedがtrueを返すまでオーバーレイの生成を待つ（先にSetDesired(true)だけ発行し、
+    ///   確認が取れてから初めてGameObjectを作る）。これにより「バニラ実体とオーバーレイが同一フレームで
+    ///   同時に見える瞬間」が理論上も発生しなくなる。
     /// </summary>
     internal static class BaseHiddenSync
     {
         private static readonly object _lock = new object();
         private static readonly Dictionary<ushort, bool> _pending = new Dictionary<ushort, bool>();
+
+        // Task75: ApplyPendingが実際にBuilding.Flags.Hiddenを立てた（かつ、まだ外していない）baseIdの集合。
+        // _lock で保護し、メインスレッド（IsHiddenApplied経由）とsimスレッド（ApplyPending経由）の
+        // 両方から安全にアクセスできるようにする（_pendingと同じロックを共有、専用ロックを増やさない）。
+        // UnhideAllForSave/ReapplyAfterSaveはセーブ処理向けの一時的な物理ビット操作であり、このMODの
+        // 「隠したい」という論理的な意図（＝オーバーレイがその基地を代表しているという事実）は変わらない
+        // ため、この2メソッドはここを一切更新しない（更新するとセーブ中にオーバーレイが一瞬消える）。
+        private static readonly HashSet<ushort> _confirmedHidden = new HashSet<ushort>();
 
         // Task72: 現在このMODが Building.Flags.Hidden を立てていると認識している建物id集合
         // （simスレッド専用、ロック不要＝MilitaryManager.OnSimTick/SerializeLocked経由の
@@ -51,6 +85,18 @@ namespace CSWarfront.Game
         public static void SetDesired(ushort baseId, bool hidden)
         {
             lock (_lock) { _pending[baseId] = hidden; }
+        }
+
+        /// <summary>
+        /// メインスレッド専用（Task75）。<see cref="SetDesired"/>(baseId, true) で要求した
+        /// Hiddenが、simスレッドの <see cref="ApplyPending"/> によって実際にCS建物バッファへ
+        /// 反映済みかどうかを返す。BaseVisualsはこれがtrueになるまでオーバーレイのGameObjectを
+        /// 生成しない（生成前に隠れていないバニラ実体と一瞬でも同時に見える＝報告された二重表示
+        /// バグを、確認が取れるまで待つことで構造的に防ぐ）。
+        /// </summary>
+        public static bool IsHiddenApplied(ushort baseId)
+        {
+            lock (_lock) { return _confirmedHidden.Contains(baseId); }
         }
 
         /// <summary>
@@ -74,6 +120,11 @@ namespace CSWarfront.Game
             if (!Singleton<BuildingManager>.exists) return;
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
 
+            // Task75: このtickで確定した確認状態の変化を集め、Building構造体のロックとは別に
+            // 一度だけ_lockを取って反映する（ループ本体を_lock保持中に回さないため）。
+            List<ushort> newlyHidden = null;
+            List<ushort> newlyUnhidden = null;
+
             foreach (var kv in drained)
             {
                 try
@@ -83,23 +134,44 @@ namespace CSWarfront.Game
                     if (id >= buf.Length) continue;
                     if ((buf[id].m_flags & Building.Flags.Created) == 0) continue; // 既に解体済み等
 
+                    // Task75: 対象は必ずこのMODが登録した自基地idのみに限定する（多層防御、
+                    // クラス冒頭コメント参照）。BasePlacementWatcher.ProcessCreatedが基地登録時に
+                    // 使う判定と全く同じ2経路（電力タブの複製プレハブ／Optionsで指定した建物アセット）
+                    // を両方見る。旧実装はWarfrontBasePrefab.TryMatchのみを見ており、Task74で追加された
+                    // BaseBuildingDesignation経由の基地でHiddenが永久に立たない不具合の原因だった。
                     BaseType ignored;
-                    if (buf[id].Info == null || !WarfrontBasePrefab.TryMatch(buf[id].Info, out ignored)) continue;
+                    if (buf[id].Info == null) continue;
+                    bool isOwnBase = WarfrontBasePrefab.TryMatch(buf[id].Info, out ignored) ||
+                        BaseBuildingDesignation.TryMatch(buf[id].Info.name, out ignored);
+                    if (!isOwnBase) continue;
 
                     if (hidden)
                     {
                         buf[id].m_flags |= Building.Flags.Hidden;
                         _hiddenIds.Add(id);
+                        (newlyHidden ?? (newlyHidden = new List<ushort>())).Add(id);
                     }
                     else
                     {
                         buf[id].m_flags &= ~Building.Flags.Hidden;
                         _hiddenIds.Remove(id);
+                        (newlyUnhidden ?? (newlyUnhidden = new List<ushort>())).Add(id);
                     }
                 }
                 catch (Exception e)
                 {
                     ModConfig.LogError("BaseHiddenSync.ApplyPending: base " + kv.Key + " error: " + e);
+                }
+            }
+
+            if (newlyHidden != null || newlyUnhidden != null)
+            {
+                lock (_lock)
+                {
+                    if (newlyHidden != null)
+                        for (int i = 0; i < newlyHidden.Count; i++) _confirmedHidden.Add(newlyHidden[i]);
+                    if (newlyUnhidden != null)
+                        for (int i = 0; i < newlyUnhidden.Count; i++) _confirmedHidden.Remove(newlyUnhidden[i]);
                 }
             }
         }
@@ -200,7 +272,7 @@ namespace CSWarfront.Game
             finally
             {
                 _hiddenIds.Clear();
-                lock (_lock) { _pending.Clear(); }
+                lock (_lock) { _pending.Clear(); _confirmedHidden.Clear(); } // Task75
             }
         }
     }
