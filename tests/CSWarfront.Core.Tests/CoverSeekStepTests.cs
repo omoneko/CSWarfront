@@ -703,4 +703,76 @@ public class CoverSeekStepTests
         Assert.Equal(0f, self.CoverSuppressionRemaining);
         Assert.Equal(0f, self.Position.X, 3); // Hold: never moves, regardless of any Task52 timer
     }
+
+    // --- Task77: 「地上ユニットが海の中に入っていける」不具合の対策（陸上ユニットに水中の立ち位置を選ばせない） ---
+
+    // 全域を水中と判定するフェイク（この座標系ではどこで遮蔽物を選んでも必ず水中扱いになる）。
+    private class AlwaysWater : IWaterSampler
+    {
+        public bool IsWater(float x, float z) { return true; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return true; }
+    }
+
+    // Mode2（交戦中）: TryFindBestCoverが見つけた立ち位置が水中なら、遮蔽が「見つからなかった」のと
+    // 同じ扱いにする（CoverDestination/CoverHoldは付かない。ただしCoverTargetIdは既存仕様どおり
+    // 記録される＝同じ相手との交戦中は毎tick再探索しない）。
+    [Fact]
+    public void Advance_rejects_engaging_cover_candidate_located_in_water()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f); // 陸上なら普通に選ばれるはずの候補
+        s.Water = new AlwaysWater();
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.False(self.CoverHold);
+        Assert.Equal(enemy.InstanceId, self.CoverTargetId);
+    }
+
+    // Mode3（進軍中のbounding advance）: 前進条件(MinForwardProgress)・迂回条件(MaxCoverDetour)を
+    // 両方満たす候補であっても、水中なら却下し、道路経路(Path/OrderTargetPos)優先へフォールバックする。
+    [Fact]
+    public void Advance_rejects_bounding_cover_candidate_located_in_water()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        self.State = UnitState.Moving;
+        self.OrderTargetPos = new WorldPos(200, 0, 0);
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // Advance_gives_forward_progressing_CoverDestination...と同じ、陸上なら選ばれる候補
+        s.Water = new AlwaysWater();
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.False(self.CoverHold);
+    }
+
+    // 回帰確認: state.Waterが未供給(null)なら、従来どおり水中判定は一切行わず普通に候補を選ぶ
+    // （RoadGraph/Cover/Heightと同じ「未供給時は安全側フォールバック」パターン）。
+    [Fact]
+    public void Advance_still_picks_cover_when_WaterSampler_is_absent()
+    {
+        var s = BaseState();
+        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
+        self.State = UnitState.Engaging;
+        self.TargetId = enemy.InstanceId;
+
+        s.Cover = new CoverMap();
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        Assert.Null(s.Water);
+
+        CoverSeekStep.Advance(s, 0.01f);
+
+        Assert.True(self.CoverDestination.HasValue);
+    }
 }

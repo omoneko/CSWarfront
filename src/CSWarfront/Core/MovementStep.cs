@@ -86,6 +86,45 @@ namespace CSWarfront.Core
         /// 設定する（道路の高さに合わせるMovementStepの陸上ロジックとは全く別の垂直方向の扱い）。</summary>
         public const float CruiseAltitude = 120f;
 
+        // --- Task77: 「地上ユニットが橋の上を渡ってくれない」「海の中に入っていける」不具合の修正 ---
+        //
+        // 【橋】RoadGraphBuilderを確認した結果、Road-serviceのセグメントは橋も含めて全て道路網グラフに
+        // 採用されており（ItemClass.Service.Roadでの判定のみ、橋固有のフラグでの除外は無い）、グラフ
+        // 自体に橋の欠落は無かった。真因はCore側のY解決にあった: Task53は「TrySampleHeightが成功すれば
+        // X/Zを計算した直後に必ずそれでYを上書きする」を、ウェイポイント追従(ConsumePath)と直線移動
+        // (AdvanceStraight)の区別なく一律に適用していた。橋は地形をその高さまでフラット化しない（橋桁は
+        // 地形とは別に浮いている構造物）ため、橋の直下でGame層のSurfaceHeightSampler
+        // (TerrainManager.SampleDetailHeight)が返すのは水面/川底の高さであり、それが橋の上のユニットの
+        // Yへ採用されると「橋を渡っているのに水中へ沈んで見える」→ユーザーには「橋を渡ってくれない」
+        // ように見えていた（MaxSurfaceDeviationの15fクランプは橋の高さ次第で乖離が15f以内に収まる
+        // こともあり、常にガードできるわけではなかった）。
+        //
+        // 修正: Yの取得元を移動の文脈で明確に分離する。
+        //   - 経路上（Path/ConsumePath、ウェイポイントを道路網に沿って辿っている間）: Terrainサンプラー
+        //     には一切触れず、道路網ノード自身のY（RoadGraphBuilderがNetNode.m_position.yから
+        //     そのまま持ってきた値＝橋なら橋桁の高さ）をそのまま採用する（Task37が最初に導入した
+        //     挙動へ、経路上に限定して回帰させた形）。
+        //   - オフロード（経路が尽きた後の直線フォールバック、遮蔽移動AdvanceTowardCover、集結移動
+        //     AdvanceTowardRallyの直線部分、経路自体が無いケース。いずれもAdvanceStraight/MoveToward
+        //     経由）: 従来どおりstate.Height(IHeightSampler)で"見た目の"地表へスナップする
+        //     （Task53/55の多層防御はそのまま維持）。
+        //
+        // 【海】陸上(Land)ユニットのオフロード移動には、Sea/AirのAdvanceSeaと違って水域チェックが
+        // 一切無く、これが「地上ユニットが海の中に入っていける」不具合の直接の原因だった
+        // （state.Water(IWaterSampler)自体はTask61でGame層まで配線済みだったが、Land分岐の
+        // ConsumePath/AdvanceStraightからは一度も参照されていなかった）。
+        // 修正: オフロード移動（AdvanceStraight/MoveToward）でのみ、移動後の着地点がwater.IsWaterなら
+        // そのtickの移動を丸ごとキャンセルする（Positionを更新しない＝波打ち際で足止めする）。
+        // AdvanceSea（陸へ踏み込む一歩を捨てて足止めする、Task61）と対称な設計にし、タイムアウトで
+        // Idleへ遷移させたりはしない（u.State/OrderTargetPosは変更しないため、後続tickで目的地が
+        // 変わる・道路網ができる等の理由で経路が見つかれば自然に再開できる、シンプルさと決定性を
+        // 優先した仕様）。経路上(ConsumePath)には意図的にこのチェックを追加しない
+        // ——橋の直下はHasWater的には"水"だが、路面(道路網ノード)を辿っている限りは通行可能で
+        // なければならないため（水域チェックを経路上にまで広げると橋を渡れなくなる回帰になる）。
+        //
+        // CoverSeekStep側にも対をなす修正を入れている（陸上ユニットの立ち位置候補が水中ならその候補を
+        // 棄却する）。詳細はCoverSeekStep.csを参照。
+
         public static void Advance(WarState state, float dt)
         {
             IHeightSampler height = state.Height; // Task53: null-safeなローカルへ1回だけ拾っておく。
@@ -121,13 +160,13 @@ namespace CSWarfront.Core
 
                 if (u.CoverDestination.HasValue)
                 {
-                    AdvanceTowardCover(u, stepLen, dt, height);
+                    AdvanceTowardCover(u, stepLen, dt, height, water);
                     continue;
                 }
 
                 if (u.Order == UnitOrder.RallyHold)
                 {
-                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen, height);
+                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen, height, water);
                     continue;
                 }
 
@@ -148,9 +187,9 @@ namespace CSWarfront.Core
 
                 if (!u.OrderTargetPos.HasValue) continue;
 
-                stepLen = ConsumePath(u, stepLen, height);
+                stepLen = ConsumePath(u, stepLen);
                 if (stepLen > 0f)
-                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen, height);
+                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen, height, water);
             }
         }
 
@@ -158,15 +197,15 @@ namespace CSWarfront.Core
         /// 計算した道路経路(Path)があればまずそれを消化し、残りは直線移動でフォールバックする
         /// （ConsumePath/AdvanceStraightは通常のOrderTargetPos移動と全く同じヘルパーを再利用する）。
         /// CoverArrivalDistance以内まで近づいたら以後は何もしない（その場に留まる）。</summary>
-        private static void AdvanceTowardRally(UnitInstance u, float stepLen, IHeightSampler height)
+        private static void AdvanceTowardRally(UnitInstance u, float stepLen, IHeightSampler height, IWaterSampler water)
         {
             WorldPos rally = u.RallyPoint.Value;
             float dist = u.Position.HorizontalDistanceTo(rally);
             if (dist <= CoverArrivalDistance) return;
 
-            stepLen = ConsumePath(u, stepLen, height);
+            stepLen = ConsumePath(u, stepLen);
             if (stepLen > 0f)
-                AdvanceStraight(u, rally, stepLen, height);
+                AdvanceStraight(u, rally, stepLen, height, water);
         }
 
         /// <summary>CoverDestinationへ向けたキネマティック移動。CoverArrivalDistance以内に入ったら、
@@ -174,7 +213,7 @@ namespace CSWarfront.Core
         /// 「CoverDestinationをクリアして次tickから通常の経路/直線移動または次の遮蔽評価へ委ねる」
         /// (false、互換維持用のフォールバック経路)かを分岐する。それ以外の距離ではAdvanceStraightと
         /// 同じ補間で進む（この間はCoverHoldTimerを0のまま維持し、実際に静止した時間だけを計測する）。</summary>
-        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt, IHeightSampler height)
+        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt, IHeightSampler height, IWaterSampler water)
         {
             WorldPos coverPos = u.CoverDestination.Value;
             float distBefore = u.Position.HorizontalDistanceTo(coverPos);
@@ -209,11 +248,16 @@ namespace CSWarfront.Core
 
             // まだ到達していない＝保持はまだ始まっていないのでタイマーは0のまま。
             u.CoverHoldTimer = 0f;
-            AdvanceStraight(u, coverPos, stepLen, height);
+            AdvanceStraight(u, coverPos, stepLen, height, water);
         }
 
-        /// <summary>Pathが残っていればウェイポイントを順に消化する。残ったstepLen（直線フォールバック用）を返す。</summary>
-        private static float ConsumePath(UnitInstance u, float stepLen, IHeightSampler height)
+        /// <summary>Pathが残っていればウェイポイントを順に消化する。残ったstepLen（直線フォールバック用）を返す。
+        /// Task77: 経路上（道路網ノード間）の移動であり、Terrainサンプラー/水域チェックのどちらにも
+        /// 一切触れない（下のMoveTowardOnPath/waypointスナップ参照）。橋を含む道路網ノードのYは
+        /// RoadGraphBuilderが道路網自身から取得した値であり信頼できるため、地形サンプラーで上書きすると
+        /// 橋の直下の水面/地形へ沈む（クラス冒頭のTask77コメント参照）。同じ理由で水域チェックも行わない
+        /// ——橋の直下はHasWater的に"水"だが、道路網を辿っている限り通行可能でなければならない。</summary>
+        private static float ConsumePath(UnitInstance u, float stepLen)
         {
             if (u.Path == null) return stepLen;
 
@@ -224,17 +268,17 @@ namespace CSWarfront.Core
 
                 if (dist <= stepLen || dist <= 0.01f)
                 {
-                    // Task37: ウェイポイントに到達したらそのウェイポイントのYをそのまま採用する
-                    // （旧: u.Position.Yを維持 → 路面から浮く原因だった）。
-                    // Task53: state.Heightが供給されていれば、そのウェイポイントのYではなく
-                    // 実際の地表（建設後）のYへスナップする（ウェイポイント自体のYが古い/不正確でも安全）。
-                    u.Position = ResolvePosition(waypoint.X, waypoint.Y, waypoint.Z, height);
+                    // Task37/Task77: ウェイポイントに到達したらそのウェイポイントのYをそのまま採用する
+                    // （道路網ノード自身のY＝橋なら橋桁の高さ）。Task53〜76はここもTerrainサンプラーで
+                    // 上書きしていたが、それが「橋を渡ってくれない」不具合の真因だったため、経路上では
+                    // 二度とTerrainサンプラーを参照しない（クラス冒頭のTask77コメント参照）。
+                    u.Position = new WorldPos(waypoint.X, waypoint.Y, waypoint.Z);
                     stepLen -= dist;
                     u.PathIndex++;
                 }
                 else
                 {
-                    MoveToward(u, waypoint, stepLen, height);
+                    MoveTowardOnPath(u, waypoint, stepLen);
                     return 0f;
                 }
             }
@@ -242,30 +286,67 @@ namespace CSWarfront.Core
             return stepLen;
         }
 
-        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height)
-        {
-            float dist = u.Position.HorizontalDistanceTo(target);
-            if (dist <= stepLen || dist <= 0.01f)
-                // 到達: targetのYをそのまま採用（Task37、旧:u.Position.Y維持）。
-                // Task53: state.Heightが供給されていれば実際の地表のYへスナップする。
-                u.Position = ResolvePosition(target.X, target.Y, target.Z, height);
-            else
-                MoveToward(u, target, stepLen, height);
-        }
-
-        /// <summary>X/Zと同じ補間係数(t = stepLen/dist)でYも目標へ向けて補間する（Task37）。
-        /// 旧仕様は常に u.Position.Y を維持していたため、道路の勾配（橋・坂）を無視して水平飛行して
-        /// しまい「路面から浮いている」ように見えるバグの原因だった。X/Zの補間ロジック自体は変更していない
-        /// （オーバーシュートは発生しない、既存のAdvance_stops_at_target_without_overshootで保証）。
-        /// Task53: heightが供給されていれば、この補間したY自体は使わず、計算済みのX/Zで実際の地表を
-        /// サンプリングした値をYに採用する（ResolvePositionが分岐）。</summary>
-        private static void MoveToward(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height)
+        /// <summary>Task77: 経路上（ウェイポイント間）の部分移動。X/Zと同じ補間係数でウェイポイント自身の
+        /// Yへ向けて補間するのみで、Terrainサンプラー/水域チェックのどちらにも触れない（ConsumePathの
+        /// 到達分岐と同じ理由。橋の勾配はウェイポイントのY自体が表現しているため、これで十分かつ正確）。</summary>
+        private static void MoveTowardOnPath(UnitInstance u, WorldPos target, float stepLen)
         {
             float dist = u.Position.HorizontalDistanceTo(target);
             if (dist <= 0.01f) return;
             float t = stepLen / dist;
             float nx = u.Position.X + (target.X - u.Position.X) * t;
             float nz = u.Position.Z + (target.Z - u.Position.Z) * t;
+            float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
+            u.Position = new WorldPos(nx, ny, nz);
+        }
+
+        /// <summary>Task77: オフロード（経路が尽きた後の直線フォールバック/遮蔽移動/集結移動の直線部分）の
+        /// 移動。ConsumePathと異なり、ここはTerrainサンプラー（見た目の地表へスナップ、Task53/55）と
+        /// 水域チェック（陸上ユニットが水中へ踏み込む一歩を丸ごとキャンセルする、Task77）の両方を適用する。
+        /// 道路網に無い場所を進む以上、地表の変化を追従しつつ、水域には入らせない。
+        /// Task77ハードニング: dist&lt;=0.01f（呼び出し時点で既にtargetへ到達済み）なら何もしない。
+        /// これはConsumePathがPathを最後まで消化し、かつPathの最終ウェイポイントがOrderTargetPosと
+        /// 一致する（＝道路が目的地まで通じている）場合に発生する「消化しきれなかった端数stepLen」で
+        /// このメソッドが呼ばれるケースを吸収するために必須: そのケースではConsumePathが既に道路網
+        /// ノード自身のY（橋なら橋桁の高さ）へ厳密にスナップ済みであり、dist==0のこの時点でTerrain
+        /// サンプラーによる"到達"処理を重ねて行うと、せっかく経路上ロジックが避けたはずの地表への
+        /// スナップが土壇場で起きてしまう（橋の終点＝目的地というケースで再発する）。実際に0より大きい
+        /// 距離を移動する時だけ地表判定/水域判定を適用する、という原則をここで明確にする。</summary>
+        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height, IWaterSampler water)
+        {
+            float dist = u.Position.HorizontalDistanceTo(target);
+            if (dist <= 0.01f) return; // 既に到達済み（多くの場合ConsumePathの経路上スナップ）: 何もしない。
+
+            if (dist <= stepLen)
+            {
+                // Task77: 着地点そのものが水中なら、このtickは一切移動しない（波打ち際で足止め）。
+                if (water != null && water.IsWater(target.X, target.Z)) return;
+                // 到達: targetのYをそのまま採用（Task37、旧:u.Position.Y維持）。
+                // Task53: state.Heightが供給されていれば実際の地表のYへスナップする。
+                u.Position = ResolvePosition(target.X, target.Y, target.Z, height);
+            }
+            else
+            {
+                MoveToward(u, target, stepLen, height, water);
+            }
+        }
+
+        /// <summary>X/Zと同じ補間係数(t = stepLen/dist)でYも目標へ向けて補間する（Task37、オフロード専用）。
+        /// 旧仕様は常に u.Position.Y を維持していたため、道路の勾配（橋・坂）を無視して水平飛行して
+        /// しまい「路面から浮いている」ように見えるバグの原因だった。X/Zの補間ロジック自体は変更していない
+        /// （オーバーシュートは発生しない、既存のAdvance_stops_at_target_without_overshootで保証）。
+        /// Task53: heightが供給されていれば、この補間したY自体は使わず、計算済みのX/Zで実際の地表を
+        /// サンプリングした値をYに採用する（ResolvePositionが分岐）。
+        /// Task77: 一歩先(nx,nz)が水域なら、このtickは一切移動しない（陸上ユニットが海へ踏み込む一歩を
+        /// 丸ごとキャンセルする＝波打ち際で足止め、AdvanceSeaの陸地版と対称の設計）。</summary>
+        private static void MoveToward(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height, IWaterSampler water)
+        {
+            float dist = u.Position.HorizontalDistanceTo(target);
+            if (dist <= 0.01f) return;
+            float t = stepLen / dist;
+            float nx = u.Position.X + (target.X - u.Position.X) * t;
+            float nz = u.Position.Z + (target.Z - u.Position.Z) * t;
+            if (water != null && water.IsWater(nx, nz)) return;
             float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
             u.Position = ResolvePosition(nx, ny, nz, height);
         }

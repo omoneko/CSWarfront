@@ -617,10 +617,17 @@ public class MovementStepTests
             "expected the unit to resume advancing once MaxCoverHoldHours elapsed");
     }
 
-    // --- Task53: state.Heightが供給されている場合、Yは常にサンプリング値へ置き換わる ---
+    // --- Task53/Task77: state.Heightが供給されている場合のYの取得元 ---
 
+    // Task77（「地上ユニットが橋の上を渡ってくれない」不具合の修正）: 経路上（ウェイポイント追従中）は
+    // Terrainサンプラーに一切触れず、ウェイポイント自身のY（道路網ノードのY＝橋なら橋桁の高さ）を
+    // そのまま採用する。旧仕様（Task53〜76）はここもTrySampleHeightの結果で上書きしていたため、
+    // 橋の直下（水面/川底）の高さがFakeHeightSamplerのように"それらしい"値を返すと、橋を渡っている
+    // ユニットが水中へ沈んで見える不具合になっていた。乖離(3)はMaxSurfaceDeviation(15)以内に収まる
+    // 値にしてあり、単に乖離クランプで弾かれているのではなく、経路上ではサンプラー自体を参照しない
+    // という仕様変更そのものを検証する。
     [Fact]
-    public void Advance_uses_sampled_height_instead_of_waypoint_y_on_arrival_when_HeightSampler_supplied()
+    public void Advance_uses_waypoint_y_not_sampled_height_on_arrival_while_following_path()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -628,19 +635,67 @@ public class MovementStepTests
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(10, 7, 0);
-        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // ウェイポイント自体のY=7
+        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // ウェイポイント自体のY=7（橋桁の高さ想定）
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
-        s.Height = new FakeHeightSampler(); // TrySampleHeight(10, 0) -> true, 10
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(10, 0) -> true, 10（橋の下の水面/地形想定）
 
         // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達（ウェイポイントに到達）
         MovementStep.Advance(s, 2f);
 
         Assert.Equal(10f, s.Units[0].Position.X, 1);
-        // Task37の旧仕様なら Y はウェイポイントの7になるはずだが、Heightサンプラーがあれば
-        // それを無視して TrySampleHeight(10, 0) = 10 が採用される。
-        Assert.Equal(10f, s.Units[0].Position.Y, 3);
+        // Task77: 経路上なのでサンプラーの値(10)は無視し、ウェイポイント自身のY(7)へ厳密にスナップする。
+        Assert.Equal(7f, s.Units[0].Position.Y, 3);
+    }
+
+    // Task77: ウェイポイントへ向かう部分移動中も同様にサンプラーを無視し、ウェイポイントのYへ向けた
+    // 補間を維持する（Advance_interpolates_y_toward_waypoint_while_following_pathと同じ幾何・期待値に
+    // HeightSamplerを追加しても結果が変わらないことを確認する回帰テスト）。
+    [Fact]
+    public void Advance_interpolates_toward_waypoint_y_ignoring_HeightSampler_during_partial_path_move()
+    {
+        var s = UnitWithPath();
+        s.Units[0].Position = new WorldPos(0, 42, 0);
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z、経路上では無視されるはず
+
+        MovementStep.Advance(s, 0.6f);
+
+        Assert.Equal(40.6f, s.Units[0].Position.Y, 1);
+    }
+
+    // Task77（「地上ユニットが橋の上を渡ってくれない」不具合の統合的な回帰テスト）: 橋を模した
+    // Path（Y=0の岸→Y=20の橋の頂点→Y=0の対岸、橋の直下にFakeHeightSamplerが常に低い値(x+z、
+    // 岸のY=0付近)を返す）を渡り切るまで、Yがウェイポイントの高さ通りに上下し、一度も
+    // サンプラーの値へ落ち込まないことを確認する。
+    [Fact]
+    public void Advance_crosses_a_bridge_path_following_waypoint_heights_without_dropping_to_sampled_terrain()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(200, 0, 0);
+        u.Path = new List<WorldPos>
+        {
+            new WorldPos(100, 20, 0), // 橋の頂点
+            new WorldPos(200, 0, 0),  // 対岸
+        };
+        u.PathIndex = 0;
+        u.PathTarget = u.OrderTargetPos;
+        s.Units.Add(u);
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z（橋の下の地形/水面想定）
+
+        // 橋の頂点までちょうど到達するステップ長。
+        MovementStep.Advance(s, 100f / TankSpeedPerHour);
+        Assert.Equal(100f, s.Units[0].Position.X, 1);
+        Assert.Equal(20f, s.Units[0].Position.Y, 2); // サンプラー(100)ではなく橋桁のY(20)
+
+        // 対岸まで進む。
+        MovementStep.Advance(s, 100f / TankSpeedPerHour);
+        Assert.Equal(200f, s.Units[0].Position.X, 1);
+        Assert.Equal(0f, s.Units[0].Position.Y, 2); // サンプラー(200)ではなく対岸のY(0)
     }
 
     [Fact]
@@ -918,5 +973,121 @@ public class MovementStepTests
         Assert.Equal(0.542f, u.Position.X, 2);
         Assert.Equal(0f, u.Position.Z, 1);
         Assert.Equal(0, u.PathIndex);
+    }
+
+    // --- Task77: 「地上ユニットが海の中に入っていける」不具合の修正（陸上ユニットのオフロード水域禁止） ---
+
+    // AdvanceSeaのFakeWaterSampler（x<=boundaryが水）とは逆に、「boundary以上が水」というフェイク
+    // （陸から海へ向けて進む陸上ユニットのシナリオに合わせた向き）。
+    private class FakeWaterBeyondX : IWaterSampler
+    {
+        private readonly float _boundaryX;
+        public FakeWaterBeyondX(float boundaryX) { _boundaryX = boundaryX; }
+        public bool IsWater(float x, float z) { return x >= _boundaryX; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
+    }
+
+    private class FakeWaterBeyondZ : IWaterSampler
+    {
+        private readonly float _boundaryZ;
+        public FakeWaterBeyondZ(float boundaryZ) { _boundaryZ = boundaryZ; }
+        public bool IsWater(float x, float z) { return z >= _boundaryZ; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
+    }
+
+    // オフロードの直線フォールバック（Pathなし）で、次の一歩が水域に入るなら、そのtickは一切移動しない
+    // （波打ち際で足止め）。何tick進めても同じ場所に留まり続けることも確認する（AdvanceSeaの陸地版と
+    // 対称の、シンプルで決定的なルール）。
+    [Fact]
+    public void Advance_land_unit_off_road_step_into_water_is_cancelled_and_unit_stays_at_the_shoreline()
+    {
+        var s = OneMovingUnit(); // (0,0,0) -> OrderTargetPos (1000,0,0), Pathなし
+        s.Water = new FakeWaterBeyondX(3f); // x>=3が水（stepLen(≈5.4)は一歩でこれを超える）
+
+        MovementStep.Advance(s, 1f);
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+
+        // 複数tick進めても、水域の外に留まったまま（Idle等への自動遷移はしない、単純な足止め）。
+        MovementStep.Advance(s, 5f);
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+    }
+
+    // 集結(RallyHold)の直線フォールバックでも同様に水域侵入は禁止される。
+    [Fact]
+    public void Advance_RallyHold_unit_off_road_step_into_water_is_cancelled()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(1000, 0, 0);
+        s.Units.Add(u);
+        s.Water = new FakeWaterBeyondX(3f);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.X, 3);
+    }
+
+    // 遮蔽移動(AdvanceTowardCover)の直線区間でも同様に水域侵入は禁止される。
+    [Fact]
+    public void Advance_toward_CoverDestination_off_road_step_into_water_is_cancelled()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Engaging;
+        u.CoverDestination = new WorldPos(0, 0, 1000); // 南北方向、Z方向へ動こうとする
+        s.Units.Add(u);
+        s.Water = new FakeWaterBeyondZ(3f); // z>=3が水
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, s.Units[0].Position.Z, 3);
+    }
+
+    // Task77の要（橋の回帰防止）: 経路上(Path/ConsumePath)は水域チェックの対象外である。橋の直下は
+    // HasWater的に"水"だが、道路網ノードを辿っている限り通行可能でなければならない。水域サンプラーを
+    // 供給しても、Path追従の結果がAdvance_large_step_crosses_first_waypoint_and_continues_toward_second
+    // と全く同じであること（水域チェックで足止めされていないこと）を確認する。
+    [Fact]
+    public void Advance_water_sampler_does_not_block_movement_while_following_a_road_Path_bridge_regression()
+    {
+        var s = UnitWithPath(); // waypoints (100,0,0), (100,0,100)
+        s.Water = new FakeWaterBeyondX(0f); // x>=0は全て"水"（橋の下を含む極端なケース）
+
+        MovementStep.Advance(s, 27.6855469f); // Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt
+        var u = s.Units[0];
+
+        Assert.Equal(100f, u.Position.X, 1);
+        Assert.Equal(50f, u.Position.Z, 1);
+        Assert.Equal(1, u.PathIndex);
+    }
+
+    // Path消化後のオフロード残り区間（"経路が目的地の手前で尽きたときの最終区間"）だけが水域チェックの
+    // 対象になり、経路上で既に消化した部分は影響を受けないことを確認する。
+    [Fact]
+    public void Advance_blocks_only_the_off_road_remainder_after_Path_is_exhausted_when_it_enters_water()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(1000, 0, 0);
+        u.Path = new List<WorldPos> { new WorldPos(50, 0, 0) }; // 陸上の道路の終点
+        u.PathIndex = 0;
+        u.PathTarget = u.OrderTargetPos;
+        s.Units.Add(u);
+        s.Water = new FakeWaterBeyondX(55f); // 道路の終点(50)より先、水域は x>=55
+
+        // stepLen=60: ConsumePathが50を消化(残り10)、オフロード残り10を(1000,0,0)へ向けて進めようとすると
+        // nx = 50 + 950*(10/950) ≈ 59.95 >= 55 -> 水域なのでオフロード分は一切動かない。
+        MovementStep.Advance(s, 60f / TankSpeedPerHour);
+
+        Assert.Equal(50f, u.Position.X, 1); // 道路の終点で足止め（消化済みの50fは失われない）
+        Assert.Equal(1, u.PathIndex); // ウェイポイントは消化済み
     }
 }

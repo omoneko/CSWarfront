@@ -44,6 +44,14 @@ namespace CSWarfront.Core
     ///   4. 膠着ウォッチドッグ: OrderTargetPosまでの距離が一定時間（StallTimeoutHours）
     ///      StallEpsilon以上縮まらなければ、CoverSuppressedHoursの間だけ遮蔽探索そのものを完全に
     ///      止め、道路経路をそのまま進ませる（Belt and braces：上記1〜3で捕捉しきれない膠着への保険）。
+    ///
+    /// Task77（「地上ユニットが海の中に入っていける」不具合の対策の一部）: TryFindBestCoverが返す
+    /// 立ち位置（CoverMap.StandingPosition＝遮蔽物の脅威側の反対側へStandoffMargin分だけ離れた点）は、
+    /// 遮蔽物が海沿いにある場合、水域側へ計算されてしまうことがある。state.Water(IWaterSampler)が
+    /// 供給されており、その候補が水中と判定されれば「見つからなかった」のと同じ扱い（既存の
+    /// else分岐＝CoverDestination/CoverHoldをクリアし、Mode2は判断を記憶、Mode3は道路経路優先）にする。
+    /// これでMovementStep側のオフロード水域チェック（AdvanceStraight/MoveToward、MovementStep.cs参照）
+    /// と対になり、「そもそも水中の立ち位置を選ばせない」形で二重に防御する。
     /// </summary>
     public static class CoverSeekStep
     {
@@ -107,6 +115,8 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state, float dt)
         {
+            IWaterSampler water = state.Water; // Task77: null-safeなローカルへ1回だけ拾っておく。
+
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
@@ -192,7 +202,10 @@ namespace CSWarfront.Core
                     // 新規の交戦、または相手が変わった: このtickで即座に（クールダウンを待たず）評価する。
                     u.CoverTargetId = u.TargetId;
                     u.CoverHoldTimer = 0f;
-                    if (state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out WorldPos coverPos))
+                    // Task77: 見つかった候補が水中（state.Water.IsWater）なら「見つからなかった」と
+                    // 同じ扱いにする（陸上ユニットを水際/水中の立ち位置へ誘導しない）。
+                    if (state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out WorldPos coverPos)
+                        && !(water != null && water.IsWater(coverPos.X, coverPos.Z)))
                     {
                         u.CoverDestination = coverPos;
                         u.CoverHold = true;
@@ -246,7 +259,9 @@ namespace CSWarfront.Core
                 // 目的地に確実に近づく（MinForwardProgress）かつ現在地から近い（MaxCoverDetour）
                 // 候補があれば、その遮蔽へ立ち寄って少し隠れる（CoverHold=true、Task52）。
                 WorldPos objective = u.OrderTargetPos.Value;
-                if (state.Cover.TryFindBestCover(u.Position, objective, searchRadius, u.InstanceId, out WorldPos boundCover))
+                // Task77: モード2と同じく、候補が水中なら「見つからなかった」扱いにする。
+                if (state.Cover.TryFindBestCover(u.Position, objective, searchRadius, u.InstanceId, out WorldPos boundCover)
+                    && !(water != null && water.IsWater(boundCover.X, boundCover.Z)))
                 {
                     float distNow = u.Position.HorizontalDistanceTo(objective);
                     float distAfter = boundCover.HorizontalDistanceTo(objective);
