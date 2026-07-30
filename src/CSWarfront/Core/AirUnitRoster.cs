@@ -104,7 +104,23 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
                 b.ShotKind,
-                DomainMask.All); // 航空ユニットは地上・海上・航空のいずれも交戦候補にできる（Task61）。
+                TargetDomainsFor(b.Category));
+        }
+
+        /// <summary>Task85（旧Task61の「Air can hit everything」を廃止）: 兵科ごとの標的ドメイン。
+        ///  - 戦闘機: 航空のみ（戦闘機・爆撃機・自爆ドローンとの空戦専任。地上・海上は撃てない）。
+        ///  - 爆撃機: 地上のみ（航空・海上は撃てない）。
+        ///  - 自爆ドローン: 全領域（特攻兵器という位置づけのまま。ユーザー指定に含まれない兵科のため
+        ///    従来のAllを維持する）。
+        /// 拠点・KAIJUへの攻撃可否はTargetingRules（BaseCombatStep/ThreatCombatStep側）が担う。</summary>
+        private static DomainMask TargetDomainsFor(UnitCategory category)
+        {
+            switch (category)
+            {
+                case UnitCategory.AirSuperiority: return DomainMask.Air;
+                case UnitCategory.TacticalBomber: return DomainMask.Land;
+                default: return DomainMask.All;
+            }
         }
     }
 }

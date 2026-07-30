@@ -195,7 +195,9 @@ namespace CSWarfront.Core
                 // 同様に適用しない。
                 float dmg = CombatMath.DamagePerHit(type.Attack, 0f);
                 targetBase.CurrentHP -= dmg;
-                if (targetBase.CurrentHP < 0f) targetBase.CurrentHP = 0f;
+                // Task85: 自爆ドローンは航空戦力なので、拠点HPは1で頭打ち（占領は地上戦力のみ）。
+                float floor = TargetingRules.BaseHpFloor(type.Domain);
+                if (targetBase.CurrentHP < floor) targetBase.CurrentHP = floor;
 
                 state.CombatZones.ReportCombat(targetBase.Position);
                 self.Position = targetBase.Position;

@@ -285,14 +285,16 @@ public class KamikazeStepTests
         Assert.Equal(500f - 260f, quick.Bases[0].CurrentHP, 3);
     }
 
+    // Task85: 旧仕様（Clamps_base_HP_at_zero...、下限0）から変更。自爆ドローンは航空戦力なので、
+    // どれだけオーバーキルしても拠点HPは1で頭打ちになる（占領＝HP0にできるのは地上戦力のみ）。
     [Fact]
-    public void Clamps_base_HP_at_zero_even_if_the_hit_would_overkill()
+    public void Clamps_base_HP_at_one_because_air_units_cannot_capture()
     {
         var s = DroneAndBase(5f, baseHp: 100f); // 100 - 260 would go negative
 
         KamikazeStep.Advance(s, 1f);
 
-        Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
+        Assert.Equal(1f, s.Bases[0].CurrentHP, 3);
     }
 
     [Fact]

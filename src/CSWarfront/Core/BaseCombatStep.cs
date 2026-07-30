@@ -39,6 +39,9 @@ namespace CSWarfront.Core
                 // のクラス冒頭コメント参照）。
                 if (type.Category.IsKamikaze()) continue;
 
+                // Task85: 戦闘機（対空専任）・空母（プラットフォーム専任）は拠点を一切攻撃しない。
+                if (!TargetingRules.CanAttackBase(type.Category)) continue;
+
                 for (int j = 0; j < state.Bases.Count; j++)
                 {
                     var b = state.Bases[j];
@@ -54,7 +57,10 @@ namespace CSWarfront.Core
                     float accuracy = CombatSynergy.AccuracyFor(state, u, type);
                     float siegeAccuracy = Math.Max(accuracy, SiegeAccuracyFloor);
                     b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy;
-                    if (b.CurrentHP < 0f) b.CurrentHP = 0f;
+                    // Task85: 拠点をHP0（＝占領）まで削れるのは地上戦力のみ。航空・海上の攻撃は
+                    // HP1で頭打ちにする（最後の1は必ず陸上部隊が削る）。
+                    float floor = TargetingRules.BaseHpFloor(type.Domain);
+                    if (b.CurrentHP < floor) b.CurrentHP = floor;
 
                     // Task54: 被弾地点（基地攻め）も戦闘域として報告する（CombatStepと同じ理由）。
                     state.CombatZones.ReportCombat(b.Position);

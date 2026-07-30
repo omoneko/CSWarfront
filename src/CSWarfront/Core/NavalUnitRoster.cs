@@ -93,7 +93,20 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
                 b.ShotKind,
-                DomainMask.Land | DomainMask.Sea); // 艦艇は対地・対艦のみ。対空能力は持たない（Task61）。
+                TargetDomainsFor(b.Category));
+        }
+
+        /// <summary>Task85: 兵科ごとの標的ドメイン。
+        ///  - 駆逐艦: 対地・対艦（従来どおり。対空能力は持たない、Task61）。
+        ///  - 空母: なし（発着艦プラットフォーム専任、一切攻撃しない。CarrierAirWingが艦載機を扱う）。
+        /// 拠点・KAIJUへの攻撃可否はTargetingRules側が担う（空母はそちらでも全て不可）。</summary>
+        private static DomainMask TargetDomainsFor(UnitCategory category)
+        {
+            switch (category)
+            {
+                case UnitCategory.Carrier: return DomainMask.None;
+                default: return DomainMask.Land | DomainMask.Sea;
+            }
         }
     }
 }

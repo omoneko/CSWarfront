@@ -55,6 +55,9 @@ namespace CSWarfront.Core
                 // 大きく通る）。
                 if (type.Category.IsKamikaze()) continue;
 
+                // Task85: 空母は発着艦プラットフォーム専任で脅威にも攻撃しない。
+                if (!TargetingRules.CanAttackThreat(type.Category)) continue;
+
                 for (int j = 0; j < state.Threats.Count; j++)
                 {
                     var threat = state.Threats[j];

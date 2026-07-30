@@ -139,8 +139,11 @@ public class TargetSearchTests
         Assert.Equal((uint)2, t.InstanceId);
     }
 
+    // Task85（ユーザー要望「戦闘機は戦闘機・爆撃機・KAIJUのみ攻撃可能」）: 旧仕様
+    // （Air_attacker_can_target_land_sea_and_air_hostiles、CanTargetDomains=All）を廃し、
+    // 戦闘機は航空ユニットしか標的にしない（地上・海上は最寄りでも素通しする）。
     [Fact]
-    public void Air_attacker_can_target_land_sea_and_air_hostiles()
+    public void Fighter_targets_only_air_hostiles_ignoring_closer_land_and_sea()
     {
         var types = new UnitTypeRegistry();
         LandUnitRoster.RegisterAll(types);
@@ -149,14 +152,59 @@ public class TargetSearchTests
 
         var rel = new RelationMatrix(5);
         rel.Set(0, 1, Relation.Hostile);
-        var self = UOf(1, 0, 0f, "AirSuperiority_T1"); // CanTargetDomains=All
+        var self = UOf(1, 0, 0f, "AirSuperiority_T1"); // CanTargetDomains=Air（Task85）
         var tank = UOf(2, 1, 5f, "Tank_T1");
-        var destroyer = UOf(3, 1, 55f, "Destroyer_T1");
-        var all = new List<UnitInstance> { self, tank, destroyer };
+        var destroyer = UOf(3, 1, 30f, "Destroyer_T1");
+        var bomber = UOf(4, 1, 55f, "TacticalBomber_T1");
+        var all = new List<UnitInstance> { self, tank, destroyer, bomber };
 
         UnitType fighterType = types.Get("AirSuperiority_T1");
         var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, fighterType.CanTargetDomains, types);
-        Assert.Equal((uint)2, nearest.InstanceId); // nearest overall (tank), domain filter doesn't exclude it
+        Assert.Equal((uint)4, nearest.InstanceId); // 最寄りの戦車・駆逐艦は無視し、航空(爆撃機)だけを狙う
+    }
+
+    // Task85: 爆撃機は地上目標のみ（航空・海上は標的にしない）。
+    [Fact]
+    public void Bomber_targets_only_land_hostiles_ignoring_closer_air_and_sea()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        NavalUnitRoster.RegisterAll(types);
+        AirUnitRoster.RegisterAll(types);
+
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "TacticalBomber_T1"); // CanTargetDomains=Land（Task85）
+        var fighter = UOf(2, 1, 5f, "AirSuperiority_T1");
+        var destroyer = UOf(3, 1, 30f, "Destroyer_T1");
+        var tank = UOf(4, 1, 55f, "Tank_T1");
+        var all = new List<UnitInstance> { self, fighter, destroyer, tank };
+
+        UnitType bomberType = types.Get("TacticalBomber_T1");
+        var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, bomberType.CanTargetDomains, types);
+        Assert.Equal((uint)4, nearest.InstanceId); // 最寄りの戦闘機・駆逐艦は無視し、地上(戦車)だけを狙う
+    }
+
+    // Task85: 空母は何も攻撃しない（発着艦プラットフォーム専任、CanTargetDomains=None）。
+    [Fact]
+    public void Carrier_targets_nothing()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        NavalUnitRoster.RegisterAll(types);
+        AirUnitRoster.RegisterAll(types);
+
+        var rel = new RelationMatrix(5);
+        rel.Set(0, 1, Relation.Hostile);
+        var self = UOf(1, 0, 0f, "Carrier_T1"); // CanTargetDomains=None（Task85）
+        var tank = UOf(2, 1, 5f, "Tank_T1");
+        var destroyer = UOf(3, 1, 10f, "Destroyer_T1");
+        var fighter = UOf(4, 1, 15f, "AirSuperiority_T1");
+        var all = new List<UnitInstance> { self, tank, destroyer, fighter };
+
+        UnitType carrierType = types.Get("Carrier_T1");
+        var t = TargetSearch.FindNearestHostile(self, all, rel, 200f, carrierType.CanTargetDomains, types);
+        Assert.Null(t);
     }
 
     [Fact]
