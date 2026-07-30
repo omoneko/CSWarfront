@@ -169,6 +169,7 @@ namespace CSWarfront.Game
             // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
             // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
             CombatFx.Spawn(_shotSnapshot);
+            UnitVisuals.NotifyShots(_shotSnapshot); // Task83: 発砲したユニットは射撃方向を向く
             CombatFx.SpawnKillSounds(_killSnapshot); // Task51: 撃破音（視覚エフェクトは無し）
             KillFx.Spawn(_killSnapshot); // Task65: 撃破爆発エフェクト（音とは別のエフェクト専用クラス、同じカテゴリ判定を共有）
             CombatFx.Update(Time.deltaTime);

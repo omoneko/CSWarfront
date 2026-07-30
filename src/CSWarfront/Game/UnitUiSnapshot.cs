@@ -61,7 +61,10 @@ namespace CSWarfront.Game
                 Attack = type != null ? type.Attack : 0f,
                 Range = type != null ? type.Range : 0f,
                 Armor = type != null ? type.Armor : 0f,
-                SpeedKmh = type != null ? SpeedCalibration.KmhFromUnitsPerGameHour(type.Speed) : 0f,
+                // Task83: 実効速度（全体倍率込み）を表示する。type.Speed単体の表示だと実際の移動と食い違う。
+                SpeedKmh = type != null
+                    ? SpeedCalibration.KmhFromUnitsPerGameHour(type.Speed * MovementStep.GlobalSpeedMultiplier)
+                    : 0f,
                 Accuracy = effectiveAccuracy,
                 // 素の命中率(type.Accuracy)より高ければ、CombatSynergy(ドローン観測支援)が効いている
                 // ことを意味する（AccuracyForは非該当の場合、type.Accuracyをそのまま返す規約のため）。

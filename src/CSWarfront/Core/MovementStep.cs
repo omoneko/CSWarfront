@@ -93,6 +93,13 @@ namespace CSWarfront.Core
         /// そのものはこのクラスの責務のため）。</summary>
         public const float DiveSpeedMultiplier = 1.5f;
 
+        /// <summary>Task83（ユーザー要望「移動速度は全体的に現在の1.25倍速」）: 全ユニットの移動速度に
+        /// かかる全体倍率。stepLen計算（このクラスのAdvance、移動の唯一の消費点）にのみ掛ける。
+        /// UnitType.Speed自体（km/h較正値、SpeedCalibration）は変更しない——個々の兵科の相対速度と
+        /// km/h表示の根拠を保ったまま、全体のテンポだけを引き上げるための独立した係数。
+        /// UnitInfoPanelのkm/h表示はこの倍率を掛けた実効速度を表示する。</summary>
+        public const float GlobalSpeedMultiplier = 1.25f;
+
         // --- Task77: 「地上ユニットが橋の上を渡ってくれない」「海の中に入っていける」不具合の修正 ---
         //
         // 【橋】RoadGraphBuilderを確認した結果、Road-serviceのセグメントは橋も含めて全て道路網グラフに
@@ -146,7 +153,7 @@ namespace CSWarfront.Core
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
 
-                float stepLen = type.Speed * dt;
+                float stepLen = type.Speed * GlobalSpeedMultiplier * dt;
                 if (stepLen <= 0f) continue;
 
                 // Task61: Sea/Airは陸上の道路経路(Path)・遮蔽(CoverDestination)・territory-based

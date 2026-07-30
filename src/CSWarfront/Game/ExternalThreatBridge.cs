@@ -59,6 +59,14 @@ namespace CSWarfront.Game
         private static readonly MonsterModAdapter _alien = new MonsterModAdapter(
             "Alien", "AlienInvasion", "AlienInvasion.Game.InvasionManager", "TryGetAnyTripodPosition");
 
+        // Task83: 各MODのビーム発射記録（ゴジラ光線=RayStrikeLog、トライポッドレーザー=BeamStrikeLog、
+        // どちらも「単調増加ID + float[]スナップショット」形式の公開API）を読み、新着の発射1件につき
+        // Core/ThreatBeamStep.ApplyStrikeでユニットへの一撃ダメージを適用する。
+        private static readonly BeamLogAdapter _godzillaBeams = new BeamLogAdapter(
+            "Godzilla ray", "GodzillaDisaster", "GodzillaDisaster.Game.RayStrikeLog", ThreatKind.Kaiju);
+        private static readonly BeamLogAdapter _alienBeams = new BeamLogAdapter(
+            "Alien laser", "AlienInvasion", "AlienInvasion.Game.BeamStrikeLog", ThreatKind.Alien);
+
         // このブリッジが State.Threats 内で管理しているエントリのId（Godzilla/Alienそれぞれ最大1体。
         // 相手MOD自体がIsActive/TryGetPositionという単一体前提のAPIしか公開していないため、
         // CSWarfront側もそれぞれ1体までしか追跡しない）。0は「現在エントリ無し」を表す。
@@ -98,6 +106,26 @@ namespace CSWarfront.Game
             catch (Exception e)
             {
                 ModConfig.LogError("ExternalThreatBridge: exception while syncing Alien: " + e);
+            }
+
+            // Task83: ビーム発射記録の消費（新着があればユニットへダメージ適用）。同期と同じ0.1h間隔で
+            // 十分（実時間では約0.05秒間隔＝発射演出とほぼ同時にダメージが入る）。
+            try
+            {
+                _godzillaBeams.Consume(state);
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("ExternalThreatBridge: exception while consuming Godzilla ray strikes: " + e);
+            }
+
+            try
+            {
+                _alienBeams.Consume(state);
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("ExternalThreatBridge: exception while consuming Alien laser strikes: " + e);
             }
         }
 
@@ -310,6 +338,137 @@ namespace CSWarfront.Game
             }
 
             private static Assembly FindAssembly(string name)
+            {
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                for (int i = 0; i < assemblies.Length; i++)
+                {
+                    if (assemblies[i].GetName().Name == name) return assemblies[i];
+                }
+                return null;
+            }
+        }
+
+        /// <summary>Task83: 1つの他MODのビーム発射記録（CurrentId(): long / Snapshot(): float[]、
+        /// 新しい順に {id, startX, startZ, endX, endZ} ×N）へのリフレクション橋渡し。
+        /// MonsterModAdapterと同じ「解決は1回だけ・恒久エラーでセッション中無効化・
+        /// ゲームループへ例外を投げない」方針。simスレッド・_stateLock内から呼ぶこと。</summary>
+        private sealed class BeamLogAdapter
+        {
+            private readonly string _label;
+            private readonly string _assemblyName;
+            private readonly string _typeName;
+            private readonly ThreatKind _kind;
+
+            private bool _resolveAttempted;
+            private bool _available;
+            private MethodInfo _currentIdMethod;
+            private MethodInfo _snapshotMethod;
+            private bool _errorLogged;
+
+            /// <summary>既読の発射ID。-1は「未ベースライン」＝最初のConsumeで現在IDを既読に設定し、
+            /// それ以前の発射（前セッションの残骸等）へダメージを適用しない。相手MOD側のIDは
+            /// レベル再読込でも巻き戻らない（RayStrikeLog/BeamStrikeLogの契約）ため、この既読IDも
+            /// リセット不要。</summary>
+            private long _lastConsumedId = -1;
+
+            public BeamLogAdapter(string label, string assemblyName, string typeName, ThreatKind kind)
+            {
+                _label = label;
+                _assemblyName = assemblyName;
+                _typeName = typeName;
+                _kind = kind;
+            }
+
+            public void Consume(WarState state)
+            {
+                if (!EnsureResolved()) return;
+
+                try
+                {
+                    long current = (long)_currentIdMethod.Invoke(null, null);
+                    if (_lastConsumedId < 0)
+                    {
+                        _lastConsumedId = current; // ベースライン: 過去の発射は適用しない
+                        return;
+                    }
+                    if (current <= _lastConsumedId) return;
+
+                    float[] snap = (float[])_snapshotMethod.Invoke(null, null);
+                    for (int s = 0; s + 4 < snap.Length; s += 5)
+                    {
+                        long id = (long)snap[s];
+                        if (id <= _lastConsumedId) break; // 新しい順なので既読IDに達したら終了
+
+                        int hits = ThreatBeamStep.ApplyStrike(state, _kind,
+                            snap[s + 1], snap[s + 2], snap[s + 3], snap[s + 4]);
+                        if (hits > 0)
+                        {
+                            ModConfig.Log("ExternalThreatBridge: " + _label + " strike hit " + hits + " unit(s).");
+                        }
+                    }
+                    _lastConsumedId = current;
+                }
+                catch (Exception e)
+                {
+                    if (!_errorLogged)
+                    {
+                        _errorLogged = true;
+                        ModConfig.LogError("ExternalThreatBridge: " + _label +
+                            " strike log read error, disabling for the rest of this session: " + e);
+                    }
+                    _available = false;
+                }
+            }
+
+            private bool EnsureResolved()
+            {
+                if (_resolveAttempted) return _available;
+                _resolveAttempted = true;
+
+                try
+                {
+                    Assembly asm = FindBeamAssembly(_assemblyName);
+                    if (asm == null)
+                    {
+                        _available = false; // 未導入: エラーではない
+                        return false;
+                    }
+
+                    Type type = asm.GetType(_typeName);
+                    if (type == null)
+                    {
+                        // 旧バージョンの相手MOD（発射記録APIがまだ無い）: エラーではなく単に機能無効。
+                        ModConfig.Log("ExternalThreatBridge: " + _label + " strike log not found (" + _typeName +
+                            "); beam damage to units is disabled (older mod version?).");
+                        _available = false;
+                        return false;
+                    }
+
+                    MethodInfo currentId = type.GetMethod("CurrentId", BindingFlags.Public | BindingFlags.Static);
+                    MethodInfo snapshot = type.GetMethod("Snapshot", BindingFlags.Public | BindingFlags.Static);
+                    if (currentId == null || snapshot == null)
+                    {
+                        ModConfig.LogError("ExternalThreatBridge: " + _label +
+                            " strike log members (CurrentId/Snapshot) not found. Disabling.");
+                        _available = false;
+                        return false;
+                    }
+
+                    _currentIdMethod = currentId;
+                    _snapshotMethod = snapshot;
+                    _available = true;
+                    ModConfig.Log("ExternalThreatBridge: detected " + _label + " strike log.");
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    ModConfig.LogError("ExternalThreatBridge: failed to resolve " + _label + " strike log: " + e);
+                    _available = false;
+                    return false;
+                }
+            }
+
+            private static Assembly FindBeamAssembly(string name)
             {
                 Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
                 for (int i = 0; i < assemblies.Length; i++)

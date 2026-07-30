@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
@@ -62,18 +62,27 @@ public class MovementStepTests
         return s;
     }
 
-    // Tank_T1のSpeed（Task26でkm/h基準に較正済み、SpeedCalibration参照）:
-    // 40km/h -> (40*1000/3600) / 2.05078125(InGameHoursPerRealSecond) ≈ 5.418 map units / ゲーム内時間。
-    private const float TankSpeedPerHour = 5.418f;
+    // Tank_T1の実効速度（Task26でkm/h基準に較正: 40km/h ≈ 5.418 map units/ゲーム内時間。
+    // Task83でGlobalSpeedMultiplier(1.25)が移動に一律にかかるようになったため、この定数は
+    // 倍率込みの「実際に1ゲーム内時間で進む距離」を表す。距離・時間の期待値は全てここから導出する）。
+    private const float TankSpeedPerHour = 5.418f * MovementStep.GlobalSpeedMultiplier;
 
     [Fact]
     public void Advance_moves_unit_toward_target()
     {
         var s = OneMovingUnit();
         MovementStep.Advance(s, 1f);
-        // dt=1h, distance 1000 -> TankSpeedPerHour(≈5.418)ぶんの部分移動
+        // dt=1h, distance 1000 -> TankSpeedPerHour（実効速度、倍率込み）ぶんの部分移動
         Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
         Assert.Equal(0f, s.Units[0].Position.Z, 1);
+    }
+
+    [Fact]
+    public void GlobalSpeedMultiplier_is_1_25()
+    {
+        // Task83（ユーザー要望「全体的に現在の1.25倍速」）: 移動の唯一の消費点（stepLen計算）に
+        // かかる全体倍率。値そのものが仕様なので定数として固定する。
+        Assert.Equal(1.25f, MovementStep.GlobalSpeedMultiplier, 3);
     }
 
     [Fact]
@@ -142,7 +151,7 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(39.7f, s.Units[0].Position.Y, 1);
+        Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1);
     }
 
     // Task37: 直線フォールバック（Path無し/消化済み）でも、到達時はtargetのYへ完全収束すること
@@ -187,7 +196,7 @@ public class MovementStepTests
         // dt small enough that stepLen (TankSpeedPerHour*dt ≈ 5.418*0.1 ≈ 0.542) doesn't reach waypoint 1 (100 away)
         MovementStep.Advance(s, 0.1f); // stepLen ≈ 0.542
         var u = s.Units[0];
-        Assert.Equal(0.542f, u.Position.X, 2);
+        Assert.Equal(TankSpeedPerHour * 0.1f, u.Position.X, 2);
         Assert.Equal(0f, u.Position.Z, 1);
         Assert.Equal(0, u.PathIndex); // still heading to waypoint 0
     }
@@ -198,7 +207,7 @@ public class MovementStepTests
         var s = UnitWithPath();
         // dt chosen so that stepLen = TankSpeedPerHour*dt = 150 exactly (150/5.418... ≈ 27.6855469h):
         // covers 100 to first waypoint, then 50 more toward second (同じ幾何、旧テストのSpeed=250, dt=0.6と同じ結果になるよう選定)
-        MovementStep.Advance(s, 27.6855469f);
+        MovementStep.Advance(s, 150f / TankSpeedPerHour);
         var u = s.Units[0];
         Assert.Equal(100f, u.Position.X, 1);
         Assert.Equal(50f, u.Position.Z, 1);
@@ -241,7 +250,7 @@ public class MovementStepTests
         var s = UnitWithPath();
         s.Units[0].Position = new WorldPos(0, 42, 0);
         MovementStep.Advance(s, 0.6f);
-        Assert.Equal(40.6f, s.Units[0].Position.Y, 1);
+        Assert.Equal(42f - 42f * (TankSpeedPerHour * 0.6f / 100f), s.Units[0].Position.Y, 1);
     }
 
     // Task37: ウェイポイントへ到達した瞬間は、丸め誤差なくそのウェイポイントのYへ厳密にスナップすること
@@ -287,7 +296,7 @@ public class MovementStepTests
         // stepLen≈150（Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt）:
         // 最初のウェイポイントまで100ぶん到達（Y=10へスナップ）→残り50を2番目(dist100)へ向けて進む
         // (t=0.5) -> Y = 10 + (20-10)*0.5 = 15。
-        MovementStep.Advance(s, 27.6855469f);
+        MovementStep.Advance(s, 150f / TankSpeedPerHour);
         var pos = s.Units[0].Position;
 
         Assert.Equal(100f, pos.X, 1);
@@ -506,7 +515,7 @@ public class MovementStepTests
 
         // Same geometry as Advance_large_step_crosses_first_waypoint_and_continues_toward_second:
         // clears the first waypoint (100 away) then advances 50 more toward the second.
-        MovementStep.Advance(s, 27.6855469f);
+        MovementStep.Advance(s, 150f / TankSpeedPerHour);
 
         var pos = s.Units[0].Position;
         Assert.Equal(100f, pos.X, 1);
@@ -661,7 +670,7 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 0.6f);
 
-        Assert.Equal(40.6f, s.Units[0].Position.Y, 1);
+        Assert.Equal(42f - 42f * (TankSpeedPerHour * 0.6f / 100f), s.Units[0].Position.Y, 1);
     }
 
     // Task77（「地上ユニットが橋の上を渡ってくれない」不具合の統合的な回帰テスト）: 橋を模した
@@ -750,7 +759,7 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(39.7f, s.Units[0].Position.Y, 1); // Advance_interpolates_y_toward_target_in_straight_line_fallbackと同じ期待値
+        Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1); // Advance_interpolates_y_toward_target_in_straight_line_fallbackと同じ期待値
     }
 
     // Task53ハードニング: TrySampleHeightがfalseを返す（TerrainManager瞬断/例外を模した）場合、
@@ -774,7 +783,7 @@ public class MovementStepTests
 
         // Advance_preserves_old_y_interpolation_when_HeightSampler_is_nullと全く同じ期待値
         // （= state.Height == nullのときと同一の補間結果になっていることの確認）。
-        Assert.Equal(39.7f, s.Units[0].Position.Y, 1);
+        Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1);
         Assert.NotEqual(-9999f, s.Units[0].Position.Y);
     }
 
@@ -993,7 +1002,7 @@ public class MovementStepTests
     {
         var s = OneSeaUnit(0f, 1000f); // heading is pure +X
         var type = s.Types.Get("Destroyer_T1");
-        float stepLen = type.Speed * 1f;
+        float stepLen = type.Speed * MovementStep.GlobalSpeedMultiplier * 1f;
 
         // 直進の着地点(stepLen, 0)だけを覆う狭い矩形の陸地。±30度回転した着地点はどちらもこの矩形の
         // 外に出るはずなので、迂回ロジックが実際に候補方向を順に試していることを幾何学的に保証する。
@@ -1088,7 +1097,7 @@ public class MovementStepTests
         var s = UnitWithPath();
         MovementStep.Advance(s, 0.1f);
         var u = s.Units[0];
-        Assert.Equal(0.542f, u.Position.X, 2);
+        Assert.Equal(TankSpeedPerHour * 0.1f, u.Position.X, 2);
         Assert.Equal(0f, u.Position.Z, 1);
         Assert.Equal(0, u.PathIndex);
     }
@@ -1176,7 +1185,7 @@ public class MovementStepTests
         var s = UnitWithPath(); // waypoints (100,0,0), (100,0,100)
         s.Water = new FakeWaterBeyondX(0f); // x>=0は全て"水"（橋の下を含む極端なケース）
 
-        MovementStep.Advance(s, 27.6855469f); // Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt
+        MovementStep.Advance(s, 150f / TankSpeedPerHour); // Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt
         var u = s.Units[0];
 
         Assert.Equal(100f, u.Position.X, 1);

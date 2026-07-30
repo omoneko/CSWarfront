@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CSWarfront.Core;
 using UnityEngine;
 namespace CSWarfront.Game
 {
@@ -60,7 +61,20 @@ namespace CSWarfront.Game
             /// <summary>アイコンをルートGameObjectのローカル座標系で置く高さ（Y）。CreateVisual時に
             /// mesh.bounds.max.y + ギャップから1回だけ計算してキャッシュする（MuzzleOffsetYと同じ方針）。</summary>
             public float IconLocalHeightY;
+
+            /// <summary>Task83（ユーザー要望「攻撃するときは攻撃方向を向く」）: 直近の発砲の射撃方向
+            /// （水平、正規化済み）。NotifyShotsが発砲イベントから設定し、FacingHoldUntilまでの間
+            /// MoveVisualが移動方向ではなくこちらを向きに採用する。</summary>
+            public Vector3 FacingDirection;
+
+            /// <summary>射撃方向を向き続ける期限（Time.time基準の実時間）。発砲のたびに更新されるため、
+            /// 交戦が続く限り目標の方を向き続け、交戦が終われば数秒で移動方向の向きに戻る。</summary>
+            public float FacingHoldUntil;
         }
+
+        /// <summary>発砲後に射撃方向を向き続ける実時間（秒）。交戦中の発砲間隔より長めにして
+        /// 「戦闘中はずっと相手を向いている」ように見せる。</summary>
+        private const float FacingHoldSeconds = 4f;
 
         // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
         // Task37: 割り当て済みプロップがある場合はもう使わない（AttachVisibilityMarkerのfromAssignedProp分岐参照）。
@@ -456,11 +470,46 @@ namespace CSWarfront.Game
             if (entry == null || entry.GameObject == null) return;
             Vector3 delta = newPosition - entry.LastPosition;
             entry.GameObject.transform.position = newPosition;
-            if (delta.sqrMagnitude > MinMoveDeltaForRotation * MinMoveDeltaForRotation)
+
+            // Task83: 直近に発砲したユニットは移動方向ではなく射撃方向を向く（静止中の交戦でも
+            // 相手の方を向くよう、移動デルタの有無に関わらず毎フレーム適用する）。
+            if (Time.time < entry.FacingHoldUntil && entry.FacingDirection.sqrMagnitude > 1e-6f)
+            {
+                entry.GameObject.transform.rotation = Quaternion.LookRotation(entry.FacingDirection);
+            }
+            else if (delta.sqrMagnitude > MinMoveDeltaForRotation * MinMoveDeltaForRotation)
             {
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
             entry.LastPosition = newPosition;
+        }
+
+        /// <summary>Task83: 発砲イベントから射撃方向を拾い、該当ユニットのビジュアルに
+        /// 「FacingHoldSecondsの間、射撃方向を向く」指示を与える（メインスレッド専用。
+        /// MilitaryManagerVisualsがロック解放後、CombatFx.Spawnと同じスナップショットで呼ぶ）。</summary>
+        public static void NotifyShots(System.Collections.Generic.List<ShotEvent> shots)
+        {
+            try
+            {
+                for (int i = 0; i < shots.Count; i++)
+                {
+                    ShotEvent shot = shots[i];
+                    if (shot.AttackerId == 0) continue;
+
+                    VisualEntry entry;
+                    if (!_visuals.TryGetValue(shot.AttackerId, out entry)) continue;
+
+                    Vector3 dir = new Vector3(shot.To.X - shot.From.X, 0f, shot.To.Z - shot.From.Z);
+                    if (dir.sqrMagnitude < 1e-6f) continue; // 真上/同一地点への射撃は向きを変えない
+
+                    entry.FacingDirection = dir.normalized;
+                    entry.FacingHoldUntil = Time.time + FacingHoldSeconds;
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitVisuals.NotifyShots error: " + e);
+            }
         }
 
         // Task49: UpdateFactionIcon/CreateFactionIcon は UnitVisualsFactionIcon.cs（同じ partial class）参照。
