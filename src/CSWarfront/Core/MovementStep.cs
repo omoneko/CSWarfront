@@ -59,7 +59,7 @@ namespace CSWarfront.Core
     /// 補間済みYから大きく乖離していれば採用せず補間済みYを使う。これにより、IHeightSampler実装側の
     /// 座標系/API誤用が将来再発しても、Coreはユニットを空へ打ち上げるような致命的な被害を機械的に
     /// 防げる（ResolvePosition参照）。</summary>
-    public static class MovementStep
+    public static partial class MovementStep
     {
         /// <summary>CoverDestinationへ到達したとみなす距離（Task44）。これ未満まで近づいたら停止する。
         /// Task48: RallyPointへの到達判定にも同じ閾値を再利用する。</summary>
@@ -154,7 +154,7 @@ namespace CSWarfront.Core
                     if (type.Domain == Domain.Air)
                         AdvanceAir(u, stepLen, objective.Value, height);
                     else // Domain.Sea
-                        AdvanceSea(u, stepLen, objective.Value, water);
+                        AdvanceSea(u, stepLen, objective.Value, water, dt);
                     continue;
                 }
 
@@ -418,32 +418,5 @@ namespace CSWarfront.Core
             u.Position = new WorldPos(nx, ny, nz);
         }
 
-        /// <summary>Task61: 海上ユニットの移動。RoadGraph/CoverMapを一切使わず目的地へ直線移動するが、
-        /// 移動後の位置が水面でなくなる場合はそのtickは一切移動しない（陸地へテレポートしない、
-        /// クラス冒頭のIWaterSamplerコメント参照。海軍専用の経路探索が無いMVPの既知の制約——
-        /// 岬の裏側の目標へは物理的に到達できないことがある）。Yは水面サンプラーが返す値をそのまま
-        /// 採用する（サンプリングに失敗すれば従来のYを維持）。water==nullの場合は「常に水上」とみなし
-        /// 自由に移動する（Height同様、Game層未供給時のテスト容易性のための安全側フォールバック）。</summary>
-        private static void AdvanceSea(UnitInstance u, float stepLen, WorldPos objective, IWaterSampler water)
-        {
-            float dist = u.Position.HorizontalDistanceTo(objective);
-            float nx, nz;
-            if (dist <= stepLen || dist <= 0.01f) { nx = objective.X; nz = objective.Z; }
-            else
-            {
-                float t = stepLen / dist;
-                nx = u.Position.X + (objective.X - u.Position.X) * t;
-                nz = u.Position.Z + (objective.Z - u.Position.Z) * t;
-            }
-
-            if (water != null && !water.IsWater(nx, nz)) return; // 陸地へ踏み込む一歩は捨てて足止めする。
-
-            float ny = u.Position.Y;
-            float level;
-            if (water != null && water.TrySampleWaterLevel(nx, nz, out level))
-                ny = level;
-
-            u.Position = new WorldPos(nx, ny, nz);
-        }
     }
 }

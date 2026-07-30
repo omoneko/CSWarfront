@@ -962,6 +962,124 @@ public class MovementStepTests
         Assert.Equal(beforeX, s.Units[0].Position.X, 3);
     }
 
+    // --- Task78: 「海上ユニットが敵拠点へ移動せず自拠点にこもったまま」不具合の修正 ---
+    // 直線移動の次の一歩が陸地に阻まれた場合、±30/60/90度の決定的な迂回方向を順に試し、
+    // 最初に水域へ着地する方向へ進む（簡易wall-follow）。全方向とも塞がっている場合は、
+    // その旨をSeaBlockedHoursへ積算し、MovementStep.SeaBlockedIdleHoursを超えたら
+    // Idleへ遷移して無限に探索し続けるのを防ぐ（新しい目的地を受け取ればリセットされる）。
+
+    // boxMinX<=x<=boxMaxX かつ |z|<=boxHalfZ の矩形だけを陸地とし、それ以外を水域とするフェイク
+    // （半島/岬の付け根を模す：直進はこの矩形にぶつかるが、z方向へ大きく迂回すれば回り込める）。
+    private class FakeWaterExceptBox : IWaterSampler
+    {
+        private readonly float _minX, _maxX, _halfZ;
+        public FakeWaterExceptBox(float minX, float maxX, float halfZ) { _minX = minX; _maxX = maxX; _halfZ = halfZ; }
+        public bool IsWater(float x, float z) { return !(x >= _minX && x <= _maxX && System.Math.Abs(z) <= _halfZ); }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
+    }
+
+    // 原点からの半径内だけが水域というフェイク（半径をユニットの1tick移動距離より充分小さくすれば、
+    // 直進はもちろんどの迂回方向へ一歩踏み出しても必ず陸地に着地する＝完全に陸に囲まれた目標を模す）。
+    private class FakeWaterOnlyNearOrigin : IWaterSampler
+    {
+        private readonly float _radius;
+        public FakeWaterOnlyNearOrigin(float radius) { _radius = radius; }
+        public bool IsWater(float x, float z) { return (x * x + z * z) <= _radius * _radius; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
+    }
+
+    [Fact]
+    public void Sea_unit_takes_a_deterministic_detour_step_when_the_direct_step_lands_on_a_peninsula()
+    {
+        var s = OneSeaUnit(0f, 1000f); // heading is pure +X
+        var type = s.Types.Get("Destroyer_T1");
+        float stepLen = type.Speed * 1f;
+
+        // 直進の着地点(stepLen, 0)だけを覆う狭い矩形の陸地。±30度回転した着地点はどちらもこの矩形の
+        // 外に出るはずなので、迂回ロジックが実際に候補方向を順に試していることを幾何学的に保証する。
+        s.Water = new FakeWaterExceptBox(stepLen - 1f, stepLen + 1f, 1f);
+
+        MovementStep.Advance(s, 1f);
+
+        var pos = s.Units[0].Position;
+        // アルゴリズムは0度(直進)→+30度→-30度→...の順に試す想定。直進が塞がっているので+30度が採用され、
+        // 同じ歩幅(stepLen)で+30度回転した点へ着地するはず。
+        double rad = 30.0 * System.Math.PI / 180.0;
+        float expectedX = (float)(stepLen * System.Math.Cos(rad));
+        float expectedZ = (float)(stepLen * System.Math.Sin(rad));
+        Assert.Equal(expectedX, pos.X, 1);
+        Assert.Equal(expectedZ, pos.Z, 1);
+        // 迂回後の着地点は矩形の外＝水域でなければならない（陸地へテレポートしていないことの再確認）。
+        Assert.True(s.Water.IsWater(pos.X, pos.Z));
+    }
+
+    [Fact]
+    public void Sea_unit_makes_net_progress_working_its_way_around_a_peninsula_over_several_ticks()
+    {
+        var s = OneSeaUnit(0f, 30f);
+        // (10<=x<=20, |z|<=5) だけが陸地: 目的地までの直線上に立ちはだかるが、有限の幅なので
+        // 大きく迂回すれば回り込める（無限に続く壁ではない、という意味で「半島」）。
+        s.Water = new FakeWaterExceptBox(10f, 20f, 5f);
+
+        float initialDist = s.Units[0].Position.HorizontalDistanceTo(new WorldPos(30f, 0f, 0f));
+        for (int i = 0; i < 30; i++)
+            MovementStep.Advance(s, 1f);
+        float finalDist = s.Units[0].Position.HorizontalDistanceTo(new WorldPos(30f, 0f, 0f));
+
+        Assert.True(finalDist < initialDist, $"expected progress toward the target; initial={initialDist} final={finalDist}");
+        // 迂回中も一度も陸地へ着地していないはず（現在位置が常に水域）という不変条件も併せて確認する。
+        Assert.True(s.Water.IsWater(s.Units[0].Position.X, s.Units[0].Position.Z));
+    }
+
+    [Fact]
+    public void Sea_unit_gives_up_and_goes_Idle_after_SeaBlockedIdleHours_of_being_fully_landlocked()
+    {
+        var s = OneSeaUnit(0f, 1000f);
+        // 半径2の円の中だけが水域: destroyerの1tickの移動距離よりずっと小さいので、直進・6方向の
+        // 迂回のいずれを試しても必ず陸地に着地する＝完全に陸へ囲まれた目的地を模す。
+        s.Water = new FakeWaterOnlyNearOrigin(2f);
+        var u = s.Units[0];
+
+        for (int hour = 1; hour < (int)MovementStep.SeaBlockedIdleHours; hour++)
+        {
+            MovementStep.Advance(s, 1f);
+            Assert.Equal(UnitState.Moving, u.State); // まだ閾値未満: 進撃状態のまま探索を続けている
+            Assert.Equal(0f, u.Position.X, 3); // どの方向にも進めていない
+        }
+
+        MovementStep.Advance(s, 1f); // ちょうど閾値(SeaBlockedIdleHours)に到達する呼び出し
+        Assert.Equal(UnitState.Idle, u.State);
+        Assert.Equal(0f, u.Position.X, 3);
+
+        // Idleになった後はResolveDomainObjectiveがOrderTargetPosを一切参照しなくなるため、
+        // 何度呼び出しても永遠に同じ場所で静止したまま（見た目のスピンが起きない）。
+        MovementStep.Advance(s, 100f);
+        Assert.Equal(UnitState.Idle, u.State);
+        Assert.Equal(0f, u.Position.X, 3);
+    }
+
+    [Fact]
+    public void Sea_unit_blocked_counter_resets_when_a_new_order_gives_a_different_OrderTargetPos()
+    {
+        var s = OneSeaUnit(0f, 1000f);
+        s.Water = new FakeWaterOnlyNearOrigin(2f); // completely landlocked toward either objective
+        var u = s.Units[0];
+
+        for (int i = 0; i < (int)MovementStep.SeaBlockedIdleHours; i++)
+            MovementStep.Advance(s, 1f);
+        Assert.Equal(UnitState.Idle, u.State); // gave up on the first objective
+
+        // 新しい命令(InvasionOrders相当)がOrderTargetPosを変えてState=Movingへ戻したと仮定する。
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(2000f, 0f, 0f);
+
+        MovementStep.Advance(s, 1f);
+
+        // 目的地が変わったのでSeaBlockedHoursは0からやり直しのはず: 1回のtickだけでは
+        // まだ閾値(SeaBlockedIdleHours)に届かず、即座にIdleへ戻ることはない。
+        Assert.Equal(UnitState.Moving, u.State);
+    }
+
     [Fact]
     public void Land_unit_behaviour_is_unchanged_by_the_Sea_Air_domain_split()
     {

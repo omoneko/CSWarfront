@@ -101,12 +101,42 @@ namespace CSWarfront.Core
                 else
                 {
                     // Task64: Sea(艦艇)は BaseType.Navy の敵対所有基地のみを狙う（内陸のArmy/AirForce/
-                    // MissileBaseへ直線で向かって座礁するのを防ぐ）。Navy基地が1つも無ければ
-                    // targetがnullになり下のcontinueでスキップされる＝進撃命令を出さない
-                    // （MVPの巡回挙動：その場でIdleのまま、射程内に来た敵とは引き続き交戦する）。
+                    // MissileBaseへ直線で向かって座礁するのを防ぐ）。
                     var target = AiTargeting.ChooseTargetBase(state, factionId, u.Position, domain);
-                    if (target == null) continue;
-                    targetPos = target.Position;
+                    if (target != null)
+                    {
+                        targetPos = target.Position;
+                    }
+                    else
+                    {
+                        // Task78:「敵性の目標(脅威/敵基地)が1つも無い」不具合の修正。従来はここで単に
+                        // continue しており、前回呼び出し時のOrderTargetPos/State/Pathがそのまま
+                        // 残っていた——外部脅威(KAIJU等)が自然消滅した後もその地点へ進み続ける、
+                        // 敵拠点を陥落させた後もその場所へ進み続ける、として報告された不具合の直接の原因。
+                        // 対象が無い間は自勢力の最寄り所有基地へ撤収させる（無ければその場でIdle）。
+                        // 状態を持たず毎回再判定するだけなので、次の呼び出しで新たな脅威/敵基地が
+                        // 現れれば自動的に通常の進軍へ戻る（Task58と同じ設計）。
+                        MilitaryBase home = FindNearestOwnedBase(state, factionId, u.Position);
+                        if (home == null)
+                        {
+                            // 撤収先が無い（基地を1つも持たない勢力）: その場でIdleにし、
+                            // 古い目標を追い続けないよう目標/経路をクリアする。
+                            u.OrderTargetPos = null;
+                            u.ClearPath();
+                            u.State = UnitState.Idle;
+                            continue;
+                        }
+
+                        targetPos = home.Position;
+                        if (u.Position.HorizontalDistanceTo(targetPos) <= MovementStep.CoverArrivalDistance)
+                        {
+                            // 撤収完了: 自拠点付近まで戻ったのでIdleへ（既存のMovementStepの到着距離を再利用）。
+                            u.OrderTargetPos = null;
+                            u.ClearPath();
+                            u.State = UnitState.Idle;
+                            continue;
+                        }
+                    }
                 }
 
                 u.OrderTargetPos = targetPos;
@@ -193,6 +223,30 @@ namespace CSWarfront.Core
         private static bool IsSameTarget(WorldPos a, WorldPos b)
         {
             return System.Math.Abs(a.X - b.X) < TargetChangeEpsilon && System.Math.Abs(a.Z - b.Z) < TargetChangeEpsilon;
+        }
+
+        /// <summary>Task78: factionIdが所有する基地のうち、fromに最も近いものを返す（1つも所有していなければnull）。
+        /// 距離がほぼ同点（TargetChangeEpsilon以内）の場合は本拠地(IsHeadquarters)を優先する——
+        /// 複数の自拠点が同距離にある稀なケースでも、呼び出しのたびに同じ基地を選ぶ決定的な
+        /// タイブレークにするため（乱数は使わない、Core全体の方針）。</summary>
+        private static MilitaryBase FindNearestOwnedBase(WarState state, byte factionId, WorldPos from)
+        {
+            MilitaryBase best = null; float bestDist = float.MaxValue;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                var mb = state.Bases[b];
+                if (mb.OwnerFactionId != factionId) continue;
+                float d = from.HorizontalDistanceTo(mb.Position);
+                if (best == null || d < bestDist - TargetChangeEpsilon)
+                {
+                    best = mb; bestDist = d;
+                }
+                else if (System.Math.Abs(d - bestDist) <= TargetChangeEpsilon && mb.IsHeadquarters && !best.IsHeadquarters)
+                {
+                    best = mb; bestDist = d;
+                }
+            }
+            return best;
         }
     }
 }

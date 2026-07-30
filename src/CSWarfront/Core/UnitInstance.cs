@@ -124,6 +124,19 @@ namespace CSWarfront.Core
         /// System.Randomは使わない）。1回の建造に着手するたびに1つずつ増える。</summary>
         public uint CarrierBuildCounter;
 
+        /// <summary>Task78: 海上ユニット(Domain.Sea)が直線移動・迂回(±30/60/90度)のいずれも水域に
+        /// 着地できず完全に足止めされている継続ゲーム内時間（実行時のみ・非永続化）。
+        /// MovementStep.AdvanceSeaが移動に成功するたび、または目的地(OrderTargetPos)が変わった
+        /// （＝新しい命令を受けた）瞬間に0へリセットする。MovementStep.SeaBlockedIdleHoursを
+        /// 超えたらState=Idleへ遷移し、以後は目的地が変わるまで一切移動を試みない
+        /// （毎tick迂回を探索し続けて見た目がスピンし続けるのを防ぐ、Task52のStallTimer相当のガード）。</summary>
+        public float SeaBlockedHours;
+
+        /// <summary>SeaBlockedHoursの起点判定に使う、直近にAdvanceSeaが処理した目的地（実行時のみ・
+        /// 非永続化、Task78）。OrderTargetPos/RallyPointがこれと異なればMovementStepは「新しい命令」
+        /// とみなしSeaBlockedHoursを0へリセットする。</summary>
+        public WorldPos? SeaLastObjective;
+
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)
         {
             InstanceId = id; TypeKey = typeKey; FactionId = factionId;
