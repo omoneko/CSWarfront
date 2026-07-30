@@ -35,6 +35,23 @@ namespace CSWarfront.Game
         /// </summary>
         private static readonly Dictionary<ushort, float> _baseAngles = new Dictionary<ushort, float>();
 
+        /// <summary>
+        /// Task74: 基地登録時（ProcessCreated）に確定した建物の<see cref="BuildingInfo"/>.nameのキャッシュ。
+        /// ReconcileBasesの「幽霊基地」判定を、建物実体の消失／id使い回しの検知だけに絞り込むために使う
+        /// （以前はOptionsの現在の指定(BaseBuildingDesignation)とInfo.nameを比較しており、登録後に
+        /// プレイヤーが指定を変更/解除しただけで、生きている基地がゴースト扱いされ削除される不具合が
+        /// あった）。書き込みは常にこのクラスのsimスレッド専用メソッド（ProcessCreated、呼び出し元
+        /// MilitaryManager.OnSimTick が既に_stateLockを保持している）から行う——_baseAnglesと同じ箇所・
+        /// 同じタイミングで、クローンプレハブ経由・指定建物経由のどちらでマッチした場合も一様に書く
+        /// （両経路とも同じ「match」フラグを共有しているため、書き込み箇所を分岐する必要がない）。
+        /// 読み取り（ReconcileBases）は同じ_stateLockを保持したまま呼ぶ想定（Dictionary自体はスレッド
+        /// セーフではないため、呼び出し側の規約でスレッド安全性を担保する）。
+        /// セッション限定キャッシュであり、セーブファイルには含まれない点に注意（セーブロード直後は
+        /// 該当基地のエントリが無い＝「まだ一度もProcessCreatedを通っていない」状態になる。この場合の
+        /// 扱いはReconcileBasesのコメントを参照）。
+        /// </summary>
+        private static readonly Dictionary<ushort, string> _baseInfoNames = new Dictionary<ushort, string>();
+
         /// <summary>冪等。OnLevelLoaded から呼ばれる想定。</summary>
         public static void Subscribe()
         {
@@ -83,6 +100,8 @@ namespace CSWarfront.Game
             // Task60: 呼び出し元（MilitaryManager.Reset）は既に_stateLockを保持しているため、
             // ここで追加のロックは不要（_baseAnglesの書き込みは常にそのロック内、ProcessCreated経由）。
             _baseAngles.Clear();
+            // Task74: _baseInfoNamesも同じ規約（_stateLock保持済み、ProcessCreated経由でのみ書き込み）。
+            _baseInfoNames.Clear();
         }
 
         /// <summary>Task60: 指定基地の向き（ラジアン）を返す。呼び出し元は_stateLockを保持していること
@@ -204,6 +223,10 @@ namespace CSWarfront.Game
                 // これを existing チェックより前で行わないと、プロセス起動直後は BaseVisuals が
                 // 向きを一切知らないままになってしまうため。
                 _baseAngles[id] = b.m_angle;
+                // Task74: 登録が確定した時点（クローンプレハブ経由・指定建物経由のいずれでもmatch==true）
+                // でInfo.nameをキャッシュする。以後のReconcileBasesはこの名前とだけ比較し、Optionsの
+                // 現在の指定がどう変わっても影響を受けない（idが同じ建物実体である限り基地は維持される）。
+                _baseInfoNames[id] = infoName;
 
                 bool existing = FindBase(state, id) != null; // 冪等: セーブロード直後や重複イベント対策
                 if (existing)
@@ -261,6 +284,7 @@ namespace CSWarfront.Game
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
                 _baseAngles.Remove(id); // Task60: 解体済みidの向きキャッシュを持ち越さない
+                _baseInfoNames.Remove(id); // Task74: 解体済みidのInfo名キャッシュも持ち越さない
 
                 ModConfig.Log("BasePlacementWatcher: base removed id=" + id +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
@@ -298,28 +322,43 @@ namespace CSWarfront.Game
                 {
                     Building b = buf[mb.BaseId];
                     bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
-                    // Task61: mb.Typeに対応する具体的なプレハブ(Army/Navy/AirForce)と一致するかを見る
-                    // （以前は常にArmyのプレハブとしか比較しておらず、海軍/航空基地が常にゴースト扱いに
-                    // なってしまう回帰があったため、必ずmb.Type別に比較する）。
-                    BuildingInfo expected;
-                    bool cloneMatch = flagsCreated && b.Info != null &&
-                        WarfrontBasePrefab.TryGetPrefab(mb.Type, out expected) && ReferenceEquals(b.Info, expected);
 
-                    // Task74: クローンに一致しなければ、mb.Typeの現在の指定建物（BaseBuildingDesignation）
-                    // のInfo.nameと一致するかも見る。これにより、Optionsで指定した建物として登録された
-                    // 基地が、電力タブのクローンではないというだけの理由でゴースト扱いされて削除される
-                    // ことを防ぐ。逆に言えば、登録後に該当種別の指定を変更/解除すると、次回の
-                    // ReconcileBasesでこの基地はどちらの条件も満たさなくなりゴースト削除される
-                    // （指定は常に「現在の設定」で評価するため。設計上の既知の挙動）。
-                    bool designationMatch = false;
-                    if (!cloneMatch && flagsCreated && b.Info != null)
+                    if (!flagsCreated || b.Info == null)
                     {
-                        string designatedName;
-                        designationMatch = BaseBuildingDesignation.TryGet(mb.Type, out designatedName) &&
-                            b.Info.name == designatedName;
+                        // 建物実体が既に無い（解体済み／未生成）→ 幽霊基地として削除（変更なし）。
+                        isGhost = true;
                     }
-
-                    isGhost = !(cloneMatch || designationMatch);
+                    else
+                    {
+                        // Task74: ReconcileBasesの本来の役目は「建物が既に無い」「idが無関係な建物に
+                        // 再利用された」の2つだけを捕まえること。Optionsの現在の指定
+                        // （BaseBuildingDesignation）とここで比較するのは誤り——プレイヤーが登録後に
+                        // 指定を変更/解除しただけで、生きている基地が幽霊扱いされ削除されてしまう
+                        // （Task74で報告された不具合）。よって現在の指定は一切見ない。
+                        string cachedName;
+                        if (_baseInfoNames.TryGetValue(mb.BaseId, out cachedName))
+                        {
+                            // 登録時（ProcessCreated）に記録したInfo.nameと現在のInfo.nameを比較する
+                            // ことで、真のid使い回し（このidが解体後に別の建物種別へ再割当てされた）
+                            // だけを検知する。現在の指定がどうであろうと、登録時と同じ建物である限り
+                            // ゴースト扱いしない。
+                            isGhost = b.Info.name != cachedName;
+                        }
+                        else
+                        {
+                            // キャッシュに無い＝このセッションでProcessCreatedを一度も通っていない基地
+                            // （典型的にはセーブから復元した直後：_baseInfoNamesはセッション限定キャッシュ
+                            // であり、セーブデータには含まれない）。この場合は寛容に扱う：建物実体が
+                            // 生きている（flagsCreated && Info!=nullを上で確認済み）こと自体を信頼して
+                            // 基地を維持する——セーブされた時点でこの基地は有効だったはずであり、id使い
+                            // 回しはCS自身がそのidを一度解放してから再割当てするまで起こり得ない
+                            // （flagsCreatedがtrueのまま保たれている限り、このidは解体されていない）。
+                            // ここで現在のInfo.nameをキャッシュに補完し、以後は通常のid使い回し検知
+                            // （上のブランチ）に合流させる。
+                            isGhost = false;
+                            _baseInfoNames[mb.BaseId] = b.Info.name;
+                        }
+                    }
                 }
                 if (isGhost)
                 {
@@ -336,6 +375,7 @@ namespace CSWarfront.Game
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
                 _baseAngles.Remove(mb.BaseId); // Task60: 幽霊基地の向きキャッシュを持ち越さない
+                _baseInfoNames.Remove(mb.BaseId); // Task74: 幽霊基地のInfo名キャッシュも持ち越さない
                 ModConfig.Log("BasePlacementWatcher: ReconcileBases: removed ghost base id=" + mb.BaseId +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
             }
