@@ -6,15 +6,12 @@ using UnityEngine;
 namespace CSWarfront.Game.Models
 {
     /// <summary>
-    /// Core が解析した ObjData から、実行時に Unity の単一サブメッシュ Mesh を構築する
-    /// （Task57、MissileDisaster.Game.Models.MissileMeshBuilder.TryBuildMergedMesh を縮小移植）。
-    /// マテリアルはこのビルダーでは作らない: ユニットは <see cref="UnitMaterialFactory"/> の勢力色
-    /// マテリアルを、建物（軍事基地）も同ファクトリの自前マテリアルを、それぞれ呼び出し側が別途
-    /// 生成して割り当てる（<see cref="UnitVisuals"/> は MeshRenderer.sharedMaterial を1枚しか
-    /// 割り当てないため、そもそも複数サブメッシュ/複数マテリアルの構成にする意味がない）。
-    /// tools/gen_models.py が出力する src/CSWarfront/Models/*.obj は usemtl を1回しか使わない
-    /// （＝ObjParserの結果は常に単一サブメッシュ）ため、全三角形を1サブメッシュへ結合するだけで
-    /// 元データを失わない。
+    /// Core が解析した ObjData から、実行時に Unity のマルチサブメッシュ Mesh + サブメッシュごとの
+    /// .mtl 色マテリアル配列を構築する（Task69、MissileDisaster.Game.Models.MissileMeshBuilder.
+    /// TryBuild を縮小移植）。呼び出し元は <see cref="WarfrontModelProvider.TryGetModel"/> のみ
+    /// （ユニットの既定モデル解決経路、<see cref="UnitMeshSource"/>参照）。
+    /// Task82: 拠点（電力タブの複製プレハブ、WarfrontBasePrefab）専用だった単一サブメッシュ統合版
+    /// TryBuildMergedMesh は、複製プレハブ機構自体の完全撤去に伴い呼び出し元が無くなったため削除した。
     /// Mesh の生成は Unity のメインスレッドでのみ許可されるため、必ずメインスレッド
     /// （GameObject を生成する箇所と同じスレッド）から呼ぶこと。
     /// </summary>
@@ -25,9 +22,6 @@ namespace CSWarfront.Game.Models
         /// サブメッシュへ対応させ、サブメッシュごとに .mtl の Kd 色を塗った自前の Standard シェーダ
         /// マテリアルを1枚ずつ生成する（MissileDisaster.Game.Models.MissileMeshBuilder.TryBuild を
         /// そのまま移植。挙動変更なし、namespace のみ変更）。
-        /// tools/export_builtin_obj.py が書き出す Blender 由来モデルは複数の usemtl ブロック
-        /// （＝複数サブメッシュ）を持つため、<see cref="TryBuildMergedMesh"/>（全サブメッシュを1つに
-        /// 潰す、tools/gen_models.py 由来の単色モデル/建物用）とは別に用意する。
         /// 呼び出し側（<see cref="WarfrontModelProvider.TryGetModel"/>）がキャッシュするため、
         /// ここでは生成のみ行いキャッシュはしない。
         /// </summary>
@@ -77,60 +71,6 @@ namespace CSWarfront.Game.Models
                 ModConfig.LogError("WarfrontMeshBuilder.TryBuild error: " + e);
                 mesh = null;
                 materials = null;
-                return false;
-            }
-        }
-
-        /// <summary>ObjData の全サブメッシュの三角形を単一サブメッシュへ統合した Mesh を構築する。
-        /// 失敗時は false を返し mesh は null。</summary>
-        public static bool TryBuildMergedMesh(ObjData obj, out Mesh mesh)
-        {
-            mesh = null;
-            try
-            {
-                if (obj == null || obj.Positions == null || obj.Submeshes == null) return false;
-                int vertexCount = obj.VertexCount;
-                if (vertexCount <= 0) return false;
-
-                var vertices = new Vector3[vertexCount];
-                for (int i = 0; i < vertexCount; i++)
-                {
-                    vertices[i] = new Vector3(
-                        obj.Positions[i * 3],
-                        obj.Positions[i * 3 + 1],
-                        obj.Positions[i * 3 + 2]);
-                }
-
-                var allTris = new List<int>();
-                for (int s = 0; s < obj.Submeshes.Count; s++)
-                {
-                    ObjSubmesh sub = obj.Submeshes[s];
-                    allTris.AddRange(FilterValidTriangles(sub != null ? sub.Triangles : null, vertexCount));
-                }
-                if (allTris.Count == 0) return false;
-
-                var built = new Mesh();
-                built.vertices = vertices;
-                built.subMeshCount = 1;
-                built.SetTriangles(allTris, 0);
-                // Task71: BuildingInfoBase.CalculateGeneratedInfo/InitMeshData（ゲーム本体、ilspycmdで
-                // 逆コンパイルして確認済み）は Mesh.uv / Mesh.tangents が頂点数と同じ長さの配列である
-                // ことを無条件に前提にしている（無いと IndexOutOfRangeException や
-                // PrefabException("LOD has no tangents") になる）。この単一マテリアルの単色モデルでは
-                // UV自体の値に意味は無い（マテリアルにテクスチャを貼らない）ため、長さだけ揃える
-                // ゼロ埋めUVで十分。
-                built.uv = new Vector2[vertices.Length];
-                built.RecalculateNormals();
-                built.RecalculateTangents();
-                built.RecalculateBounds();
-
-                mesh = built;
-                return true;
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("WarfrontMeshBuilder.TryBuildMergedMesh error: " + e);
-                mesh = null;
                 return false;
             }
         }

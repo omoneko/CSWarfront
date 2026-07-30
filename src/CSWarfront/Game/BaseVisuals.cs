@@ -28,9 +28,10 @@ namespace CSWarfront.Game
     /// Task60: 軍事拠点（MilitaryBase）に勢力ごとの見た目を持たせるためのオーバーレイ描画。
     ///
     /// 設計判断（すべてのバニラ機能を壊さないための唯一の安全な経路）:
-    /// 各基地種別（陸軍/海軍/空軍/ミサイル）の拠点は WarfrontBasePrefab が種別ごとに登録する専用の
-    /// BuildingInfo（Task61で1種類→4種類に拡張、種別内では全勢力が同じプレハブを共有する）から生成される
-    /// 本物のCS建物（配置/AI/情報パネル/占領は全てバニラのBuildingManager/BuildingAIが担う）。
+    /// 各基地種別（陸軍/海軍/空軍/ミサイル）の拠点は、Options指定建物（BaseBuildingDesignation、
+    /// Task82で電力タブの複製プレハブ機構撤去後の唯一の配置経路）が指すBuildingInfo（種別内では全勢力が
+    /// 同じアセットのBuildingInfoを共有する）から生成される本物のCS建物（配置/AI/情報パネル/占領は
+    /// 全てバニラのBuildingManager/BuildingAIが担う）。
     /// BuildingInfo.m_mesh はプレハブ（アセット）単位のフィールドであり、CS標準APIには「建物インスタンス
     /// ごとに描画メッシュを差し替える」手段が無い。もし拠点ごとにm_meshを書き換えられたとしても、
     /// それは種別内で共有されるBuildingInfoそのものを書き換えることになり、既に配置済みの他勢力の同種別拠点
@@ -48,14 +49,14 @@ namespace CSWarfront.Game
     /// 占領（Core側はCS実体のflagsを一切見ない）・情報パネルには影響しないことを確認できた
     /// （詳細は task-71-report.md）。そのため現在はオーバーレイが実際に生成された拠点についてのみ
     /// <see cref="BaseHiddenSync"/> 経由でバニラ側のBuildingメッシュを個別に隠し、割り当て済みの
-    /// 拠点では既定モデル（Building_MilitaryBase/NavalBase/AirBase/MissileBase.obj、
-    /// WarfrontBasePrefabVisualSwap参照）ではなく割り当てられたアセットのみが見える
-    /// （スタッキングは発生しない）。
+    /// 拠点では指定建物アセット自身の既定の見た目ではなく割り当てられたアセットのみが見える
+    /// （スタッキングは発生しない。Task82: 電力タブの複製プレハブ専用だった既定モデル差し替え
+    /// =WarfrontBasePrefabVisualSwapは複製プレハブ機構自体の撤去に伴い削除済み）。
     ///
     /// Task75（基地二重表示バグの修正、詳細は task-75-report.md）:
     ///   実機ログで確認した根本原因は BaseHiddenSync.ApplyPending 側にあった（Task74で追加された
-    ///   「Optionsで指定した建物アセット」経由の基地で、保険チェックがWarfrontBasePrefabのプレハブしか
-    ///   見ておらずHiddenが永久に立たなかった。修正はBaseHiddenSync.csのコメント参照）。
+    ///   「Optionsで指定した建物アセット」経由の基地で、当時の保険チェックが電力タブの複製プレハブ
+    ///   しか見ておらずHiddenが永久に立たなかった。修正はBaseHiddenSync.csのコメント参照）。
     ///   これに加え、理論上残っていた「オーバーレイ生成とHidden反映の1tick分のギャップ」も本クラスで
     ///   閉じた: 割り当てを検出した最初のSyncではオーバーレイのGameObjectをまだ作らず、
     ///   BaseHiddenSync.SetDesired(id, true) の要求だけを出して <see cref="_pendingOverlays"/> に

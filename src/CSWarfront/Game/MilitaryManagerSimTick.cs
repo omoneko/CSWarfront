@@ -81,8 +81,9 @@ namespace CSWarfront.Game
                 // 理由・同じタイミングでクリアする（MissileStep.Advance自身はクリアしない契約）。
                 State.RecentImpacts.Clear();
 
-                // プレイヤーが電力タブから配置/解体した軍事基地建物を論理基地(WarState.Bases)へ反映する
-                // （Task18）。CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
+                // プレイヤーがOptions指定建物として配置/解体した軍事基地建物を論理基地(WarState.Bases)へ
+                // 反映する（Task18、Task82で電力タブの複製プレハブ経路を撤去しこの経路のみに一本化）。
+                // CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
                 // この直後のProductionPlanningから同tickで生産対象になる。
                 BasePlacementWatcher.ProcessPending(State);
 

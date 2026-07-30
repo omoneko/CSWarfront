@@ -8,8 +8,9 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// 軍事基地建物（WarfrontBasePrefab）の情報パネル（Task25）。
-    /// バニラの建物情報パネル（CityServiceWorldInfoPanel、電力タブ複製元のため）が表示されている間、
+    /// 軍事基地建物（Options指定建物、<see cref="BaseBuildingDesignation"/>）の情報パネル（Task25、
+    /// Task82で電力タブの複製プレハブ機構撤去に伴い名称・コメントを現行方式に合わせて更新）。
+    /// バニラの建物情報パネル（CityServiceWorldInfoPanel、指定建物自身のもの）が表示されている間、
     /// 選択中の建物が登録済み論理基地（MilitaryManager.State.Bases）であれば、その隣に所属勢力
     /// ドロップダウンとステータスを表示する自前の小さな UIPanel を出す。
     ///

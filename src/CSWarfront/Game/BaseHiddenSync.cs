@@ -33,22 +33,23 @@ namespace CSWarfront.Game
     ///   - <see cref="IsHiddenApplied"/> はメインスレッド専用。Hiddenが実際にCS建物バッファへ
     ///     反映済みかどうかを _lock 経由で安全に読む（Task75、BaseVisuals参照）。
     ///
-    /// Task75（基地二重表示バグの根本原因と修正）:
+    /// Task75（基地二重表示バグの根本原因と修正、当時の経緯）:
     ///   実機ログ（output_log.txt）で確認したところ、このMODで実際に配置された基地は全て
     ///   Task74の「Optionsで指定した建物アセット」経路（<see cref="BaseBuildingDesignation"/>）
-    ///   で登録されていた（例: Info.name="MilitaryBase_Army.MilitaryBase_Army_Data"、電力タブの
-    ///   複製プレハブ名"CSWarfront Military Base"等ではない）。ところが旧実装の
-    ///   <see cref="ApplyPending"/> は「対象は必ず WarfrontBasePrefab が登録した自MOD基地プレハブと
-    ///   一致するidのみに限定する」保険チェックとして <see cref="WarfrontBasePrefab.TryMatch"/> のみを
-    ///   見ており、Task74で追加されたもう一方の正規登録経路（BaseBuildingDesignation）を見ていなかった
-    ///   （Task61時点のコメントのまま更新されていなかった）。
+    ///   で登録されていた（例: Info.name="MilitaryBase_Army.MilitaryBase_Army_Data"、当時まだ
+    ///   登録されていた電力タブの複製プレハブ名"CSWarfront Military Base"等ではない）。ところが
+    ///   旧実装の <see cref="ApplyPending"/> は「対象は必ず当時の電力タブ複製プレハブ機構が登録した
+    ///   自MOD基地プレハブと一致するidのみに限定する」保険チェックのみを見ており、Task74で追加された
+    ///   もう一方の正規登録経路（BaseBuildingDesignation）を見ていなかった（Task61時点のコメントの
+    ///   まま更新されていなかった）。
     ///   結果、BaseBuildingDesignation経由で登録された基地は BaseVisuals.Sync がオーバーレイを生成し
-    ///   SetDesiredで「隠すべき」と要求しても、ApplyPendingのTryMatchが常にfalseを返すため
+    ///   SetDesiredで「隠すべき」と要求しても、当時の保険チェックが常にfalseを返すため
     ///   Building.Flags.Hidden が永久に立たない＝バニラの実体とオーバーレイが同時に描画され続ける
     ///   （プレイヤーが割り当てたオーバーレイのアセット名と配置に使ったアセット名が一致していれば、
     ///   文字通り「同じ建物」が重なって見える。占領等でそのオーバーレイが破棄されるまで消えない
     ///   ＝ユーザー報告の「一定時間」と一致）。修正: BasePlacementWatcher.ProcessCreatedと全く同じ
-    ///   2経路判定（WarfrontBasePrefab.TryMatch → BaseBuildingDesignation.TryMatch）へ揃えた。
+    ///   判定に揃えた（Task82で電力タブの複製プレハブ機構自体を完全撤去した現在は、判定は
+    ///   BaseBuildingDesignation.TryMatchの一本のみ）。
     ///
     ///   加えて、これとは独立した理論上の競合（メインスレッドでオーバーレイ生成 → 次のsimスレッド
     ///   tickでHidden反映、の1tick分のギャップ）も閉じる。<see cref="_confirmedHidden"/>
@@ -101,11 +102,11 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// simスレッド専用（呼び出し元が _stateLock を保持していること）。ペンディングを排出し、
-        /// CS建物バッファの Flags.Hidden ビットへ反映する。対象は必ず WarfrontBasePrefab が登録した
-        /// 自MOD基地プレハブと一致するidのみに限定する（他Modや通常建物のidを誤って書き換えない
-        /// ための保険。idは常に BasePlacementWatcher.ProcessCreated が TryMatch で確認済みのものだけが
-        /// WarState.Bases → BaseVisuals.Sync のスナップショット経由でここに来るため理論上は不要だが、
-        /// CS建物バッファへの直接ビット書き込みという性質上、多層防御として維持する）。
+        /// CS建物バッファの Flags.Hidden ビットへ反映する。対象は必ずOptions指定建物
+        /// （BaseBuildingDesignation）に一致するidのみに限定する（他Modや通常建物のidを誤って
+        /// 書き換えないための保険。idは常に BasePlacementWatcher.ProcessCreated が TryMatch で
+        /// 確認済みのものだけが WarState.Bases → BaseVisuals.Sync のスナップショット経由でここに来る
+        /// ため理論上は不要だが、CS建物バッファへの直接ビット書き込みという性質上、多層防御として維持する）。
         /// </summary>
         public static void ApplyPending()
         {
@@ -134,15 +135,13 @@ namespace CSWarfront.Game
                     if (id >= buf.Length) continue;
                     if ((buf[id].m_flags & Building.Flags.Created) == 0) continue; // 既に解体済み等
 
-                    // Task75: 対象は必ずこのMODが登録した自基地idのみに限定する（多層防御、
+                    // Task75/Task82: 対象は必ずこのMODが登録した自基地idのみに限定する（多層防御、
                     // クラス冒頭コメント参照）。BasePlacementWatcher.ProcessCreatedが基地登録時に
-                    // 使う判定と全く同じ2経路（電力タブの複製プレハブ／Optionsで指定した建物アセット）
-                    // を両方見る。旧実装はWarfrontBasePrefab.TryMatchのみを見ており、Task74で追加された
-                    // BaseBuildingDesignation経由の基地でHiddenが永久に立たない不具合の原因だった。
+                    // 使う判定と全く同じ、Optionsで指定した建物アセット(BaseBuildingDesignation)との
+                    // 名前一致を見る（電力タブの複製プレハブ機構=WarfrontBasePrefabはTask82で撤去済み）。
                     BaseType ignored;
                     if (buf[id].Info == null) continue;
-                    bool isOwnBase = WarfrontBasePrefab.TryMatch(buf[id].Info, out ignored) ||
-                        BaseBuildingDesignation.TryMatch(buf[id].Info.name, out ignored);
+                    bool isOwnBase = BaseBuildingDesignation.TryMatch(buf[id].Info.name, out ignored);
                     if (!isOwnBase) continue;
 
                     if (hidden)

@@ -20,8 +20,10 @@ if (Test-Path $soundsSrc) {
     Write-Host "Sounds deployed: $soundsDst"
 }
 
-# Deploy built-in default models (Unit_*.obj/.mtl, Building_MilitaryBase.obj/.mtl).
-# WarfrontModelProvider loads these at runtime (Task57).
+# Deploy built-in default models (*.obj/.mtl). WarfrontModelProvider loads the Unit_*.obj models
+# at runtime (Task57). The Building_*.obj models are no longer loaded at runtime (Task82 removed
+# the electricity-tab clone-prefab machinery that used them) but are still deployed here since
+# they remain the asset-editor export flow's output and may be reused by a future feature.
 $modelsSrc = "src\CSWarfront\Models"
 if (Test-Path $modelsSrc) {
     $modelsDst = Join-Path $modDir "Models"

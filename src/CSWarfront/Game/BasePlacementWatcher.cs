@@ -6,8 +6,9 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// プレイヤーが電力タブから配置/解体した軍事基地建物（WarfrontBasePrefab.Prefab）を検知し、
-    /// 対応する論理 MilitaryBase を作成/削除する（Task18）。
+    /// プレイヤーがOptions指定建物（BaseBuildingDesignation）として配置/解体した軍事基地建物を検知し、
+    /// 対応する論理 MilitaryBase を作成/削除する（Task18、Task82で電力タブの複製プレハブ経路を撤去し
+    /// この経路のみに一本化）。
     /// スレッド注記:
     ///  - CS のイベント（EventBuildingCreated/EventBuildingReleased）はどのスレッドから発火するか
     ///    保証されないため、ハンドラは最小限（idの記録のみ）に留め、CS API呼び出しやWarState操作は
@@ -42,8 +43,8 @@ namespace CSWarfront.Game
         /// プレイヤーが指定を変更/解除しただけで、生きている基地がゴースト扱いされ削除される不具合が
         /// あった）。書き込みは常にこのクラスのsimスレッド専用メソッド（ProcessCreated、呼び出し元
         /// MilitaryManager.OnSimTick が既に_stateLockを保持している）から行う——_baseAnglesと同じ箇所・
-        /// 同じタイミングで、クローンプレハブ経由・指定建物経由のどちらでマッチした場合も一様に書く
-        /// （両経路とも同じ「match」フラグを共有しているため、書き込み箇所を分岐する必要がない）。
+        /// 同じタイミングで書く（Task82で電力タブの複製プレハブ経由の判定は撤去し、Options指定建物
+        /// （BaseBuildingDesignation）経由の一本のmatch判定のみになった）。
         /// 読み取り（ReconcileBases）は同じ_stateLockを保持したまま呼ぶ想定（Dictionary自体はスレッド
         /// セーフではないため、呼び出し側の規約でスレッド安全性を担保する）。
         /// セッション限定キャッシュであり、セーブファイルには含まれない点に注意（セーブロード直後は
@@ -161,17 +162,13 @@ namespace CSWarfront.Game
         private static void ProcessCreated(WarState state, List<ushort> ids)
         {
             // デバッグ計装（一時的）: 早期returnも含め、なぜ基地が登録されないかを追えるようにする。
-            // Task74: マッチ対象は「電力タブの複製プレハブ」(WarfrontBasePrefab)に加え、Optionsで指定した
-            // 建物アセット(BaseBuildingDesignation)の2経路になった。どちらか一方でも候補があれば処理を続ける
-            // （複製プレハブの登録がたまたま失敗していても、指定建物経路だけは動くようにするための変更。
-            // 以前は WarfrontBasePrefab.IsAnyRegistered のみで判定していた）。
-            // Task81: 複製プレハブは電力タブのツールバーからは非表示化済み（配置不能）だが、既存セーブの
-            // 基地照合のため登録自体・WarfrontBasePrefab.IsAnyRegistered判定は変更していない。よって
-            // 「両方とも無い」場合の唯一の実用的な回復策は、Optionsで基地種別ごとに建物を指定すること
-            // （ログ文言もその旨に更新、動作は変更なし）。
-            if (!WarfrontBasePrefab.IsAnyRegistered && !BaseBuildingDesignation.HasAny)
+            // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab）を完全撤去したため、マッチ対象は
+            // Optionsで指定した建物アセット(BaseBuildingDesignation)のみになった。指定が1件も無ければ
+            // どの建物も基地になり得ないため早期returnする（唯一の回復策はOptionsで基地種別ごとに
+            // 建物を指定すること）。
+            if (!BaseBuildingDesignation.HasAny)
             {
-                ModConfig.Log("BasePlacementWatcher: ProcessCreated: no clone prefabs and no designated buildings; " +
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: no designated buildings; " +
                     "designate a building per base type in Options to place bases; skipping " + ids.Count + " id(s)");
                 return;
             }
@@ -195,19 +192,11 @@ namespace CSWarfront.Game
                 bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
                 string infoName = b.Info != null ? b.Info.name : null;
 
-                // Task61: どの基地種別（Army/Navy/AirForce）のプレハブに一致するかをWarfrontBasePrefabへ
-                // 委譲する（参照一致優先、ダメなら名前一致。ゲームがプレハブを再インスタンス化した場合の保険）。
+                // Task82: どの基地種別（Army/Navy/AirForce/MissileBase）に一致するかは、Optionsで指定した
+                // 建物アセット名（BaseBuildingDesignation）とInfo.nameの一致のみで判定する（電力タブの
+                // 複製プレハブとの参照/名前一致判定=WarfrontBasePrefab.TryMatchは撤去済み）。
                 BaseType matchedType = default(BaseType);
-                bool match = b.Info != null && WarfrontBasePrefab.TryMatch(b.Info, out matchedType);
-
-                // Task74: クローンプレハブに一致しなかった場合のみ、Optionsで指定した建物アセット名
-                // （BaseBuildingDesignation）とInfo.nameを比較する。クローンプレハブ自身の名前が偶然
-                // 指定名と同じ場合（設計上の縮退ケース）は、上のTryMatchが先に（参照一致で）trueを
-                // 返しているため、ここには到達せず二重登録は起きない。
-                if (!match && infoName != null)
-                {
-                    match = BaseBuildingDesignation.TryMatch(infoName, out matchedType);
-                }
+                bool match = infoName != null && BaseBuildingDesignation.TryMatch(infoName, out matchedType);
 
                 if (!flagsCreated)
                 {
@@ -306,9 +295,10 @@ namespace CSWarfront.Game
         public static void ReconcileBases(WarState state)
         {
             if (state == null) return;
-            // Task74: ProcessCreatedと同じ理由で、クローンプレハブ・指定建物のどちらか一方でも比較対象が
-            // あれば続行する（以前は WarfrontBasePrefab.IsAnyRegistered のみで判定していた）。
-            if (!WarfrontBasePrefab.IsAnyRegistered && !BaseBuildingDesignation.HasAny) return;
+            // Task82: ProcessCreatedと同じ理由で、Options指定建物(BaseBuildingDesignation)に比較対象が
+            // 1件も無ければ続ける意味が無い（電力タブの複製プレハブ経由の判定=WarfrontBasePrefab.
+            // IsAnyRegisteredは撤去済み）。
+            if (!BaseBuildingDesignation.HasAny) return;
             if (!Singleton<BuildingManager>.exists) return;
 
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;

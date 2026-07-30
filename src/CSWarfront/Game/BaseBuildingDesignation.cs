@@ -39,9 +39,9 @@ namespace CSWarfront.Game
         private static readonly Dictionary<BaseType, string> _designations = new Dictionary<BaseType, string>();
         private static string _filePath;
 
-        /// <summary>いずれかの基地種別に指定が1件でもあるか。BasePlacementWatcherが「クローンプレハブも
-        /// 指定建物も無ければ何もできない」早期returnの判定に使う（クローン登録が失敗しても指定建物経路は
-        /// 動くようにするため、WarfrontBasePrefab.IsAnyRegisteredだけで判定してはならない）。</summary>
+        /// <summary>いずれかの基地種別に指定が1件でもあるか。BasePlacementWatcherが「指定建物が
+        /// 1件も無ければ何もできない」早期returnの判定に使う（Task82で電力タブの複製プレハブ機構を
+        /// 撤去した現在、基地配置経路はこの指定建物のみ）。</summary>
         public static bool HasAny { get { return _designations.Count > 0; } }
 
         /// <summary>起動時（WarfrontLoadingExtension.LoadModAssets、UnitAssetBindings.Loadと同じ箇所）に
@@ -125,8 +125,9 @@ namespace CSWarfront.Game
 
         /// <summary>
         /// 建物のInfo.name（<paramref name="assetName"/>）が、いずれかの基地種別の指定建物と一致するか。
-        /// 一致すればそのBaseTypeを返す。BasePlacementWatcher.ProcessCreated/ReconcileBasesが、
-        /// WarfrontBasePrefab.TryMatch（クローンプレハブとの一致判定）に失敗した場合の第二の判定として使う。
+        /// 一致すればそのBaseTypeを返す。BasePlacementWatcher.ProcessCreated/ReconcileBases、
+        /// BaseHiddenSync.ApplyPending、CoverMapBuilder.Buildが基地判定の唯一の経路として使う
+        /// （Task82: 電力タブの複製プレハブとの一致判定=WarfrontBasePrefab.TryMatchは撤去済み）。
         /// 4種別のうち複数が同じアセット名を指定することは無い想定だが（UIは1アセット=1種別のみ許容）、
         /// 万一重複していても最初に見つかった種別を返すだけで例外にはならない。
         /// </summary>

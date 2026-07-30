@@ -12,7 +12,7 @@ namespace CSWarfront.Game
     {
         public string Name => "CS Warfront";
         public string Description =>
-            "5勢力のTier制軍事シミュレーション（陸海空・基地・勢力圏・占領）。電力タブから軍事基地を建設可能。";
+            "5勢力のTier制軍事シミュレーション（陸海空・基地・勢力圏・占領）。Optionsで指定した建物を建てると軍事基地になる。";
 
         /// <summary>Mod Options 画面（建設先勢力の選択、およびTask47でOptionsサブページ化した
         /// モデル割り当てUI）。ゲームが自動検出して呼ぶ。モデル割り当てUI自体の構築は
@@ -25,7 +25,7 @@ namespace CSWarfront.Game
             {
                 UIHelperBase group = helper.AddGroup("Base placement");
                 group.AddDropdown(
-                    "Faction to build for (electricity tab military base)",
+                    "Faction to build for (designated base building)",
                     WarfrontSettings.FactionNames,
                     WarfrontSettings.BuildFactionId,
                     i => WarfrontSettings.SetBuildFactionId(i));

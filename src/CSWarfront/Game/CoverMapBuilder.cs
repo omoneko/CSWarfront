@@ -87,10 +87,19 @@ namespace CSWarfront.Game
                         continue;
                     }
 
-                    // 自軍の軍事基地プレハブ（陸軍/海軍/航空のいずれも、Task61）は遮蔽物として扱わない
-                    // （拠点の真上/直近に遮蔽点が立つのは意味がなく、BasePlacementWatcherと同じ
-                    // 「参照一致 OR 名前一致」判定をWarfrontBasePrefab.IsOwnBaseへ委譲する）。
-                    if (WarfrontBasePrefab.IsOwnBase(info))
+                    // 自軍の軍事基地建物（陸軍/海軍/航空/ミサイル、Task61）は遮蔽物として扱わない
+                    // （拠点の真上/直近に遮蔽点が立つのは意味がない）。
+                    // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab.IsOwnBase、参照一致による
+                    // 判定）を撤去したため、置き換えルールとしてBasePlacementWatcher/BaseHiddenSyncと
+                    // 全く同じ判定基準——Info.nameがOptions指定建物(BaseBuildingDesignation)のいずれかと
+                    // 一致するか——を使う。これが最も単純かつ他の基地判定コードと一貫した基準であり、
+                    // 新たな状態（BasePlacementWatcher._baseInfoNamesのような「実際に登録済みの基地id」
+                    // 限定のキャッシュ）をここへ持ち込む必要が無い。定義上わずかに広い（＝現在Optionsで
+                    // 指定されているアセット名の建物は、まだBasePlacementWatcherに論理基地として登録
+                    // されていなくても遮蔽物から除外される）が、遮蔽物マップは近似的な障害物リストであり、
+                    // 基地予定地を過剰に除外する分には安全側（誤って基地を遮蔽物扱いする方が実害が大きい）。
+                    BaseType ignoredType;
+                    if (BaseBuildingDesignation.TryMatch(info.name, out ignoredType))
                     {
                         skippedOwnBase++;
                         continue;

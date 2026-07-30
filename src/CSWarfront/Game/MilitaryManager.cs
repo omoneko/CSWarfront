@@ -87,9 +87,11 @@ namespace CSWarfront.Game
             NavalUnitRoster.RegisterAll(state.Types); // 海上2種(Destroyer/Carrier)×Tier1〜5（Task61）
             AirUnitRoster.RegisterAll(state.Types);   // 航空3種(AirSuperiority/TacticalBomber/SuicideDrone)×Tier1〜5（Task61）
 
-            // 全5勢力を生成する（電力タブの勢力ドロップダウンはどの選択も有効な値を指すようにするため）。
-            // 基地はもうここではシードしない（Task18）：プレイヤーが電力タブから基地建物を配置した瞬間に
-            // BasePlacementWatcher が論理基地を作成する。開始時の軍資金だけは、配置直後に生産を
+            // 全5勢力を生成する（Options内の「建設先勢力」ドロップダウンはどの選択も有効な値を
+            // 指すようにするため）。
+            // 基地はもうここではシードしない（Task18）：プレイヤーがOptions指定建物（Task74/Task82で
+            // 唯一の配置経路になった）を配置した瞬間にBasePlacementWatcher が論理基地を作成する。
+            // 開始時の軍資金だけは、配置直後に生産を
             // 始められるようここで与えておく。
             string[] names = WarfrontSettings.FactionNames;
             for (byte i = 0; i < WarfrontSettings.MaxFactions; i++)

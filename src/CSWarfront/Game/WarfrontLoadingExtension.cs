@@ -18,9 +18,13 @@ namespace CSWarfront.Game
     {
         /// <summary>
         /// ゲームプレイ可能なモード（NewGame/LoadGame及びシナリオ由来の対応モード）でのみ、
-        /// 電力タブの軍事基地プレハブを登録し、基地建物の設置/解体イベント購読を開始する
-        /// （アセット/テーマ/マップエディタ等では不要）。
+        /// 基地建物の設置/解体イベント購読を開始する（アセット/テーマ/マップエディタ等では不要）。
         /// LoadMode の各メンバーは ICities.dll から検証済み（research-power-tab-building.md §3）。
+        ///
+        /// Task82: かつては電力タブの複製プレハブ（WarfrontBasePrefab）をここで実行時登録していたが、
+        /// Options指定建物（BaseBuildingDesignation）方式への一本化に伴い撤去した（複製プレハブ機構
+        /// そのものを削除。既存セーブに残る旧クローンプレハブの建物はもう登録されないため基地として
+        /// 認識されない——CS自身は未知のプレハブ扱いになるだけで、ロード自体がクラッシュすることはない）。
         /// </summary>
         public override void OnLevelLoaded(LoadMode mode)
         {
@@ -29,13 +33,7 @@ namespace CSWarfront.Game
                 if (mode == LoadMode.NewGame || mode == LoadMode.LoadGame ||
                     mode == LoadMode.NewGameFromScenario)
                 {
-                    // Task57: LoadModAssets（WarfrontModelProvider.Initializeを含む）を
-                    // EnsureRegistered より先に呼ぶよう順序を変更した。EnsureRegistered が
-                    // 軍事基地プレハブの見た目を built-in model（Building_MilitaryBase.obj）へ
-                    // 差し替える際、WarfrontModelProvider が未初期化だと必ず失敗する
-                    // （modDirectory 未解決）ため。
                     LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音／Task57: 既定モデル
-                    WarfrontBasePrefab.EnsureRegistered();
                     BasePlacementWatcher.Subscribe();
                 }
             }
@@ -59,10 +57,10 @@ namespace CSWarfront.Game
         /// WarfrontSounds（発砲音・撃破音のwav読込）を、Task74: BaseBuildingDesignation
         /// （基地種別→指定建物アセット名の割り当て）を、それぞれMODディレクトリから読み込む/初期化する。
         /// Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
-        /// 本クラスが既に WarfrontBasePrefab.EnsureRegistered() と同じタイミング（ゲームプレイ可能な
-        /// LoadModeでのOnLevelLoaded）でプレハブ登録を行っており、資産読み込みも同じタイミングで
-        /// 十分だからである。modPath が取得できない場合はログのみで継続し、両者ともメモリ内のみで
-        /// 動作する（UnitAssetBindingsの割り当てやWarfrontSoundsの音は使えないが、ロード自体は止めない）。
+        /// 本クラスが既にゲームプレイ可能なLoadModeでのOnLevelLoadedというタイミングを持っており、
+        /// 資産読み込みも同じタイミングで十分だからである。modPath が取得できない場合はログのみで
+        /// 継続し、両者ともメモリ内のみで動作する（UnitAssetBindingsの割り当てやWarfrontSoundsの音は
+        /// 使えないが、ロード自体は止めない）。
         /// </summary>
         private static void LoadModAssets()
         {

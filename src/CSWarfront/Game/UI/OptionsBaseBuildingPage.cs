@@ -17,16 +17,15 @@ namespace CSWarfront.Game.UI
     /// 自身の通常のメニューから）どこにでも建てるだけで、それが自動的にその種別の基地として機能する」
     /// 方式を追加する（見た目の差し替え・Hidden化トリックは一切無い。アセットは常にネイティブの見た目の
     /// まま）。永続化は<see cref="BaseBuildingDesignation"/>（&lt;modDir&gt;\base-buildings.txt）が担当し、
-    /// 実際の認識（新規配置イベント→論理MilitaryBase登録）は BasePlacementWatcher.ProcessCreated が
-    /// 電力タブのクローンプレハブ判定に続く第二の判定として行う。
+    /// 実際の認識（新規配置イベント→論理MilitaryBase登録）は BasePlacementWatcher.ProcessCreated が行う。
     ///
-    /// Task81: 電力タブのクローンプレハブ（WarfrontBasePrefab）は、ツールバーからのフォールバック配置
-    /// 経路としては廃止した——4種とも m_availableIn = ItemClass.Availability.None を設定し電力タブの
-    /// ボタン自体を非表示化したため、プレイヤーが電力タブから基地を配置することはもう出来ない。
-    /// ただしプレハブの<b>登録</b>自体は維持する（既存セーブに置かれた基地のBuildingInfoがこのクローン
-    /// そのものであり、BasePlacementWatcher.TryMatch/ReconcileBasesが引き続き参照・名前一致で照合する
-    /// ため）。この結果、基地配置は本ページでの指定（BaseBuildingDesignation）が唯一の経路になった——
-    /// 未指定の基地種別は配置手段が無い状態になる（本ページのヒントラベルで明示する）。
+    /// Task81で電力タブのクローンプレハブ（WarfrontBasePrefab）はツールバーからのフォールバック配置
+    /// 経路として廃止し（m_availableIn = ItemClass.Availability.None）、Task82で複製プレハブ機構自体
+    /// （登録・実行時複製・見た目差し替え等一式）を完全撤去した。既存セーブに置かれていた旧クローン
+    /// プレハブの建物は、この撤去以降はもう論理基地として登録されない（この点はユーザーの明示的な
+    /// 判断により許容された、既存セーブ互換性の放棄）。基地配置は本ページでの指定
+    /// （BaseBuildingDesignation）が唯一の経路であり——未指定の基地種別は配置手段が無い状態になる
+    /// （本ページのヒントラベルで明示する）。
     ///
     /// UI構成: OptionsModelAssignPageと同じ制約（ICities.UIHelperBase はスクロール一覧を持たないため、
     /// 検索欄で絞り込んでからドロップダウンで選ぶ方式）に従う。検索欄・「サブスクライブ済みのみ」トグルは
@@ -216,9 +215,8 @@ namespace CSWarfront.Game.UI
         {
             if (_hintLabel == null) return;
 
-            // Task81: 電力タブの複製プレハブはツールバーから非表示化した（登録自体は既存セーブ互換の
-            // ため維持、WarfrontBasePrefab.RegisterOne参照）。そのため「未指定の種別は電力タブから」
-            // という旧文言はもう成立しない——基地は必ずこのページでの指定が唯一の配置経路になる。
+            // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab）は完全撤去した。基地は必ず
+            // このページでの指定（BaseBuildingDesignation）が唯一の配置経路になる。
             const string usage = "基地は電力タブからは配置できません。指定した建物を建てると、その建物が基地として機能します（既存の建物は対象外）。基地種別ごとに建物を指定してください。";
             _hintLabel.text = stateReady
                 ? usage
