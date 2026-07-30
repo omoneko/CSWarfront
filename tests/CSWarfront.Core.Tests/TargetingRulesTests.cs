@@ -1,4 +1,4 @@
-using CSWarfront.Core;
+﻿using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
@@ -41,7 +41,10 @@ public class TargetingRulesTests
 
     // --- BaseCombatStep への適用 ---
 
-    private static WarState StateWithHostileBase(float baseHp)
+    /// <summary>maxHpを省略するとMaxHP=開始HPになり自然回復（Task89）は発生しない
+    /// （回復と無関係なテストの期待値を単純に保つため）。回復を検証するテストは明示的に
+    /// maxHpを渡す。</summary>
+    private static WarState StateWithHostileBase(float baseHp, float maxHp = -1f)
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -50,6 +53,7 @@ public class TargetingRulesTests
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
         enemyBase.OwnerFactionId = 1;
         enemyBase.CurrentHP = baseHp;
+        enemyBase.MaxHP = maxHp > 0f ? maxHp : baseHp;
         s.Bases.Add(enemyBase);
         return s;
     }
@@ -159,6 +163,63 @@ public class TargetingRulesTests
         BaseCombatStep.Advance(s, 1f);
 
         Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
+    }
+
+    // --- Task89: 基地HPの自然回復 ---
+
+    [Fact]
+    public void Damaged_base_slowly_regenerates_hp()
+    {
+        var s = StateWithHostileBase(250f, 500f); // 攻撃者なし
+        BaseCombatStep.Advance(s, 1f);
+        Assert.Equal(250f + BaseCombatStep.BaseRegenPerHour, s.Bases[0].CurrentHP, 2);
+    }
+
+    [Fact]
+    public void Regeneration_caps_at_max_hp()
+    {
+        var s = StateWithHostileBase(499f, 500f); // MaxHP=500の直下
+        BaseCombatStep.Advance(s, 5f);
+        Assert.Equal(500f, s.Bases[0].CurrentHP, 2);
+    }
+
+    [Fact]
+    public void Captured_base_at_zero_hp_does_not_regenerate()
+    {
+        // HP0（占領処理待ち）の基地は回復しない——回復させると占領が二度と成立しなくなる。
+        var s = StateWithHostileBase(0f, 500f);
+        BaseCombatStep.Advance(s, 1f);
+        Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
+    }
+
+    [Fact]
+    public void Land_attack_exceeding_regen_still_grinds_the_base_down()
+    {
+        // Tank_T1の攻城DPS 40*0.8=32/h > 回復20/h → 正味12/hで削れ続ける＝
+        // 「回復速度を上回る攻撃が地上兵力から加えられた場合のみ占領される」の要件を満たす。
+        var s = StateWithHostileBase(100f, 500f);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 1f);
+
+        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 40f * 0.8f; // 回復→攻撃の順
+        Assert.Equal(expected, s.Bases[0].CurrentHP, 2);
+    }
+
+    [Fact]
+    public void Weak_land_attack_below_regen_cannot_capture()
+    {
+        // 回復を下回る攻撃（歩兵1体: DamagePerHit(20,0)=20 × siege accuracy 0.8 = 16/h < 20/h）では
+        // 正味プラスで、基地は削り切れない。
+        var s = StateWithHostileBase(100f, 500f);
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Infantry, 1));
+        s.Units.Add(new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 1f);
+
+        Assert.True(s.Bases[0].CurrentHP >= 100f,
+            "expected regen to outpace a sub-regen attack (hp=" + s.Bases[0].CurrentHP + ")");
     }
 
     // --- ThreatCombatStep への適用 ---

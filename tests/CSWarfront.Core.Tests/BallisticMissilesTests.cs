@@ -163,6 +163,24 @@ public class BallisticMissilesTests
         Assert.Equal(500f - MissileStep.ImpactDamageBase, enemyBase.CurrentHP, 3);
     }
 
+    // Task89（ユーザー要望「弾道ミサイルも航空攻撃と同様にHP1まで削る仕様に」）:
+    // ミサイルは拠点を占領できない＝HPは1で頭打ち。最後の1は地上兵力が削る。
+    [Fact]
+    public void Impact_reduces_base_hp_only_down_to_one()
+    {
+        var s = WithLaunchedMissileBase(1, out var b);
+        WorldPos target = new WorldPos(1000, 0, 0);
+        MissileStep.TryLaunch(s, b.BaseId, target);
+
+        var enemyBase = new MilitaryBase(200, BaseType.Army, target);
+        enemyBase.OwnerFactionId = 1;
+        enemyBase.MaxHP = 500f; enemyBase.CurrentHP = 100f; // ImpactDamageBase(300)で0を割る低HP
+        s.Bases.Add(enemyBase);
+
+        MissileStep.Advance(s, MissileStep.FlightHours);
+        Assert.Equal(1f, enemyBase.CurrentHP, 3);
+    }
+
     [Fact]
     public void Impact_spares_bases_under_capture_grace()
     {

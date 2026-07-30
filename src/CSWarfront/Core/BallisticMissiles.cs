@@ -232,7 +232,10 @@ namespace CSWarfront.Core
                 if (state.Relations.Get(m.FactionId, b.OwnerFactionId.Value) == Relation.Allied) continue; // 自軍・同盟軍の基地は無傷（Task64）
 
                 b.CurrentHP -= ImpactDamageBase;
-                if (b.CurrentHP < 0f) b.CurrentHP = 0f;
+                // Task89（ユーザー要望「弾道ミサイルも航空攻撃と同様にHP1まで削る仕様に」）:
+                // ミサイルでは占領（HP0）まで到達できない。TargetingRules.BaseHpFloorの非陸上床と
+                // 同じ考え方で、最後の1は必ず地上兵力に削らせる。
+                if (b.CurrentHP < 1f) b.CurrentHP = 1f;
             }
 
             for (int k = 0; k < state.Threats.Count; k++)

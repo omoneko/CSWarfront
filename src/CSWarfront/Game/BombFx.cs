@@ -76,6 +76,11 @@ namespace CSWarfront.Game
 
             try
             {
+                // Task89: 着弾音（爆撃音）用のカメラ位置。フレーム内で1回だけ取得する
+                // （CombatFxSound.SpawnKillSoundsと同じパターン）。
+                Camera cam = Camera.main;
+                Vector3? cameraPos = cam != null ? (Vector3?)cam.transform.position : null;
+
                 for (int i = _bombs.Count - 1; i >= 0; i--)
                 {
                     Bomb b = _bombs[i];
@@ -102,6 +107,9 @@ namespace CSWarfront.Game
                     if (t >= 1f)
                     {
                         KillFx.TryDispatchCsExplosion(b.To, ImpactExplosionMagnitude);
+                        // Task89（ユーザー要望「爆撃機からの爆撃音」）: 着弾の瞬間に爆発音を鳴らす
+                        // （撃破音と同じvehicle_destroyed.wav・同じ同時再生数/距離減衰の管理を再利用）。
+                        Audio.WarfrontSoundPlayer.PlayKill(b.To, cameraPos);
                         UnityEngine.Object.Destroy(b.Root);
                         _bombs.RemoveAt(i);
                     }

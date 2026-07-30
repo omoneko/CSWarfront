@@ -1,4 +1,4 @@
-using CSWarfront.Core;
+﻿using CSWarfront.Core;
 using Xunit;
 
 public class BaseCombatStepTests
@@ -12,7 +12,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1()); // attack 40 (per in-game hour), range 60
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         BaseCombatStep.Advance(s, 1f);
@@ -30,7 +30,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         BaseCombatStep.Advance(s, 0.5f);
@@ -46,7 +46,7 @@ public class BaseCombatStepTests
         s.Factions.Add(new Faction(1, "Blue")); // 0-1 Neutral 既定
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var neutralBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        neutralBase.OwnerFactionId = 1; neutralBase.CurrentHP = 100f;
+        neutralBase.OwnerFactionId = 1; neutralBase.CurrentHP = 100f; neutralBase.MaxHP = 100f; // Task89: 回復を無効化
         s.Bases.Add(neutralBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         BaseCombatStep.Advance(s, 1f);
@@ -62,7 +62,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         enemyBase.CaptureGraceHours = 5f;
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -82,7 +82,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         enemyBase.CaptureGraceHours = 2f;
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -109,7 +109,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(LandUnitRoster.Get(UnitCategory.Artillery, 1)); // Attack=50, Accuracy=0.35, Range=120
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Artillery_T1", 0, 100f, new WorldPos(0, 0, 0)));
 
@@ -133,7 +133,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
 
@@ -162,7 +162,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         enemyBase.CaptureGraceHours = 5f;
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -199,7 +199,7 @@ public class BaseCombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1));
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(10, 0, 0));
-        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0, 0, 0)));
 

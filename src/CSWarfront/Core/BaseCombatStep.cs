@@ -11,13 +11,30 @@ namespace CSWarfront.Core
         /// 攻城兵器としての立ち位置を保つ。</summary>
         public const float SiegeAccuracyFloor = 0.8f;
 
+        /// <summary>Task89（ユーザー要望「各基地HPは徐々に回復する仕様に」）: 基地HPの自然回復量
+        /// （ゲーム内1時間あたり）。攻撃が止めば拠点は時間とともに全快へ向かい、航空・海上・ミサイルが
+        /// 床(1)まで削った拠点も放置すれば回復する。占領を成立させるには、この回復速度を上回る
+        /// 継続的な地上攻撃が必要（Tank_T1の攻城DPS 32/h &gt; 20/h なので戦車1両でも正味では削れるが、
+        /// 歩兵1体（16/h）では回復に負ける、という調整。TargetingRulesTests参照）。</summary>
+        public const float BaseRegenPerHour = 20f;
+
         public static void Advance(WarState state, float dt)
         {
             // 新設基地の占領猶予を先に消化する。猶予中の基地はこのtickのダメージループから完全に除外する
             // （プレイヤーが両陣営を配置し終える前に一方的に占領されるのを防ぐ）。
+            // Task89: あわせて自然回復もここで先に適用する（回復→攻撃の順。同tick内では
+            // 「攻撃DPS − 回復」が正味の削り量になる）。HP0（占領処理待ち）の基地は回復させない
+            // ——回復させると占領が二度と成立しなくなる。
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 var b = state.Bases[j];
+
+                if (b.OwnerFactionId != null && b.CurrentHP > 0f && b.CurrentHP < b.MaxHP)
+                {
+                    b.CurrentHP += BaseRegenPerHour * dt;
+                    if (b.CurrentHP > b.MaxHP) b.CurrentHP = b.MaxHP;
+                }
+
                 if (b.CaptureGraceHours <= 0f) continue;
                 b.CaptureGraceHours -= dt;
                 if (b.CaptureGraceHours < 0f) b.CaptureGraceHours = 0f;
