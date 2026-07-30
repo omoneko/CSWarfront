@@ -184,6 +184,9 @@ namespace CSWarfront.Core
                         continue;
 
                     WorldPos? objective = ResolveDomainObjective(u);
+                    // Task87: 命令が無い（Idle）航空/海上ユニットは最寄りの帰還先へ戻る
+                    // （航空: 自軍航空基地/空母、海上: 自軍海軍基地。MovementStepReturnHome.cs）。
+                    if (!objective.HasValue) objective = ResolveHomeObjective(state, u, type);
                     if (!objective.HasValue) continue;
 
                     if (type.Domain == Domain.Air)

@@ -129,6 +129,7 @@ namespace CSWarfront.Game
             BaseVisuals.DestroyAll(); // Task60: 基地の勢力別オーバーレイもレベルアンロード時に破棄する。
             CombatFx.DestroyAll(); // Task42: 発砲エフェクトもレベルアンロード時に破棄する。
             KillFx.DestroyAll(); // Task65: 撃破爆発エフェクトもレベルアンロード時に破棄する。
+            BombFx.DestroyAll(); // Task87: 落下中の爆弾もレベルアンロード時に破棄する。
             MissileVisuals.DestroyAll(); // Task63: 飛翔中ミサイルの見た目もレベルアンロード時に破棄する。
             MissileVisuals.DestroyAllFx(); // Task63: 着弾/迎撃の演出も同様。
             UI.OrderDestinationMarkers.DestroyAll(); // Task62: 目的地マーカーもレベルアンロード時に破棄する。

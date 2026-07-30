@@ -174,6 +174,7 @@ namespace CSWarfront.Game
             KillFx.Spawn(_killSnapshot); // Task65: 撃破爆発エフェクト（音とは別のエフェクト専用クラス、同じカテゴリ判定を共有）
             CombatFx.Update(Time.deltaTime);
             KillFx.Update(Time.deltaTime);
+            BombFx.Update(Time.deltaTime); // Task87: 落下中の爆弾のアニメーション
 
             // Task63: 着弾/迎撃の演出（フラッシュ/爆発+音）と、生存中の演出の実時間更新。
             MissileVisuals.HandleImpacts(_missileImpactSnapshot);

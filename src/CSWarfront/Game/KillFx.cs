@@ -193,6 +193,13 @@ namespace CSWarfront.Game
         /// CS爆発を諦めてフォールバックに切り替える（毎フレームのエラーログ連発を防ぐ）。</summary>
         private static bool TryDispatchCsExplosion(Vector3 pos)
         {
+            return TryDispatchCsExplosion(pos, CsExplosionMagnitude);
+        }
+
+        /// <summary>Task87: magnitude指定版（BombFxの着弾爆発が小さめの倍率で再利用する）。
+        /// エフェクト解決・エラー時の自己無効化はTask84の実装をそのまま共有する。</summary>
+        internal static bool TryDispatchCsExplosion(Vector3 pos, float magnitude)
+        {
             EffectInfo effect = ResolveCsEffect();
             if (effect == null) return false;
 
@@ -200,7 +207,7 @@ namespace CSWarfront.Game
             {
                 var spawnArea = new EffectInfo.SpawnArea(pos, Vector3.up, 0f);
                 Singleton<EffectManager>.instance.DispatchEffect(
-                    effect, default(InstanceID), spawnArea, Vector3.zero, 0f, CsExplosionMagnitude,
+                    effect, default(InstanceID), spawnArea, Vector3.zero, 0f, magnitude,
                     Singleton<VehicleManager>.instance.m_audioGroup);
                 return true;
             }

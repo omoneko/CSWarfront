@@ -135,7 +135,16 @@ NAME_MAP = {
     'spaag': 'Unit_AntiAir',
     'loiteringdrone': 'Unit_SuicideDrone',
     'basemissile': 'Building_MissileBase',
+    # Task87: 爆撃機の投下爆弾（BombFx用の小物プロップ）。2026-07-31時点でmodels.blendに
+    # 爆弾オブジェクトはまだ無く、暫定モデル（scratchpadのgen_bomb_obj.pyで生成）を使用中。
+    # ユーザーが「17_Bomb」等の名前で追加すれば、このマッピング経由で次回エクスポート時に
+    # 暫定モデルを上書きする（OPTIONAL_MODELS参照＝無くてもエラーにしない）。
+    'bomb': 'Prop_Bomb',
 }
+
+# NAME_MAPのうち、.blend側にオブジェクトがまだ存在しなくてもエラーにしないもの
+# （存在すれば通常どおりエクスポートして暫定モデルを上書きする）。
+OPTIONAL_MODELS = {'Prop_Bomb'}
 
 # Built-in models that intentionally have NO Blender counterpart and must be
 # left untouched (still produced by tools/gen_models.py). Listed here only
@@ -378,11 +387,14 @@ def main():
     if unmapped:
         raise RuntimeError("No mapping for Blender object(s): %s (update NAME_MAP)" % unmapped)
 
-    expected_names = set(NAME_MAP.values())
+    expected_names = set(NAME_MAP.values()) - OPTIONAL_MODELS
     got_names = set(t for _, t in mapped)
     missing = expected_names - got_names
     if missing:
         raise RuntimeError("Expected built-in model(s) not found in .blend: %s" % sorted(missing))
+    optional_missing = OPTIONAL_MODELS - got_names
+    if optional_missing:
+        print("NOTE: optional model(s) not in .blend, interim files left untouched: %s" % sorted(optional_missing))
 
     print("\n%-22s -> %-24s" % ("blend object", "built-in model"))
     print("-" * 50)

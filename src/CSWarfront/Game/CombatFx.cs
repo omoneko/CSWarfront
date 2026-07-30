@@ -289,6 +289,12 @@ namespace CSWarfront.Game
                     });
                     break;
                 case ShotKind.DirectFire:
+                    // Task87: 爆撃機はトレーサーではなく爆弾投下モーション（BombFxが落下・着弾爆発まで扱う）。
+                    if (e.Category == UnitCategory.TacticalBomber)
+                    {
+                        BombFx.SpawnDrop(from, to);
+                        break;
+                    }
                     SpawnTracer(from, to, DirectFireTracerDuration, DirectFireTracerWidth, DirectFireFlashSize,
                         GetDirectFireMaterial());
                     break;
