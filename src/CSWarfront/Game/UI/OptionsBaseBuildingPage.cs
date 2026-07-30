@@ -20,8 +20,13 @@ namespace CSWarfront.Game.UI
     /// 実際の認識（新規配置イベント→論理MilitaryBase登録）は BasePlacementWatcher.ProcessCreated が
     /// 電力タブのクローンプレハブ判定に続く第二の判定として行う。
     ///
-    /// 電力タブのクローンプレハブは本ページの指定の有無に関わらず常にそのまま機能し続ける（変更なし、
-    /// フォールバック兼「セットアップ不要ですぐ使える」経路として残る。クラス冒頭の「coexistence」注記）。
+    /// Task81: 電力タブのクローンプレハブ（WarfrontBasePrefab）は、ツールバーからのフォールバック配置
+    /// 経路としては廃止した——4種とも m_availableIn = ItemClass.Availability.None を設定し電力タブの
+    /// ボタン自体を非表示化したため、プレイヤーが電力タブから基地を配置することはもう出来ない。
+    /// ただしプレハブの<b>登録</b>自体は維持する（既存セーブに置かれた基地のBuildingInfoがこのクローン
+    /// そのものであり、BasePlacementWatcher.TryMatch/ReconcileBasesが引き続き参照・名前一致で照合する
+    /// ため）。この結果、基地配置は本ページでの指定（BaseBuildingDesignation）が唯一の経路になった——
+    /// 未指定の基地種別は配置手段が無い状態になる（本ページのヒントラベルで明示する）。
     ///
     /// UI構成: OptionsModelAssignPageと同じ制約（ICities.UIHelperBase はスクロール一覧を持たないため、
     /// 検索欄で絞り込んでからドロップダウンで選ぶ方式）に従う。検索欄・「サブスクライブ済みのみ」トグルは
@@ -206,12 +211,15 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>マップ未ロード（メインメニュー等）で建物アセットが1件も無い状況、および本ページの
-        /// 使い方（「既存の建物は対象外」「未指定の種別は電力タブから」）を常に案内する。</summary>
+        /// 使い方（「既存の建物は対象外」「電力タブからは配置できない」）を常に案内する。</summary>
         private static void RefreshHint(bool stateReady)
         {
             if (_hintLabel == null) return;
 
-            const string usage = "指定した建物を建てると、その建物が基地として機能します（既存の建物は対象外）。未指定の基地種別は従来どおり電力タブから配置します。";
+            // Task81: 電力タブの複製プレハブはツールバーから非表示化した（登録自体は既存セーブ互換の
+            // ため維持、WarfrontBasePrefab.RegisterOne参照）。そのため「未指定の種別は電力タブから」
+            // という旧文言はもう成立しない——基地は必ずこのページでの指定が唯一の配置経路になる。
+            const string usage = "基地は電力タブからは配置できません。指定した建物を建てると、その建物が基地として機能します（既存の建物は対象外）。基地種別ごとに建物を指定してください。";
             _hintLabel.text = stateReady
                 ? usage
                 : usage + "\n現在利用可能な建物アセットが0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みの建物が一覧に表示されます。";
@@ -286,7 +294,7 @@ namespace CSWarfront.Game.UI
             string current;
             label.text = BaseBuildingDesignation.TryGet(RowTypes[rowIndex], out current)
                 ? "現在の指定: " + current
-                : "現在の指定: （未設定。電力タブの複製建物で配置します）";
+                : "現在の指定: （未設定。この種別は配置できません。建物を指定してください）";
         }
 
         private static void OnCustomOnlyChanged(bool value)

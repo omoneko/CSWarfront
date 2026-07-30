@@ -165,9 +165,14 @@ namespace CSWarfront.Game
             // 建物アセット(BaseBuildingDesignation)の2経路になった。どちらか一方でも候補があれば処理を続ける
             // （複製プレハブの登録がたまたま失敗していても、指定建物経路だけは動くようにするための変更。
             // 以前は WarfrontBasePrefab.IsAnyRegistered のみで判定していた）。
+            // Task81: 複製プレハブは電力タブのツールバーからは非表示化済み（配置不能）だが、既存セーブの
+            // 基地照合のため登録自体・WarfrontBasePrefab.IsAnyRegistered判定は変更していない。よって
+            // 「両方とも無い」場合の唯一の実用的な回復策は、Optionsで基地種別ごとに建物を指定すること
+            // （ログ文言もその旨に更新、動作は変更なし）。
             if (!WarfrontBasePrefab.IsAnyRegistered && !BaseBuildingDesignation.HasAny)
             {
-                ModConfig.Log("BasePlacementWatcher: ProcessCreated: no clone prefabs and no designated buildings; skipping " + ids.Count + " id(s)");
+                ModConfig.Log("BasePlacementWatcher: ProcessCreated: no clone prefabs and no designated buildings; " +
+                    "designate a building per base type in Options to place bases; skipping " + ids.Count + " id(s)");
                 return;
             }
 

@@ -21,6 +21,13 @@ namespace CSWarfront.Game
     /// テーブル（<see cref="Entry"/>/<see cref="Entries"/>）を1回だけ走査する形へ一般化した。
     /// 複製元（電力系プレハブ）の探索・サニタイズ処理は3種で共有する（同じ電力タブ内に3つとも並ぶため、
     /// 既定では全て同じ複製元から作る＝将来より適したタブが見つかれば入れ替え可能）。
+    ///
+    /// Task81: 配置手段としては非推奨（Task74のOptions指定建物に一本化）になったため、4種とも
+    /// <c>m_availableIn = ItemClass.Availability.None</c> を設定し電力タブのツールバーからは見えなく
+    /// する（RegisterOne参照）。ただし<b>登録自体は維持</b>する——既存セーブに置かれた基地の
+    /// 建物Infoはこのクローンプレハブそのものであり、<see cref="TryMatch"/>/<see cref="IsOwnBase"/>が
+    /// 参照一致・名前一致で照合し続けるため、プレハブを削除すると既存セーブの基地が読み込み時に
+    /// 壊れる（Info解決不能）。「隠すが消さない」がTask81の設計方針。
     /// </summary>
     public static class WarfrontBasePrefab
     {
@@ -127,7 +134,11 @@ namespace CSWarfront.Game
                     RegisterOne(entry, source);
                 }
 
-                RefreshPanels();
+                // Task81: 旧実装はここで ElectricityGroupPanel/ElectricityPanel.RefreshPanel() を呼んで
+                // いた（登録直後に電力タブへ新しいボタンを即座に表示させるため）。RegisterOne が
+                // clone.m_availableIn = Availability.None を設定するようになった今、クローンは
+                // どのパネルのPopulateAssets/PopulateGroupsでも最初から除外される＝表示すべきボタンが
+                // 存在しないため、このリフレッシュは無意味になった。呼び出しと専用メソッドを削除。
             }
             catch (Exception e)
             {
@@ -305,6 +316,22 @@ namespace CSWarfront.Game
             cloneGo.name = entry.PrefabName;
             clone.m_prefabInitialized = false;
 
+            // Task81: 電力タブのツールバーから外す（登録自体は維持——既存セーブの基地が
+            // BasePlacementWatcher/ReconcileBasesの照合対象であり続けるため、プレハブそのものは
+            // 消せない）。GeneratedScrollPanel.CollectAssets / GeneratedGroupPanel.CollectAssets は
+            // どちらも IsPlacementRelevant(BuildingInfo) を通し、その中身は
+            // `info.m_availableIn.IsFlagSet(Singleton<ToolManager>.instance.m_properties.m_mode)`
+            // （Assembly-CSharp.dll、GeneratedScrollPanel.decompiled.cs 2193-2201行 / GeneratedGroupPanel
+            // 同様の行、ilspycmdでの逆コンパイルで確認済み）。IsFlagSet<T>はColossalManaged.dllの
+            // EnumExtensions.IsFlagSet（`(value.ToInt64() & flag.ToInt64()) != 0`）で、m_availableInが
+            // Availability.None（値0）だと現在のToolManagerモード（Game/MapEditor/AssetEditor等）が
+            // 何であっても常にfalseを返す＝どのモードのどのパネルにもボタンが生成されない。
+            // BuildingInfo.InitializePrefab()はm_availableInを一切触らないため、この代入は
+            // InitializePrefabs/BindPrefabs呼び出しより前でも後でも安全（早期に済ませておく）。
+            // BasePlacementWatcher.TryMatch/ReconcileBasesが見るのは_prefabs辞書への参照登録と
+            // Info.name一致のみで、m_availableInは一切参照しないため、既存セーブの基地照合には無影響。
+            clone.m_availableIn = ItemClass.Availability.None;
+
             if (clone.m_class == null)
             {
                 ModConfig.LogError("WarfrontBasePrefab: cloned prefab '" + entry.PrefabName + "' has null m_class after clone; aborting");
@@ -413,33 +440,6 @@ namespace CSWarfront.Game
             if (!locale.Exists(key))
             {
                 locale.AddLocalizedString(key, value);
-            }
-        }
-
-        /// <summary>
-        /// OnLevelLoaded 時点でパネルが既にPopulate済みの場合に備え、明示的に再描画させる。
-        /// パネルが未生成でも失敗させない（null ガード＋個別 try/catch でログのみ）。
-        /// </summary>
-        private static void RefreshPanels()
-        {
-            try
-            {
-                ElectricityGroupPanel groupPanel = UnityEngine.Object.FindObjectOfType<ElectricityGroupPanel>();
-                if (groupPanel != null) groupPanel.RefreshPanel();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("WarfrontBasePrefab: ElectricityGroupPanel refresh failed: " + e);
-            }
-
-            try
-            {
-                ElectricityPanel panel = UnityEngine.Object.FindObjectOfType<ElectricityPanel>();
-                if (panel != null) panel.RefreshPanel();
-            }
-            catch (Exception e)
-            {
-                ModConfig.LogError("WarfrontBasePrefab: ElectricityPanel refresh failed: " + e);
             }
         }
     }
