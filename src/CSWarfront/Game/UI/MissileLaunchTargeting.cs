@@ -21,7 +21,6 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static class MissileLaunchTargeting
     {
-        private const float MaxRaycastDistance = 10000f; // UnitCommandInputと同じ値
         private const float ClickMoveThresholdPixels = 10f; // UnitCommandInputと同じ値
 
         private static bool _awaiting;
@@ -95,18 +94,20 @@ namespace CSWarfront.Game.UI
                 }
                 if (UIInput.hoveredComponent != null) return;
 
-                Camera cam = Camera.main;
-                if (cam == null) return; // カメラ未準備。次回のクリックで再試行。
+                // Task77: 地点の解決はGroundClickRaycastへ委譲（Physics.Raycast→地形交差フォールバック）。
+                Vector3 clicked;
+                string reason;
+                if (!GroundClickRaycast.TryGetPoint(out clicked, out reason))
+                {
+                    ModConfig.Log("MissileLaunchTargeting: click rejected - " + reason);
+                    return; // ターゲティング継続。次のクリックで再試行。
+                }
 
-                Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-                RaycastHit hit;
-                if (!Physics.Raycast(ray, out hit, MaxRaycastDistance)) return; // 何もヒットしなければ継続
-
-                LaunchResult result = MilitaryManager.TryLaunchMissile(_armedBaseId, hit.point);
+                LaunchResult result = MilitaryManager.TryLaunchMissile(_armedBaseId, clicked);
                 if (result == LaunchResult.Ok)
                 {
                     ModConfig.Log("MissileLaunchTargeting: launched from base " + _armedBaseId + " at " +
-                        hit.point.x.ToString("0") + "," + hit.point.z.ToString("0"));
+                        clicked.x.ToString("0") + "," + clicked.z.ToString("0"));
                     CommandToast.Show("Launched");
                     Reset();
                 }

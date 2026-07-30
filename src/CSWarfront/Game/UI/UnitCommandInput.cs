@@ -13,11 +13,12 @@ namespace CSWarfront.Game.UI
     ///
     /// RallyKeyは即座に命令を出さず、「次の右クリックで集結地点を指定する」ターゲティングモードへ入る
     /// （プレイヤーがまず地点を選ぶ必要があるため）。ターゲティング中はEscでキャンセルできる。
-    /// 地点のワールド座標は UnitSelection.Update / Game/UI/UnitSelection と同じ
-    /// Camera.main.ScreenPointToRay + Physics.Raycast を使う（CSの地形/建物/道路コライダーは
-    /// このMOD内の既存のraycast経路で既に反応することを確認済み、Game/UI/UnitSelection.cs参照）。
-    /// TerrainManager等CS固有APIは使わず、ヒットした物体の種類を問わず hit.point をそのまま採用する
-    /// （建物の屋根等にヒットした場合は屋根の高さになるが、集結地点としては十分実用的なためMVPとして許容）。
+    /// 地点のワールド座標は Game/UI/GroundClickRaycast で解決する（Task77）:
+    /// Physics.Raycast（ユニット/建物などMOD自前コライダーへの精密ヒット）→外れたら
+    /// Core.TerrainRaycast（TerrainManager高さサンプリングとの交差計算）の順。
+    /// CS1の地形はUnity物理コライダーを持たないため、Physics.Raycast単独では開けた地面の
+    /// クリックが全て失敗する（Task62時点の「地形コライダーも反応する」という前提は誤りだった。
+    /// ユニット選択が動いていたのはUnitVisualsが自前コライダーを付けているため）。
     ///
     /// Task62（実機ログで右クリックによる集結地点の指定が一度も成功していなかった不具合の修正）:
     /// 旧実装は Input.GetMouseButtonDown(1) の立ち上がりフレームだけで即座にraycastしていた。これだと
@@ -40,8 +41,6 @@ namespace CSWarfront.Game.UI
     /// </summary>
     public static class UnitCommandInput
     {
-        private const float MaxRaycastDistance = 10000f; // Game/UI/UnitSelectionと同じ値
-
         /// <summary>右クリックの押し下げ位置からこの距離（実スクリーンピクセル）を超えて動いてから
         /// 離した場合は「カメラ回転ドラッグ」とみなし、集結地点としては確定しない（Task62）。
         /// UnitBoxSelection.DragThresholdPixelsと同じ考え方・同じ値を採用する。</summary>
@@ -215,22 +214,18 @@ namespace CSWarfront.Game.UI
                 return;
             }
 
-            Camera cam = Camera.main;
-            if (cam == null)
+            // Task77: 地点の解決はGroundClickRaycastへ委譲（Physics.Raycast→地形交差フォールバック）。
+            // CS1の地形はコライダーを持たないため、従来のPhysics.Raycast単独では開けた地面の
+            // クリックが全て「raycast hit nothing」で却下されていた。
+            Vector3 clicked;
+            string reason;
+            if (!GroundClickRaycast.TryGetPoint(out clicked, out reason))
             {
-                ModConfig.Log("UnitCommandInput: rally click rejected - camera not ready");
-                return; // カメラ未準備。次回のクリックで再試行。
+                ModConfig.Log("UnitCommandInput: rally click rejected - " + reason);
+                return; // ターゲティング継続。次のクリックで再試行。
             }
 
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-            RaycastHit hit;
-            if (!Physics.Raycast(ray, out hit, MaxRaycastDistance))
-            {
-                ModConfig.Log("UnitCommandInput: rally click rejected - raycast hit nothing");
-                return; // 何もヒットしなければターゲティング継続
-            }
-
-            WorldPos point = new WorldPos(hit.point.x, hit.point.y, hit.point.z);
+            WorldPos point = new WorldPos(clicked.x, clicked.y, clicked.z);
             int n = MilitaryManager.CommandRally(UnitBoxSelection.SelectedIds, point);
             ModConfig.Log("UnitCommandInput: rally point set at " + point.X.ToString("0") + "," +
                 point.Z.ToString("0") + " for " + n + " unit(s)");
