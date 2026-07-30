@@ -30,7 +30,7 @@ namespace CSWarfront.Game.UI
     {
         private const string PanelName = "CSWarfrontBaseInfoPanel";
         private const string VanillaPanelName = "CityServiceWorldInfoPanel";
-        private const string TitleText = "CSWarfront 軍事基地";
+        private const string TitleText = "CSWarfront Military Base";
 
         // Task33: 旧260pxではステータス行（特に「生産中: MechInfantry_T5  62%  (残り 3.0h)」のような
         // 長い1行）が wordWrap 前提の幅に収まらず、実機で単語単位の折り返し→パネルからのはみ出しが
@@ -221,7 +221,7 @@ namespace CSWarfront.Game.UI
             UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
             if (panel == null)
             {
-                ModConfig.LogError("BaseInfoPanel.Build: UIPanel の生成に失敗");
+                ModConfig.LogError("BaseInfoPanel.Build: failed to create UIPanel");
                 return;
             }
             _panel = panel;
@@ -245,7 +245,7 @@ namespace CSWarfront.Game.UI
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += TitleRowHeight;
 
-            y = AddSectionLabel("所属勢力", Pad, y, out _factionSectionLabel);
+            y = AddSectionLabel("Faction", Pad, y, out _factionSectionLabel);
             _factionDropdown = BuildFactionDropdown(Pad, y, w);
             y += DropdownHeight + 8f;
 
@@ -412,57 +412,57 @@ namespace CSWarfront.Game.UI
                 string[] names = WarfrontSettings.FactionNames;
                 string ownerName = (snapshot.OwnerFactionId.HasValue && snapshot.OwnerFactionId.Value < names.Length)
                     ? names[snapshot.OwnerFactionId.Value]
-                    : "未所属";
+                    : "Unaffiliated";
 
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
                 // Task61: 基地種別と生産可能な領域を先頭に表示する（海軍/航空基地の追加に伴い、
                 // プレイヤーが「この基地が何を作れるか」を一目で確認できるようにする）。
-                sb.Append("種別: ").Append(BaseTypeLabel(snapshot.Type));
-                sb.Append("  生産可能: ").Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
+                sb.Append("Type: ").Append(BaseTypeLabel(snapshot.Type));
+                sb.Append("  Can produce: ").Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
 
-                sb.Append("\n所属: ").Append(ownerName);
+                sb.Append("\nFaction: ").Append(ownerName);
                 if (snapshot.IsHeadquarters) sb.Append(" (HQ)");
 
-                sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\n軍資金: ").Append(snapshot.OwnerTreasury.ToString("0"));
+                sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
+                sb.Append("\nTreasury: ").Append(snapshot.OwnerTreasury.ToString("0"));
 
                 // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切
                 // 出ていなかったため「未実装」に見えていた。0のときも表示することでその事実を伝える。
-                sb.Append("\n収入: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");
+                sb.Append("\nIncome: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");
 
-                sb.Append("\n技術: Tier ").Append(snapshot.OwnerUnlockedTier);
+                sb.Append("\nTech: Tier ").Append(snapshot.OwnerUnlockedTier);
                 if (snapshot.OwnerUnlockedTier >= 5)
                 {
-                    sb.Append("  (最大)");
+                    sb.Append("  (max)");
                 }
                 else
                 {
-                    sb.Append("  (研究点 ").Append(snapshot.OwnerResearchPoints.ToString("0"))
-                      .Append(" / 次まで ").Append(snapshot.OwnerNextTierCost.ToString("0")).Append(")");
+                    sb.Append("  (research ").Append(snapshot.OwnerResearchPoints.ToString("0"))
+                      .Append(" / next ").Append(snapshot.OwnerNextTierCost.ToString("0")).Append(")");
                 }
 
-                sb.Append("\n部隊数: ").Append(snapshot.OwnerUnitCount);
+                sb.Append("\nUnits: ").Append(snapshot.OwnerUnitCount);
 
                 if (string.IsNullOrEmpty(snapshot.ProducingTypeKey))
                 {
-                    sb.Append("\n生産中: なし");
+                    sb.Append("\nProducing: none");
                 }
                 else
                 {
                     float pct = Mathf.Clamp01(snapshot.ProducingProgress) * 100f;
                     float remainHours = (1f - Mathf.Clamp01(snapshot.ProducingProgress)) * snapshot.ProducingBuildTime;
                     if (remainHours < 0f) remainHours = 0f;
-                    sb.Append("\n生産中: ").Append(snapshot.ProducingTypeKey).Append("  ").Append(pct.ToString("0")).Append("%")
-                      .Append("  (残り ").Append(remainHours.ToString("0.0")).Append("h)");
+                    sb.Append("\nProducing: ").Append(snapshot.ProducingTypeKey).Append("  ").Append(pct.ToString("0")).Append("%")
+                      .Append("  (").Append(remainHours.ToString("0.0")).Append("h left)");
                 }
 
                 int waiting = snapshot.QueueCount - (string.IsNullOrEmpty(snapshot.ProducingTypeKey) ? 0 : 1);
-                if (waiting > 0) sb.Append("\n待機: ").Append(waiting).Append(" 件");
+                if (waiting > 0) sb.Append("\nQueued: ").Append(waiting);
 
                 if (snapshot.CaptureGraceHours > 0f)
-                    sb.Append("\n占領猶予: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
+                    sb.Append("\nCapture grace: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
 
                 _statusLabel.text = sb.ToString();
                 RefreshProductionSection(snapshot); // Task34: ステータス行の下に生産セクションを再配置

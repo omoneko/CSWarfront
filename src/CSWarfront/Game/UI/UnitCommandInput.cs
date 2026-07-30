@@ -150,14 +150,14 @@ namespace CSWarfront.Game.UI
         {
             if (UnitBoxSelection.SelectedIds.Count == 0) return;
             int n = MilitaryManager.CommandFreeAdvance(UnitBoxSelection.SelectedIds);
-            CommandToast.Show("自由進撃 ×" + n);
+            CommandToast.Show("Advance x" + n);
         }
 
         private static void IssueHold()
         {
             if (UnitBoxSelection.SelectedIds.Count == 0) return;
             int n = MilitaryManager.CommandHold(UnitBoxSelection.SelectedIds);
-            CommandToast.Show("停止 ×" + n);
+            CommandToast.Show("Hold x" + n);
         }
 
         private static void BeginRallyTargeting()
@@ -167,7 +167,7 @@ namespace CSWarfront.Game.UI
             _rightMouseDownPending = false;
             ModConfig.Log("UnitCommandInput: rally targeting armed for " + UnitBoxSelection.SelectedIds.Count +
                 " unit(s) - right-click a destination (Esc cancels)");
-            CommandToast.Show("集結待機（右クリックで地点指定）");
+            CommandToast.Show("Rally & Hold (right-click to set a destination)");
         }
 
         private static void HandleRallyTargeting()
@@ -177,7 +177,7 @@ namespace CSWarfront.Game.UI
                 _awaitingRallyClick = false;
                 _rightMouseDownPending = false;
                 ModConfig.Log("UnitCommandInput: rally targeting cancelled");
-                CommandToast.Show("集結指定をキャンセル");
+                CommandToast.Show("Cancelled rally targeting");
                 return;
             }
 
@@ -234,7 +234,7 @@ namespace CSWarfront.Game.UI
             int n = MilitaryManager.CommandRally(UnitBoxSelection.SelectedIds, point);
             ModConfig.Log("UnitCommandInput: rally point set at " + point.X.ToString("0") + "," +
                 point.Z.ToString("0") + " for " + n + " unit(s)");
-            CommandToast.Show("集結地点を設定しました ×" + n);
+            CommandToast.Show("Rally point set x" + n);
             _awaitingRallyClick = false;
         }
     }

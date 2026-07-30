@@ -90,7 +90,7 @@ namespace CSWarfront.Game.UI
             _autoProduceButton.normalBgSprite = "ButtonMenu";
             _autoProduceButton.hoveredBgSprite = "ButtonMenuHovered";
             _autoProduceButton.pressedBgSprite = "ButtonMenuPressed";
-            _autoProduceButton.text = "自動生産: ON";
+            _autoProduceButton.text = "Auto-produce: ON";
             _autoProduceButton.relativePosition = new Vector3(Pad, 0f);
             _autoProduceButton.eventClick += OnAutoProduceClick;
 
@@ -107,7 +107,7 @@ namespace CSWarfront.Game.UI
 
             float halfWidth = (width - ProductionRowGap) / 2f;
             _queueButton = _panel.AddUIComponent<UIButton>();
-            _queueButton.text = "生産";
+            _queueButton.text = "Produce";
             _queueButton.textScale = 0.8f;
             _queueButton.size = new Vector2(halfWidth, ProductionButtonHeight);
             _queueButton.normalBgSprite = "ButtonMenu";
@@ -117,7 +117,7 @@ namespace CSWarfront.Game.UI
             _queueButton.eventClick += OnQueueClick;
 
             _cancelButton = _panel.AddUIComponent<UIButton>();
-            _cancelButton.text = "取消";
+            _cancelButton.text = "Cancel";
             _cancelButton.textScale = 0.8f;
             _cancelButton.size = new Vector2(halfWidth, ProductionButtonHeight);
             _cancelButton.normalBgSprite = "ButtonMenu";
@@ -128,7 +128,7 @@ namespace CSWarfront.Game.UI
 
             // Task35: 資金→研究点への投資、および研究点によるTier解禁。
             _investButton = _panel.AddUIComponent<UIButton>();
-            _investButton.text = "研究投資 (¥" + ResearchInvestAmount.ToString("0") + ")";
+            _investButton.text = "Invest in Research (¥" + ResearchInvestAmount.ToString("0") + ")";
             _investButton.textScale = 0.8f;
             _investButton.size = new Vector2(halfWidth, ProductionButtonHeight);
             _investButton.normalBgSprite = "ButtonMenu";
@@ -138,7 +138,7 @@ namespace CSWarfront.Game.UI
             _investButton.eventClick += OnInvestClick;
 
             _unlockButton = _panel.AddUIComponent<UIButton>();
-            _unlockButton.text = "Tier解禁";
+            _unlockButton.text = "Unlock Tier";
             _unlockButton.textScale = 0.8f;
             _unlockButton.size = new Vector2(halfWidth, ProductionButtonHeight);
             _unlockButton.normalBgSprite = "ButtonMenu";
@@ -162,7 +162,7 @@ namespace CSWarfront.Game.UI
             _queueLabel.wordWrap = false;
             _queueLabel.autoSize = false;
             _queueLabel.width = width;
-            _queueLabel.text = "キュー: なし";
+            _queueLabel.text = "Queue: none";
             _queueLabel.relativePosition = new Vector3(Pad, 0f);
         }
 
@@ -208,12 +208,12 @@ namespace CSWarfront.Game.UI
 
             if (_autoProduceButton != null)
             {
-                _autoProduceButton.text = snapshot.AutoProduce ? "自動生産: ON" : "自動生産: OFF";
+                _autoProduceButton.text = snapshot.AutoProduce ? "Auto-produce: ON" : "Auto-produce: OFF";
                 _autoProduceButton.relativePosition = new Vector3(Pad, y);
             }
             if (_autoProduceHintLabel != null)
             {
-                _autoProduceHintLabel.text = snapshot.AutoProduce ? "AIがこの基地を自動管理します" : "";
+                _autoProduceHintLabel.text = snapshot.AutoProduce ? "The AI will manage this base automatically" : "";
                 _autoProduceHintLabel.relativePosition = new Vector3(Pad + ToggleButtonWidth + 6f, y + 4f);
             }
             y += ToggleButtonHeight + ProductionRowGap;
@@ -307,11 +307,11 @@ namespace CSWarfront.Game.UI
             {
                 if (_currentBaseId == 0 || !_lastOwnerFactionId.HasValue)
                 {
-                    SetProductionMessage("所有者がいません");
+                    SetProductionMessage("No owner");
                     return;
                 }
                 bool ok = MilitaryManager.TryInvestResearch(_lastOwnerFactionId.Value, ResearchInvestAmount);
-                SetProductionMessage(ok ? "" : "資金不足");
+                SetProductionMessage(ok ? "" : "Insufficient funds");
             }
             catch (Exception e)
             {
@@ -329,12 +329,12 @@ namespace CSWarfront.Game.UI
             {
                 if (_currentBaseId == 0 || !_lastOwnerFactionId.HasValue)
                 {
-                    SetProductionMessage("所有者がいません");
+                    SetProductionMessage("No owner");
                     return;
                 }
                 bool ok = MilitaryManager.TryUnlockNextTier(_lastOwnerFactionId.Value);
                 if (ok) SetProductionMessage("");
-                else SetProductionMessage(_lastOwnerUnlockedTier >= 5 ? "最大Tier" : "研究点不足");
+                else SetProductionMessage(_lastOwnerUnlockedTier >= 5 ? "Max tier" : "Insufficient research points");
             }
             catch (Exception e)
             {
@@ -353,13 +353,13 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case QueueResult.BaseNotFound: return "基地が見つかりません";
-                case QueueResult.NoOwner: return "所有者がいません";
-                case QueueResult.UnknownType: return "不明な種別です";
-                case QueueResult.QueueFull: return "キューが一杯";
-                case QueueResult.NotAffordable: return "資金不足";
-                case QueueResult.TierLocked: return "未解禁のTierです";
-                case QueueResult.WrongDomain: return "この基地では生産できない種別です"; // Task61
+                case QueueResult.BaseNotFound: return "Base not found";
+                case QueueResult.NoOwner: return "No owner";
+                case QueueResult.UnknownType: return "Unknown type";
+                case QueueResult.QueueFull: return "Queue full";
+                case QueueResult.NotAffordable: return "Insufficient funds";
+                case QueueResult.TierLocked: return "Tier not unlocked";
+                case QueueResult.WrongDomain: return "This base cannot produce this type"; // Task61
                 default: return "";
             }
         }
@@ -370,9 +370,9 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case QueueResult.BaseNotFound: return "基地が見つかりません";
-                case QueueResult.NoOwner: return "所有者がいません";
-                case QueueResult.QueueFull: return "取消できる注文がありません";
+                case QueueResult.BaseNotFound: return "Base not found";
+                case QueueResult.NoOwner: return "No owner";
+                case QueueResult.QueueFull: return "No orders to cancel";
                 default: return "";
             }
         }

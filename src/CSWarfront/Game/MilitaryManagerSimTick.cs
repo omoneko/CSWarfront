@@ -128,7 +128,7 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("MilitaryManager: CarrierAirWing.Advance 中に例外: " + e);
+                    ModConfig.LogError("MilitaryManager: exception in CarrierAirWing.Advance: " + e);
                 }
 
                 // 道路網（State.Roads）の構築/再構築。InvasionOrdersが同tickで経路計算できるよう、

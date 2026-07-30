@@ -50,8 +50,8 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static class OptionsBaseBuildingPage
     {
-        private const string GroupTitle = "基地に使う建物";
-        private const string NoSelectionLabel = "（未選択）";
+        private const string GroupTitle = "Base Buildings";
+        private const string NoSelectionLabel = "(none selected)";
 
         // 行の並び。UnitAssetBindingsBaseTypesの表示ラベル定数をそのまま流用する（UI文言の一元管理）。
         private static readonly BaseType[] RowTypes = { BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase };
@@ -84,8 +84,8 @@ namespace CSWarfront.Game.UI
                 UIHelperBase group = helper.AddGroup(GroupTitle);
                 UIComponent groupPanel = (group as UIHelper) != null ? ((UIHelper)group).self as UIComponent : null;
 
-                _customOnlyCheckbox = group.AddCheckbox("サブスクライブ済みのみ", _customOnly, OnCustomOnlyChanged) as UICheckBox;
-                _searchField = group.AddTextfield("検索（部分一致）", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
+                _customOnlyCheckbox = group.AddCheckbox("Subscribed only", _customOnly, OnCustomOnlyChanged) as UICheckBox;
+                _searchField = group.AddTextfield("Search (partial match)", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
 
                 if (groupPanel != null)
                 {
@@ -137,7 +137,7 @@ namespace CSWarfront.Game.UI
                 _rowLabels[index] = label;
             }
 
-            object resetObj = group.AddButton("既定に戻す", () => OnResetClick(rowIndex));
+            object resetObj = group.AddButton("Reset to Default", () => OnResetClick(rowIndex));
             _rowResetButtons[index] = resetObj as UIButton;
 
             return resetObj;
@@ -217,10 +217,10 @@ namespace CSWarfront.Game.UI
 
             // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab）は完全撤去した。基地は必ず
             // このページでの指定（BaseBuildingDesignation）が唯一の配置経路になる。
-            const string usage = "基地は電力タブからは配置できません。指定した建物を建てると、その建物が基地として機能します（既存の建物は対象外）。基地種別ごとに建物を指定してください。";
+            const string usage = "Bases cannot be placed from the Electricity tab. Building the designated building turns it into a base (existing buildings are not affected). Please designate a building for each base type.";
             _hintLabel.text = stateReady
                 ? usage
-                : usage + "\n現在利用可能な建物アセットが0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みの建物が一覧に表示されます。";
+                : usage + "\nNo building assets are currently available (e.g. opened from the main menu). Open this again after loading a city to see subscribed buildings in the list.";
         }
 
         private static void RefreshFilteredNames()
@@ -236,8 +236,8 @@ namespace CSWarfront.Game.UI
             if (_countLabel != null)
             {
                 _countLabel.text = truncated
-                    ? "※ " + names.Count + " 件中 " + AssetAssignPanel.MaxListItems + " 件のみ表示（検索で絞り込んでください）"
-                    : names.Count + " 件";
+                    ? "* Showing " + AssetAssignPanel.MaxListItems + " of " + names.Count + " (narrow your search)"
+                    : names.Count + " item(s)";
             }
         }
 
@@ -291,8 +291,8 @@ namespace CSWarfront.Game.UI
 
             string current;
             label.text = BaseBuildingDesignation.TryGet(RowTypes[rowIndex], out current)
-                ? "現在の指定: " + current
-                : "現在の指定: （未設定。この種別は配置できません。建物を指定してください）";
+                ? "Current designation: " + current
+                : "Current designation: (not set. This base type cannot be placed. Please designate a building)";
         }
 
         private static void OnCustomOnlyChanged(bool value)

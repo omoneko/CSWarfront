@@ -88,7 +88,7 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                ModConfig.LogError("ExternalThreatBridge: Godzilla 同期中に例外: " + e);
+                ModConfig.LogError("ExternalThreatBridge: exception while syncing Godzilla: " + e);
             }
 
             try
@@ -97,7 +97,7 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                ModConfig.LogError("ExternalThreatBridge: Alien 同期中に例外: " + e);
+                ModConfig.LogError("ExternalThreatBridge: exception while syncing Alien: " + e);
             }
         }
 
@@ -131,7 +131,7 @@ namespace CSWarfront.Game
                 };
                 state.Threats.Add(threat);
                 threatId = threat.Id;
-                ModConfig.Log("ExternalThreatBridge: " + label + " 出現（HP=" + maxHp.ToString("0") + "）。");
+                ModConfig.Log("ExternalThreatBridge: " + label + " appeared (HP=" + maxHp.ToString("0") + ").");
                 return;
             }
 
@@ -139,9 +139,9 @@ namespace CSWarfront.Game
 
             if (threat.IsDefeated)
             {
-                float totalDamage = threat.MaxHP; // MaxHPから0まで削られた＝与えた総ダメージ
+                float totalDamage = threat.MaxHP; // reduced from MaxHP to 0 = total damage dealt
                 adapter.Despawn();
-                ModConfig.Log("ExternalThreatBridge: " + label + " 撃退（総ダメージ" + totalDamage.ToString("0") + "）。");
+                ModConfig.Log("ExternalThreatBridge: " + label + " repelled (total damage " + totalDamage.ToString("0") + ").");
                 RemoveThreat(state, ref threatId);
             }
         }
@@ -226,7 +226,7 @@ namespace CSWarfront.Game
                     {
                         _stateErrorLogged = true;
                         ModConfig.LogError("ExternalThreatBridge: " + _label +
-                            " の状態取得でエラー、以後このセッションでは橋渡しを無効化します: " + e);
+                            " state retrieval error, disabling the bridge for the rest of this session: " + e);
                     }
                     _available = false; // 以後 EnsureResolved は再試行せずfalseを返す
                     return false;
@@ -245,8 +245,8 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("ExternalThreatBridge: " + _label + " の despawn呼び出し(" +
-                        _despawnMethod.Name + ")に失敗: " + e);
+                    ModConfig.LogError("ExternalThreatBridge: " + _label + " despawn call (" +
+                        _despawnMethod.Name + ") failed: " + e);
                 }
             }
 
@@ -268,8 +268,8 @@ namespace CSWarfront.Game
                     Type type = asm.GetType(_typeName);
                     if (type == null)
                     {
-                        ModConfig.LogError("ExternalThreatBridge: " + _label + " の型が見つかりません(" +
-                            _typeName + ")。橋渡しを無効化します。");
+                        ModConfig.LogError("ExternalThreatBridge: " + _label + " type not found (" +
+                            _typeName + "). Disabling the bridge.");
                         _available = false;
                         return false;
                     }
@@ -281,7 +281,7 @@ namespace CSWarfront.Game
                     if (isActiveProp == null || positionMethod == null || resetMethod == null)
                     {
                         ModConfig.LogError("ExternalThreatBridge: " + _label +
-                            " の想定メンバ(IsActive/" + _positionMethodName + "/ResetForNewLevel)が見つかりません。橋渡しを無効化します。");
+                            " expected member(s) (IsActive/" + _positionMethodName + "/ResetForNewLevel) not found. Disabling the bridge.");
                         _available = false;
                         return false;
                     }
@@ -298,12 +298,12 @@ namespace CSWarfront.Game
                     _despawnMethod = despawn;
                     _available = true;
 
-                    ModConfig.Log("ExternalThreatBridge: " + _label + " を検出しました（despawn=" + despawn.Name + "）。");
+                    ModConfig.Log("ExternalThreatBridge: detected " + _label + " (despawn=" + despawn.Name + ").");
                     return true;
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("ExternalThreatBridge: " + _label + " の解決に失敗: " + e);
+                    ModConfig.LogError("ExternalThreatBridge: failed to resolve " + _label + ": " + e);
                     _available = false;
                     return false;
                 }

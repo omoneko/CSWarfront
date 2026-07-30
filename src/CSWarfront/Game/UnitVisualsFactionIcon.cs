@@ -100,7 +100,7 @@ namespace CSWarfront.Game
                 if (!_loggedFreeCameraCheckFailure)
                 {
                     _loggedFreeCameraCheckFailure = true;
-                    ModConfig.LogError("UnitVisuals.IsFreeCameraActive: 取得に失敗、フリーカメラ非表示機能を無効化します: " + e);
+                    ModConfig.LogError("UnitVisuals.IsFreeCameraActive: failed to retrieve state, disabling free-camera hide feature: " + e);
                 }
                 return false;
             }

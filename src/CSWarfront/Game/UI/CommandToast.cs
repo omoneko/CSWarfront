@@ -46,7 +46,7 @@ namespace CSWarfront.Game.UI
                 UILabel label = view.AddUIComponent(typeof(UILabel)) as UILabel;
                 if (label == null)
                 {
-                    ModConfig.LogError("CommandToast.EnsureCreated: UILabel の生成に失敗");
+                    ModConfig.LogError("CommandToast.EnsureCreated: failed to create UILabel");
                     return;
                 }
                 label.name = LabelName;

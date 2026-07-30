@@ -64,8 +64,8 @@ namespace CSWarfront.Game.UI
             if (_countLabel != null)
             {
                 _countLabel.text = truncated
-                    ? "※ " + names.Count + " 件中 " + AssetAssignPanel.MaxListItems + " 件のみ表示（検索で絞り込んでください）"
-                    : names.Count + " 件";
+                    ? "* Showing " + AssetAssignPanel.MaxListItems + " of " + names.Count + " (narrow your search)"
+                    : names.Count + " item(s)";
             }
         }
 
@@ -84,7 +84,7 @@ namespace CSWarfront.Game.UI
             AssetKind kind;
             string name;
             bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
-            _currentBindingLabel.text = "現在の割り当て: " + (bound ? AssetKindUtil.Describe(kind, name) : "(既定のモデル)");
+            _currentBindingLabel.text = "Current binding: " + (bound ? AssetKindUtil.Describe(kind, name) : "(default model)");
             RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
 

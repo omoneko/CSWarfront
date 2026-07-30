@@ -207,7 +207,7 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("UnitVisuals.Sync: instance " + s.InstanceId + " の更新に失敗: " + e);
+                    ModConfig.LogError("UnitVisuals.Sync: failed to update instance " + s.InstanceId + ": " + e);
                 }
             }
 
@@ -288,7 +288,7 @@ namespace CSWarfront.Game
                 string resolvedAssetName;
                 if (!UnitMeshSource.TryResolve(s.FactionId, s.TypeKey, s.AssetPrefabName, out mesh, out builtInMaterials, out fromAssignedProp, out fromBuiltInModel, out resolvedKind, out resolvedAssetName))
                 {
-                    ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のメッシュ解決に失敗、表現をスキップ");
+                    ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " failed to resolve mesh, skipping visual");
                     return null;
                 }
 
@@ -316,7 +316,7 @@ namespace CSWarfront.Game
                 }
                 if (!materialOk)
                 {
-                    ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " のマテリアル生成に失敗、表現をスキップ");
+                    ModConfig.LogError("UnitVisuals.CreateVisual: instance " + s.InstanceId + " failed to create material, skipping visual");
                     return null;
                 }
 

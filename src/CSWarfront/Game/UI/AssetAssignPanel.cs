@@ -36,7 +36,7 @@ namespace CSWarfront.Game.UI
     internal static partial class AssetAssignPanel
     {
         private const string PanelName = "CSWarfrontAssetAssignPanel";
-        private const string TitleText = "モデル設定";
+        private const string TitleText = "Model Settings";
 
         internal const int MaxListItems = 300; // アイテム件数の上限。パネルの寸法とは無関係のためスケールしない。
 
@@ -257,7 +257,7 @@ namespace CSWarfront.Game.UI
             UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
             if (panel == null)
             {
-                ModConfig.LogError("AssetAssignPanel.Build: UIPanel の生成に失敗");
+                ModConfig.LogError("AssetAssignPanel.Build: failed to create UIPanel");
                 return;
             }
             _panel = panel;
@@ -282,11 +282,11 @@ namespace CSWarfront.Game.UI
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += RowHeight;
 
-            y = AddSectionLabel("勢力", y, out _factionSectionLabel); // フィールドはAssetAssignPanelFaction.cs側で宣言
+            y = AddSectionLabel("Faction", y, out _factionSectionLabel); // フィールドはAssetAssignPanelFaction.cs側で宣言
             BuildFactionDropdown(Pad, y, w); // AssetAssignPanelFaction.cs
             y += DropdownHeight + SectionGap;
 
-            y = AddSectionLabel("ユニット種別", y, out _typeKeySectionLabel);
+            y = AddSectionLabel("Unit Type", y, out _typeKeySectionLabel);
             BuildTypeKeys();
             _typeKeyDropdown = BuildTypeKeyDropdown(Pad, y, w);
             y += DropdownHeight + SectionGap;
@@ -307,7 +307,7 @@ namespace CSWarfront.Game.UI
             BuildThumbnailSprite(Pad + bindingLabelWidth + SectionGap, y); // AssetAssignPanelFaction.cs
             y += ThumbnailSize + SectionGap;
 
-            y = AddSectionLabel("検索（部分一致） / アセット種別", y, out _searchSectionLabel);
+            y = AddSectionLabel("Search (partial match) / Asset Type", y, out _searchSectionLabel);
 
             // Task41: 検索欄（左）とアセット種別ドロップダウン（右、プロップ/建物/車両/樹木）を同じ行に並べる。
             float searchWidth = w - AssetKindDropdownWidth - SectionGap;
@@ -355,24 +355,24 @@ namespace CSWarfront.Game.UI
             // Task47: 「複製適用」= 現在選択中(勢力,ユニット種別)の割り当てを他の(勢力,種別)へまとめて
             // 複製するUI。範囲選択ドロップダウン（左）とボタン（右）を同じ行に並べる
             // （AssetAssignPanelCopy.cs 参照）。
-            y = AddSectionLabel("複製適用", y, out _copyScopeSectionLabel);
+            y = AddSectionLabel("Apply to Multiple", y, out _copyScopeSectionLabel);
             float copyButtonWidth = w * 0.35f;
             float copyDropdownWidth = w - copyButtonWidth - SectionGap;
             _copyScopeDropdown = BuildCopyScopeDropdown(Pad, y, copyDropdownWidth);
-            _copyApplyButton = BuildButton("複製適用", Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
+            _copyApplyButton = BuildButton("Apply to Multiple", Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
             y += DropdownHeight + SectionGap;
 
             // Task70: 「全て初期化」を既存3ボタンと同じ行に4つ目のボタンとして追加した
             // （要件「既存のボタンの隣に」）。均等4分割にするため既存3ボタンの幅計算も併せて変更する。
             float buttonWidth = (w - SectionGap * 3f) / 4f;
-            _applyButton = BuildButton("適用", Pad, y, buttonWidth, OnApplyClick);
-            _resetButton = BuildButton("既定に戻す", Pad + (buttonWidth + SectionGap), y, buttonWidth, OnResetClick);
+            _applyButton = BuildButton("Apply", Pad, y, buttonWidth, OnApplyClick);
+            _resetButton = BuildButton("Reset to Default", Pad + (buttonWidth + SectionGap), y, buttonWidth, OnResetClick);
             _clearAllButton = BuildClearAllButton(Pad + (buttonWidth + SectionGap) * 2f, y, buttonWidth);
-            _closeButton = BuildButton("閉じる", Pad + (buttonWidth + SectionGap) * 3f, y, buttonWidth, OnCloseClick);
+            _closeButton = BuildButton("Close", Pad + (buttonWidth + SectionGap) * 3f, y, buttonWidth, OnCloseClick);
             y += ButtonRowHeight + SectionGap;
 
             // Task70: 「セット」プリセット行（スロット1-3の保存/読込、AssetAssignPanelPresets.cs参照）。
-            y = AddSectionLabel("セット", y, out _presetSectionLabel);
+            y = AddSectionLabel("Preset", y, out _presetSectionLabel);
             BuildPresetRow(Pad, y, w);
             y += DropdownHeight + SectionGap;
 

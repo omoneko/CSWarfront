@@ -61,8 +61,8 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
-        private const string GroupTitle = "モデル割り当て";
-        private const string NoSelectionLabel = "（未選択）";
+        private const string GroupTitle = "Model Assignment";
+        private const string NoSelectionLabel = "(none selected)";
 
         private static UIDropDown _factionDropdown;
         private static UIDropDown _typeKeyDropdown;
@@ -103,26 +103,26 @@ namespace CSWarfront.Game.UI
                 UIComponent groupPanel = (group as UIHelper) != null ? ((UIHelper)group).self as UIComponent : null;
                 if (groupPanel == null)
                 {
-                    ModConfig.LogError("OptionsModelAssignPage.Build: グループパネルの取得に失敗したため、現在の割り当て表示/サムネイルは省略します。");
+                    ModConfig.LogError("OptionsModelAssignPage.Build: failed to get group panel, omitting current binding display/thumbnail.");
                 }
 
-                _factionDropdown = group.AddDropdown("勢力", WarfrontSettings.FactionNames, 0, OnFactionChanged) as UIDropDown;
+                _factionDropdown = group.AddDropdown("Faction", WarfrontSettings.FactionNames, 0, OnFactionChanged) as UIDropDown;
 
                 BuildTypeKeys();
-                _typeKeyDropdown = group.AddDropdown("ユニット種別", BuildTypeKeyLabels(), 0, OnTypeKeyChanged) as UIDropDown;
+                _typeKeyDropdown = group.AddDropdown("Unit Type", BuildTypeKeyLabels(), 0, OnTypeKeyChanged) as UIDropDown;
 
                 if (groupPanel != null) BuildBindingPreview(groupPanel);
 
                 string[] kindLabels = new string[AssetKindUtil.All.Length];
                 for (int i = 0; i < AssetKindUtil.All.Length; i++) kindLabels[i] = AssetKindUtil.DisplayNameJa(AssetKindUtil.All[i]);
-                _assetKindDropdown = group.AddDropdown("アセット種別", kindLabels, 0, OnAssetKindChanged) as UIDropDown;
+                _assetKindDropdown = group.AddDropdown("Asset Type", kindLabels, 0, OnAssetKindChanged) as UIDropDown;
 
-                _customOnlyCheckbox = group.AddCheckbox("サブスクライブ済みのみ", _customOnly, OnCustomOnlyChanged) as UICheckBox;
+                _customOnlyCheckbox = group.AddCheckbox("Subscribed only", _customOnly, OnCustomOnlyChanged) as UICheckBox;
                 // Task47: AddTextfieldのOnTextSubmittedは未使用（OnTextChangedだけで十分）だが、
                 // UIHelper実装がコールバックのnullガードを持つか未検証のため、nullは渡さずno-opを渡す
                 // （IL上はeventTextSubmitted購読が無条件に見えたため、安全側に倒す）。
-                _searchField = group.AddTextfield("検索（部分一致）", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
-                _assetDropdown = group.AddDropdown("アセット", new[] { NoSelectionLabel }, 0, OnAssetSelected) as UIDropDown;
+                _searchField = group.AddTextfield("Search (partial match)", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
+                _assetDropdown = group.AddDropdown("Asset", new[] { NoSelectionLabel }, 0, OnAssetSelected) as UIDropDown;
 
                 if (groupPanel != null)
                 {
@@ -136,11 +136,11 @@ namespace CSWarfront.Game.UI
                 for (int i = 0; i < CopyScopeUtil.All.Length; i++) copyLabels[i] = CopyScopeUtil.DisplayNameJa(CopyScopeUtil.All[i]);
                 // OnCopyApplyClickが押された時点でselectedIndexを読むだけなので変更通知は不要だが、
                 // 上記と同じ理由でnullではなくno-opコールバックを渡す。
-                _copyScopeDropdown = group.AddDropdown("複製適用の範囲", copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
+                _copyScopeDropdown = group.AddDropdown("Apply to Multiple - Scope", copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
 
-                _applyButton = group.AddButton("適用", OnApplyClick) as UIButton;
-                _resetButton = group.AddButton("既定に戻す", OnResetClick) as UIButton;
-                object copyButtonObj = group.AddButton("複製適用", OnCopyApplyClick);
+                _applyButton = group.AddButton("Apply", OnApplyClick) as UIButton;
+                _resetButton = group.AddButton("Reset to Default", OnResetClick) as UIButton;
+                object copyButtonObj = group.AddButton("Apply to Multiple", OnCopyApplyClick);
                 _copyApplyButton = copyButtonObj as UIButton;
 
                 _hintLabel = CreateNoteLabel(copyButtonObj);
@@ -225,9 +225,9 @@ namespace CSWarfront.Game.UI
                 string name;
                 string suffix = UnitAssetBindings.TryGetEffective(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
-                    : "(既定)";
+                    : "(default)";
                 string displayKey = UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[i]);
-                labels[i] = displayKey + " → " + suffix;
+                labels[i] = displayKey + " -> " + suffix;
             }
             return labels;
         }
@@ -259,7 +259,7 @@ namespace CSWarfront.Game.UI
             if (_hintLabel == null) return;
             _hintLabel.text = stateReady
                 ? ""
-                : "現在利用可能なアセット（プロップ/建物/車両/樹木）が0件です（メインメニューから開いた場合など）。マップを読み込んだ後にもう一度開くと、サブスクライブ済みのアセットが一覧に表示されます。";
+                : "No assets are currently available (props/buildings/vehicles/trees), e.g. opened from the main menu. Open this again after loading a city to see subscribed assets in the list.";
         }
 
         /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正）。
@@ -337,7 +337,7 @@ namespace CSWarfront.Game.UI
                 int assetIdx = _assetDropdown.selectedIndex;
                 if (assetIdx < 1 || assetIdx - 1 >= _filteredAssetNames.Count)
                 {
-                    ModConfig.Log("OptionsModelAssignPage: 適用スキップ（アセットが未選択）");
+                    ModConfig.Log("OptionsModelAssignPage: apply skipped (no asset selected)");
                     return;
                 }
 
@@ -406,7 +406,7 @@ namespace CSWarfront.Game.UI
 
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
-            ModConfig.Log("OptionsModelAssignPage: 割り当て変更を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+            ModConfig.Log("OptionsModelAssignPage: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the binding change");
 
             WarnIfNoOwnedBaseForKey(typeIdx);
         }
@@ -422,8 +422,8 @@ namespace CSWarfront.Game.UI
             if (!UnitAssetBindings.TryGetBaseTypeForKey(_typeKeys[typeIdx], out baseType)) return;
             if (MilitaryManager.HasOwnedBaseOfType(SelectedFactionId, baseType)) return;
 
-            string note = "（この勢力が所有する" + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
-                "が現在ありません。拠点を建設/所属変更すると反映されます）";
+            string note = "(This faction currently owns no " + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
+                ". It will take effect once a base is built or changes ownership)";
             ModConfig.Log("OptionsModelAssignPage: " + note);
             if (_currentBindingLabel != null) _currentBindingLabel.text += "\n" + note;
         }

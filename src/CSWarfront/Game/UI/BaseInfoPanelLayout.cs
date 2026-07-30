@@ -16,10 +16,10 @@ namespace CSWarfront.Game.UI
         {
             switch (type)
             {
-                case BaseType.Army: return "陸軍基地";
-                case BaseType.Navy: return "海軍基地";
-                case BaseType.AirForce: return "航空基地";
-                case BaseType.MissileBase: return "ミサイル基地";
+                case BaseType.Army: return "Army Base";
+                case BaseType.Navy: return "Naval Base";
+                case BaseType.AirForce: return "Air Base";
+                case BaseType.MissileBase: return "Missile Base";
                 default: return type.ToString();
             }
         }
@@ -28,10 +28,10 @@ namespace CSWarfront.Game.UI
         private static string SpawnableDomainsLabel(DomainMask mask)
         {
             var parts = new System.Collections.Generic.List<string>(3);
-            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add("陸上");
-            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add("海上");
-            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add("航空");
-            return parts.Count > 0 ? string.Join("・", parts.ToArray()) : "なし";
+            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add("Land");
+            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add("Sea");
+            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add("Air");
+            return parts.Count > 0 ? string.Join("/", parts.ToArray()) : "None";
         }
 
         /// <summary>

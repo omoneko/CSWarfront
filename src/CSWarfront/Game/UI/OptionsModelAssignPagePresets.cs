@@ -39,12 +39,12 @@ namespace CSWarfront.Game.UI
         /// フィードバック用ラベルを、渡された group（モデル割り当てグループ）の末尾に追加する。</summary>
         internal static void BuildPresetsSection(UIHelperBase group)
         {
-            _clearAllButton = group.AddButton("全て初期化", OnClearAllClick) as UIButton;
+            _clearAllButton = group.AddButton("Reset All", OnClearAllClick) as UIButton;
 
             string[] presetLabels = BuildPresetSlotLabels();
-            _presetSlotDropdown = group.AddDropdown("セット", presetLabels, 0, OnPresetSlotChanged) as UIDropDown;
-            _presetSaveButton = group.AddButton("保存", OnSaveSlotClick) as UIButton;
-            object loadButtonObj = group.AddButton("読込", OnLoadSlotClick);
+            _presetSlotDropdown = group.AddDropdown("Preset", presetLabels, 0, OnPresetSlotChanged) as UIDropDown;
+            _presetSaveButton = group.AddButton("Save", OnSaveSlotClick) as UIButton;
+            object loadButtonObj = group.AddButton("Load", OnLoadSlotClick);
             _presetLoadButton = loadButtonObj as UIButton;
 
             _presetMessageLabel = CreateNoteLabel(loadButtonObj);
@@ -59,7 +59,7 @@ namespace CSWarfront.Game.UI
             for (int i = 0; i < 3; i++)
             {
                 int slot = i + 1;
-                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : slot + "（空）";
+                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : slot + " (empty)";
             }
             return labels;
         }
@@ -104,8 +104,8 @@ namespace CSWarfront.Game.UI
             {
                 int removed = UnitAssetBindings.ClearAll();
                 SetPresetMessage(removed > 0
-                    ? "全割り当てを初期化しました（" + removed + "件）"
-                    : "初期化対象の割り当てがありませんでした（既に既定のままです）");
+                    ? "Reset all bindings (" + removed + " entries)"
+                    : "Nothing to reset (already at default)");
 
                 if (removed > 0) RefreshAfterBulkChange();
             }
@@ -121,7 +121,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.SaveToSlot(slot);
-                SetPresetMessage(ok ? "セット" + slot + "に保存しました" : "セット" + slot + "への保存に失敗しました");
+                SetPresetMessage(ok ? "Saved to preset " + slot : "Failed to save to preset " + slot);
                 if (ok) RefreshPresetSlotLabels();
             }
             catch (Exception e)
@@ -138,7 +138,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.LoadFromSlot(slot);
-                SetPresetMessage(ok ? "セット" + slot + "を読み込みました（既存の割り当てを置き換えました）" : "セット" + slot + "は空です");
+                SetPresetMessage(ok ? "Loaded preset " + slot + " (replaced the existing bindings)" : "Preset " + slot + " is empty");
 
                 if (ok)
                 {
@@ -161,7 +161,7 @@ namespace CSWarfront.Game.UI
 
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll();
-            ModConfig.Log("OptionsModelAssignPage: 一括変更を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+            ModConfig.Log("OptionsModelAssignPage: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the bulk change");
         }
     }
 }

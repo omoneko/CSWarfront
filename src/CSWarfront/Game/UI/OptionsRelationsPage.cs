@@ -51,9 +51,9 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static class OptionsRelationsPage
     {
-        private const string GroupTitle = "勢力の関係";
+        private const string GroupTitle = "Faction Relations";
         // Task59: 宿敵(Nemesis)を末尾に追加。Relation enumの宣言順（Hostile, Neutral, Allied, Nemesis）と一致させる。
-        private static readonly string[] RelationLabels = { "敵対", "中立", "同盟", "宿敵" };
+        private static readonly string[] RelationLabels = { "Hostile", "Neutral", "Allied", "Nemesis" };
         private static readonly Relation[] RelationValues = { Relation.Hostile, Relation.Neutral, Relation.Allied, Relation.Nemesis };
 
         // Build() 実行中に生成した10行分のドロップダウンと、対応する (a,b) ペア。
@@ -121,7 +121,7 @@ namespace CSWarfront.Game.UI
                 if (godzillaPresent) BuildThreatRows(group, names, ThreatKind.Kaiju, "KAIJU", stateReady);
                 if (alienPresent) BuildThreatRows(group, names, ThreatKind.Alien, "Alien", stateReady);
 
-                object resetButtonObj = group.AddButton("全て敵対に戻す", OnResetAllClick);
+                object resetButtonObj = group.AddButton("Reset All to Hostile", OnResetAllClick);
 
                 if (groupPanel != null)
                 {
@@ -133,7 +133,7 @@ namespace CSWarfront.Game.UI
                     _noteLabel.width = 500f;
                     _noteLabel.text = stateReady
                         ? ""
-                        : "都市が読み込まれていないため、勢力の関係を編集できません。都市を読み込んだ後にもう一度開いてください。";
+                        : "No city is loaded, so faction relations cannot be edited. Please open this again after loading a city.";
 
                     // Task52バグ修正: CSはこのMOD全体のOnSettingsUIをOptions画面を開くたびには
                     // 再実行しない（クラス冒頭のコメント参照）。代わりに、Options内でこのMODのタブが
@@ -263,7 +263,7 @@ namespace CSWarfront.Game.UI
                 {
                     _noteLabel.text = stateReady
                         ? ""
-                        : "都市が読み込まれていないため、勢力の関係を編集できません。都市を読み込んだ後にもう一度開いてください。";
+                        : "No city is loaded, so faction relations cannot be edited. Please open this again after loading a city.";
                 }
             }
             catch (Exception e)

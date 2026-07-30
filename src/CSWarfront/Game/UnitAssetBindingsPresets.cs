@@ -50,7 +50,7 @@ namespace CSWarfront.Game
                 _anyFactionBindings.Clear();
                 Save();
 
-                ModConfig.Log("UnitAssetBindings.ClearAll: 全ての割り当て(" + removed + "件)を既定モデルへ初期化しました");
+                ModConfig.Log("UnitAssetBindings.ClearAll: reset all bindings (" + removed + " entries) to default models");
                 return removed;
             }
             catch (Exception e)
@@ -70,20 +70,20 @@ namespace CSWarfront.Game
             {
                 if (!IsValidSlot(slot))
                 {
-                    ModConfig.LogError("UnitAssetBindings.SaveToSlot: 不正なslot=" + slot + "（1〜3のみ有効）");
+                    ModConfig.LogError("UnitAssetBindings.SaveToSlot: invalid slot=" + slot + " (only 1-3 are valid)");
                     return false;
                 }
                 if (string.IsNullOrEmpty(_modDirectory))
                 {
-                    ModConfig.LogError("UnitAssetBindings.SaveToSlot: modDirectory 未解決のため保存できません（今回のセッションのみ有効）");
+                    ModConfig.LogError("UnitAssetBindings.SaveToSlot: modDirectory unresolved, cannot save (valid for this session only)");
                     return false;
                 }
 
                 string path = SlotPath(slot);
                 WriteBindingsToFile(path, _bindings, _anyFactionBindings);
 
-                ModConfig.Log("UnitAssetBindings.SaveToSlot: 現在の割り当て(勢力別" + _bindings.Count + "件 + 全勢力共通" +
-                    _anyFactionBindings.Count + "件)をセット" + slot + "（'" + path + "'）へ保存しました");
+                ModConfig.Log("UnitAssetBindings.SaveToSlot: saved current bindings (per-faction " + _bindings.Count + " + all-factions " +
+                    _anyFactionBindings.Count + ") to preset " + slot + " ('" + path + "')");
                 return true;
             }
             catch (Exception e)
@@ -103,19 +103,19 @@ namespace CSWarfront.Game
             {
                 if (!IsValidSlot(slot))
                 {
-                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: 不正なslot=" + slot + "（1〜3のみ有効）");
+                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: invalid slot=" + slot + " (only 1-3 are valid)");
                     return false;
                 }
                 if (string.IsNullOrEmpty(_modDirectory))
                 {
-                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: modDirectory 未解決のため読込できません");
+                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: modDirectory unresolved, cannot load");
                     return false;
                 }
 
                 string path = SlotPath(slot);
                 if (!File.Exists(path))
                 {
-                    ModConfig.Log("UnitAssetBindings.LoadFromSlot: セット" + slot + "（'" + path + "'）が存在しないため読込をスキップしました（現在の割り当てを維持）");
+                    ModConfig.Log("UnitAssetBindings.LoadFromSlot: preset " + slot + " ('" + path + "') does not exist, skipping load (keeping current bindings)");
                     return false;
                 }
 
@@ -131,7 +131,7 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: セット" + slot + "（'" + path + "'）の読込に失敗したため現在の割り当てを維持します: " + e);
+                    ModConfig.LogError("UnitAssetBindings.LoadFromSlot: failed to load preset " + slot + " ('" + path + "'), keeping current bindings: " + e);
                     return false;
                 }
 
@@ -143,13 +143,13 @@ namespace CSWarfront.Game
 
                 Save(); // unit-assets.txt にも反映（次回レベルロード時もこのセットの内容を維持するため）
 
-                ModConfig.Log("UnitAssetBindings.LoadFromSlot: セット" + slot + "（'" + path + "'）から" + parsed +
-                    "件を読み込み、既存の割り当てテーブル全体を置き換えました");
+                ModConfig.Log("UnitAssetBindings.LoadFromSlot: loaded " + parsed + " entries from preset " + slot +
+                    " ('" + path + "') and replaced the entire binding table");
                 return true;
             }
             catch (Exception e)
             {
-                ModConfig.LogError("UnitAssetBindings.LoadFromSlot(slot=" + slot + ") error（現在の割り当てを維持）: " + e);
+                ModConfig.LogError("UnitAssetBindings.LoadFromSlot(slot=" + slot + ") error (keeping current bindings): " + e);
                 return false;
             }
         }

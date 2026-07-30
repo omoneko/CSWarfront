@@ -53,7 +53,7 @@ namespace CSWarfront.Game.UI
             float halfWidth = (width - MissileRowGap) / 2f;
 
             _buildMissileButton = _panel.AddUIComponent<UIButton>();
-            _buildMissileButton.text = "ミサイル建造 (¥" + MissileStockpile.MissileCost.ToString("0") + ")";
+            _buildMissileButton.text = "Build Missile (¥" + MissileStockpile.MissileCost.ToString("0") + ")";
             _buildMissileButton.textScale = 0.75f;
             _buildMissileButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _buildMissileButton.normalBgSprite = "ButtonMenu";
@@ -63,7 +63,7 @@ namespace CSWarfront.Game.UI
             _buildMissileButton.eventClick += OnBuildMissileClick;
 
             _launchMissileButton = _panel.AddUIComponent<UIButton>();
-            _launchMissileButton.text = "発射地点を指定";
+            _launchMissileButton.text = "Set Launch Target";
             _launchMissileButton.textScale = 0.75f;
             _launchMissileButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _launchMissileButton.normalBgSprite = "ButtonMenu";
@@ -98,17 +98,17 @@ namespace CSWarfront.Game.UI
 
             if (_missileStatusLabel != null)
             {
-                string statusText = "備蓄: " + snapshot.StockpiledMissiles + " / " + MissileStockpile.MaxStockpile;
+                string statusText = "Stockpile: " + snapshot.StockpiledMissiles + " / " + MissileStockpile.MaxStockpile;
                 if (snapshot.IsBuildingMissile)
                 {
                     float pct = Mathf.Clamp01(snapshot.MissileBuildProgress) * 100f;
                     float remainHours = (1f - Mathf.Clamp01(snapshot.MissileBuildProgress)) * MissileStockpile.MissileBuildHours;
                     if (remainHours < 0f) remainHours = 0f;
-                    statusText += "\n建造中: " + pct.ToString("0") + "%  (残り " + remainHours.ToString("0.0") + "h)";
+                    statusText += "\nBuilding: " + pct.ToString("0") + "%  (" + remainHours.ToString("0.0") + "h left)";
                 }
                 else
                 {
-                    statusText += "\n建造中: なし";
+                    statusText += "\nBuilding: none";
                 }
                 _missileStatusLabel.text = statusText;
                 _missileStatusLabel.relativePosition = new Vector3(Pad, y);
@@ -171,12 +171,12 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case MissileBuildResult.BaseNotFound: return "基地が見つかりません";
-                case MissileBuildResult.NotMissileBase: return "ミサイル基地ではありません";
-                case MissileBuildResult.NoOwner: return "所有者がいません";
-                case MissileBuildResult.AlreadyBuilding: return "既に建造中です";
-                case MissileBuildResult.StockpileFull: return "備蓄上限です";
-                case MissileBuildResult.NotAffordable: return "資金不足";
+                case MissileBuildResult.BaseNotFound: return "Base not found";
+                case MissileBuildResult.NotMissileBase: return "Not a missile base";
+                case MissileBuildResult.NoOwner: return "No owner";
+                case MissileBuildResult.AlreadyBuilding: return "Already building";
+                case MissileBuildResult.StockpileFull: return "Stockpile full";
+                case MissileBuildResult.NotAffordable: return "Insufficient funds";
                 default: return "";
             }
         }

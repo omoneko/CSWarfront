@@ -515,7 +515,7 @@ namespace CSWarfront.Game
                 _shader = shader;
 
                 if (shader == null)
-                    ModConfig.LogError("CombatFx: シェーダー解決に失敗（Standard/Legacy Shaders/Diffuse/Diffuse 全滅）、発砲エフェクトは描画されません");
+                    ModConfig.LogError("CombatFx: failed to resolve shader (Standard/Legacy Shaders/Diffuse all failed), muzzle flash effects will not render");
             }
             catch (Exception e)
             {

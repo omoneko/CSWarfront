@@ -40,7 +40,7 @@ namespace CSWarfront.Game.UI
             _armedBaseId = baseId;
             _rightMouseDownPending = false;
             ModConfig.Log("MissileLaunchTargeting: armed for base " + baseId + " - right-click a target (Esc cancels)");
-            CommandToast.Show("ミサイル発射地点を指定してください");
+            CommandToast.Show("Please set a missile launch target");
         }
 
         /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。ターゲティング状態を残さない。</summary>
@@ -64,7 +64,7 @@ namespace CSWarfront.Game.UI
                 if (Input.GetKeyDown(KeyCode.Escape))
                 {
                     ModConfig.Log("MissileLaunchTargeting: cancelled");
-                    CommandToast.Show("発射地点の指定をキャンセル");
+                    CommandToast.Show("Cancelled launch targeting");
                     Reset();
                     return;
                 }
@@ -107,7 +107,7 @@ namespace CSWarfront.Game.UI
                 {
                     ModConfig.Log("MissileLaunchTargeting: launched from base " + _armedBaseId + " at " +
                         hit.point.x.ToString("0") + "," + hit.point.z.ToString("0"));
-                    CommandToast.Show("発射しました");
+                    CommandToast.Show("Launched");
                     Reset();
                 }
                 else
@@ -129,11 +129,11 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case LaunchResult.NoStockpile: return "備蓄がありません";
-                case LaunchResult.OutOfRange: return "射程外です";
-                case LaunchResult.NoOwner: return "所有者がいません";
-                case LaunchResult.NotMissileBase: return "ミサイル基地ではありません";
-                case LaunchResult.BaseNotFound: return "基地が見つかりません";
+                case LaunchResult.NoStockpile: return "No missiles in stockpile";
+                case LaunchResult.OutOfRange: return "Out of range";
+                case LaunchResult.NoOwner: return "No owner";
+                case LaunchResult.NotMissileBase: return "Not a missile base";
+                case LaunchResult.BaseNotFound: return "Base not found";
                 default: return "";
             }
         }

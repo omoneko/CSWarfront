@@ -249,7 +249,7 @@ namespace CSWarfront.Game
                 _shader = shader;
 
                 if (shader == null)
-                    ModConfig.LogError("KillFx: シェーダー解決に失敗（Standard/Legacy Shaders/Diffuse/Diffuse 全滅）、撃破爆発エフェクトは描画されません");
+                    ModConfig.LogError("KillFx: failed to resolve shader (Standard/Legacy Shaders/Diffuse all failed), kill explosion effects will not render");
             }
             catch (Exception e)
             {

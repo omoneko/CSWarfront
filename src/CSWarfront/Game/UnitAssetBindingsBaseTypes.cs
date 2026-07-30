@@ -33,10 +33,10 @@ namespace CSWarfront.Game
         /// <summary>UI（AssetAssignPanel/OptionsModelAssignPage）のドロップダウンで生のキー文字列の
         /// 代わりに表示する日本語ラベル。生のキー文字列をそのまま出すと「これは35種のユニットの1つ」
         /// という誤解を招くため、常にこのラベルへ差し替えて表示する。</summary>
-        public const string ArmyBaseDisplayName = "陸軍基地";
-        public const string NavyBaseDisplayName = "海軍基地";
-        public const string AirBaseDisplayName = "空軍基地";
-        public const string MissileBaseDisplayName = "ミサイル基地";
+        public const string ArmyBaseDisplayName = "Army Base";
+        public const string NavyBaseDisplayName = "Naval Base";
+        public const string AirBaseDisplayName = "Air Base";
+        public const string MissileBaseDisplayName = "Missile Base";
 
         /// <summary>指定<see cref="BaseType"/>に対応する割り当てキー（<see cref="ArmyBaseTypeKey"/>等）を返す。</summary>
         public static string BaseTypeKeyFor(BaseType type)
@@ -139,8 +139,8 @@ namespace CSWarfront.Game
             bool allFactions = scope == CopyScope.AllFactionsSameType || scope == CopyScope.AllFactionsAllTypes;
             if (!allFactions)
             {
-                ModConfig.Log("UnitAssetBindings.CopyTo: " + fromTypeKey + " はscope=" + scope +
-                    " に対応しないためスキップしました（同カテゴリ/全ユニット種別はユニット専用のスコープです）");
+                ModConfig.Log("UnitAssetBindings.CopyTo: skipped, " + fromTypeKey + " does not support scope=" + scope +
+                    " (same-category/all-unit-types scopes are unit-only)");
                 return 0;
             }
 
@@ -154,8 +154,8 @@ namespace CSWarfront.Game
 
             if (written > 0) Save();
             ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + fromTypeKey + " (" +
-                AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し（同じ基地種別で他の全勢力へ）、" +
-                written + " 件を書き込みました");
+                AssetKindUtil.ToPrefix(kind) + ":" + name + ") copied to scope=" + scope + " (same base type, all other factions), " +
+                "wrote " + written + " entries");
             return written;
         }
     }

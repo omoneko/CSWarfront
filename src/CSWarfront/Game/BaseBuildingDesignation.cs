@@ -55,14 +55,14 @@ namespace CSWarfront.Game
             {
                 if (string.IsNullOrEmpty(modDirectory))
                 {
-                    ModConfig.LogError("BaseBuildingDesignation.Load: modDirectory が空のためメモリ内のみで動作します（割り当ては保存されません）");
+                    ModConfig.LogError("BaseBuildingDesignation.Load: modDirectory is empty, running in-memory only (designations will not be saved)");
                     return;
                 }
 
                 _filePath = Path.Combine(modDirectory, FileName);
                 if (!File.Exists(_filePath))
                 {
-                    ModConfig.Log("BaseBuildingDesignation.Load: '" + _filePath + "' が無いため割り当て0件で開始");
+                    ModConfig.Log("BaseBuildingDesignation.Load: '" + _filePath + "' not found, starting with 0 designations");
                     return;
                 }
 
@@ -87,12 +87,12 @@ namespace CSWarfront.Game
                     parsed++;
                 }
 
-                ModConfig.Log("BaseBuildingDesignation.Load: '" + _filePath + "' から " + parsed + " 件の指定建物を読み込みました");
+                ModConfig.Log("BaseBuildingDesignation.Load: loaded " + parsed + " designated building(s) from '" + _filePath + "'");
             }
             catch (Exception e)
             {
                 // 壊れたファイル・アクセス権限エラー等は「割り当て無し」として継続する（ロードを止めない）。
-                ModConfig.LogError("BaseBuildingDesignation.Load error（割り当て無しとして継続）: " + e);
+                ModConfig.LogError("BaseBuildingDesignation.Load error (continuing with no designations): " + e);
                 _designations.Clear();
             }
         }
@@ -118,7 +118,7 @@ namespace CSWarfront.Game
         {
             if (_designations.Remove(type))
             {
-                ModConfig.Log("BaseBuildingDesignation.Clear: " + type + " の指定を解除しました（電力タブの複製建物のみが引き続き使えます）");
+                ModConfig.Log("BaseBuildingDesignation.Clear: cleared designation for " + type + " (only the Electricity tab duplicate building remains usable)");
                 Save();
             }
         }
@@ -161,7 +161,7 @@ namespace CSWarfront.Game
             {
                 if (string.IsNullOrEmpty(_filePath))
                 {
-                    ModConfig.LogError("BaseBuildingDesignation.Save: modDirectory 未解決のため保存をスキップ（今回のセッション内のみ有効）");
+                    ModConfig.LogError("BaseBuildingDesignation.Save: modDirectory unresolved, skipping save (valid for this session only)");
                     return;
                 }
 
@@ -175,7 +175,7 @@ namespace CSWarfront.Game
                     }
                 }
 
-                ModConfig.Log("BaseBuildingDesignation.Save: '" + _filePath + "' へ " + _designations.Count + " 件を保存しました");
+                ModConfig.Log("BaseBuildingDesignation.Save: saved " + _designations.Count + " designation(s) to '" + _filePath + "'");
             }
             catch (Exception e)
             {

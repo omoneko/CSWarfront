@@ -184,7 +184,7 @@ namespace CSWarfront.Game.UI
             UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
             if (panel == null)
             {
-                ModConfig.LogError("UnitInfoPanel.Build: UIPanel の生成に失敗");
+                ModConfig.LogError("UnitInfoPanel.Build: failed to create UIPanel");
                 return;
             }
             _panel = panel;
@@ -317,16 +317,16 @@ namespace CSWarfront.Game.UI
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
-                sb.Append("所属: ").Append(factionName);
-                sb.Append("\n体力: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\n攻撃: ").Append(snapshot.Attack.ToString("0")).Append("/h  射程: ").Append(snapshot.Range.ToString("0"));
-                sb.Append("\n装甲: ").Append(snapshot.Armor.ToString("0")).Append("    速度: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
-                sb.Append("\n命中: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
-                if (snapshot.AccuracyBoosted) sb.Append("（観測支援）");
-                sb.Append("\n状態: ").Append(StateLabel(snapshot.State));
-                sb.Append("\n目標: ").Append(snapshot.TargetId.HasValue ? "ユニット#" + snapshot.TargetId.Value : "なし");
-                sb.Append("\n経路: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "直進");
-                sb.Append("\n命令: ").Append(OrderLabel(snapshot.Order)); // Task48
+                sb.Append("Faction: ").Append(factionName);
+                sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
+                sb.Append("\nAttack: ").Append(snapshot.Attack.ToString("0")).Append("/h  Range: ").Append(snapshot.Range.ToString("0"));
+                sb.Append("\nArmor: ").Append(snapshot.Armor.ToString("0")).Append("    Speed: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
+                sb.Append("\nAccuracy: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
+                if (snapshot.AccuracyBoosted) sb.Append(" (Spotted)");
+                sb.Append("\nStatus: ").Append(StateLabel(snapshot.State));
+                sb.Append("\nTarget: ").Append(snapshot.TargetId.HasValue ? "Unit#" + snapshot.TargetId.Value : "none");
+                sb.Append("\nPath: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "Direct");
+                sb.Append("\nOrder: ").Append(OrderLabel(snapshot.Order)); // Task48
 
                 _statusLabel.text = sb.ToString();
                 RecomputePanelHeight();
@@ -360,10 +360,10 @@ namespace CSWarfront.Game.UI
         {
             switch (state)
             {
-                case UnitState.Idle: return "待機";
-                case UnitState.Moving: return "移動中";
-                case UnitState.Engaging: return "交戦中";
-                case UnitState.Dead: return "戦死";
+                case UnitState.Idle: return "Idle";
+                case UnitState.Moving: return "Moving";
+                case UnitState.Engaging: return "Engaging";
+                case UnitState.Dead: return "Dead";
                 default: return state.ToString();
             }
         }
@@ -373,9 +373,9 @@ namespace CSWarfront.Game.UI
         {
             switch (order)
             {
-                case UnitOrder.FreeAdvance: return "自由進撃";
-                case UnitOrder.Hold: return "停止";
-                case UnitOrder.RallyHold: return "集結待機";
+                case UnitOrder.FreeAdvance: return "Advance";
+                case UnitOrder.Hold: return "Hold";
+                case UnitOrder.RallyHold: return "Rally & Hold";
                 case UnitOrder.AiControlled: default: return "AI";
             }
         }

@@ -116,7 +116,7 @@ namespace CSWarfront.Game.UI
                 string name;
                 string suffix = UnitAssetBindings.TryGetEffective(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
-                    : "(既定)";
+                    : "(default)";
                 string displayKey = UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[i]);
                 labels[i] = displayKey + " → " + suffix;
             }
@@ -154,7 +154,7 @@ namespace CSWarfront.Game.UI
             AssetKind kind;
             string name;
             bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
-            _currentBindingLabel.text = "現在の割り当て: " + (bound ? AssetKindUtil.Describe(kind, name) : "(既定のモデル)");
+            _currentBindingLabel.text = "Current binding: " + (bound ? AssetKindUtil.Describe(kind, name) : "(default model)");
             RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
 
@@ -170,7 +170,7 @@ namespace CSWarfront.Game.UI
                 int assetIdx = _propListBox.selectedIndex;
                 if (assetIdx < 0 || assetIdx >= _filteredAssetNames.Count)
                 {
-                    ModConfig.Log("AssetAssignPanel: 適用スキップ（アセットが未選択）");
+                    ModConfig.Log("AssetAssignPanel: apply skipped (no asset selected)");
                     return;
                 }
 
@@ -215,7 +215,7 @@ namespace CSWarfront.Game.UI
 
             UnitVisuals.DestroyAll();
             BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
-            ModConfig.Log("AssetAssignPanel: 割り当て変更を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+            ModConfig.Log("AssetAssignPanel: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the binding change");
 
             WarnIfNoOwnedBaseForKey(typeIdx);
         }
@@ -232,8 +232,8 @@ namespace CSWarfront.Game.UI
             if (!UnitAssetBindings.TryGetBaseTypeForKey(_typeKeys[typeIdx], out baseType)) return;
             if (MilitaryManager.HasOwnedBaseOfType(SelectedFactionId, baseType)) return;
 
-            string note = "（この勢力が所有する" + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
-                "が現在ありません。拠点を建設/所属変更すると反映されます）";
+            string note = "(This faction currently owns no " + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
+                ". It will take effect once a base is built or changes ownership)";
             ModConfig.Log("AssetAssignPanel: " + note);
             if (_currentBindingLabel != null) _currentBindingLabel.text += "\n" + note;
         }

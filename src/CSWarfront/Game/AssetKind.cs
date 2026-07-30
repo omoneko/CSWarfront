@@ -60,10 +60,10 @@ namespace CSWarfront.Game
         {
             switch (kind)
             {
-                case AssetKind.Building: return "建物";
-                case AssetKind.Vehicle: return "車両";
-                case AssetKind.Tree: return "樹木";
-                default: return "プロップ";
+                case AssetKind.Building: return "Building";
+                case AssetKind.Vehicle: return "Vehicle";
+                case AssetKind.Tree: return "Tree";
+                default: return "Prop";
             }
         }
 

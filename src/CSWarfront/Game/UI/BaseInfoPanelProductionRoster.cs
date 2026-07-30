@@ -83,7 +83,7 @@ namespace CSWarfront.Game.UI
             foreach (UnitType t in roster)
             {
                 string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
-                if (t.Tier > unlockedTier) label += " [未解禁]";
+                if (t.Tier > unlockedTier) label += " [Locked]";
                 items.Add(label);
                 keys.Add(t.TypeKey);
             }
@@ -107,18 +107,18 @@ namespace CSWarfront.Game.UI
         /// index 0 は常に生産中（先頭）で "(生産中)" を付ける。QueueDisplayMax件を超える分は "…" で省略する。</summary>
         private static string BuildQueueDisplayText(string[] queuedTypeKeys)
         {
-            if (queuedTypeKeys == null || queuedTypeKeys.Length == 0) return "キュー: なし";
+            if (queuedTypeKeys == null || queuedTypeKeys.Length == 0) return "Queue: none";
 
             StringBuilder sb = _queueBuilder;
             sb.Length = 0;
-            sb.Append("キュー: ");
+            sb.Append("Queue: ");
 
             int shown = Math.Min(queuedTypeKeys.Length, QueueDisplayMax);
             for (int i = 0; i < shown; i++)
             {
-                if (i > 0) sb.Append(" → ");
+                if (i > 0) sb.Append(" -> ");
                 sb.Append(queuedTypeKeys[i]);
-                if (i == 0) sb.Append("(生産中)");
+                if (i == 0) sb.Append("(producing)");
             }
             if (queuedTypeKeys.Length > shown) sb.Append(" → …");
 

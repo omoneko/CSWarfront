@@ -30,7 +30,7 @@ namespace CSWarfront.Game.UI
 
         private static UIButton BuildClearAllButton(float x, float y, float width)
         {
-            _clearAllButton = BuildButton("全て初期化", x, y, width, OnClearAllClick);
+            _clearAllButton = BuildButton("Reset All", x, y, width, OnClearAllClick);
             return _clearAllButton;
         }
 
@@ -42,8 +42,8 @@ namespace CSWarfront.Game.UI
             float buttonWidth = (width - dropdownWidth - SectionGap * 2f) / 2f;
 
             _presetSlotDropdown = BuildPresetSlotDropdown(x, y, dropdownWidth);
-            _presetSaveButton = BuildButton("保存", x + dropdownWidth + SectionGap, y, buttonWidth, OnSaveSlotClick);
-            _presetLoadButton = BuildButton("読込", x + dropdownWidth + SectionGap + buttonWidth + SectionGap, y, buttonWidth, OnLoadSlotClick);
+            _presetSaveButton = BuildButton("Save", x + dropdownWidth + SectionGap, y, buttonWidth, OnSaveSlotClick);
+            _presetLoadButton = BuildButton("Load", x + dropdownWidth + SectionGap + buttonWidth + SectionGap, y, buttonWidth, OnLoadSlotClick);
         }
 
         private static UIDropDown BuildPresetSlotDropdown(float x, float y, float width)
@@ -94,7 +94,7 @@ namespace CSWarfront.Game.UI
             for (int i = 0; i < 3; i++)
             {
                 int slot = i + 1;
-                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : slot + "（空）";
+                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : slot + " (empty)";
             }
             return labels;
         }
@@ -127,8 +127,8 @@ namespace CSWarfront.Game.UI
             {
                 int removed = UnitAssetBindings.ClearAll();
                 SetPresetMessage(removed > 0
-                    ? "全割り当てを初期化しました（" + removed + "件）"
-                    : "初期化対象の割り当てがありませんでした（既に既定のままです）");
+                    ? "Reset all bindings (" + removed + " entries)"
+                    : "Nothing to reset (already at default)");
 
                 if (removed > 0)
                 {
@@ -136,7 +136,7 @@ namespace CSWarfront.Game.UI
                     RefreshCurrentBindingLabel();
                     UnitVisuals.DestroyAll();
                     BaseVisuals.DestroyAll();
-                    ModConfig.Log("AssetAssignPanel: 全初期化を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+                    ModConfig.Log("AssetAssignPanel: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the full reset");
                 }
             }
             catch (Exception e)
@@ -151,7 +151,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.SaveToSlot(slot);
-                SetPresetMessage(ok ? "セット" + slot + "に保存しました" : "セット" + slot + "への保存に失敗しました");
+                SetPresetMessage(ok ? "Saved to preset " + slot : "Failed to save to preset " + slot);
                 if (ok) RefreshPresetSlotLabels();
             }
             catch (Exception e)
@@ -169,7 +169,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.LoadFromSlot(slot);
-                SetPresetMessage(ok ? "セット" + slot + "を読み込みました（既存の割り当てを置き換えました）" : "セット" + slot + "は空です");
+                SetPresetMessage(ok ? "Loaded preset " + slot + " (replaced the existing bindings)" : "Preset " + slot + " is empty");
 
                 if (ok)
                 {
@@ -178,7 +178,7 @@ namespace CSWarfront.Game.UI
                     RefreshCurrentBindingLabel();
                     UnitVisuals.DestroyAll();
                     BaseVisuals.DestroyAll();
-                    ModConfig.Log("AssetAssignPanel: セット読込を反映するため UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() を実行しました");
+                    ModConfig.Log("AssetAssignPanel: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the preset load");
                 }
             }
             catch (Exception e)

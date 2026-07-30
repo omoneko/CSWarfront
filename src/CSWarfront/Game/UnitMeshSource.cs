@@ -120,8 +120,8 @@ namespace CSWarfront.Game
                         string warnKey = factionId + "|" + typeKey + "=" + boundKind + ":" + boundName;
                         if (_warnedMissingBindings.Add(warnKey))
                         {
-                            ModConfig.Log("UnitMeshSource: faction=" + factionId + " '" + typeKey + "' に割り当て済みの" + boundKind + " '" + boundName +
-                                "' が見つかりません（未ロード等）。assetPrefabName/既定へフォールバックします");
+                            ModConfig.Log("UnitMeshSource: faction=" + factionId + " '" + typeKey + "' bound " + boundKind + " '" + boundName +
+                                "' not found (not loaded, etc). Falling back to assetPrefabName/default");
                         }
                     }
                 }
@@ -251,7 +251,7 @@ namespace CSWarfront.Game
                     if (!_loggedSourceOnce)
                     {
                         _loggedSourceOnce = true;
-                        ModConfig.Log("UnitMeshSource: source prefab='" + info.name + "' mesh='" + mesh.name + "' を借用します（AI・マテリアルは使用しません）");
+                        ModConfig.Log("UnitMeshSource: borrowing source prefab='" + info.name + "' mesh='" + mesh.name + "' (not using its AI or material)");
                     }
                     return new Resolved { Mesh = mesh, Ok = true };
                 }
@@ -262,7 +262,7 @@ namespace CSWarfront.Game
                     if (!_loggedSourceOnce)
                     {
                         _loggedSourceOnce = true;
-                        ModConfig.Log("UnitMeshSource: 車両プレハブのメッシュが見つからず、プリミティブ(Cube)にフォールバックしました");
+                        ModConfig.Log("UnitMeshSource: vehicle prefab mesh not found, fell back to primitive (Cube)");
                     }
                     return new Resolved { Mesh = mesh, Ok = true };
                 }
@@ -270,7 +270,7 @@ namespace CSWarfront.Game
                 if (!_loggedFailureOnce)
                 {
                     _loggedFailureOnce = true;
-                    ModConfig.LogError("UnitMeshSource: メッシュ解決に完全失敗（プレハブ・プリミティブ共に不可）key='" + key + "'");
+                    ModConfig.LogError("UnitMeshSource: mesh resolution failed completely (neither prefab nor primitive available) key='" + key + "'");
                 }
                 return new Resolved { Mesh = null, Ok = false };
             }

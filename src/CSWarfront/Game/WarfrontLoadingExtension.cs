@@ -70,7 +70,7 @@ namespace CSWarfront.Game
                     Singleton<PluginManager>.instance.FindPluginInfo(Assembly.GetExecutingAssembly());
                 if (info == null || string.IsNullOrEmpty(info.modPath))
                 {
-                    ModConfig.LogError("LoadModAssets: PluginManager から modPath を取得できませんでした（メモリ内のみで動作）");
+                    ModConfig.LogError("LoadModAssets: could not get modPath from PluginManager (running in-memory only)");
                 }
                 string modPath = info != null ? info.modPath : null;
                 UnitAssetBindings.Load(modPath);

@@ -73,7 +73,7 @@ namespace CSWarfront.Game.Models
 
                 if (string.IsNullOrEmpty(_modDirectory))
                 {
-                    ModConfig.LogError("WarfrontModelProvider.TryGetModel(" + modelName + "): modDirectory 未初期化 (Initialize 未呼び出し)");
+                    ModConfig.LogError("WarfrontModelProvider.TryGetModel(" + modelName + "): modDirectory not initialized (Initialize not called)");
                     return false;
                 }
 
@@ -83,7 +83,7 @@ namespace CSWarfront.Game.Models
                 {
                     if (_warnedMissingModel.Add(modelName))
                     {
-                        ModConfig.LogError("WarfrontModelProvider: OBJ が見つかりません path=" + objPath);
+                        ModConfig.LogError("WarfrontModelProvider: OBJ not found path=" + objPath);
                     }
                     return false;
                 }
@@ -101,12 +101,12 @@ namespace CSWarfront.Game.Models
                 Material[] builtMaterials;
                 if (!WarfrontMeshBuilder.TryBuild(data, mtl, ModConfig.ObjFallbackColor, out built, out builtMaterials))
                 {
-                    ModConfig.LogError("WarfrontModelProvider: マルチマテリアルメッシュ構築失敗 name=" + modelName + " path=" + objPath);
+                    ModConfig.LogError("WarfrontModelProvider: multi-material mesh build failed name=" + modelName + " path=" + objPath);
                     return false;
                 }
 
                 _modelCache[modelName] = new BuiltModel { Mesh = built, Materials = builtMaterials };
-                ModConfig.Log("WarfrontModelProvider: built-in model(multi-material) を読み込みました name=" + modelName +
+                ModConfig.Log("WarfrontModelProvider: loaded built-in model (multi-material) name=" + modelName +
                     " subMeshes=" + (builtMaterials != null ? builtMaterials.Length : 0));
                 mesh = built;
                 materials = builtMaterials;

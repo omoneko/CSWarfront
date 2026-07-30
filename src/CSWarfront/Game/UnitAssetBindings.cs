@@ -36,10 +36,10 @@ namespace CSWarfront.Game
         {
             switch (scope)
             {
-                case CopyScope.SameCategoryAllTiers: return "同カテゴリの全Tier";
-                case CopyScope.AllUnitTypes: return "全ユニット種別";
-                case CopyScope.AllFactionsSameType: return "全勢力（同じ種別）";
-                case CopyScope.AllFactionsAllTypes: return "全勢力・全種別";
+                case CopyScope.SameCategoryAllTiers: return "All tiers of same category";
+                case CopyScope.AllUnitTypes: return "All unit types";
+                case CopyScope.AllFactionsSameType: return "All factions (same type)";
+                case CopyScope.AllFactionsAllTypes: return "All factions & all types";
                 default: return scope.ToString();
             }
         }
@@ -136,7 +136,7 @@ namespace CSWarfront.Game
             {
                 if (string.IsNullOrEmpty(modDirectory))
                 {
-                    ModConfig.LogError("UnitAssetBindings.Load: modDirectory が空のためメモリ内のみで動作します（割り当ては保存されません）");
+                    ModConfig.LogError("UnitAssetBindings.Load: modDirectory is empty, running in-memory only (bindings will not be saved)");
                     return;
                 }
 
@@ -144,20 +144,20 @@ namespace CSWarfront.Game
                 _filePath = Path.Combine(modDirectory, FileName);
                 if (!File.Exists(_filePath))
                 {
-                    ModConfig.Log("UnitAssetBindings.Load: '" + _filePath + "' が無いため割り当て0件で開始");
+                    ModConfig.Log("UnitAssetBindings.Load: '" + _filePath + "' not found, starting with 0 bindings");
                     return;
                 }
 
                 int parsed;
                 ParseFileInto(_filePath, _bindings, _anyFactionBindings, out parsed);
 
-                ModConfig.Log("UnitAssetBindings.Load: '" + _filePath + "' から " + parsed + " 件の割り当てを読み込みました（勢力別 " +
-                    _bindings.Count + " 件 / 全勢力共通(レガシー) " + _anyFactionBindings.Count + " 件）");
+                ModConfig.Log("UnitAssetBindings.Load: loaded " + parsed + " binding(s) from '" + _filePath + "' (per-faction " +
+                    _bindings.Count + " / all-factions (legacy) " + _anyFactionBindings.Count + ")");
             }
             catch (Exception e)
             {
                 // 壊れたファイル・アクセス権限エラー等は「割り当て無し」として継続する（ロードを止めない）。
-                ModConfig.LogError("UnitAssetBindings.Load error（割り当て無しとして継続）: " + e);
+                ModConfig.LogError("UnitAssetBindings.Load error (continuing with no bindings): " + e);
                 _bindings.Clear();
                 _anyFactionBindings.Clear();
             }
@@ -281,7 +281,7 @@ namespace CSWarfront.Game
             if (string.IsNullOrEmpty(typeKey)) return;
             if (_bindings.Remove(MakeKey(factionId, typeKey)))
             {
-                ModConfig.Log("UnitAssetBindings.Clear: faction=" + factionId + " " + typeKey + " を既定に戻しました");
+                ModConfig.Log("UnitAssetBindings.Clear: faction=" + factionId + " " + typeKey + " reset to default");
                 Save();
             }
         }
@@ -315,7 +315,7 @@ namespace CSWarfront.Game
 
             if (!hasSource)
             {
-                ModConfig.Log("UnitAssetBindings.CopyTo: コピー元 faction=" + fromFaction + " " + fromTypeKey + " に割り当てが無いためスキップしました");
+                ModConfig.Log("UnitAssetBindings.CopyTo: skipped, source faction=" + fromFaction + " " + fromTypeKey + " has no binding");
                 return 0;
             }
 
@@ -327,7 +327,7 @@ namespace CSWarfront.Game
             UnitCategory fromCategory;
             if (!TryGetCategory(fromTypeKey, out fromCategory))
             {
-                ModConfig.LogError("UnitAssetBindings.CopyTo: 不明なTypeKey '" + fromTypeKey + "' のためスキップしました");
+                ModConfig.LogError("UnitAssetBindings.CopyTo: skipped, unknown TypeKey '" + fromTypeKey + "'");
                 return 0;
             }
 
@@ -363,7 +363,7 @@ namespace CSWarfront.Game
 
             if (written > 0) Save();
             ModConfig.Log("UnitAssetBindings.CopyTo: faction=" + fromFaction + " " + fromTypeKey + " (" +
-                AssetKindUtil.ToPrefix(kind) + ":" + name + ") を scope=" + scope + " へ複製し、" + written + " 件を書き込みました");
+                AssetKindUtil.ToPrefix(kind) + ":" + name + ") copied to scope=" + scope + ", wrote " + written + " entries");
             return written;
         }
 
@@ -438,14 +438,14 @@ namespace CSWarfront.Game
             {
                 if (string.IsNullOrEmpty(_filePath))
                 {
-                    ModConfig.LogError("UnitAssetBindings.Save: modDirectory 未解決のため保存をスキップ（今回のセッション内のみ有効）");
+                    ModConfig.LogError("UnitAssetBindings.Save: modDirectory unresolved, skipping save (valid for this session only)");
                     return;
                 }
 
                 WriteBindingsToFile(_filePath, _bindings, _anyFactionBindings);
 
-                ModConfig.Log("UnitAssetBindings.Save: '" + _filePath + "' へ 勢力別" + _bindings.Count +
-                    "件 + 全勢力共通" + _anyFactionBindings.Count + "件 を保存しました");
+                ModConfig.Log("UnitAssetBindings.Save: saved " + _bindings.Count +
+                    " per-faction + " + _anyFactionBindings.Count + " all-factions entries to '" + _filePath + "'");
             }
             catch (Exception e)
             {

@@ -187,7 +187,7 @@ namespace CSWarfront.Game
                 if (shader == null && !_loggedShaderFailure)
                 {
                     _loggedShaderFailure = true;
-                    ModConfig.LogError("UnitMaterialFactory: シェーダー解決に失敗（Standard/Legacy Shaders/Diffuse/Diffuse 全滅）、ユニットは描画されません");
+                    ModConfig.LogError("UnitMaterialFactory: failed to resolve shader (Standard/Legacy Shaders/Diffuse all failed), units will not render");
                 }
             }
             catch (Exception e)

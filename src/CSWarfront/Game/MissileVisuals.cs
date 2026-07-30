@@ -92,7 +92,7 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("MissileVisuals.Sync: missile " + s.Id + " の更新に失敗: " + e);
+                    ModConfig.LogError("MissileVisuals.Sync: failed to update missile " + s.Id + ": " + e);
                 }
             }
 
@@ -220,7 +220,7 @@ namespace CSWarfront.Game
                 if (shader == null) shader = Shader.Find("Diffuse");
                 _shader = shader;
                 if (shader == null)
-                    ModConfig.LogError("MissileVisuals: シェーダー解決に失敗、ミサイルは描画されません");
+                    ModConfig.LogError("MissileVisuals: failed to resolve shader, missiles will not render");
             }
             catch (Exception e)
             {

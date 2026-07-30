@@ -201,7 +201,7 @@ namespace CSWarfront.Game
                 }
                 catch (Exception e)
                 {
-                    ModConfig.LogError("BaseVisuals.Sync: base " + s.BaseId + " の更新に失敗: " + e);
+                    ModConfig.LogError("BaseVisuals.Sync: failed to update base " + s.BaseId + ": " + e);
                 }
             }
 
@@ -288,8 +288,8 @@ namespace CSWarfront.Game
                 Mesh mesh;
                 if (!AssetCatalog.TryGetMesh(kind, name, out mesh) || mesh == null)
                 {
-                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") のメッシュ解決に失敗（" +
-                        kind + ":" + name + "）、オーバーレイをスキップします（既定の見た目のまま）");
+                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") failed to resolve mesh (" +
+                        kind + ":" + name + "), skipping overlay (keeping default appearance)");
                     return null;
                 }
 
@@ -298,7 +298,7 @@ namespace CSWarfront.Game
                 Material material;
                 if (!UnitMaterialFactory.TryGetAssetMaterial(kind, name, out material) || material == null)
                 {
-                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") のマテリアル生成に失敗、オーバーレイをスキップします");
+                    ModConfig.LogError("BaseVisuals.CreateVisual: base " + s.BaseId + " (" + s.Type + ") failed to create material, skipping overlay");
                     return null;
                 }
 

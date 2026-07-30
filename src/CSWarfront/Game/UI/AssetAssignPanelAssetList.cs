@@ -150,7 +150,7 @@ namespace CSWarfront.Game.UI
         {
             if (_customOnlyToggle != null)
             {
-                _customOnlyToggle.text = "サブスクライブ済みのみ: " + (_customOnly ? "ON" : "OFF");
+                _customOnlyToggle.text = "Subscribed only: " + (_customOnly ? "ON" : "OFF");
             }
         }
 
@@ -207,8 +207,8 @@ namespace CSWarfront.Game.UI
             if (_truncatedLabel != null)
             {
                 _truncatedLabel.text = truncated
-                    ? "※ " + names.Count + " 件中 " + MaxListItems + " 件のみ表示（検索で絞り込んでください）"
-                    : names.Count + " 件";
+                    ? "* Showing " + MaxListItems + " of " + names.Count + " (narrow your search)"
+                    : names.Count + " item(s)";
             }
         }
     }

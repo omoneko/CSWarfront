@@ -218,7 +218,7 @@ namespace CSWarfront.Game
             // 再走査され直しても件数が更新されたことがログから追えなかった（「割り当てたアセットが反映
             // されない」調査を著しく困難にした）。Rescan()はUIパネルを開いた時だけ呼ばれる低頻度パス
             // （毎フレームではない）なので、常にログしてもスパムにならない。
-            ModConfig.Log("AssetCatalog: " + kind + " 走査完了、mesh有り " + list.Count + " 件");
+            ModConfig.Log("AssetCatalog: " + kind + " scan complete, " + list.Count + " with mesh");
 
             _all[idx] = list;
         }

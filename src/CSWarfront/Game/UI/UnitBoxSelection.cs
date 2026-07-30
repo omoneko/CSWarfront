@@ -124,7 +124,7 @@ namespace CSWarfront.Game.UI
                 UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
                 if (panel == null)
                 {
-                    ModConfig.LogError("UnitBoxSelection.EnsureCreated: UIPanel の生成に失敗");
+                    ModConfig.LogError("UnitBoxSelection.EnsureCreated: failed to create UIPanel");
                     return;
                 }
                 panel.name = RectPanelName;
@@ -282,7 +282,7 @@ namespace CSWarfront.Game.UI
             _selectionModeActive = active;
             if (!active) CancelDrag(); // ドラッグ中にOFFへ切り替えた場合は即座に破棄する（矩形も消す）
             ModConfig.Log("UnitBoxSelection: selection mode " + (active ? "ON" : "OFF"));
-            CommandToast.Show(active ? "部隊選択モード ON（ドラッグで範囲選択）" : "部隊選択モード OFF");
+            CommandToast.Show(active ? "Unit selection mode ON (drag to box-select)" : "Unit selection mode OFF");
         }
 
         /// <summary>スクリーン実ピクセル座標（Input.mousePositionと同じ空間、左下原点）をUIViewのGUI座標
