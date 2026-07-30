@@ -33,6 +33,13 @@ namespace CSWarfront.Core
         /// まま無視される。MovementStepのダイブ移動先の解決、KamikazeStepの起爆判定の両方から参照される。</summary>
         public uint? TargetThreatId;
 
+        /// <summary>KamikazeStepがロックした敵対基地のMilitaryBase.BaseId（実行時のみ・非永続化、Task79）。
+        /// TargetId/TargetThreatIdと同じ「対象の種類ごとに別フィールド」方針。ユニット目標・外部脅威の
+        /// どちらも見つからなかった場合にのみ設定される（優先順位: ユニット→外部脅威→基地）。
+        /// 自爆ドローン以外のカテゴリでは常にnullのまま無視される。MovementStepのダイブ移動先の解決、
+        /// KamikazeStepの起爆判定の両方から参照される。</summary>
+        public ushort? TargetBaseId;
+
         public WorldPos? OrderTargetPos;
 
         /// <summary>プレイヤーの指揮コマンド（実行時のみ・非永続化、Task48）。既定はAiControlled。
