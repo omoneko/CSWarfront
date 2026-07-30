@@ -22,9 +22,13 @@ namespace CSWarfront.Core
     /// 「Air can hit everything」という仕様どおり、地上・海上・航空のいずれも交戦候補になり得る
     /// （実際の有効打はCombatMatchupの相性倍率で表現する。例: TacticalBomberはvs Air 0.2で事実上無力）。
     ///
-    /// SuicideDrone.IsOneShot=true（Task61）: CombatStep/BaseCombatStepが、このユニットが実際に
-    /// ダメージを与えた直後にCurrentHPを0にして即座に死亡させる（Cost=90が「1回分の使い捨てコスト」
-    /// という設計）。他の2種はIsOneShot=falseで通常どおり継戦する。
+    /// SuicideDrone（Task79再設計）: もはや「射撃してから自壊」ではなく、KamikazeStep（Core）が
+    /// 専用の交戦フロー（射程内で目標をロック→MovementStepのダイブ移動で直接突入→DetonateDistance
+    /// 以内でAttackを1回フル適用して自壊）を完結して扱う。CombatStep/BaseCombatStep/ThreatCombatStepは
+    /// UnitCategoryFlags.IsKamikaze()を見て早期continueするため、この3種のうちSuicideDroneだけが
+    /// 通常の射撃パイプライン（ShotEvent/dtスケールダメージ）に一切乗らない。Cost=90は変わらず
+    /// 「1回分の使い捨てコスト」という設計のまま（旧UnitType.IsOneShotフラグは撤廃済み、
+    /// KamikazeStep.cs/MovementStep.cs参照）。
     /// </summary>
     public static class AirUnitRoster
     {
@@ -34,24 +38,26 @@ namespace CSWarfront.Core
             public readonly float Hp, Attack, Range, Armor, SpeedKmh, Splash, Cost, BuildTime, Accuracy;
             public readonly float FireIntervalHours;
             public readonly ShotKind ShotKind;
-            public readonly bool IsOneShot;
 
             public BaseStats(UnitCategory category, float hp, float attack, float range, float armor,
                 float speedKmh, float splash, float cost, float buildTime, float accuracy,
-                float fireIntervalHours, ShotKind shotKind, bool isOneShot)
+                float fireIntervalHours, ShotKind shotKind)
             {
                 Category = category; Hp = hp; Attack = attack; Range = range; Armor = armor;
                 SpeedKmh = speedKmh; Splash = splash; Cost = cost; BuildTime = buildTime;
                 Accuracy = accuracy;
-                FireIntervalHours = fireIntervalHours; ShotKind = shotKind; IsOneShot = isOneShot;
+                FireIntervalHours = fireIntervalHours; ShotKind = shotKind;
             }
         }
 
         private static readonly BaseStats[] Bases =
         {
-            new BaseStats(UnitCategory.AirSuperiority, 120f, 85f,  90f, 4f, 900f,  0f, 200f, 14f, 0.80f, 0.30f, ShotKind.Gunfire,     false),
-            new BaseStats(UnitCategory.TacticalBomber,  180f, 120f, 70f, 6f, 650f, 45f, 260f, 18f, 0.65f, 1.00f, ShotKind.DirectFire,  false),
-            new BaseStats(UnitCategory.SuicideDrone,     40f, 260f, 20f, 0f, 420f, 35f,  90f,  6f, 0.90f, 0.50f, ShotKind.DirectFire,  true),
+            new BaseStats(UnitCategory.AirSuperiority, 120f, 85f,  90f, 4f, 900f,  0f, 200f, 14f, 0.80f, 0.30f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.TacticalBomber,  180f, 120f, 70f, 6f, 650f, 45f, 260f, 18f, 0.65f, 1.00f, ShotKind.DirectFire),
+            // SuicideDrone: ShotKind/FireIntervalHoursはKamikazeStepでは参照されない（ShotEventを
+            // 一切発行しないため）。旧ロスターの値をそのまま残してあるのは、他の2種と同じBaseStats
+            // 形状を保つため（このカテゴリでは単に無視されるだけで実害は無い）。
+            new BaseStats(UnitCategory.SuicideDrone,     40f, 260f, 20f, 0f, 420f, 35f,  90f,  6f, 0.90f, 0.50f, ShotKind.DirectFire),
         };
 
         /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（LandUnitRoster.TypeKeyと同じ形式）。</summary>
@@ -98,8 +104,7 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
                 b.ShotKind,
-                DomainMask.All, // 航空ユニットは地上・海上・航空のいずれも交戦候補にできる（Task61）。
-                b.IsOneShot);
+                DomainMask.All); // 航空ユニットは地上・海上・航空のいずれも交戦候補にできる（Task61）。
         }
     }
 }

@@ -187,4 +187,25 @@ public class ThreatCombatStepTests
         ThreatCombatStep.Advance(s, 1f);
         Assert.Equal(999.3f, s.Threats[0].CurrentHP, 3);
     }
+
+    // Task79: 自爆ドローンは脅威にも継続的なdtスケール射撃を行わない（KamikazeStepが同じ実効射程/
+    // ThreatArmor/ThreatRelationsのルールで体当たり一撃を扱う。KamikazeStepTests.cs参照）。
+    [Fact]
+    public void SuicideDrone_deals_no_continuous_damage_to_threats_and_emits_no_ShotEvent()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1)); // Range=20
+        s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0f, 0f, 0f)));
+        s.Threats.Add(new ExternalThreat
+        {
+            Id = 1, Kind = ThreatKind.Kaiju, Position = new WorldPos(15f, 0f, 0f),
+            Radius = 10f, MaxHP = 1000f, CurrentHP = 1000f
+        });
+
+        ThreatCombatStep.Advance(s, 1f);
+
+        Assert.Equal(1000f, s.Threats[0].CurrentHP, 3);
+        Assert.Empty(s.RecentShots);
+    }
 }

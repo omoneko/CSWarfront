@@ -86,6 +86,13 @@ namespace CSWarfront.Core
         /// 設定する（道路の高さに合わせるMovementStepの陸上ロジックとは全く別の垂直方向の扱い）。</summary>
         public const float CruiseAltitude = 120f;
 
+        /// <summary>Task79: 自爆ドローン（UnitCategoryFlags.IsKamikaze）が目標をロックしてダイブする際の
+        /// 速度倍率。type.Speed（通常の巡航速度）にこれを掛けた値をダイブの実効速度として使う——
+        /// 「目標に向かって加速して突っ込む」という体当たり特攻らしい見た目にするための、ドキュメント化
+        /// されたバランス調整用の定数（KamikazeStepではなくMovementStep側で管理する。ダイブの移動
+        /// そのものはこのクラスの責務のため）。</summary>
+        public const float DiveSpeedMultiplier = 1.5f;
+
         // --- Task77: 「地上ユニットが橋の上を渡ってくれない」「海の中に入っていける」不具合の修正 ---
         //
         // 【橋】RoadGraphBuilderを確認した結果、Road-serviceのセグメントは橋も含めて全て道路網グラフに
@@ -148,6 +155,21 @@ namespace CSWarfront.Core
                 // 立っていることは無いが、防御的に陸上ロジック（下のif以降）へは絶対に流れ込ませない。
                 if (type.Domain != Domain.Land)
                 {
+                    // Task79: 自爆ドローンが目標をロック中（KamikazeStep.Advanceが前tickで
+                    // TargetId/TargetThreatIdを書いた）なら、通常の巡航(AdvanceAir)ではなく専用の
+                    // ダイブ移動で目標へ直進する。ロックが無い/失った（目標を撃破・見失った）場合は
+                    // 下のResolveDomainObjectiveへフォールスルーし、通常の航空ユニットと同じく
+                    // 巡航高度へ戻ってOrderTargetPos（進撃/集結命令）へ向かう。
+                    if (type.Category.IsKamikaze())
+                    {
+                        WorldPos? diveTarget = ResolveKamikazeTarget(state, u);
+                        if (diveTarget.HasValue)
+                        {
+                            AdvanceKamikaze(u, stepLen, diveTarget.Value);
+                            continue;
+                        }
+                    }
+
                     WorldPos? objective = ResolveDomainObjective(u);
                     if (!objective.HasValue) continue;
 
@@ -415,6 +437,56 @@ namespace CSWarfront.Core
             if (height != null && height.TrySampleHeight(nx, nz, out groundY))
                 ny = groundY + CruiseAltitude;
 
+            u.Position = new WorldPos(nx, ny, nz);
+        }
+
+        /// <summary>Task79: KamikazeStepが書いたロック(TargetId/TargetThreatId)から、ダイブ先の
+        /// 「目標の現在位置」を解決する。ロックしたユニットが撃破/消滅していた、または脅威が
+        /// 撃破(IsDefeated)されていた場合はnullを返す（このtickはダイブせず、呼び出し元が通常の
+        /// ResolveDomainObjectiveへフォールスルーする）。TargetIdとTargetThreatIdの両方がnull
+        /// （まだ何もロックしていない）の場合もnullを返す。</summary>
+        private static WorldPos? ResolveKamikazeTarget(WarState state, UnitInstance u)
+        {
+            if (u.TargetId.HasValue)
+            {
+                UnitInstance target = state.FindUnit(u.TargetId.Value);
+                if (target != null && target.IsAlive) return target.Position;
+                return null;
+            }
+
+            if (u.TargetThreatId.HasValue)
+            {
+                for (int i = 0; i < state.Threats.Count; i++)
+                {
+                    ExternalThreat threat = state.Threats[i];
+                    if (threat.Id == u.TargetThreatId.Value)
+                        return threat.IsDefeated ? (WorldPos?)null : threat.Position;
+                }
+                return null;
+            }
+
+            return null;
+        }
+
+        /// <summary>Task79: 自爆ドローンのダイブ移動。目標の現在位置(target)へ向けて3D（X/Y/Z全て）で
+        /// 直線的に突入する。CruiseAltitude（巡航高度の維持）・IHeightSampler（地表スナップ）・
+        /// IWaterSampler（水域チェック）のいずれにも一切触れない（「ignoring cover/paths」という
+        /// 仕様どおり、地形・障害物を無視して最短距離で目標へ向かう）。速度はtype.Speed（呼び出し元の
+        /// stepLen=Speed×dt）にDiveSpeedMultiplierを掛けた実効値を使う。</summary>
+        private static void AdvanceKamikaze(UnitInstance u, float stepLen, WorldPos target)
+        {
+            float diveStepLen = stepLen * DiveSpeedMultiplier;
+            float dist = u.Position.DistanceTo(target);
+            if (dist <= diveStepLen || dist <= 0.01f)
+            {
+                u.Position = target;
+                return;
+            }
+
+            float t = diveStepLen / dist;
+            float nx = u.Position.X + (target.X - u.Position.X) * t;
+            float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
+            float nz = u.Position.Z + (target.Z - u.Position.Z) * t;
             u.Position = new WorldPos(nx, ny, nz);
         }
 

@@ -20,9 +20,11 @@ namespace CSWarfront.Core
         Carrier, Cruiser, Destroyer, Frigate, Minelayer, Minesweeper, Submarine,
         FastBoat, SuicideBoat, SeaDrone,
         AirSuperiority, GroundAttack, TacticalBomber, StrategicBomber, ElectronicWarfare, Awacs,
-        /// <summary>自爆ドローン（Task61）。UnitType.IsOneShot=trueで運用される唯一のカテゴリ。
-        /// 既存メンバーの並びを一切変更せず末尾に追加（列挙のint値に依存する永続化が万一存在しても
-        /// 既存値を破壊しないため）。</summary>
+        /// <summary>自爆ドローン（Task61で追加、Task79で「射撃してから自壊」→「突進して体当たり起爆」へ
+        /// 再設計）。UnitCategoryFlags.IsKamikaze()がtrueを返す唯一のカテゴリで、通常の射撃パイプライン
+        /// （CombatStep/BaseCombatStep/ThreatCombatStep）には一切乗らず、専用のKamikazeStepが
+        /// 交戦フロー全体（目標ロック→ダイブ→体当たり起爆）を扱う。既存メンバーの並びを一切変更せず
+        /// 末尾に追加（列挙のint値に依存する永続化が万一存在しても既存値を破壊しないため）。</summary>
         SuicideDrone
     }
 }

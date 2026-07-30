@@ -13,6 +13,13 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(self.TypeKey);
                 if (type == null) continue;
 
+                // Task79: 自爆ドローン（UnitCategoryFlags.IsKamikaze）は通常の射撃パイプラインに
+                // 一切乗らない（ShotEventも発行しない・dtスケールのダメージも与えない）。
+                // 目標のロック・突進・体当たり起爆はKamikazeStep（MovementStepと連携）が完結して扱う。
+                // このユニットのCurrentHPがKamikazeStepの起爆で0になった場合の死亡判定・KillEvent発行は、
+                // 下の第2パス（死亡はCurrentHP<=0から導出するという単一の真実源）がそのまま拾う。
+                if (type.Category.IsKamikaze()) continue;
+
                 // ターゲット選定は依然として単純な「射程内最近接の敵」（TargetSearch）。
                 // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
                 // Task61: type.CanTargetDomainsで領域フィルタをかける（AntiAir以外の陸上兵科は航空ユニットを
@@ -52,12 +59,6 @@ namespace CSWarfront.Core
                 // ダメージを与えたこのtickでのみFireCooldownをdt分だけ減算する。0以下になった瞬間だけ
                 // ShotEventを1つ積み、FireIntervalHoursへリセットする（乱数不使用・決定的）。
                 FireEffects.EmitThrottled(state, self, type, target.Position, target.InstanceId, dt);
-
-                // Task61: 自爆ドローン（UnitType.IsOneShot）は、実際にダメージを与えた瞬間に自壊する。
-                // CurrentHPを0にするだけで、死亡判定・KillEvent発行は下の第2パス（既存の死亡判定ループ）が
-                // そのまま担う（自爆用の特別な分岐を増やさず、既存の「死亡はCurrentHP<=0から導出する」
-                // という単一の真実源を維持する）。
-                if (type.IsOneShot) self.CurrentHP = 0f;
             }
             // 2) 死亡判定
             // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
@@ -78,8 +79,11 @@ namespace CSWarfront.Core
         }
 
         /// <summary>撃破報酬（Task35）を killerFactionId の勢力へ加算する。victimType/勢力が見つからなければ
-        /// 何もしない（防御的：整合性が崩れているケースで例外にしないため）。</summary>
-        private static void AwardKillReward(WarState state, byte killerFactionId, UnitType victimType)
+        /// 何もしない（防御的：整合性が崩れているケースで例外にしないため）。
+        /// internal（Task79）: KamikazeStepの体当たり起爆でも同じ撃破報酬ロジックを再利用するため、
+        /// ロジックを複製せずここを直接呼べるようにアクセス修飾子をprivateから緩めた
+        /// （同一アセンブリ内のみ、公開APIの増加はない）。</summary>
+        internal static void AwardKillReward(WarState state, byte killerFactionId, UnitType victimType)
         {
             if (victimType == null) return;
             Faction killer = state.FindFaction(killerFactionId);

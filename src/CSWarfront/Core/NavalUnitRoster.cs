@@ -93,8 +93,7 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
                 b.ShotKind,
-                DomainMask.Land | DomainMask.Sea, // 艦艇は対地・対艦のみ。対空能力は持たない（Task61）。
-                false);
+                DomainMask.Land | DomainMask.Sea); // 艦艇は対地・対艦のみ。対空能力は持たない（Task61）。
         }
     }
 }

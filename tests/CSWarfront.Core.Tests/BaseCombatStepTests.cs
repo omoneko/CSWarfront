@@ -187,4 +187,26 @@ public class BaseCombatStepTests
 
         Assert.Equal(0f, s.Bases[0].CaptureGraceHours, 3);
     }
+
+    // Task79: 自爆ドローンは対拠点の継続射程内砲撃を行わない（体当たり特攻は対ユニット/対外部脅威の
+    // KamikazeStepの範囲のみで、対拠点の体当たりは本タスクのスコープ外として明示的に見送った）。
+    [Fact]
+    public void SuicideDrone_deals_no_damage_to_bases_and_emits_no_ShotEvent()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1));
+        var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(10, 0, 0));
+        enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f;
+        s.Bases.Add(enemyBase);
+        s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0, 0, 0)));
+
+        BaseCombatStep.Advance(s, 1f);
+
+        Assert.Equal(100f, s.Bases[0].CurrentHP, 3);
+        Assert.Equal(40f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Empty(s.RecentShots);
+    }
 }

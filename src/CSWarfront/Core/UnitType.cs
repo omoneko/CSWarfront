@@ -38,16 +38,18 @@ namespace CSWarfront.Core
         /// 航空ユニットはAll（Land|Sea|Air）。既定コンストラクタ引数は無く、全ロスターが明示的に指定する。</summary>
         public DomainMask CanTargetDomains { get; private set; }
 
-        /// <summary>trueなら、このユニットは1回攻撃（ダメージ適用）した瞬間に自壊する（Task61: 自爆ドローン）。
-        /// CombatStep/BaseCombatStepが、ダメージを実際に適用した直後にCurrentHPを0にして死亡させる。
-        /// 既定はfalse（陸上/海上/戦闘機・爆撃機は通常通り継戦する）。</summary>
-        public bool IsOneShot { get; private set; }
+        // Task79: 旧IsOneShotフラグ（「1回攻撃した瞬間に自壊する」、自爆ドローン専用）は撤廃した。
+        // 自爆ドローンはもはや「攻撃してから自壊する」のではなく、そもそも通常の射撃パイプライン
+        // （CombatStep/BaseCombatStep/ThreatCombatStep）に一切乗らず、専用のKamikazeStepが
+        // 突進・体当たり起爆を完結して扱う（UnitCategoryFlags.IsKamikaze参照）。射撃系3ステップは
+        // type.Category.IsKamikaze()を見て早期continueするため、このフラグを見る分岐はもう存在しない
+        // （旧: CombatStep.cs/BaseCombatStep.csのif(type.IsOneShot)分岐、Task61）。
 
         public UnitType(string typeKey, Domain domain, UnitCategory category, byte tier,
             float maxHp, float attack, float range, float armor, float speed,
             float splashRadius, float cost, float buildTime, string assetPrefabName,
             float accuracy, float fireIntervalHours, ShotKind shotKind,
-            DomainMask canTargetDomains, bool isOneShot)
+            DomainMask canTargetDomains)
         {
             TypeKey = typeKey; Domain = domain; Category = category; Tier = tier;
             MaxHP = maxHp; Attack = attack; Range = range; Armor = armor; Speed = speed;
@@ -57,7 +59,6 @@ namespace CSWarfront.Core
             FireIntervalHours = fireIntervalHours;
             ShotKind = shotKind;
             CanTargetDomains = canTargetDomains;
-            IsOneShot = isOneShot;
         }
     }
 

@@ -222,6 +222,14 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
+                // Task79: 自爆ドローンの目標ロック・体当たり起爆。MovementStepの直後・CombatStepより前に
+                // 置く（このtickで決めたロックが次tickのMovementStepダイブ移動から参照されるのは通常の
+                // AI意思決定ステップと同じ1tick遅延パターン、CoverSeekStep→MovementStepと対称）。
+                // CombatStepより前に置くことで、KamikazeStepがCurrentHPを0にした自爆ドローン自身・
+                // 起爆で倒した相手ユニットの両方を、直後のCombatStep第2パス（死亡判定・KillEvent発行）が
+                // 同tick内で拾える。
+                KamikazeStep.Advance(State, dt);
+
                 // 戦闘（ユニット同士＋基地攻撃＋外部脅威、Task58）→ 占領 → 勢力状態の再導出（Task46:
                 // 拠点の自衛射撃は廃止。Eliminated/HomeBaseIdはOccupationが直接いじらず、
                 // FactionStatus.Refreshが毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても

@@ -30,6 +30,14 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
 
+                // Task79: 自爆ドローンは基地への継続的な射程内砲撃（旧: ダメージ1回でIsOneShot自壊）を
+                // 行わない。対拠点への体当たり特攻はこのリワーク（対ユニット/対外部脅威への突進・体当たり
+                // 起爆）のスコープ外として明示的に見送った（KamikazeStep参照）。旧仕様で基地を直接
+                // 削れていた分は失われるが、ユーザー報告「機銃で攻撃するようなアニメーション」の解消を
+                // 優先し、中途半端に旧ロジックを残さない（ShotEventを一切出さないというTask79の契約を
+                // 対基地でも一貫させる）。
+                if (type.Category.IsKamikaze()) continue;
+
                 for (int j = 0; j < state.Bases.Count; j++)
                 {
                     var b = state.Bases[j];
@@ -57,12 +65,6 @@ namespace CSWarfront.Core
                     // ため）。TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
                     // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
                     FireEffects.EmitThrottled(state, u, type, b.Position, 0, dt);
-
-                    // Task61: 自爆ドローンは基地攻撃でも同じく1回のダメージで自壊する
-                    // （CombatStepと同じ「CurrentHPを0にするだけ」の実装、死亡判定は次tickの
-                    // CombatStepの第2パスに委ねる）。breakで同一tick内でのこのユニットによる
-                    // 複数基地への多重ダメージを防ぐ（「1回攻撃したら死ぬ」を文字通り1回にする）。
-                    if (type.IsOneShot) { u.CurrentHP = 0f; break; }
                 }
             }
         }

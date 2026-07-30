@@ -48,6 +48,13 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(self.TypeKey);
                 if (type == null) continue;
 
+                // Task79: 自爆ドローンは脅威（ゴジラ/エイリアン）にも継続的なdtスケール射撃を行わない。
+                // KamikazeStepが同じ実効射程(Range+threat.Radius)・同じThreatArmor/ThreatRelations判定を
+                // 使って目標をロックし、体当たりで1回だけフルダメージを与える（「巨体には一撃が非常に
+                // 効く」という設計、ThreatArmorが小火器をほぼ無効化する一方でSuicideDroneの高Attackは
+                // 大きく通る）。
+                if (type.Category.IsKamikaze()) continue;
+
                 for (int j = 0; j < state.Threats.Count; j++)
                 {
                     var threat = state.Threats[j];

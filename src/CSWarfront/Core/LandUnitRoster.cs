@@ -124,8 +124,7 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(b.Accuracy, tier),
                 b.FireIntervalHours,
                 b.ShotKind,
-                canTarget,
-                false);
+                canTarget);
         }
     }
 }

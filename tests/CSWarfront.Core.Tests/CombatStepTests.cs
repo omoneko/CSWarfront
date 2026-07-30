@@ -459,10 +459,15 @@ public class CombatStepTests
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
-    // --- Task61: 自爆ドローン(UnitType.IsOneShot) ---
+    // --- Task79: 自爆ドローン（旧: Task61のUnitType.IsOneShotによる「射程内で撃ってから自壊」方式） ---
+    // 旧テスト SuicideDrone_dies_immediately_after_dealing_damage /
+    // SuicideDrone_that_never_finds_a_target_does_not_die はCombatStepが自爆ドローンの交戦全体
+    // （ターゲット選定・ダメージ適用・自壊）を担っていた前提のテストだった。Task79でCombatStepは
+    // 自爆ドローンを完全にスキップするよう変更され（下のテストが検証する）、交戦ロジックそのものは
+    // KamikazeStepTests.cs（目標ロック・ダイブ・体当たり起爆）へ丸ごと移設した。
 
     [Fact]
-    public void SuicideDrone_dies_immediately_after_dealing_damage()
+    public void CombatStep_skips_SuicideDrone_entirely_no_ranged_damage_no_ShotEvent()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -475,21 +480,9 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        Assert.True(s.FindUnit(2).CurrentHP < 200f, "drone should have dealt damage before dying");
-        Assert.Equal(UnitState.Dead, s.FindUnit(1).State); // the drone itself died from its own attack
-    }
-
-    [Fact]
-    public void SuicideDrone_that_never_finds_a_target_does_not_die()
-    {
-        var s = new WarState();
-        s.Factions.Add(new Faction(0, "Red"));
-        s.Types.Register(AirUnitRoster.Get(UnitCategory.SuicideDrone, 1));
-        s.Units.Add(new UnitInstance(1, "SuicideDrone_T1", 0, 40f, new WorldPos(0f, 0f, 0f)));
-
-        CombatStep.Advance(s, 1f);
-
-        Assert.NotEqual(UnitState.Dead, s.FindUnit(1).State);
-        Assert.Equal(40f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(40f, s.FindUnit(1).CurrentHP, 3); // drone untouched by CombatStep
+        Assert.Equal(200f, s.FindUnit(2).CurrentHP, 3); // CombatStep never applied ranged damage
+        Assert.NotEqual(UnitState.Engaging, s.FindUnit(1).State); // CombatStep never locked a target
+        Assert.Empty(s.RecentShots); // no gunfire/tracer ShotEvent ever emitted by CombatStep for it
     }
 }

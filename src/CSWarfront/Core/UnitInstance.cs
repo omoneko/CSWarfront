@@ -25,6 +25,14 @@ namespace CSWarfront.Core
         public WorldPos Position;
         public UnitState State;
         public uint? TargetId;
+
+        /// <summary>KamikazeStepがロックした外部脅威（ゴジラ/エイリアン）のExternalThreat.Id
+        /// （実行時のみ・非永続化、Task79）。TargetIdはUnitInstance向け、こちらはExternalThreat向けと
+        /// 対象の種類ごとに別フィールドへ分ける（両者のID空間は別物のため、1つのuint?フィールドへ
+        /// 混在させると衝突・誤読の余地が生まれるのを避けた）。自爆ドローン以外のカテゴリでは常にnullの
+        /// まま無視される。MovementStepのダイブ移動先の解決、KamikazeStepの起爆判定の両方から参照される。</summary>
+        public uint? TargetThreatId;
+
         public WorldPos? OrderTargetPos;
 
         /// <summary>プレイヤーの指揮コマンド（実行時のみ・非永続化、Task48）。既定はAiControlled。
