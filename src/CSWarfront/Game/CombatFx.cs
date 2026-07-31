@@ -301,6 +301,10 @@ namespace CSWarfront.Game
                 case ShotKind.IndirectFire:
                     SpawnArc(from, to);
                     break;
+                case ShotKind.SamMissile:
+                    // Task90: 対空ミサイル。追尾弾体・フレア・回避機動はAaMissileFxが完結して扱う。
+                    AaMissileFx.Spawn(from, to, e.TargetId, e.Missed);
+                    break;
             }
 
             // Task51: 兵科別の発砲音再生（実装はCombatFxSound.cs、同じpartial class）。

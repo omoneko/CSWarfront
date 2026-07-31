@@ -26,7 +26,14 @@ namespace CSWarfront.Game.UI
         private static UILabel _missileStatusLabel;
         private static UIButton _buildMissileButton;
         private static UIButton _launchMissileButton;
+        private static UIButton _missileAutoProduceButton;
+        private static UIButton _missileAutoLaunchButton;
         private static UILabel _missileMessageLabel;
+
+        /// <summary>直近スナップショットのAutoProduce/AutoLaunchMissiles（クリック時の反転計算用、
+        /// BaseInfoPanelProduction._lastAutoProduceと同じパターン）。</summary>
+        private static bool _lastMissileAutoProduce = true;
+        private static bool _lastMissileAutoLaunch = true;
 
         /// <summary>ミサイルセクションの最下端Y（0なら非表示中＝RecomputeExpandedHeightが無視する）。</summary>
         private static float _missileSectionBottomY;
@@ -71,6 +78,28 @@ namespace CSWarfront.Game.UI
             _launchMissileButton.pressedBgSprite = "ButtonMenuPressed";
             _launchMissileButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, 0f);
             _launchMissileButton.eventClick += OnLaunchMissileClick;
+
+            // Task90: 生産/発射の自動・手動切替（自動生産は既存のMilitaryBase.AutoProduceを流用、
+            // 自動発射は新設のAutoLaunchMissiles。どちらもトグルボタン）。
+            _missileAutoProduceButton = _panel.AddUIComponent<UIButton>();
+            _missileAutoProduceButton.text = "Auto-build: ON";
+            _missileAutoProduceButton.textScale = 0.75f;
+            _missileAutoProduceButton.size = new Vector2(halfWidth, MissileButtonHeight);
+            _missileAutoProduceButton.normalBgSprite = "ButtonMenu";
+            _missileAutoProduceButton.hoveredBgSprite = "ButtonMenuHovered";
+            _missileAutoProduceButton.pressedBgSprite = "ButtonMenuPressed";
+            _missileAutoProduceButton.relativePosition = new Vector3(Pad, 0f);
+            _missileAutoProduceButton.eventClick += OnMissileAutoProduceClick;
+
+            _missileAutoLaunchButton = _panel.AddUIComponent<UIButton>();
+            _missileAutoLaunchButton.text = "Auto-launch: ON";
+            _missileAutoLaunchButton.textScale = 0.75f;
+            _missileAutoLaunchButton.size = new Vector2(halfWidth, MissileButtonHeight);
+            _missileAutoLaunchButton.normalBgSprite = "ButtonMenu";
+            _missileAutoLaunchButton.hoveredBgSprite = "ButtonMenuHovered";
+            _missileAutoLaunchButton.pressedBgSprite = "ButtonMenuPressed";
+            _missileAutoLaunchButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, 0f);
+            _missileAutoLaunchButton.eventClick += OnMissileAutoLaunchClick;
 
             _missileMessageLabel = _panel.AddUIComponent<UILabel>();
             _missileMessageLabel.textScale = 0.7f;
@@ -121,6 +150,22 @@ namespace CSWarfront.Game.UI
             if (_launchMissileButton != null) _launchMissileButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, y);
             y += MissileButtonHeight + MissileRowGap;
 
+            // Task90: 自動生産/自動発射トグル行。表示テキストは毎フレームsnapshotへ追従させる
+            // （他プレイヤー操作は無いが、AI側から値が変わる将来拡張・ロード直後の整合のため）。
+            _lastMissileAutoProduce = snapshot.AutoProduce;
+            _lastMissileAutoLaunch = snapshot.AutoLaunchMissiles;
+            if (_missileAutoProduceButton != null)
+            {
+                _missileAutoProduceButton.text = snapshot.AutoProduce ? "Auto-build: ON" : "Auto-build: OFF";
+                _missileAutoProduceButton.relativePosition = new Vector3(Pad, y);
+            }
+            if (_missileAutoLaunchButton != null)
+            {
+                _missileAutoLaunchButton.text = snapshot.AutoLaunchMissiles ? "Auto-launch: ON" : "Auto-launch: OFF";
+                _missileAutoLaunchButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, y);
+            }
+            y += MissileButtonHeight + MissileRowGap;
+
             if (_missileMessageLabel != null) _missileMessageLabel.relativePosition = new Vector3(Pad, y);
             y += SmallLabelHeight;
 
@@ -132,7 +177,47 @@ namespace CSWarfront.Game.UI
             if (_missileStatusLabel != null) _missileStatusLabel.isVisible = !hidden;
             if (_buildMissileButton != null) _buildMissileButton.isVisible = !hidden;
             if (_launchMissileButton != null) _launchMissileButton.isVisible = !hidden;
+            if (_missileAutoProduceButton != null) _missileAutoProduceButton.isVisible = !hidden;
+            if (_missileAutoLaunchButton != null) _missileAutoLaunchButton.isVisible = !hidden;
             if (_missileMessageLabel != null) _missileMessageLabel.isVisible = !hidden;
+        }
+
+        private static void OnMissileAutoProduceClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                if (_currentBaseId == 0) return;
+                bool newValue = !_lastMissileAutoProduce;
+                if (MilitaryManager.TrySetAutoProduce(_currentBaseId, newValue))
+                {
+                    _lastMissileAutoProduce = newValue;
+                    if (_missileAutoProduceButton != null)
+                        _missileAutoProduceButton.text = newValue ? "Auto-build: ON" : "Auto-build: OFF";
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseInfoPanel.OnMissileAutoProduceClick error: " + e);
+            }
+        }
+
+        private static void OnMissileAutoLaunchClick(UIComponent component, UIMouseEventParameter eventParam)
+        {
+            try
+            {
+                if (_currentBaseId == 0) return;
+                bool newValue = !_lastMissileAutoLaunch;
+                if (MilitaryManager.TrySetMissileAutoLaunch(_currentBaseId, newValue))
+                {
+                    _lastMissileAutoLaunch = newValue;
+                    if (_missileAutoLaunchButton != null)
+                        _missileAutoLaunchButton.text = newValue ? "Auto-launch: ON" : "Auto-launch: OFF";
+                }
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("BaseInfoPanel.OnMissileAutoLaunchClick error: " + e);
+            }
         }
 
         private static void OnBuildMissileClick(UIComponent component, UIMouseEventParameter eventParam)
@@ -186,13 +271,19 @@ namespace CSWarfront.Game.UI
         {
             if (_buildMissileButton != null) _buildMissileButton.eventClick -= OnBuildMissileClick;
             if (_launchMissileButton != null) _launchMissileButton.eventClick -= OnLaunchMissileClick;
+            if (_missileAutoProduceButton != null) _missileAutoProduceButton.eventClick -= OnMissileAutoProduceClick;
+            if (_missileAutoLaunchButton != null) _missileAutoLaunchButton.eventClick -= OnMissileAutoLaunchClick;
 
             _missileStatusLabel = null;
             _buildMissileButton = null;
             _launchMissileButton = null;
+            _missileAutoProduceButton = null;
+            _missileAutoLaunchButton = null;
             _missileMessageLabel = null;
             _missileSectionBottomY = 0f;
             _lastIsMissileBase = false;
+            _lastMissileAutoProduce = true;
+            _lastMissileAutoLaunch = true;
         }
     }
 }

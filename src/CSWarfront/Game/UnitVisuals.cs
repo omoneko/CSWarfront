@@ -70,7 +70,19 @@ namespace CSWarfront.Game
             /// <summary>射撃方向を向き続ける期限（Time.time基準の実時間）。発砲のたびに更新されるため、
             /// 交戦が続く限り目標の方を向き続け、交戦が終われば数秒で移動方向の向きに戻る。</summary>
             public float FacingHoldUntil;
+
+            /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
+            /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
+            /// 表示位置にだけ減衰する横揺れオフセットを加える。</summary>
+            public float EvadeUntil;
+
+            /// <summary>回避機動の横方向（水平・正規化済み）。NotifyEvadeが進行方向と直交する向きに設定する。</summary>
+            public Vector3 EvadeDir;
         }
+
+        /// <summary>回避機動の長さ（実秒）と最大振れ幅（m）。</summary>
+        private const float EvadeDurationSeconds = 1.2f;
+        private const float EvadeAmplitude = 10f;
 
         /// <summary>発砲後に射撃方向を向き続ける実時間（秒）。交戦中の発砲間隔より長めにして
         /// 「戦闘中はずっと相手を向いている」ように見せる。</summary>
@@ -469,7 +481,18 @@ namespace CSWarfront.Game
         {
             if (entry == null || entry.GameObject == null) return;
             Vector3 delta = newPosition - entry.LastPosition;
-            entry.GameObject.transform.position = newPosition;
+
+            // Task90: 対空ミサイル接近中の回避機動。論理位置はCoreのまま、表示位置にだけ
+            // 減衰する横揺れ（バンクを切って逃げるジンク）を加える。
+            Vector3 displayPosition = newPosition;
+            if (Time.time < entry.EvadeUntil)
+            {
+                float remaining = (entry.EvadeUntil - Time.time) / EvadeDurationSeconds; // 1→0
+                float progress = 1f - remaining;
+                float sway = Mathf.Sin(progress * Mathf.PI * 3f) * EvadeAmplitude * remaining;
+                displayPosition += entry.EvadeDir * sway;
+            }
+            entry.GameObject.transform.position = displayPosition;
 
             // Task83: 直近に発砲したユニットは移動方向ではなく射撃方向を向く（静止中の交戦でも
             // 相手の方を向くよう、移動デルタの有無に関わらず毎フレーム適用する）。
@@ -482,6 +505,30 @@ namespace CSWarfront.Game
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
             entry.LastPosition = newPosition;
+        }
+
+        /// <summary>Task90: 対空ミサイルが接近した標的機に回避機動（視覚ジンク）を開始させる
+        /// （AaMissileFxから、フレア放出と同時に呼ばれる。メインスレッド専用）。
+        /// 横方向は現在の機首方向と直交する水平ベクトル。</summary>
+        public static void NotifyEvade(uint instanceId)
+        {
+            try
+            {
+                VisualEntry entry;
+                if (!_visuals.TryGetValue(instanceId, out entry) || entry.GameObject == null) return;
+
+                Vector3 forward = entry.GameObject.transform.forward;
+                forward.y = 0f;
+                Vector3 side = forward.sqrMagnitude > 1e-4f
+                    ? Vector3.Cross(forward.normalized, Vector3.up)
+                    : Vector3.right;
+                entry.EvadeDir = side;
+                entry.EvadeUntil = Time.time + EvadeDurationSeconds;
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("UnitVisuals.NotifyEvade error: " + e);
+            }
         }
 
         /// <summary>Task83: 発砲イベントから射撃方向を拾い、該当ユニットのビジュアルに

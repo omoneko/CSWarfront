@@ -97,6 +97,14 @@ namespace CSWarfront.Game.Audio
         /// </summary>
         public static string ShotSoundFor(UnitCategory category)
         {
+            return ShotSoundFor(category, ShotKind.Gunfire);
+        }
+
+        /// <summary>Task90: ShotKindも考慮するオーバーロード。対空(AntiAir)は撃ち分けに対応する——
+        /// 対ドローンの機銃(Gunfire)は重機関銃音、対戦闘機/爆撃機のSamMissileは対空ミサイル音。
+        /// それ以外の兵科ではShotKindは無視される（従来どおりカテゴリのみで決まる）。</summary>
+        public static string ShotSoundFor(UnitCategory category, ShotKind kind)
+        {
             switch (category)
             {
                 case UnitCategory.Infantry:
@@ -110,7 +118,9 @@ namespace CSWarfront.Game.Audio
                 case UnitCategory.Destroyer: // Task88: 駆逐艦の艦砲/ミサイルにも砲撃音を当てる（従来は未マッピング＝無音）
                     return CannonVariants[NextIndex(ref _cannonIndex, CannonVariants.Length)];
                 case UnitCategory.AntiAir:
-                    return AaMissile;
+                    return kind == ShotKind.SamMissile
+                        ? AaMissile
+                        : MgVariants[NextIndex(ref _mgIndex, MgVariants.Length)];
                 default:
                     return null;
             }

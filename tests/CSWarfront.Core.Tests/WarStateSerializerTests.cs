@@ -297,6 +297,19 @@ public class WarStateSerializerTests
         Assert.Equal(0.42f, r.Bases[0].MissileBuildProgress, 3);
     }
 
+    // Task90: v7で追加した自動発射フラグの往復と、v6以前の既定値true。
+    [Fact]
+    public void Roundtrip_v7_preserves_AutoLaunchMissiles_false()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.Bases[0].AutoLaunchMissiles = false;
+        byte[] bytes = WarStateSerializer.Serialize(s);
+        var r = WarStateSerializer.Deserialize(bytes, types);
+
+        Assert.False(r.Bases[0].AutoLaunchMissiles);
+    }
+
     /// <summary>旧形式（v5、基地ブロック末尾にStockpiledMissiles/MissileBuildProgressが無い）を読んでも
     /// 例外にならず、両方とも既定値0で復元されることを保証する。</summary>
     [Fact]

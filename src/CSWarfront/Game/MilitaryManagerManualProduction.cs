@@ -56,5 +56,26 @@ namespace CSWarfront.Game
                 return false;
             }
         }
+
+        /// <summary>
+        /// 基地情報パネルから呼ばれる、ミサイル基地の自動発射ON/OFF切替（Task90）。
+        /// OFFの間はMissileDoctrine（AIの自動発射）がこの基地を撃たず、プレイヤーの
+        /// 「Set Launch Target」経由でのみ発射できる。
+        /// </summary>
+        /// <returns>baseId の基地が見つからない場合は false。</returns>
+        public static bool TrySetMissileAutoLaunch(ushort baseId, bool value)
+        {
+            lock (_stateLock)
+            {
+                if (State == null) return false;
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    if (State.Bases[i].BaseId != baseId) continue;
+                    State.Bases[i].AutoLaunchMissiles = value;
+                    return true;
+                }
+                return false;
+            }
+        }
     }
 }

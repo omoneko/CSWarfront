@@ -14,8 +14,10 @@ namespace CSWarfront.Core
         //           追加（Task63：弾道ミサイル基地の備蓄・建造進捗）。v5以前を読んだ場合はどちらも
         //           既定値0（備蓄0発・建造中でない）で復元される（MissileBaseはTask63以前は配置可能な
         //           プレハブが存在しなかったため実害は無い）。
+        // v6 -> v7: 基地ブロックのさらに末尾に AutoLaunchMissiles (bool) を追加（Task90：ミサイル基地の
+        //           自動発射のON/OFF切替）。v6以前を読んだ場合は既定値true（従来の全自動発射挙動）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 6;
+        private const int Version = 7;
 
         public static byte[] Serialize(WarState s)
         {
@@ -51,6 +53,7 @@ namespace CSWarfront.Core
                     w.Write(b.CaptureGraceHours); // v2で追加。位置依存フォーマットのためブロック末尾に追記。
                     w.Write(b.AutoProduce); // v3で追加（Task34）。同じ理由でさらに末尾に追記。
                     w.Write(b.StockpiledMissiles); w.Write(b.MissileBuildProgress); // v6で追加（Task63）。
+                    w.Write(b.AutoLaunchMissiles); // v7で追加（Task90）。
                 }
                 // units
                 w.Write(s.Units.Count);
@@ -132,6 +135,7 @@ namespace CSWarfront.Core
                         b.StockpiledMissiles = 0; // v5以前は既定値0（備蓄0発）
                         b.MissileBuildProgress = 0f; // v5以前は既定値0（建造中でない）
                     }
+                    b.AutoLaunchMissiles = version >= 7 ? r.ReadBoolean() : true; // v6以前は既定値true（従来の全自動発射）
                     s.Bases.Add(b);
                 }
                 int ucount = r.ReadInt32();

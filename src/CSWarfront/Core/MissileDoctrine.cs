@@ -41,6 +41,7 @@ namespace CSWarfront.Core
                 }
 
                 if (b.OwnerFactionId == null) continue;
+                if (!b.AutoLaunchMissiles) continue; // Task90: 手動発射に切り替えられた基地はAIが撃たない
                 Faction f = state.FindFaction(b.OwnerFactionId.Value);
                 if (f == null || f.IsPlayer || f.Eliminated) continue;
                 if (b.StockpiledMissiles <= 0) continue;

@@ -39,6 +39,15 @@ namespace CSWarfront.Core
                 float matchup = targetType != null
                     ? CombatMatchup.Multiplier(type.Category, targetType.Category)
                     : 1.0f;
+
+                // Task90（ユーザー要望）: 対空兵科の対航空攻撃は離散的な1発ごとの命中ロールで解決する
+                // （自爆ドローンには機銃、戦闘機・爆撃機には対空ミサイル。Tier別命中率で外れもある）。
+                // 期待値方式の連続ダメージ・FireEffectsの間引きはどちらも使わない（AntiAirCombat参照）。
+                if (type.Category == UnitCategory.AntiAir && targetType != null && targetType.Domain == Domain.Air)
+                {
+                    AdvanceAntiAirShot(state, self, type, target, targetType, targetArmor, matchup, dt);
+                    continue;
+                }
                 // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
                 // 兵科相性倍率(CombatMatchup、Task29)、命中率(CombatSynergy.AccuracyFor、Task38)に比例する。
                 // 命中率は乱数抽選ではなく期待値ダメージ倍率として適用する（決定的シミュレーションを保つため）。
@@ -78,6 +87,37 @@ namespace CSWarfront.Core
                     state.AddKill(new KillEvent(u.Position, u.FactionId, category));
                 }
             }
+        }
+
+        /// <summary>Task90: 対空の対航空・離散射撃。FireCooldownをdtで消化し、0以下になった瞬間に
+        /// 1発発射する: AntiAirCombat.RollHit（決定的ハッシュ、Tier別命中率）で命中/外れをロールし、
+        /// 命中時のみ「Attack × FireIntervalHours × 相性」の一括ダメージ（＝連続方式の1発射間隔ぶんの
+        /// ダメージをまとめて適用する形。期待DPS = 命中率×Attack×相性）。外れはノーダメージで、
+        /// Missed=trueのShotEventだけを積む（Game層のフレア/回避演出用）。ShotKindは機銃=Gunfire、
+        /// 対空ミサイル=SamMissile（UnitTypeのShotKindは使わない——目標の種類で撃ち分けるため）。</summary>
+        private static void AdvanceAntiAirShot(WarState state, UnitInstance self, UnitType type,
+            UnitInstance target, UnitType targetType, float targetArmor, float matchup, float dt)
+        {
+            self.FireCooldown -= dt;
+            if (self.FireCooldown > 0f) return;
+            self.FireCooldown = type.FireIntervalHours;
+
+            bool usesMissile = AntiAirCombat.UsesMissileAgainst(targetType.Category);
+            float chance = AntiAirCombat.HitChanceFor(type.Tier, targetType.Category);
+            bool hit = AntiAirCombat.RollHit(self.InstanceId, target.InstanceId, state.TickCounter, chance);
+
+            if (hit)
+            {
+                float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * type.FireIntervalHours * matchup;
+                bool wasAlive = target.CurrentHP > 0f;
+                target.CurrentHP -= dmg;
+                if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
+                state.CombatZones.ReportCombat(target.Position);
+            }
+
+            state.AddShot(new ShotEvent(self.Position, target.Position,
+                usesMissile ? ShotKind.SamMissile : ShotKind.Gunfire,
+                self.FactionId, self.InstanceId, target.InstanceId, type.Category, !hit));
         }
 
         /// <summary>撃破報酬（Task35）を killerFactionId の勢力へ加算する。victimType/勢力が見つからなければ

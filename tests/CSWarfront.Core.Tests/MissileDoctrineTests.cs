@@ -36,6 +36,25 @@ public class MissileDoctrineTests
         Assert.Equal(far.Position.X, s.MissilesInFlight[0].To.X, 3);
     }
 
+    // Task90（ユーザー要望「生産と発射を手動に切り替えられるように」）: 自動発射OFFの基地はAIが撃たない。
+    [Fact]
+    public void Advance_does_not_launch_from_a_base_with_AutoLaunchMissiles_off()
+    {
+        var s = Base(out var mb);
+        mb.AutoLaunchMissiles = false;
+        var far = new MilitaryBase(201, BaseType.Army, new WorldPos(1500, 0, 0));
+        far.OwnerFactionId = 1;
+        s.Bases.Add(far);
+
+        MissileDoctrine.Advance(s, 0f);
+
+        Assert.Equal(1, mb.StockpiledMissiles); // 消費されない
+        Assert.Empty(s.MissilesInFlight);
+
+        // 手動発射（プレイヤーの照準ボタン→TryLaunch）は引き続き可能。
+        Assert.Equal(LaunchResult.Ok, MissileStep.TryLaunch(s, mb.BaseId, far.Position));
+    }
+
     [Fact]
     public void Advance_does_not_launch_when_only_target_is_within_MinLaunchDistance()
     {

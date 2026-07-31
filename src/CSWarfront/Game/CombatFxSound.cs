@@ -28,7 +28,7 @@ namespace CSWarfront.Game
         /// 銃撃(Gunfire)はまれに跳弾音(Ricochet)も重ねる（演出のスパイス、鳴らしすぎない）。</summary>
         private static void PlayShotSound(ShotEvent e, Vector3 from, Vector3? cameraPos)
         {
-            string clipName = WarfrontSounds.ShotSoundFor(e.Category);
+            string clipName = WarfrontSounds.ShotSoundFor(e.Category, e.Kind); // Task90: 対空の撃ち分け対応
             if (clipName != null) WarfrontSoundPlayer.PlayShot(clipName, from, cameraPos);
 
             if (e.Kind == ShotKind.Gunfire)

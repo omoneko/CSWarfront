@@ -42,6 +42,12 @@ namespace CSWarfront.Core
         /// （MissileBaseはこのタスク以前は配置可能なプレハブが存在しなかったため実害は無い）。</summary>
         public int StockpiledMissiles;
 
+        /// <summary>Task90（ユーザー要望「生産と発射を手動に切り替えられるように」）: trueなら
+        /// MissileDoctrineがこの基地から自動発射する。falseの場合はプレイヤーの「発射地点を指定」
+        /// （MissileLaunchTargeting）経由でしか発射されない。生産側の自動/手動は既存のAutoProduceが
+        /// 兼ねる（ProductionPlanningのMissileBase分岐が参照）。v7で永続化。</summary>
+        public bool AutoLaunchMissiles = true;
+
         /// <summary>現在建造中のミサイルの進捗（0..1、Task63）。0fは「建造中でない」を意味し、
         /// MissileStockpile.TryBuildMissileが建造を開始する瞬間に微小な正の値へ設定することで
         /// 「建造中」と区別する（MissileStockpile.IsBuilding参照）。v6でWarStateSerializerが

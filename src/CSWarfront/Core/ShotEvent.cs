@@ -1,8 +1,8 @@
 namespace CSWarfront.Core
 {
     /// <summary>発砲の見た目の種別（Task42）。Game層がこれを見てトレーサー（銃撃）/直射（戦車）/
-    /// 曲射（砲兵の放物線弾道）のどれを描くかを選ぶ。</summary>
-    public enum ShotKind { Gunfire, DirectFire, IndirectFire }
+    /// 曲射（砲兵の放物線弾道）/対空ミサイル（Task90、迎撃ミサイルモデルの飛翔体）のどれを描くかを選ぶ。</summary>
+    public enum ShotKind { Gunfire, DirectFire, IndirectFire, SamMissile }
 
     /// <summary>
     /// 1回分の「見える発砲」を表す軽量イベント（Task42）。
@@ -42,11 +42,23 @@ namespace CSWarfront.Core
         /// 一切使わない（ShotKindと同じく見た目・音専用の付随データ）。</summary>
         public UnitCategory Category;
 
+        /// <summary>Task90: この1発が外れたか（対空の離散射撃のみ使用、それ以外は常にfalse）。
+        /// Game層が「逸れて自爆する対空ミサイル」「標的のフレア放出・回避機動」の演出トリガーに使う。
+        /// ダメージはCore側で既に確定済み（Missed=trueの発砲はノーダメージ）。</summary>
+        public bool Missed;
+
         public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId,
             UnitCategory category)
+            : this(from, to, kind, factionId, attackerId, targetId, category, false)
+        {
+        }
+
+        public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId,
+            UnitCategory category, bool missed)
         {
             From = from; To = to; Kind = kind; FactionId = factionId;
             AttackerId = attackerId; TargetId = targetId; Category = category;
+            Missed = missed;
         }
     }
 }

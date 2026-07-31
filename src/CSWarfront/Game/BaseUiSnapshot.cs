@@ -30,6 +30,10 @@ namespace CSWarfront.Game
         /// <summary>trueならAIがこの基地のキューを自動補充する（Task34、MilitaryBase.AutoProduceの写し）。</summary>
         public bool AutoProduce;
 
+        /// <summary>trueならAI（MissileDoctrine）がこの基地から弾道ミサイルを自動発射する
+        /// （Task90、MilitaryBase.AutoLaunchMissilesの写し。MissileBase以外では未使用）。</summary>
+        public bool AutoLaunchMissiles;
+
         /// <summary>現在のキュー内容をTypeKeyだけの配列にした表示用コピー（Task34）。
         /// index 0 == 生産中（ProducingTypeKeyと同じ内容）。選択中の1基地分のみ構築するため
         /// 毎tickのホットパスではない（TryGetBaseSnapshot呼び出し時のみ）。</summary>
@@ -133,6 +137,7 @@ namespace CSWarfront.Game
                 OwnerTreasury = ownerTreasury,
                 OwnerUnitCount = ownerUnitCount,
                 AutoProduce = mb.AutoProduce,
+                AutoLaunchMissiles = mb.AutoLaunchMissiles,
                 QueuedTypeKeys = queuedTypeKeys,
                 LastIncome = mb.LastIncome,
                 OwnerResearchPoints = ownerResearchPoints,

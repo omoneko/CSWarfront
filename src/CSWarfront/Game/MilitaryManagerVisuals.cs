@@ -175,6 +175,7 @@ namespace CSWarfront.Game
             CombatFx.Update(Time.deltaTime);
             KillFx.Update(Time.deltaTime);
             BombFx.Update(Time.deltaTime); // Task87: 落下中の爆弾のアニメーション
+            AaMissileFx.Update(Time.deltaTime); // Task90: 飛翔中の対空ミサイル（追尾・フレア・回避）
 
             // Task63: 着弾/迎撃の演出（フラッシュ/爆発+音）と、生存中の演出の実時間更新。
             MissileVisuals.HandleImpacts(_missileImpactSnapshot);

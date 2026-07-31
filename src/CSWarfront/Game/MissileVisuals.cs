@@ -129,15 +129,32 @@ namespace CSWarfront.Game
         {
             try
             {
-                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                Collider col = go.GetComponent<Collider>();
-                if (col != null) UnityEngine.Object.Destroy(col); // 選択/raycastの邪魔をしない
+                // Task90: 弾道ミサイルモデル（Models/Prop_BallisticMissile.obj、+Z=機首）があれば
+                // そちらを使う。models.blendにユーザーのモデルが追加されるまでは暫定モデル
+                // （MissileDisasterのIncomingWarhead流用）が同梱されている。解決できない環境のみ
+                // 従来の細長い箱にフォールバックする。
+                GameObject go;
+                Mesh modelMesh;
+                Material[] modelMaterials;
+                if (Models.WarfrontModelProvider.TryGetModel("Prop_BallisticMissile", out modelMesh, out modelMaterials))
+                {
+                    go = new GameObject();
+                    MeshFilter mf = go.AddComponent<MeshFilter>();
+                    mf.sharedMesh = modelMesh;
+                    MeshRenderer mr = go.AddComponent<MeshRenderer>();
+                    if (modelMaterials != null) mr.sharedMaterials = modelMaterials;
+                }
+                else
+                {
+                    go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    Collider col = go.GetComponent<Collider>();
+                    if (col != null) UnityEngine.Object.Destroy(col); // 選択/raycastの邪魔をしない
+                    go.transform.localScale = new Vector3(BodyWidth, BodyWidth, BodyLength);
+                    Renderer renderer = go.GetComponent<Renderer>();
+                    if (renderer != null) renderer.sharedMaterial = GetBodyMaterial();
+                }
 
                 go.name = "CSWarfrontMissile_" + s.Id;
-                go.transform.localScale = new Vector3(BodyWidth, BodyWidth, BodyLength);
-
-                Renderer renderer = go.GetComponent<Renderer>();
-                if (renderer != null) renderer.sharedMaterial = GetBodyMaterial();
 
                 TrailRenderer trail = go.AddComponent<TrailRenderer>();
                 trail.time = TrailTime;
