@@ -209,18 +209,16 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>マップ未ロード（メインメニュー等）で建物アセットが1件も無い状況、および本ページの
-        /// 使い方（「既存の建物は対象外」「電力タブからは配置できない」）を常に案内する。</summary>
+        /// <summary>マップ未ロード（メインメニュー等）で建物アセットが1件も無い状況の案内。
+        /// Task93（ユーザー要望）: 常時表示だった使い方の注記（電力タブ云々の黄色文字）は撤去し、
+        /// アセット一覧が空のときの案内だけを残す。</summary>
         private static void RefreshHint(bool stateReady)
         {
             if (_hintLabel == null) return;
 
-            // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab）は完全撤去した。基地は必ず
-            // このページでの指定（BaseBuildingDesignation）が唯一の配置経路になる。
-            const string usage = "Bases cannot be placed from the Electricity tab. Building the designated building turns it into a base (existing buildings are not affected). Please designate a building for each base type.";
             _hintLabel.text = stateReady
-                ? usage
-                : usage + "\nNo building assets are currently available (e.g. opened from the main menu). Open this again after loading a city to see subscribed buildings in the list.";
+                ? ""
+                : "No building assets are currently available (e.g. opened from the main menu). Open this again after loading a city to see subscribed buildings in the list.";
         }
 
         private static void RefreshFilteredNames()
