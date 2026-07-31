@@ -10,7 +10,7 @@ namespace CSWarfront.Game
     /// </summary>
     public class Mod : IUserMod
     {
-        public string Name => "CS Warfront";
+        public string Name => "CS:WARFRONT"; // Task93: ユーザー指定のMODタイトル（Workshopタイトルと統一）
         public string Description =>
             "A tier-based military simulation with 5 factions (land/sea/air, bases, territory, occupation). Building the building designated in Options turns it into a military base.";
 
