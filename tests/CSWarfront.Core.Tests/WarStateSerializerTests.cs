@@ -310,6 +310,49 @@ public class WarStateSerializerTests
         Assert.False(r.Bases[0].AutoLaunchMissiles);
     }
 
+    // Task92: v8で追加した飛翔中ミサイル＋部隊命令の往復。
+    [Fact]
+    public void Roundtrip_v8_preserves_missiles_in_flight_and_next_missile_id()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.MissilesInFlight.Add(new MissileInFlight
+        {
+            Id = 7, FactionId = 1,
+            From = new WorldPos(10, 0, 20), To = new WorldPos(900, 0, 800),
+            Progress = 0.63f, Intercepted = false
+        });
+        s.NextMissileId = 8;
+
+        var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
+
+        Assert.Single(r.MissilesInFlight);
+        var m = r.MissilesInFlight[0];
+        Assert.Equal(7u, m.Id);
+        Assert.Equal((byte)1, m.FactionId);
+        Assert.Equal(900f, m.To.X, 3);
+        Assert.Equal(0.63f, m.Progress, 3);
+        Assert.Equal(8u, r.NextMissileId);
+    }
+
+    [Fact]
+    public void Roundtrip_v8_preserves_unit_orders_and_rally_points()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        var u = s.Units[0];
+        u.Order = UnitOrder.RallyHold;
+        u.RallyPoint = new WorldPos(123, 0, 456);
+
+        var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
+
+        var ru = r.FindUnit(u.InstanceId);
+        Assert.Equal(UnitOrder.RallyHold, ru.Order);
+        Assert.True(ru.RallyPoint.HasValue);
+        Assert.Equal(123f, ru.RallyPoint.Value.X, 3);
+        Assert.Equal(456f, ru.RallyPoint.Value.Z, 3);
+    }
+
     /// <summary>旧形式（v5、基地ブロック末尾にStockpiledMissiles/MissileBuildProgressが無い）を読んでも
     /// 例外にならず、両方とも既定値0で復元されることを保証する。</summary>
     [Fact]

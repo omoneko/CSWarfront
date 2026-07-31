@@ -44,6 +44,10 @@ namespace CSWarfront.Core
         /// <summary>道路スナップ判定に使う最大距離（水平）。これより道路から離れているユニット/基地は直線移動にフォールバック。</summary>
         public const float PathSnapRadius = 200f;
 
+        /// <summary>Task92: 海上経路（SeaGrid）のスナップ半径。港・海軍基地は岸辺にあるため、
+        /// 道路より大きめに取って最寄りの航行可能セルへ確実に載せる。</summary>
+        public const float SeaPathSnapRadius = 400f;
+
         /// <summary>目的地が変わったとみなす閾値（X/Z）。これ未満の差は同一目的地として扱い経路を再利用する。</summary>
         private const float TargetChangeEpsilon = 1f;
 
@@ -175,6 +179,20 @@ namespace CSWarfront.Core
                     u.PathIndex = 0;
                     u.PathTarget = u.OrderTargetPos;
                     u.PathRetryCooldown = path == null ? PathRetryFailCooldownHours : 0f;
+                }
+                else if (domain == Domain.Sea && state.SeaNav != null && u.Path == null && u.PathRetryCooldown <= 0f)
+                {
+                    // Task92: 海上ユニットはSeaGrid（航行グリッドA*）で経路を張る。予算は道路探索と共有。
+                    // 経路が張れない（完全に陸に囲まれた目標等）場合は従来どおり直線＋壁沿い迂回のみで
+                    // 進む（MovementStepSea）。
+                    if (pathComputations >= maxPathComputations) continue;
+
+                    pathComputations++;
+                    var seaPath = state.SeaNav.FindPath(u.Position, u.OrderTargetPos.Value, SeaPathSnapRadius);
+                    u.Path = seaPath;
+                    u.PathIndex = 0;
+                    u.PathTarget = u.OrderTargetPos;
+                    u.PathRetryCooldown = seaPath == null ? PathRetryFailCooldownHours : 0f;
                 }
             }
         }

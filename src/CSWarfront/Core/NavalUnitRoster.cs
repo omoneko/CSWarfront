@@ -82,19 +82,20 @@ namespace CSWarfront.Core
 
         private static UnitType Build(BaseStats b, byte tier)
         {
+            // Task92: 基礎値はUnitStatOverrides（unit-stats.xml）で上書きできる（LandUnitRosterと同じ）。
             return new UnitType(
                 TypeKey(b.Category, tier), Domain.Sea, b.Category, tier,
-                TierScaling.Hp(b.Hp, tier),
-                TierScaling.Attack(b.Attack, tier),
-                TierScaling.Range(b.Range, tier),
-                TierScaling.Armor(b.Armor, tier),
-                SpeedCalibration.UnitsPerGameHourFromKmh(TierScaling.SpeedKmh(b.SpeedKmh, tier)),
-                b.Splash,
-                TierScaling.Cost(b.Cost, tier),
-                TierScaling.BuildTime(b.BuildTime, tier),
+                TierScaling.Hp(UnitStatOverrides.Hp(b.Category, b.Hp), tier),
+                TierScaling.Attack(UnitStatOverrides.Attack(b.Category, b.Attack), tier),
+                TierScaling.Range(UnitStatOverrides.Range(b.Category, b.Range), tier),
+                TierScaling.Armor(UnitStatOverrides.Armor(b.Category, b.Armor), tier),
+                SpeedCalibration.UnitsPerGameHourFromKmh(TierScaling.SpeedKmh(UnitStatOverrides.SpeedKmh(b.Category, b.SpeedKmh), tier)),
+                UnitStatOverrides.Splash(b.Category, b.Splash),
+                TierScaling.Cost(UnitStatOverrides.Cost(b.Category, b.Cost), tier),
+                TierScaling.BuildTime(UnitStatOverrides.BuildTime(b.Category, b.BuildTime), tier),
                 "",
-                TierScaling.Accuracy(b.Accuracy, tier),
-                b.FireIntervalHours,
+                TierScaling.Accuracy(UnitStatOverrides.Accuracy(b.Category, b.Accuracy), tier),
+                UnitStatOverrides.FireInterval(b.Category, b.FireIntervalHours),
                 b.ShotKind,
                 TargetDomainsFor(b.Category));
         }

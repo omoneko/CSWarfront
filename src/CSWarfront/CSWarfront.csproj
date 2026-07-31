@@ -22,6 +22,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
     <Reference Include="ICities"><HintPath>$(ManagedDLLPath)\ICities.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="Assembly-CSharp"><HintPath>$(ManagedDLLPath)\Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="ColossalManaged"><HintPath>$(ManagedDLLPath)\ColossalManaged.dll</HintPath><Private>False</Private></Reference>

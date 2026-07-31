@@ -20,6 +20,10 @@ namespace CSWarfront.Core
         /// <summary>Game層から供給される道路網（実行時のみ・非永続化）。未供給ならnull。</summary>
         public RoadGraph Roads;
 
+        /// <summary>Game層（SeaGridBuilder）から供給される海上航行グリッド（実行時のみ・非永続化、
+        /// Task92）。未供給ならnull＝海上ユニットは従来の直線＋壁沿い迂回のみで移動する。</summary>
+        public SeaGrid SeaNav;
+
         /// <summary>Game層から供給される遮蔽物（建物/Prop）マップ（実行時のみ・非永続化、Task44）。
         /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
         public CoverMap Cover;
@@ -94,7 +98,8 @@ namespace CSWarfront.Core
 
         /// <summary>Task63: 飛翔中ミサイルのID払い出し用カウンタ。UnitInstanceのNextInstanceIdとは別の
         /// 名前空間（ミサイルはUnitInstanceではないため衝突しても実害は無いが、混同を避けるため分離した）。
-        /// 実行時のみ・非永続化（MissilesInFlight自体が非永続化のため、カウンタも保存する意味が無い）。</summary>
+        /// Task92: MissilesInFlightとともにv8で永続化されるようになった（「ロードで飛行中ミサイルが
+        /// 消える」の解消）。</summary>
         public uint NextMissileId = 1;
 
         /// <summary>Task63: 決定的な迎撃判定（BallisticMissiles.TryIntercept）のハッシュ種に使う、

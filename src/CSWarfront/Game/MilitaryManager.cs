@@ -83,6 +83,7 @@ namespace CSWarfront.Game
             // こうすることで OnSimTick の `if (State == null) return;` が
             // 初期化途中の半端な状態を観測することがない。
             var state = new WarState();
+            UnitStatsFile.EnsureLoaded(); // Task92: unit-stats.xmlの上書きをロスター構築より前に反映する
             LandUnitRoster.RegisterAll(state.Types); // 陸上7兵種×Tier1〜5（Task28）
             NavalUnitRoster.RegisterAll(state.Types); // 海上2種(Destroyer/Carrier)×Tier1〜5（Task61）
             AirUnitRoster.RegisterAll(state.Types);   // 航空3種(AirSuperiority/TacticalBomber/SuicideDrone)×Tier1〜5（Task61）
@@ -131,6 +132,7 @@ namespace CSWarfront.Game
             KillFx.DestroyAll(); // Task65: 撃破爆発エフェクトもレベルアンロード時に破棄する。
             BombFx.DestroyAll(); // Task87: 落下中の爆弾もレベルアンロード時に破棄する。
             AaMissileFx.DestroyAll(); // Task90: 飛翔中の対空ミサイルも破棄する。
+            UnitStatsFile.Reset(); // Task92: 次のロードでunit-stats.xmlを再読込させる。
             MissileVisuals.DestroyAll(); // Task63: 飛翔中ミサイルの見た目もレベルアンロード時に破棄する。
             MissileVisuals.DestroyAllFx(); // Task63: 着弾/迎撃の演出も同様。
             UI.OrderDestinationMarkers.DestroyAll(); // Task62: 目的地マーカーもレベルアンロード時に破棄する。
@@ -159,6 +161,8 @@ namespace CSWarfront.Game
                 _roadRebuildAccum = 0f;
                 _roadBuildRetryAccum = 0f;
                 _hasAttemptedRoadBuild = false;
+                _seaGridRebuildAccum = 0f; // Task92: 海上航行グリッドの構築状態もセッションを跨がせない
+                _hasAttemptedSeaGridBuild = false;
                 _coverRebuildAccum = 0f;
                 _coverBuildRetryAccum = 0f;
                 _hasAttemptedCoverBuild = false;

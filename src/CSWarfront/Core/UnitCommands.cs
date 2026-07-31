@@ -62,10 +62,25 @@ namespace CSWarfront.Core
                 u.CoverHold = false;
                 u.ClearPath();
 
-                if (state.Roads != null)
+                // Task92: 経路はドメインで使い分ける（陸=道路A*、海=SeaGrid、空=経路なしの直線）。
+                // 従来は海上ユニットにも道路経路を張っていたが、海はPathを無視していたため無害だった。
+                // AdvanceSeaがPathを消化するようになったので、誤った道路経路を渡さないようにする。
+                UnitType rallyType = state.Types.Get(u.TypeKey);
+                Domain rallyDomain = rallyType != null ? rallyType.Domain : Domain.Land;
+                if (rallyDomain == Domain.Land && state.Roads != null)
                 {
                     List<WorldPos> path = state.Roads.FindPath(
                         u.Position, rallyPoint, InvasionOrders.PathSnapRadius, u.InstanceId, InvasionOrders.PathJitter);
+                    if (path != null)
+                    {
+                        u.Path = path;
+                        u.PathIndex = 0;
+                        u.PathTarget = rallyPoint;
+                    }
+                }
+                else if (rallyDomain == Domain.Sea && state.SeaNav != null)
+                {
+                    List<WorldPos> path = state.SeaNav.FindPath(u.Position, rallyPoint, InvasionOrders.SeaPathSnapRadius);
                     if (path != null)
                     {
                         u.Path = path;

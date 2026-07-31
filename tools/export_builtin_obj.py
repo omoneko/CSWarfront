@@ -140,6 +140,7 @@ NAME_MAP = {
     # ユーザーが「17_Bomb」等の名前で追加すれば、このマッピング経由で次回エクスポート時に
     # 暫定モデルを上書きする（OPTIONAL_MODELS参照＝無くてもエラーにしない）。
     'bomb': 'Prop_Bomb',
+    'bomb500lb': 'Prop_Bomb',  # 2026-07-31 ユーザー追加の実名（17_Bomb_500lb）
     # Task90: 弾道ミサイル（MissileVisuals）と対空/迎撃ミサイル（AaMissileFx）。こちらも
     # 2026-07-31時点でmodels.blend未収録（暫定モデル=MissileDisasterのOBJを流用）。
     # 「18_Ballistic_Missile」「19_Interceptor」等で追加されれば次回エクスポートで上書きされる。

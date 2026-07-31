@@ -48,8 +48,8 @@ namespace CSWarfront.Core
         /// ふらつき防止）。航空以外のカテゴリでは常にnullのまま無視される。</summary>
         public WorldPos? AirPassEgress;
 
-        /// <summary>プレイヤーの指揮コマンド（実行時のみ・非永続化、Task48）。既定はAiControlled。
-        /// セーブ/ロードでは常にAiControlledへ戻る（WarStateSerializerには一切書き出さない）。</summary>
+        /// <summary>プレイヤーの指揮コマンド（Task48）。既定はAiControlled。
+        /// Task92: v8でRallyPointとともに永続化されるようになった（「ロードで命令がAI制御へ戻る」の解消）。</summary>
         public UnitOrder Order;
 
         /// <summary>Order==RallyHold の目的地（実行時のみ・非永続化、Task48）。UnitCommands.ApplyRallyが設定する。</summary>

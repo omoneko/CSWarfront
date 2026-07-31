@@ -25,6 +25,11 @@ namespace CSWarfront.Game
         private const float IncomeRate = 0.04f;
 
         private const float RoadRebuildIntervalHours = 12f;
+
+        // Task92: 海上航行グリッド（State.SeaNav）の再構築間隔。水域は道路より変化が稀なので長め。
+        private const float SeaGridRebuildIntervalHours = 24f;
+        private static float _seaGridRebuildAccum;
+        private static bool _hasAttemptedSeaGridBuild;
         private const float RoadBuildRetryIntervalHours = 0.25f;
 
         private const float CoverRebuildIntervalHours = 12f;
@@ -156,6 +161,37 @@ namespace CSWarfront.Game
                         _roadRebuildAccum -= RoadRebuildIntervalHours;
                         var rebuilt = RoadGraphBuilder.Build();
                         if (rebuilt != null) State.Roads = rebuilt;
+                    }
+                }
+
+                // Task92: 海上航行グリッド（State.SeaNav）の構築/再構築。道路網と同じ供給パターン。
+                // 初回は即座に構築し、以後はSeaGridRebuildIntervalHoursごとに作り直す（失敗時は既存を維持）。
+                if (State.SeaNav == null)
+                {
+                    if (!_hasAttemptedSeaGridBuild)
+                    {
+                        _hasAttemptedSeaGridBuild = true;
+                        State.SeaNav = SeaGridBuilder.Build();
+                    }
+                    else
+                    {
+                        // 初回失敗後（水の無いマップ含む）は再構築間隔でだけ再試行する。
+                        _seaGridRebuildAccum += dt;
+                        if (_seaGridRebuildAccum >= SeaGridRebuildIntervalHours)
+                        {
+                            _seaGridRebuildAccum = 0f;
+                            State.SeaNav = SeaGridBuilder.Build();
+                        }
+                    }
+                }
+                else
+                {
+                    _seaGridRebuildAccum += dt;
+                    if (_seaGridRebuildAccum >= SeaGridRebuildIntervalHours)
+                    {
+                        _seaGridRebuildAccum = 0f;
+                        var rebuiltSea = SeaGridBuilder.Build();
+                        if (rebuiltSea != null) State.SeaNav = rebuiltSea;
                     }
                 }
 

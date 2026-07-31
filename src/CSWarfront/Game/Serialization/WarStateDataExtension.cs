@@ -26,6 +26,7 @@ namespace CSWarfront.Game.Serialization
                 byte[] bytes = serializableDataManager.LoadData(DataId);
                 if (bytes == null || bytes.Length == 0) return; // 新規ゲームは既定初期化に任せる
                 var types = new UnitTypeRegistry();
+                UnitStatsFile.EnsureLoaded(); // Task92: unit-stats.xmlの上書きをロスター構築より前に反映する
                 LandUnitRoster.RegisterAll(types); // 陸上7兵種×Tier1〜5（Task28）。旧セーブのTank_T1も同じキーで解決される。
                 NavalUnitRoster.RegisterAll(types); // 海上2種×Tier1〜5（Task61）。海上/航空ユニットを含むセーブの復元に必要。
                 AirUnitRoster.RegisterAll(types);   // 航空3種×Tier1〜5（Task61）。

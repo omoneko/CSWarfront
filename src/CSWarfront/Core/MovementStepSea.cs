@@ -36,6 +36,10 @@ namespace CSWarfront.Core
         /// そのまま採用する（サンプリングに失敗すれば従来のYを維持）。water==nullの場合は「常に水上」
         /// とみなし自由に移動する（Height同様、Game層未供給時のテスト容易性のための安全側フォールバック、
         /// この場合迂回/足止めのロジックは一切発生しない＝直進のみで常に成功する）。</summary>
+        /// <summary>Task92: SeaGrid経路のウェイポイントへの到達判定距離。セルサイズ（96m）より
+        /// やや小さく取り、通過しながら次のウェイポイントへ滑らかに切り替える。</summary>
+        public const float SeaWaypointArrivalDistance = 60f;
+
         private static void AdvanceSea(UnitInstance u, float stepLen, WorldPos objective, IWaterSampler water, float dt)
         {
             bool objectiveChanged = !u.SeaLastObjective.HasValue ||
@@ -54,6 +58,19 @@ namespace CSWarfront.Core
                 u.State = UnitState.Idle;
                 return;
             }
+
+            // Task92: SeaGrid経路（InvasionOrders/ApplyRallyが張る）があればウェイポイントを順に辿る。
+            // 各歩の水域チェック・壁沿い迂回・足止めカウンタは従来どおり機能する（グリッドは粗いため
+            // 最終防衛線として残す）。経路が尽きたら本来の目的地への直線に戻る。
+            WorldPos steer = objective;
+            if (u.Path != null)
+            {
+                while (u.PathIndex < u.Path.Count &&
+                       u.Position.HorizontalDistanceTo(u.Path[u.PathIndex]) <= SeaWaypointArrivalDistance)
+                    u.PathIndex++;
+                if (u.PathIndex < u.Path.Count) steer = u.Path[u.PathIndex];
+            }
+            objective = steer;
 
             float dist = u.Position.HorizontalDistanceTo(objective);
             if (dist <= 0.01f) { u.SeaBlockedHours = 0f; return; } // 既に到達済み。

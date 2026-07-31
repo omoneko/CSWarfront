@@ -16,8 +16,12 @@ namespace CSWarfront.Core
         //           プレハブが存在しなかったため実害は無い）。
         // v6 -> v7: 基地ブロックのさらに末尾に AutoLaunchMissiles (bool) を追加（Task90：ミサイル基地の
         //           自動発射のON/OFF切替）。v6以前を読んだ場合は既定値true（従来の全自動発射挙動）。
+        // v7 -> v8: ペイロード全体の末尾に (a)飛翔中ミサイル（MissilesInFlight + NextMissileId）、
+        //           (b)ユニットの部隊命令（InstanceIdキーのOrder/RallyPoint並列ブロック）を追加
+        //           （Task92：「ロードで飛行中ミサイルが消える／命令がAI制御へ戻る」の解消）。
+        //           v7以前を読んだ場合はどちらも従来どおり（飛翔中なし・全員AiControlled）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 7;
+        private const int Version = 8;
 
         public static byte[] Serialize(WarState s)
         {
@@ -70,6 +74,28 @@ namespace CSWarfront.Core
                 for (int f = 0; f < 5; f++)
                     for (int k = 0; k < ThreatRelations.ThreatKindCount; k++)
                         w.Write((int)s.ThreatRelations.Get((byte)f, (ThreatKind)k));
+
+                // v8（Task92）: 飛翔中ミサイル。着弾間際でセーブしても続きから飛ぶ。
+                w.Write(s.MissilesInFlight.Count);
+                foreach (var m in s.MissilesInFlight)
+                {
+                    w.Write(m.Id); w.Write(m.FactionId);
+                    WritePos(w, m.From); WritePos(w, m.To);
+                    w.Write(m.Progress); w.Write(m.Intercepted);
+                }
+                w.Write(s.NextMissileId);
+
+                // v8（Task92）: 部隊命令（Order/RallyPoint）。ユニットブロック本体は互換のため触らず、
+                // InstanceIdをキーにした並列ブロックとして末尾に追記する。
+                w.Write(s.Units.Count);
+                foreach (var u in s.Units)
+                {
+                    w.Write(u.InstanceId);
+                    w.Write((int)u.Order);
+                    w.Write(u.RallyPoint.HasValue);
+                    WritePos(w, u.RallyPoint.HasValue ? u.RallyPoint.Value : new WorldPos(0, 0, 0));
+                }
+
                 w.Flush();
                 return ms.ToArray();
             }
@@ -159,6 +185,40 @@ namespace CSWarfront.Core
                     for (int f = 0; f < 5; f++)
                         for (int k = 0; k < ThreatRelations.ThreatKindCount; k++)
                             s.ThreatRelations.Set((byte)f, (ThreatKind)k, (Relation)r.ReadInt32());
+                }
+
+                // v8（Task92）: 飛翔中ミサイル＋部隊命令。v7以前にはこのブロックが無いため、
+                // その場合は従来どおり（飛翔中なし・全員AiControlled/RallyPointなし）で復元される。
+                if (version >= 8)
+                {
+                    int mcount = r.ReadInt32();
+                    for (int i = 0; i < mcount; i++)
+                    {
+                        var m = new MissileInFlight
+                        {
+                            Id = r.ReadUInt32(),
+                            FactionId = r.ReadByte(),
+                            From = ReadPos(r),
+                            To = ReadPos(r),
+                            Progress = r.ReadSingle(),
+                            Intercepted = r.ReadBoolean()
+                        };
+                        s.MissilesInFlight.Add(m);
+                    }
+                    s.NextMissileId = r.ReadUInt32();
+
+                    int ocount = r.ReadInt32();
+                    for (int i = 0; i < ocount; i++)
+                    {
+                        uint iid = r.ReadUInt32();
+                        var order = (UnitOrder)r.ReadInt32();
+                        bool hasRally = r.ReadBoolean();
+                        var rally = ReadPos(r);
+                        UnitInstance u = s.FindUnit(iid);
+                        if (u == null) continue; // 整合性が崩れたセーブでも例外にしない（防御的）
+                        u.Order = order;
+                        if (hasRally) u.RallyPoint = rally;
+                    }
                 }
             }
             return s;
