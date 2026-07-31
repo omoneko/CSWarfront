@@ -50,10 +50,12 @@ namespace CSWarfront.Core
             }
         }
 
+        // Task91（相対レートの現実寄り再較正）: 戦闘機は機関砲バーストを高頻度で（85/0.25h、
+        // 1発あたり21）、爆撃機は1航過に1発の重い爆弾（125/1.5h、1発あたり187）という対比にした。
         private static readonly BaseStats[] Bases =
         {
-            new BaseStats(UnitCategory.AirSuperiority, 120f, 85f,  90f, 4f, 900f,  0f, 200f, 14f, 0.80f, 0.30f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.TacticalBomber,  180f, 120f, 70f, 6f, 650f, 45f, 260f, 18f, 0.65f, 1.00f, ShotKind.DirectFire),
+            new BaseStats(UnitCategory.AirSuperiority, 120f, 85f,  90f, 4f, 900f,  0f, 200f, 14f, 0.80f, 0.25f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.TacticalBomber,  180f, 125f, 70f, 6f, 650f, 45f, 260f, 18f, 0.65f, 1.50f, ShotKind.DirectFire),
             // SuicideDrone: ShotKind/FireIntervalHoursはKamikazeStepでは参照されない（ShotEventを
             // 一切発行しないため）。旧ロスターの値をそのまま残してあるのは、他の2種と同じBaseStats
             // 形状を保つため（このカテゴリでは単に無視されるだけで実害は無い）。

@@ -17,8 +17,8 @@ public class BaseCombatStepTests
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         BaseCombatStep.Advance(s, 1f);
         // Task38: Tank_T1.Accuracy=0.70 < BaseCombatStep.SiegeAccuracyFloor(0.8), so the floor applies.
-        // dmg = DamagePerHit(40,0)=40 * dt(1) * siegeAccuracy(0.8) = 32 -> 100-32=68 (old: 100-40=60)
-        Assert.Equal(68f, s.Bases[0].CurrentHP, 3);
+        // Task91: Tank Attack 40->42。dmg = DamagePerHit(42,0)=42 * dt(1) * siegeAccuracy(0.8) = 33.6 -> 100-33.6=66.4
+        Assert.Equal(66.4f, s.Bases[0].CurrentHP, 3);
     }
 
     [Fact]
@@ -34,8 +34,8 @@ public class BaseCombatStepTests
         s.Bases.Add(enemyBase);
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         BaseCombatStep.Advance(s, 0.5f);
-        // dmg = 40 * 0.5 * siegeAccuracy(0.8) = 16 -> 100-16=84 (old: 100-40*0.5=80)
-        Assert.Equal(84f, s.Bases[0].CurrentHP, 3);
+        // Task91: dmg = 42 * 0.5 * siegeAccuracy(0.8) = 16.8 -> 100-16.8=83.2
+        Assert.Equal(83.2f, s.Bases[0].CurrentHP, 3);
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public class BaseCombatStepTests
 
         BaseCombatStep.Advance(s, 1f); // grace 1 -> 0（減算後0なので、このtickから通常通りダメージ）
 
-        // dmg = 40 * 1 * siegeAccuracy(0.8) = 32 -> 100-32=68 (old: 100-40=60)
-        Assert.Equal(68f, s.Bases[0].CurrentHP, 3);
+        // Task91: dmg = 42 * 1 * siegeAccuracy(0.8) = 33.6 -> 100-33.6=66.4
+        Assert.Equal(66.4f, s.Bases[0].CurrentHP, 3);
     }
 
     // --- Task38: 命中率(Accuracy)の基地攻めへの適用（0.8下限） ---
@@ -107,7 +107,7 @@ public class BaseCombatStepTests
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions.Add(new Faction(1, "Blue"));
         s.Relations.Set(0, 1, Relation.Hostile);
-        s.Types.Register(LandUnitRoster.Get(UnitCategory.Artillery, 1)); // Attack=50, Accuracy=0.35, Range=120
+        s.Types.Register(LandUnitRoster.Get(UnitCategory.Artillery, 1)); // Attack=55 (Task91), Accuracy=0.35, Range=120
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
         enemyBase.OwnerFactionId = 1; enemyBase.CurrentHP = 100f; enemyBase.MaxHP = 100f; // Task89: 回復を無効化（このテストは回復対象外の検証）
         s.Bases.Add(enemyBase);
@@ -116,10 +116,10 @@ public class BaseCombatStepTests
         BaseCombatStep.Advance(s, 1f);
 
         // Artillery.Accuracy(0.35) < SiegeAccuracyFloor(0.8), so the floor of 0.8 is used instead of 0.35.
-        // dmg = DamagePerHit(50,0)=50 * dt(1) * 0.8 = 40 -> 100-40=60
-        // (without the floor, dmg would only have been 50*0.35=17.5 -> 82.5: the floor keeps artillery
+        // Task91: dmg = DamagePerHit(55,0)=55 * dt(1) * 0.8 = 44 -> 100-44=56
+        // (without the floor, dmg would only have been 55*0.35=19.25: the floor keeps artillery
         // a strong siege weapon despite its low anti-unit accuracy)
-        Assert.Equal(60f, s.Bases[0].CurrentHP, 3);
+        Assert.Equal(56f, s.Bases[0].CurrentHP, 3);
     }
 
     // --- Task42: 発砲エフェクト(ShotEvent)は基地位置(To)を狙う ---

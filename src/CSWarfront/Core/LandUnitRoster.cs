@@ -58,15 +58,28 @@ namespace CSWarfront.Core
         //   Artillery    0.60 -> 2.00
         // Task43: Infantryの移動速度を1.5倍（5km/h -> 7.5km/h、市民の徒歩速度基準を離れ「駆け足」寄りに）。
         //   他カテゴリの速度はこのタスクの対象外のため据え置き。
+        // Task91（ユーザー要望「攻撃力と攻撃頻度の相対レートを現実寄りに」）: 発射間隔と攻撃力を
+        // 「小火器=高頻度・低威力 ⇔ 砲・ミサイル=低頻度・高威力」の現実的な相対関係へ再較正した。
+        // 1発あたりのダメージ感（Attack×FireIntervalHours）: 歩兵5.4 < APC 9.8 < ドローン18 <
+        // 戦車50 < 砲兵137（最重・最低頻度）。DPS（Attack）自体の変動は±20%以内に抑え、
+        // 既存バランス（脅威HP等）を大きく崩さない。
+        //   Infantry     20/0.40 -> 18/0.30（小銃の連射、威力最小）
+        //   MechInfantry 26/0.40 -> 24/0.30
+        //   Apc          22/0.45 -> 28/0.35（機関砲、小銃より重い）
+        //   Tank         40/0.90 -> 42/1.20（主砲、重い一撃・遅い装填）
+        //   Artillery    50/2.00 -> 55/2.50（榴弾斉射、最重・最遅）
+        //   DroneInfantry 30/0.50 -> 30/0.60
+        //   AntiAir      15/0.45 -> 20/0.60（SAM1発を重く・発射は離散的に。対航空の離散射撃
+        //                （AntiAirCombat）の1発ダメージ=Attack×Interval×相性が実質を決める）
         private static readonly BaseStats[] Bases =
         {
-            new BaseStats(UnitCategory.Infantry,      60f, 20f,  40f,  1f,  7.5f,0f, 20f, 4f, 0.75f, 0.40f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.MechInfantry,   90f, 26f,  45f,  4f, 35f,  0f, 40f, 6f, 0.75f, 0.40f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.Apc,           110f, 22f,  50f,  6f, 45f,  0f, 45f, 6f, 0.70f, 0.45f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.Tank,          140f, 40f,  60f, 10f, 40f,  0f, 60f, 8f, 0.70f, 0.90f, ShotKind.DirectFire),
-            new BaseStats(UnitCategory.Artillery,      70f, 50f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f, 2.00f, ShotKind.IndirectFire),
-            new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f, 0.50f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.AntiAir,        80f, 15f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f, 0.45f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.Infantry,      60f, 18f,  40f,  1f,  7.5f,0f, 20f, 4f, 0.75f, 0.30f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.MechInfantry,   90f, 24f,  45f,  4f, 35f,  0f, 40f, 6f, 0.75f, 0.30f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.Apc,           110f, 28f,  50f,  6f, 45f,  0f, 45f, 6f, 0.70f, 0.35f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.Tank,          140f, 42f,  60f, 10f, 40f,  0f, 60f, 8f, 0.70f, 1.20f, ShotKind.DirectFire),
+            new BaseStats(UnitCategory.Artillery,      70f, 55f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f, 2.50f, ShotKind.IndirectFire),
+            new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f, 0.60f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.AntiAir,        80f, 20f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f, 0.60f, ShotKind.Gunfire),
         };
 
         /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（例: Tank, 3 -&gt; "Tank_T3"）。</summary>

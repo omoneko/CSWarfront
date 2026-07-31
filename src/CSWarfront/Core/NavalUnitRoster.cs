@@ -43,9 +43,12 @@ namespace CSWarfront.Core
             }
         }
 
+        // Task91（相対レートの現実寄り再較正）: 駆逐艦は「艦対地/艦対艦ミサイルの斉射」らしく
+        // 1発あたり160（80×2.0h）の重い一撃を低頻度で放つ形にした（旧84/1.2h）。
+        // Carrierの数値はTask85（一切攻撃しないプラットフォーム専任）以降参照されない。
         private static readonly BaseStats[] Bases =
         {
-            new BaseStats(UnitCategory.Destroyer, 260f, 70f, 220f, 14f, 55f, 20f, 180f, 16f, 0.70f, 1.2f, ShotKind.IndirectFire),
+            new BaseStats(UnitCategory.Destroyer, 260f, 80f, 220f, 14f, 55f, 20f, 180f, 16f, 0.70f, 2.0f, ShotKind.IndirectFire),
             new BaseStats(UnitCategory.Carrier,   520f, 30f, 120f, 20f, 45f,  0f, 400f, 30f, 0.60f, 2.0f, ShotKind.DirectFire),
         };
 

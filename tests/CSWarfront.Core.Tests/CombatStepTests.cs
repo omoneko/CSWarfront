@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
@@ -23,10 +23,10 @@ public class CombatStepTests
         CombatStep.Advance(s, 1f);
         // Task28: Tank_T1.Armor is now 10 (was 5). DamagePerHit(40,10)=30.
         // Task38: Tank_T1.Accuracy=0.70 (no drone synergy applies to non-Artillery), matchup Tank->Tank=1.0.
-        // dmg = 30 * dt(1) * matchup(1.0) * accuracy(0.70) = 21 -> 100-21=79
+        // Task91: Tank Attack 40->42。DamagePerHit(42,10)=32, dmg = 32 * dt(1) * matchup(1.0) * accuracy(0.70) = 22.4 -> 100-22.4=77.6
         // (old arithmetic, pre-accuracy: 100-30=70)
-        Assert.Equal(79f, s.FindUnit(1).CurrentHP, 3);
-        Assert.Equal(79f, s.FindUnit(2).CurrentHP, 3);
+        Assert.Equal(77.6f, s.FindUnit(1).CurrentHP, 3);
+        Assert.Equal(77.6f, s.FindUnit(2).CurrentHP, 3);
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
@@ -88,8 +88,8 @@ public class CombatStepTests
         float halfDmg = 100f - half.FindUnit(1).CurrentHP; // 10.5 (old arithmetic, pre-accuracy: 15)
 
         Assert.Equal(fullDmg / 2f, halfDmg, 3);
-        // 100 - 30*0.70*0.5 = 89.5 (old arithmetic, pre-accuracy: 100 - 30*0.5 = 85)
-        Assert.Equal(89.5f, half.FindUnit(1).CurrentHP, 3);
+        // Task91: 100 - 32*0.70*0.5 = 88.8
+        Assert.Equal(88.8f, half.FindUnit(1).CurrentHP, 3);
     }
 
     // --- Task29: CombatMatchup適用 ---
@@ -131,9 +131,9 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // DamagePerHit(Infantry.Attack=20, Tank.Armor=10) = 10, × CombatMatchup(Infantry->Tank)=0.4 × dt(1)
-        // × Infantry.Accuracy(0.75, Task38) = 3 -> 200-3=197 (old arithmetic, pre-accuracy: 200-4=196)
-        Assert.Equal(197f, s.FindUnit(2).CurrentHP, 3);
+        // Task91: Infantry Attack 20->18。DamagePerHit(18,10)=8, × CombatMatchup(Infantry->Tank)=0.4 × dt(1)
+        // × Infantry.Accuracy(0.75) = 2.4 -> 200-2.4=197.6
+        Assert.Equal(197.6f, s.FindUnit(2).CurrentHP, 3);
     }
 
     [Fact]
@@ -171,9 +171,9 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // DamagePerHit(Artillery.Attack=50, Tank.Armor=10) = 40, × CombatMatchup(Artillery->Tank)=0.7
-        // × dt(1) × Artillery.Accuracy(0.35, no drone nearby) = 9.8 -> 200-9.8=190.2
-        Assert.Equal(190.2f, s.FindUnit(2).CurrentHP, 2);
+        // Task91: Artillery Attack 50->55。期待値は式で導出する（リテラル固定はレート再調整のたびに壊れるため）。
+        float expectedAlone = 200f - CombatMath.DamagePerHit(55f, 10f) * 0.7f * 0.35f;
+        Assert.Equal(expectedAlone, s.FindUnit(2).CurrentHP, 2);
     }
 
     [Fact]
@@ -196,10 +196,10 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // effective accuracy = min(0.95, 0.35 + DroneSpotterAccuracyBonus(0.5)) = 0.85
-        // DamagePerHit(50,10)=40 × matchup(0.7) × dt(1) × 0.85 = 23.8 -> 200-23.8=176.2
+        // effective accuracy = min(0.95, 0.35 + DroneSpotterAccuracyBonus(0.5)) = 0.85（Task91: Attack 55）
         // (versus 190.2 without the drone above: the synergy visibly raises artillery damage)
-        Assert.Equal(176.2f, s.FindUnit(2).CurrentHP, 2);
+        float expectedSpotted = 200f - CombatMath.DamagePerHit(55f, 10f) * 0.7f * 0.85f;
+        Assert.Equal(expectedSpotted, s.FindUnit(2).CurrentHP, 2);
     }
 
     // --- Task42: 発砲エフェクト(ShotEvent)の間引き ---

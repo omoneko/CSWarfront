@@ -1,4 +1,4 @@
-using CSWarfront.Core;
+﻿using CSWarfront.Core;
 using Xunit;
 
 public class UnitTypeRegistryTests
@@ -11,7 +11,7 @@ public class UnitTypeRegistryTests
         var t = reg.Get("Tank_T1");
         Assert.NotNull(t);
         Assert.Equal(Domain.Land, t.Domain);
-        Assert.Equal(40f, t.Attack, 3);
+        Assert.Equal(42f, t.Attack, 3); // Task91: 40->42
     }
 
     [Fact]

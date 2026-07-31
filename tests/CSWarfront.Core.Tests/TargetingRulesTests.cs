@@ -203,7 +203,7 @@ public class TargetingRulesTests
 
         BaseCombatStep.Advance(s, 1f);
 
-        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 40f * 0.8f; // 回復→攻撃の順
+        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 42f * 0.8f; // 回復→攻撃の順（Task91: Tank Attack 42）
         Assert.Equal(expected, s.Bases[0].CurrentHP, 2);
     }
 

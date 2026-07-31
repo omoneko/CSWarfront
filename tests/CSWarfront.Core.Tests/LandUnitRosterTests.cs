@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using CSWarfront.Core;
@@ -39,7 +39,7 @@ public class LandUnitRosterTests
         UnitType t = LandUnitRoster.Get(UnitCategory.Tank, 1);
         Assert.Equal("Tank_T1", t.TypeKey);
         Assert.Equal(140f, t.MaxHP, 3);
-        Assert.Equal(40f, t.Attack, 3);
+        Assert.Equal(42f, t.Attack, 3); // Task91: 40->42（現実寄り再較正）
         Assert.Equal(60f, t.Range, 3);
         Assert.Equal(10f, t.Armor, 3);
         Assert.Equal(0f, t.SplashRadius, 3);
@@ -71,7 +71,7 @@ public class LandUnitRosterTests
         // Task38: Artillery Tier1 Range 160->120, Attack 55->50 (nerf; accuracy 0.35 is the compensating buff).
         UnitType t = LandUnitRoster.Get(UnitCategory.Artillery, 1);
         Assert.Equal(120f, t.Range, 3);
-        Assert.Equal(50f, t.Attack, 3);
+        Assert.Equal(55f, t.Attack, 3); // Task91: 50->55
         // HP/Armor/Speed/Splash/Cost/BuildTime stay as before (unaffected by the rebalance).
         Assert.Equal(70f, t.MaxHP, 3);
         Assert.Equal(2f, t.Armor, 3);
@@ -86,11 +86,11 @@ public class LandUnitRosterTests
         UnitType t5 = LandUnitRoster.Get(UnitCategory.Tank, 5);
         Assert.Equal("Tank_T5", t5.TypeKey);
         Assert.Equal(TierScaling.Hp(140f, 5), t5.MaxHP, 3);
-        Assert.Equal(TierScaling.Attack(40f, 5), t5.Attack, 3);
+        Assert.Equal(TierScaling.Attack(42f, 5), t5.Attack, 3);
         Assert.Equal(TierScaling.Cost(60f, 5), t5.Cost, 3);
         // Documented Tier5 multipliers applied to the Tank_T1 base table values.
         Assert.Equal(336f, t5.MaxHP, 3);   // 140 * 2.4
-        Assert.Equal(104f, t5.Attack, 3);  // 40 * 2.6
+        Assert.Equal(109.2f, t5.Attack, 3);  // 42 * 2.6 (Task91)
         Assert.Equal(204f, t5.Cost, 3);    // 60 * 3.4
     }
 
@@ -98,13 +98,13 @@ public class LandUnitRosterTests
     // Task43: ユーザーフィードバック（発砲間隔が短すぎる）により全面的に延長した
     // （Gunfireは3点バーストのバースト間隔、DirectFire/IndirectFireは単発の発射間隔）。
     [Theory]
-    [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.40f)]
-    [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.40f)]
-    [InlineData(UnitCategory.Apc, ShotKind.Gunfire, 0.45f)]
-    [InlineData(UnitCategory.DroneInfantry, ShotKind.Gunfire, 0.50f)]
-    [InlineData(UnitCategory.AntiAir, ShotKind.Gunfire, 0.45f)]
-    [InlineData(UnitCategory.Tank, ShotKind.DirectFire, 0.90f)]
-    [InlineData(UnitCategory.Artillery, ShotKind.IndirectFire, 2.00f)]
+    [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.30f)]
+    [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.30f)]
+    [InlineData(UnitCategory.Apc, ShotKind.Gunfire, 0.35f)]
+    [InlineData(UnitCategory.DroneInfantry, ShotKind.Gunfire, 0.60f)]
+    [InlineData(UnitCategory.AntiAir, ShotKind.Gunfire, 0.60f)]
+    [InlineData(UnitCategory.Tank, ShotKind.DirectFire, 1.20f)]
+    [InlineData(UnitCategory.Artillery, ShotKind.IndirectFire, 2.50f)]
     public void Tier1_shot_kind_and_fire_interval_match_design_table(UnitCategory category, ShotKind expectedKind,
         float expectedIntervalHours)
     {

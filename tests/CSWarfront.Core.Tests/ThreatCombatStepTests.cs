@@ -1,4 +1,4 @@
-using CSWarfront.Core;
+﻿using CSWarfront.Core;
 using Xunit;
 
 // Task58: ThreatCombatStep — units fighting an ExternalThreat (Godzilla/Alien, owned by another mod).
@@ -87,7 +87,7 @@ public class ThreatCombatStepTests
         });
         ThreatCombatStep.Advance(infantryState, 1f);
         float infantryDmg = 1000f - infantryState.Threats[0].CurrentHP;
-        Assert.Equal(6.51f, infantryDmg, 2);
+        Assert.Equal(1.674f, infantryDmg, 2); // Task91: Infantry 18*2.6=46.8, DamagePerHit(46.8,45)=1.8 x 0.93
 
         var tankState = new WarState();
         tankState.Factions.Add(new Faction(0, "Red"));
@@ -100,9 +100,9 @@ public class ThreatCombatStepTests
         });
         ThreatCombatStep.Advance(tankState, 1f);
         float tankDmg = 1000f - tankState.Threats[0].CurrentHP;
-        Assert.Equal(51.212f, tankDmg, 2);
+        Assert.Equal(55.726f, tankDmg, 2); // Task91: Tank 42*2.6=109.2, DamagePerHit(109.2,45)=64.2 x 0.868
 
-        // Tanks remain drastically more effective than infantry against an armored threat (~7.9x here).
+        // Tanks remain drastically more effective than infantry against an armored threat (~33x here, Task91).
         Assert.True(tankDmg > infantryDmg * 5f);
     }
 

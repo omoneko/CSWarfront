@@ -1,4 +1,4 @@
-using CSWarfront.Core;
+﻿using CSWarfront.Core;
 using Xunit;
 
 public class MvpUnitTypesTests
@@ -16,7 +16,7 @@ public class MvpUnitTypesTests
         // 新しいTier1基礎値（LandUnitRosterのTankの行）: HP140, Attack40, Range60, Armor10, Cost60, BuildTime8。
         // Attack/Range/BuildTime/Speedは旧値と一致（意図的に据え置き）。HP/Armor/Costは新テーブルの値へ変更。
         Assert.Equal(140f, t.MaxHP, 3);
-        Assert.Equal(40f, t.Attack, 3);
+        Assert.Equal(42f, t.Attack, 3); // Task91: 40->42
         Assert.Equal(60f, t.Range, 3);
         Assert.Equal(10f, t.Armor, 3);
         Assert.Equal(60f, t.Cost, 3);
@@ -34,7 +34,7 @@ public class MvpUnitTypesTests
         // 7.5km/h -> 2.0833... m/s -> / 2.05078125 ≈ 1.016 units/ゲーム内時間（旧: 5km/hで0.677）
         Assert.Equal(1.02f, t.Speed, 2);
         Assert.Equal(60f, t.MaxHP, 3);
-        Assert.Equal(20f, t.Attack, 3);
+        Assert.Equal(18f, t.Attack, 3); // Task91: 20->18
         Assert.Equal(40f, t.Range, 3);
         Assert.Equal(1f, t.Armor, 3);
         Assert.Equal(20f, t.Cost, 3);

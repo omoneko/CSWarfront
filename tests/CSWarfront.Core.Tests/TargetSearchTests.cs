@@ -187,6 +187,31 @@ public class TargetSearchTests
         Assert.Equal((uint)3, nearest.InstanceId); // 最寄りの戦闘機は無視し、次に近い海上(駆逐艦)を狙う
     }
 
+    // Task91（ユーザー確認依頼「海上戦力から地上戦力に攻撃ができるようになってるか」）:
+    // 駆逐艦は地上ユニットを標的にでき、CombatStepで実際にダメージが入る。
+    [Fact]
+    public void Destroyer_targets_and_damages_a_land_unit_in_range()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions.Add(new Faction(1, "Blue"));
+        s.Relations.Set(0, 1, Relation.Hostile);
+        LandUnitRoster.RegisterAll(s.Types);
+        NavalUnitRoster.RegisterAll(s.Types);
+
+        var destroyer = new UnitInstance(1, "Destroyer_T1", 0, 260f, new WorldPos(0, 0, 0));
+        s.Units.Add(destroyer);
+        var tank = new UnitInstance(2, "Tank_T1", 1, 100000f, new WorldPos(150, 0, 0)); // 射程220内の沿岸目標
+        s.Units.Add(tank);
+
+        float hpBefore = tank.CurrentHP;
+        CombatStep.Advance(s, 1f);
+
+        Assert.Equal(UnitState.Engaging, destroyer.State);
+        Assert.Equal(2u, destroyer.TargetId.Value);
+        Assert.True(tank.CurrentHP < hpBefore, "expected the destroyer to damage the land unit");
+    }
+
     // Task85: 空母は何も攻撃しない（発着艦プラットフォーム専任、CanTargetDomains=None）。
     [Fact]
     public void Carrier_targets_nothing()
