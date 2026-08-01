@@ -66,6 +66,14 @@ namespace CSWarfront.Core
         /// FindPath失敗時に立て、失敗し続けるユニットが毎tick予算を消費するのを防ぐ（Task23レビュー）。</summary>
         public float PathRetryCooldown;
 
+        /// <summary>Task98: スタック検知の基準位置（実行時のみ・非永続化）。ここからMinProgressDistance
+        /// 以上動くたびに現在位置へ更新され、StuckHoursが0へ戻る（StuckCleanupStep参照）。</summary>
+        public WorldPos? StuckAnchor;
+
+        /// <summary>Task98: StuckAnchorからほぼ動けていない状態が続いているゲーム内時間
+        /// （実行時のみ・非永続化。ロードで0に戻っても判定が遅れるだけで実害なし）。</summary>
+        public float StuckHours;
+
         /// <summary>次の発砲エフェクト(ShotEvent)を出すまでの残りゲーム内時間（実行時のみ・非永続化、Task42）。
         /// このユニットが実際にダメージを与えたtickでのみ dt 分だけ減算し、0以下になった時点で
         /// ShotEventを1つ積んでから UnitType.FireIntervalHours にリセットする（CombatStep/BaseCombatStep

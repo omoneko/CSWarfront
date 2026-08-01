@@ -276,6 +276,12 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
+                // Task98: 水際等でスタックしたユニットの自動消滅（移動直後＝このtickの実際の変位を
+                // 見た上で判定する。自拠点付近・非Moving状態は対象外、無音無爆発でDead化のみ）。
+                int stuckDespawned = StuckCleanupStep.Advance(State, dt);
+                if (stuckDespawned > 0)
+                    ModConfig.Log("StuckCleanupStep: despawned " + stuckDespawned + " stuck unit(s).");
+
                 // Task79: 自爆ドローンの目標ロック・体当たり起爆。MovementStepの直後・CombatStepより前に
                 // 置く（このtickで決めたロックが次tickのMovementStepダイブ移動から参照されるのは通常の
                 // AI意思決定ステップと同じ1tick遅延パターン、CoverSeekStep→MovementStepと対称）。
