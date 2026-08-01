@@ -55,6 +55,48 @@ public class StuckCleanupStepTests
     }
 
     [Fact]
+    public void Slow_infantry_marching_at_its_own_speed_never_despawns()
+    {
+        // Task98追補（実機バグ）: 歩兵(7.5km/h)は約1.0m/ゲーム時しか進まないため、固定20m閾値だと
+        // 正常行軍のまま「12hで12m＜20m」でスタック扱いになり消滅していた。閾値は速度比例で
+        // なければならない。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        LandUnitRoster.RegisterAll(s.Types);
+        UnitType infantry = s.Types.Get(LandUnitRoster.TypeKey(UnitCategory.Infantry, 1));
+        var u = new UnitInstance(1, infantry.TypeKey, 0, infantry.MaxHP, new WorldPos(0, 0, 0));
+        u.State = UnitState.Moving;
+        s.Units.Add(u);
+
+        // 本来の速度どおり毎時間 Speed×1h だけ前進し続ける（正常な行軍）。
+        for (int i = 0; i < 48; i++)
+        {
+            u.Position = new WorldPos(u.Position.X + infantry.Speed * 1f, 0, 0);
+            StuckCleanupStep.Advance(s, 1f);
+        }
+
+        Assert.True(u.IsAlive);
+    }
+
+    [Fact]
+    public void Fully_stuck_infantry_still_despawns()
+    {
+        // 速度比例閾値でも「本当に動けていない」歩兵はきちんと消える。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        LandUnitRoster.RegisterAll(s.Types);
+        UnitType infantry = s.Types.Get(LandUnitRoster.TypeKey(UnitCategory.Infantry, 1));
+        var u = new UnitInstance(1, infantry.TypeKey, 0, infantry.MaxHP, new WorldPos(1000, 0, 1000));
+        u.State = UnitState.Moving;
+        s.Units.Add(u);
+
+        int despawned = AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours + 2f);
+
+        Assert.Equal(1, despawned);
+        Assert.Equal(UnitState.Dead, u.State);
+    }
+
+    [Fact]
     public void Stuck_unit_near_its_own_base_is_preserved()
     {
         var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));

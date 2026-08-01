@@ -4,7 +4,10 @@ namespace CSWarfront.Core
     /// Task98（実機フィードバック）: 水際・行き止まり等でスタックして動けなくなったユニットの自動消滅。
     ///
     /// 「スタック」の定義: State==Moving（移動したいのに）で、基準位置（StuckAnchor）から
-    /// MinProgressDistance未満しか動けない状態がDespawnAfterHours続いたユニット。
+    /// 「そのユニットの速度なら進めるはずの距離のProgressFraction」未満しか動けない状態が
+    /// DespawnAfterHours続いたユニット（Task98追補: 当初は固定20mだったが、歩兵は約1.0m/ゲーム時
+    /// しか進まないため正常行軍のまま12hで12m＜20mとなり誤消滅した——閾値は速度比例が正しい。
+    /// 上限MinProgressDistanceは高速ユニットの誤検知マージンとして残す）。
     /// Idle/Engaging/Deadは対象外（止まっているのが正常な状態のため。自拠点で待機している部隊や
     /// 交戦中に立ち止まっている部隊はStateがMovingでないので、そもそもタイマーが進まない）。
     ///
@@ -18,12 +21,15 @@ namespace CSWarfront.Core
     /// </summary>
     public static class StuckCleanupStep
     {
-        /// <summary>この時間（ゲーム内時間）動けないままだと消滅する。最低速の兵科でも本来なら
-        /// 数千mは進んでいる長さで、正常な渋滞・低速移動を誤検知しないマージンを取った値。</summary>
+        /// <summary>この時間（ゲーム内時間）動けないままだと消滅する。</summary>
         public const float DespawnAfterHours = 12f;
 
-        /// <summary>この距離（水平m）以上動けていれば「前進できている」とみなしタイマーを0へ戻す。
-        /// 海上ユニットの壁沿い迂回の小刻みな往復（数m〜十数m）は前進とみなさない。</summary>
+        /// <summary>前進判定閾値の速度比例係数。「本来の速度で進めるはずの距離の25%未満しか
+        /// 進めていない」＝スタック。壁沿い迂回の斜め成分程度は前進とみなす余裕を持たせた値。</summary>
+        public const float ProgressFraction = 0.25f;
+
+        /// <summary>前進判定閾値の上限（水平m）。高速ユニット（戦車・艦艇・航空）で速度比例のまま
+        /// だと数百mになり、壁際の往復でも到達してしまうため、従来の固定値でキャップする。</summary>
         public const float MinProgressDistance = 20f;
 
         /// <summary>自勢力基地からこの距離以内のユニットは消滅対象外。</summary>
@@ -46,7 +52,7 @@ namespace CSWarfront.Core
                 }
 
                 if (!u.StuckAnchor.HasValue ||
-                    u.Position.HorizontalDistanceTo(u.StuckAnchor.Value) >= MinProgressDistance)
+                    u.Position.HorizontalDistanceTo(u.StuckAnchor.Value) >= ProgressThresholdFor(state, u))
                 {
                     u.StuckAnchor = u.Position;
                     u.StuckHours = 0f;
@@ -69,6 +75,17 @@ namespace CSWarfront.Core
                 despawned++;
             }
             return despawned;
+        }
+
+        /// <summary>このユニットの前進判定閾値: min(速度×DespawnAfterHours×ProgressFraction,
+        /// MinProgressDistance)。歩兵（約1.0m/ゲーム時）なら約3m、戦車以上ならキャップの20m。
+        /// 型が引けない防御的ケースは0（＝常に前進扱い、消滅させない側に倒す）。</summary>
+        private static float ProgressThresholdFor(WarState state, UnitInstance u)
+        {
+            UnitType type = state.Types.Get(u.TypeKey);
+            if (type == null) return 0f;
+            float threshold = type.Speed * DespawnAfterHours * ProgressFraction;
+            return threshold < MinProgressDistance ? threshold : MinProgressDistance;
         }
 
         private static bool IsNearOwnBase(WarState state, UnitInstance u)
