@@ -7,6 +7,14 @@ namespace CSWarfront.Core
     {
         public const int QueueCap = 2;             // 1基地あたり最大キュー長
 
+        /// <summary>Task97（実機フィードバック「戦闘が進むと重くなる」）: 勢力あたりの生存ユニット数が
+        /// この値以上の間、その勢力の自動生産（AutoProduce基地のキュー補充）を止める。実測で総690体
+        /// （Blue単独355体）まで無制限に膨張し、交戦判定・表示同期の負荷が支配的になっていたための
+        /// 上限。研究投資もこのゲートの内側にあるため一緒に止まるが、ユニットが消耗して上限を割れば
+        /// 次の経済tickから自動的に再開する。手動生産（AutoProduce=OFF基地のUI操作）とミサイル建造は
+        /// 対象外（プレイヤーの明示操作を妨げない）。</summary>
+        public const int MaxUnitsPerFaction = 150;
+
         /// <summary>1基地・1tickあたりの意思決定回数の上限（防御的）。研究への投資はキューを
         /// 消費しないため、理論上は「研究ばかり選ばれ続ける」限りループが続きうる。Treasuryが
         /// ResearchInvestPerDecisionずつ減っていくため実際には有限だが、念のため上限を設ける
@@ -15,10 +23,19 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state)
         {
+            // Task97: 勢力別の生存ユニット数を一度だけ数える（+1はInvader勢力のぶん）。
+            var aliveCounts = new int[Faction.InvaderFactionId + 1];
+            for (int ui = 0; ui < state.Units.Count; ui++)
+            {
+                UnitInstance u = state.Units[ui];
+                if (u.IsAlive && u.FactionId < aliveCounts.Length) aliveCounts[u.FactionId]++;
+            }
+
             for (int fi = 0; fi < state.Factions.Count; fi++)
             {
                 Faction f = state.Factions[fi];
                 if (f.Eliminated) continue;
+                bool atUnitCap = f.Id < aliveCounts.Length && aliveCounts[f.Id] >= MaxUnitsPerFaction;
 
                 for (int bi = 0; bi < state.Bases.Count; bi++)
                 {
@@ -34,6 +51,10 @@ namespace CSWarfront.Core
                         MissileStockpile.TryBuildMissile(state, b.BaseId);
                         continue;
                     }
+
+                    // Task97: ユニット上限に達している勢力は自動生産を止める（コメントはMaxUnitsPerFaction参照。
+                    // ミサイル建造は上で済ませているため対象外）。
+                    if (atUnitCap) continue;
 
                     // seedの由来: (勢力Id, 基地Id, この基地でこのtick中に下した意思決定の通し番号)。
                     // 同じ基地・同じtickでも決定のたびに種を変え、研究/生産の選択が単調に固定化しない

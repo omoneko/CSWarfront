@@ -33,6 +33,49 @@ public class ProductionPlanningTests
     }
 
     [Fact]
+    public void Advance_stops_producing_at_the_per_faction_unit_cap()
+    {
+        // Task97: 生存ユニットがMaxUnitsPerFaction以上の勢力は自動生産を止める（重さ対策）。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions[0].AddTreasury(10000f);
+        s.Factions[0].UnlockedTier = 5;
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+        for (uint i = 0; i < ProductionPlanning.MaxUnitsPerFaction; i++)
+            s.Units.Add(new UnitInstance(1000 + i, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+
+        ProductionPlanning.Advance(s);
+
+        Assert.Empty(s.Bases[0].Queue);
+        Assert.Equal(10000f, s.Factions[0].Treasury, 3);
+    }
+
+    [Fact]
+    public void Advance_resumes_producing_when_units_are_lost_below_the_cap()
+    {
+        // Task97: 上限を1体でも割れば（死亡ユニットは数えない）自動生産が再開する。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Factions[0].AddTreasury(10000f);
+        s.Factions[0].UnlockedTier = 5;
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = 0;
+        s.Bases.Add(b);
+        for (uint i = 0; i < ProductionPlanning.MaxUnitsPerFaction; i++)
+            s.Units.Add(new UnitInstance(1000 + i, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+        s.Units[0].CurrentHP = 0f;
+        s.Units[0].State = UnitState.Dead; // 1体撃破され149体 → 上限未満
+
+        ProductionPlanning.Advance(s);
+
+        Assert.Equal(2, s.Bases[0].Queue.Count);
+    }
+
+    [Fact]
     public void Advance_does_not_queue_when_faction_broke()
     {
         var s = new WarState();

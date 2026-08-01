@@ -5,6 +5,10 @@ namespace CSWarfront.Core
     {
         public static void Advance(WarState state, float dt)
         {
+            // Task97: ターゲット探索の総当たりO(N²)を避けるため、このtickのユニット配置で
+            // 空間グリッドを組み直す（O(N)。結果は総当たり版と完全に同一、UnitSpatialGrid参照）。
+            state.UnitGrid.Build(state.Units);
+
             // 1) ターゲット選定と発火（ダメージは後段で一括適用しないシンプル版：都度適用）
             for (int i = 0; i < state.Units.Count; i++)
             {
@@ -24,7 +28,7 @@ namespace CSWarfront.Core
                 // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
                 // Task61: type.CanTargetDomainsで領域フィルタをかける（AntiAir以外の陸上兵科は航空ユニットを
                 // 一切狙わない、艦艇は航空ユニットを狙わない、航空ユニットは全領域を狙える、等）。
-                var target = TargetSearch.FindNearestHostile(self, state.Units, state.Relations, type.Range,
+                var target = TargetSearch.FindNearestHostile(self, state.UnitGrid, state.Relations, type.Range,
                     type.CanTargetDomains, state.Types);
                 if (target == null)
                 {

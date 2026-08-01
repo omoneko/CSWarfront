@@ -66,6 +66,11 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state, float dt)
         {
+            // Task97: CombatStepと同じく空間グリッドで探索する（自爆ドローンが多い編成での
+            // 総当たりO(N²)回避。このstepはMovementStepの後・CombatStepの前に走り、位置は
+            // step内で変わらないため、先頭で一度Buildすれば十分）。
+            state.UnitGrid.Build(state.Units);
+
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance self = state.Units[i];
@@ -73,7 +78,7 @@ namespace CSWarfront.Core
                 UnitType type = state.Types.Get(self.TypeKey);
                 if (type == null || !type.Category.IsKamikaze()) continue;
 
-                UnitInstance targetUnit = TargetSearch.FindNearestHostile(self, state.Units, state.Relations,
+                UnitInstance targetUnit = TargetSearch.FindNearestHostile(self, state.UnitGrid, state.Relations,
                     type.Range, type.CanTargetDomains, state.Types);
                 ExternalThreat targetThreat = targetUnit == null ? FindNearestHostileThreat(state, self, type) : null;
                 MilitaryBase targetBase = (targetUnit == null && targetThreat == null)

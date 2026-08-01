@@ -53,5 +53,14 @@ namespace CSWarfront.Core
             }
             return bestNemesis != null ? bestNemesis : bestHostile;
         }
+
+        /// <summary>Task97: 空間グリッド版。結果は上の総当たり版と完全に同一で、探索候補を
+        /// 「射程円と重なるセル内」に絞ることでO(N²)→ほぼO(N)にする（UnitSpatialGridの
+        /// クラスコメント参照）。呼び出し元は毎tickの先頭でgrid.Build(state.Units)を済ませておくこと。</summary>
+        public static UnitInstance FindNearestHostile(UnitInstance self, UnitSpatialGrid grid,
+            RelationMatrix rel, float range, DomainMask attackerCanTarget, UnitTypeRegistry types)
+        {
+            return grid.FindNearestHostile(self, rel, range, attackerCanTarget, types);
+        }
     }
 }

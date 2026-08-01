@@ -28,6 +28,10 @@ namespace CSWarfront.Core
         /// ロードで0に戻っても「次の判定が最大6時間遅れる」だけで実害なし）。</summary>
         public float InvasionCheckAccum;
 
+        /// <summary>Task97: 交戦判定用の空間グリッド（実行時のみ・非永続化、simスレッド専用）。
+        /// CombatStep/KamikazeStepが各Advanceの先頭でBuildして使う（総当たりO(N²)の回避）。</summary>
+        public UnitSpatialGrid UnitGrid = new UnitSpatialGrid();
+
         /// <summary>Game層から供給される遮蔽物（建物/Prop）マップ（実行時のみ・非永続化、Task44）。
         /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
         public CoverMap Cover;
