@@ -102,6 +102,11 @@ namespace CSWarfront.Game
                 state.Factions.Add(f);
             }
 
+            // Task95: 外部襲来イベント専用のInvader勢力（第6勢力、モスグリーン、常時敵対）。
+            // 建設先勢力ドロップダウン（MaxFactions=5）や関係設定UIには登場しない。軍資金も不要
+            // （基地・生産を一切持たず、部隊はInvasionEventsが直接スポーンする）。
+            InvasionEvents.EnsureInvaderFaction(state);
+
             // MVPの既定関係は全勢力ペアがHostile。実装はCore.RelationPresets.ApplyAllHostileに委譲する
             // （Task49: Options画面の「全て敵対に戻す」ボタンからも同じ実装を再利用するため）。
             // これは「新規State作成時」のみ適用される既定値であり、既存セーブをロードした場合は

@@ -30,11 +30,15 @@ namespace CSWarfront.Core
 
         public Relation Get(byte factionId, ThreatKind kind)
         {
+            // Task95: 表の外側のId（Faction.InvaderFactionId等）は常時Hostile（RelationMatrixと同じ扱い。
+            // Invader部隊も外部脅威と交戦する＝「確定で敵対的な勢力」という仕様に一致する）。
+            if (factionId >= _factionCount) return Relation.Hostile;
             return _rel[factionId, (int)kind];
         }
 
         public void Set(byte factionId, ThreatKind kind, Relation r)
         {
+            if (factionId >= _factionCount) return; // Invader等の表外Idは常時Hostile固定（変更不可）
             _rel[factionId, (int)kind] = r;
         }
 

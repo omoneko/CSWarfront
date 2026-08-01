@@ -130,6 +130,11 @@ namespace CSWarfront.Core
                     }
                     s.Factions.Add(f);
                 }
+                // Task95: Invader実装以前のセーブ（5勢力）にはInvader勢力が居ないため、ここで補完する
+                // （冪等。Invader実装後のセーブはfcount=6で上のループが既に復元している）。
+                // 関係はRelationMatrix/ThreatRelationsがハードコードで常時Hostileを返すため永続化不要
+                // （下の5x5固定ブロックは従来のまま）。
+                InvasionEvents.EnsureInvaderFaction(s);
                 for (int a = 0; a < 5; a++)
                     for (int b = 0; b < 5; b++)
                         s.Relations.Set(a, b, (Relation)r.ReadInt32());

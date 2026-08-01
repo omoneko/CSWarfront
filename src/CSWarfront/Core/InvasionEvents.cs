@@ -9,10 +9,16 @@ namespace CSWarfront.Core
     ///
     /// Optionsのトグル（Game層WarfrontSettings.InvasionEventsEnabled）がONの間、CheckIntervalHoursごとに
     /// 決定的ハッシュで襲来判定を行い、当選したらマップ端のランダムな地点（陸地）へ襲撃部隊を
-    /// スポーンする。部隊の所属は「基地を最も持っていない勢力」（＝プレイヤーが使っていない勢力を
-    /// 侵略者役として使い回す。基地0の勢力を優先）で、スポーン時に防衛側（基地所有勢力）との関係を
-    /// Hostileへ設定する（Nemesis設定は上書きしない）。以後は通常のAI（InvasionOrders.AssignAdvance）が
-    /// 最寄りの敵基地へ進軍させるため、専用の攻撃ロジックは不要。
+    /// スポーンする。
+    ///
+    /// Task95（実機フィードバック）: 部隊の所属は専用勢力「Invader」（Faction.InvaderFactionId、
+    /// モスグリーン）に固定。当初は「基地を最も持っていない既存勢力を侵略者役に使い回す」設計だったが、
+    /// (1)プレイヤーの勢力（Blue等）が勝手に侵略者になり紛らわしい、(2)基地0の勢力は
+    /// FactionStatus.Refreshが毎tickEliminated化する→AI進軍対象外→スポーン地点で固まる、という
+    /// 2つの実害があった。Invaderは関係表にハードコードで常時Hostile（RelationMatrix/ThreatRelations）、
+    /// Eliminated判定対象外（FactionStatus）なので、スポーン後は通常のAI
+    /// （InvasionOrders.AssignAdvance）がそのまま最寄りの基地（都市に建設されている軍事基地）へ
+    /// 進軍させる。専用の攻撃ロジックは不要。
     ///
     /// 部隊規模・Tierは防衛側の最高解禁Tierに追従する（ゲームが進むほど強い襲撃が来る）。
     /// 乱数不使用（TickCounterと通し番号からの決定的ハッシュ、AntiAirCombat.RollHitと同じfmix32）。
@@ -52,13 +58,27 @@ namespace CSWarfront.Core
             return SpawnWave(state);
         }
 
+        /// <summary>State.FactionsにInvader勢力（Faction.InvaderFactionId）が居なければ追加する。
+        /// 新規State作成時（Game層MilitaryManager）とセーブロード時（WarStateSerializer.Deserialize、
+        /// Invader実装以前のセーブは5勢力しか持たない）の両方から呼ばれる冪等ヘルパー。</summary>
+        public static Faction EnsureInvaderFaction(WarState state)
+        {
+            Faction invader = state.FindFaction(Faction.InvaderFactionId);
+            if (invader == null)
+            {
+                invader = new Faction(Faction.InvaderFactionId, "Invader");
+                state.Factions.Add(invader);
+            }
+            return invader;
+        }
+
         /// <summary>襲撃部隊を1回スポーンする（テストからも直接呼べる）。戻り値はスポーンしたユニット数。
         /// 防衛側（基地所有勢力）が1つも無い、または陸地のスポーン地点が見つからない場合は0。</summary>
         public static int SpawnWave(WarState state)
         {
             // 防衛側 = 基地を1つ以上所有する勢力。いなければ攻める意味が無い。
             var defenders = new List<byte>();
-            int[] baseCounts = new int[state.Factions.Count];
+            int[] baseCounts = new int[Faction.InvaderFactionId];
             for (int i = 0; i < state.Bases.Count; i++)
             {
                 MilitaryBase b = state.Bases[i];
@@ -66,35 +86,16 @@ namespace CSWarfront.Core
                 byte owner = b.OwnerFactionId.Value;
                 if (owner < baseCounts.Length) baseCounts[owner]++;
             }
-            for (int f = 0; f < state.Factions.Count; f++)
+            for (int f = 0; f < baseCounts.Length; f++)
             {
-                if (baseCounts[f] > 0) defenders.Add(state.Factions[f].Id);
+                Faction df = state.FindFaction((byte)f);
+                if (df != null && baseCounts[f] > 0) defenders.Add(df.Id);
             }
             if (defenders.Count == 0) return 0;
 
-            // 侵略者役 = 基地が最も少ない勢力（同数なら若いId）。通常は基地0の未使用勢力が選ばれる。
-            Faction attacker = null;
-            int fewest = int.MaxValue;
-            for (int f = 0; f < state.Factions.Count; f++)
-            {
-                int count = baseCounts[f];
-                if (count < fewest)
-                {
-                    fewest = count;
-                    attacker = state.Factions[f];
-                }
-            }
-            if (attacker == null) return 0;
-
-            // 全防衛勢力と敵対させる（既にNemesisならそのまま。侵略者が防衛側自身になる縮退ケース
-            // ＝全勢力が基地持ち、では自分以外とだけ敵対させる）。
-            for (int d = 0; d < defenders.Count; d++)
-            {
-                byte def = defenders[d];
-                if (def == attacker.Id) continue;
-                if (!state.Relations.Get(attacker.Id, def).IsHostile())
-                    state.Relations.Set(attacker.Id, def, Relation.Hostile);
-            }
+            // 侵略者役 = 専用のInvader勢力（Task95）。関係はRelationMatrix/ThreatRelationsが
+            // ハードコードで常時Hostileを返すため、ここでの関係設定は不要（かつ不可能）。
+            Faction attacker = EnsureInvaderFaction(state);
 
             // スポーン地点: マップ端の1辺上の決定的ランダム点。水域なら内側へずらして陸地を探す。
             WorldPos? spawn = FindLandSpawnPoint(state);
@@ -107,6 +108,9 @@ namespace CSWarfront.Core
                 Faction df = state.FindFaction(defenders[d]);
                 if (df != null && df.UnlockedTier > tier) tier = df.UnlockedTier;
             }
+            // Invader勢力の解禁Tierも波のTierへ追従させておく（AiThreatAssessment等が参照しても
+            // 実際にスポーンしている部隊と矛盾しないように）。
+            if (attacker.UnlockedTier < tier) attacker.UnlockedTier = tier;
 
             // 編成: 諸兵科連合の襲撃部隊（Tierが上がると戦車が増える）。
             var composition = new List<UnitCategory>

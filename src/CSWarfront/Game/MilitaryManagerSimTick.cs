@@ -362,7 +362,8 @@ namespace CSWarfront.Game
                 sb.Append(" units=").Append(State.Units.Count);
 
                 // 勢力別ユニット数（Task24）：どの勢力にもユニットが存在しない不具合を一目で分かるようにする。
-                var unitsPerFaction = new int[WarfrontSettings.MaxFactions];
+                // +1はInvader勢力（Task95、Faction.InvaderFactionId=5）のぶん。
+                var unitsPerFaction = new int[WarfrontSettings.MaxFactions + 1];
                 for (int u = 0; u < State.Units.Count; u++)
                 {
                     byte fid = State.Units[u].FactionId;

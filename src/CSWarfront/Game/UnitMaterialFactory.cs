@@ -31,10 +31,12 @@ namespace CSWarfront.Game
     /// </summary>
     internal static class UnitMaterialFactory
     {
-        // 勢力id 0..4 に対応する識別色。0=赤, 1=青, 2=緑, 3=黄, 4=マゼンタ。
+        // 勢力id 0..5 に対応する識別色。0=赤, 1=青, 2=緑, 3=黄, 4=マゼンタ,
+        // 5=モスグリーン（Task95: 外部襲来のInvader勢力。純緑のGreenと見分けがつくよう暗くくすんだ苔色）。
         private static readonly Color[] FactionColors =
         {
-            Color.red, Color.blue, Color.green, Color.yellow, Color.magenta
+            Color.red, Color.blue, Color.green, Color.yellow, Color.magenta,
+            new Color(0.42f, 0.49f, 0.25f)
         };
 
         private static readonly Color FallbackColor = Color.white;

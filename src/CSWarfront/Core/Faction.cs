@@ -2,6 +2,14 @@ namespace CSWarfront.Core
 {
     public class Faction
     {
+        /// <summary>Task95: 外部襲来イベント専用勢力「Invader」の固定Id。プレイヤー勢力（0..4）の外側に
+        /// 置かれた第6の勢力で、(1)RelationMatrix/ThreatRelationsがこのIdを常時Hostile扱いにハードコード
+        /// する（Options等でどう操作しても敵対のまま）、(2)FactionStatus.RefreshのEliminated導出対象外
+        /// （基地を1つも持たないのが正常状態のため。従来はここでEliminated化→AI進軍対象外→侵攻部隊が
+        /// スポーン地点で固まる、が実機バグの根本原因だった）、(3)建設先勢力ドロップダウン・関係設定UI
+        /// には登場しない、という特別扱いを受ける。</summary>
+        public const byte InvaderFactionId = 5;
+
         public byte Id { get; private set; }
         public string Name { get; set; }
         public float Treasury { get; private set; }

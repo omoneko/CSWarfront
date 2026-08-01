@@ -19,6 +19,15 @@ namespace CSWarfront.Core
             {
                 Faction f = state.Factions[i];
 
+                // Task95: Invader勢力（外部襲来専用）は基地を1つも持たないのが正常状態。
+                // ここでEliminated化するとAI進軍（AssignAdvance）の対象から外れ、侵攻部隊が
+                // スポーン地点で永久に固まる（実機バグの根本原因）ため、常に現役として扱う。
+                if (f.Id == Faction.InvaderFactionId)
+                {
+                    f.Eliminated = false;
+                    continue;
+                }
+
                 bool ownsAnyBase = false;
                 bool homeStillOwned = false;
                 for (int j = 0; j < state.Bases.Count; j++)

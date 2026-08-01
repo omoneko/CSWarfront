@@ -30,7 +30,9 @@ public class WarStateSerializerTests
         byte[] bytes = WarStateSerializer.Serialize(s);
         var r = WarStateSerializer.Deserialize(bytes, types);
 
-        Assert.Equal(2, r.Factions.Count);
+        // 3 = 元の2勢力 + Invader（Task95: DeserializeがInvader実装以前のセーブへ冪等に補完する）。
+        Assert.Equal(3, r.Factions.Count);
+        Assert.NotNull(r.FindFaction(Faction.InvaderFactionId));
         Assert.Equal(123.5f, r.FindFaction(0).Treasury, 3);
         Assert.True(r.FindFaction(0).IsPlayer);
         Assert.Equal((ushort)200, r.FindFaction(0).HomeBaseId.Value);
@@ -218,7 +220,8 @@ public class WarStateSerializerTests
 
         var r = WarStateSerializer.Deserialize(bytes, types);
 
-        Assert.Single(r.Factions);
+        // 2 = 元の1勢力 + Invader（Task95: Deserializeが冪等に補完する）。
+        Assert.Equal(2, r.Factions.Count);
         Assert.Equal(50f, r.FindFaction(0).Treasury, 3);
         Assert.Equal(0f, r.FindFaction(0).ResearchPoints, 3);
         Assert.Equal((byte)1, r.FindFaction(0).UnlockedTier);
