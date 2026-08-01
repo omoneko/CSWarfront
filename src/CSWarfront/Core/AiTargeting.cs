@@ -88,6 +88,9 @@ namespace CSWarfront.Core
         {
             int pathComputations = 0;
             WorldPos? divertTarget = FindNearbyThreatToOwnTerritory(state, factionId);
+            // Task96: 外部襲来（Invader勢力）の部隊が生きている間は、外部脅威（KAIJU/Alien）に次ぐ
+            // 優先度で迎撃対象にする（敵基地への進軍より優先。詳細はFindInvaderToInterceptのコメント参照）。
+            if (!divertTarget.HasValue) divertTarget = FindInvaderToIntercept(state, factionId);
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
@@ -253,6 +256,50 @@ namespace CSWarfront.Core
                 }
             }
             return bestNemesis ?? bestHostile;
+        }
+
+        /// <summary>Task96（実機フィードバック「配置したユニットが侵攻部隊の迎撃に向かわない」）:
+        /// AIの進軍先は従来「敵対勢力の所有基地」と「外部脅威（state.Threats）」だけで、敵ユニット
+        /// そのものを追う行動が存在しなかった。Invader勢力（外部襲来、Faction.InvaderFactionId）は
+        /// 基地を持たず脅威リストにも載らないため、防衛側は誰も迎撃に向かわず、侵攻部隊が基地の
+        /// 射程に入るまで放置される状態だった。
+        ///
+        /// このメソッドは、生きているInvaderユニットのうち「自勢力の最寄り所有基地に最も近い」
+        /// ものの位置を返す（＝最も差し迫った脅威から順に潰す）。規則は宿敵(Nemesis)脅威への
+        /// 迎撃（Task62）と同じ:
+        ///  - 距離無制限（基地を1つでも所有していれば、マップ端の上陸地点へも積極的に出撃する）。
+        ///  - 基地を1つも持たない勢力は対象外（迎撃に向かわせる拠点自体が無い）。
+        ///  - 状態を持たず毎tick再判定するだけなので、侵攻部隊を殲滅すれば次の呼び出しから
+        ///    自動的に通常の敵基地進軍へ戻る（Task58/Task62と同じ設計）。
+        /// Invader勢力自身の部隊はこの迎撃の対象外の側（呼び出し元がInvaderならnull＝従来どおり
+        /// 基地へ進軍する）。ターゲットが毎tick動く点は宿敵脅威と同じで、呼び出し元の
+        /// ThreatTargetChangeEpsilon（100m動いたときだけ経路再計算）・目的地スナップ無制限が
+        /// そのまま適用される。</summary>
+        private static WorldPos? FindInvaderToIntercept(WarState state, byte factionId)
+        {
+            if (factionId == Faction.InvaderFactionId) return null;
+
+            WorldPos? best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance u = state.Units[i];
+                if (u.FactionId != Faction.InvaderFactionId || !u.IsAlive) continue;
+
+                // このInvaderユニットから自勢力の最寄り所有基地までの距離（基地が無ければMaxValueの
+                // まま＝下の < 比較が一度も成立せず、結果的に「基地なし勢力は対象外」が成立する）。
+                float nearestOwnedBaseDist = float.MaxValue;
+                for (int b = 0; b < state.Bases.Count; b++)
+                {
+                    MilitaryBase ownedBase = state.Bases[b];
+                    if (ownedBase.OwnerFactionId != factionId) continue;
+                    float d = u.Position.HorizontalDistanceTo(ownedBase.Position);
+                    if (d < nearestOwnedBaseDist) nearestOwnedBaseDist = d;
+                }
+
+                if (nearestOwnedBaseDist < bestDist) { bestDist = nearestOwnedBaseDist; best = u.Position; }
+            }
+            return best;
         }
 
         private static bool IsSameTarget(WorldPos a, WorldPos b)
