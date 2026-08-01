@@ -24,6 +24,10 @@ namespace CSWarfront.Core
         /// Task92）。未供給ならnull＝海上ユニットは従来の直線＋壁沿い迂回のみで移動する。</summary>
         public SeaGrid SeaNav;
 
+        /// <summary>Task94: 外部襲来イベント（InvasionEvents）の判定タイマー（実行時のみ・非永続化。
+        /// ロードで0に戻っても「次の判定が最大6時間遅れる」だけで実害なし）。</summary>
+        public float InvasionCheckAccum;
+
         /// <summary>Game層から供給される遮蔽物（建物/Prop）マップ（実行時のみ・非永続化、Task44）。
         /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
         public CoverMap Cover;

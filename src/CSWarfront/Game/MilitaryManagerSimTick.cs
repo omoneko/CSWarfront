@@ -30,6 +30,9 @@ namespace CSWarfront.Game
         private const float SeaGridRebuildIntervalHours = 24f;
         private static float _seaGridRebuildAccum;
         private static bool _hasAttemptedSeaGridBuild;
+
+        // Task94: 襲来発生をメインスレッドのトースト表示へ伝えるフラグ（sim→mainの一方向、boolのため良性）。
+        private static bool _invasionToastPending;
         private const float RoadBuildRetryIntervalHours = 0.25f;
 
         private const float CoverRebuildIntervalHours = 12f;
@@ -242,6 +245,20 @@ namespace CSWarfront.Game
                 // 何もしない（ExternalThreatBridge内部で間引き・リフレクション解決結果をキャッシュする）。
                 // AI進軍命令（迂回判定）・ThreatCombatStepより前に済ませ、このtick中は最新の位置を使う。
                 ExternalThreatBridge.Advance(State, dt);
+
+                // Task94: MissileDisaster（災害ミサイル）の着弾をユニット被害へ反映する
+                // （Workshopコメント対応。未導入/旧バージョンなら内部で自動無効化）。
+                DisasterImpactBridge.Advance(State);
+
+                // Task94: 外部襲来イベント（Optionsトグル、Workshopコメント要望）。スポーンした部隊は
+                // 次のInvasionOrders.AssignAdvanceが通常のAIとして最寄りの敵基地へ進軍させる。
+                int invaders = InvasionEvents.Advance(State, dt,
+                    WarfrontSettings.InvasionEventsEnabled, WarfrontSettings.InvasionFrequencyIndex);
+                if (invaders > 0)
+                {
+                    _invasionToastPending = true; // メインスレッド（OnMainVisualUpdate）でトースト表示
+                    ModConfig.Log("InvasionEvents: spawned an invasion wave of " + invaders + " unit(s).");
+                }
 
                 // AI進軍命令（非プレイヤー勢力）。Task58: 自勢力の territory 近くに外部脅威がいれば
                 // 敵基地より優先してそちらへ迂回する（InvasionOrders.AssignAdvance内部で判定）。

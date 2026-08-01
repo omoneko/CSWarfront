@@ -32,6 +32,8 @@ namespace CSWarfront.Game
 
                 AddUnitCommandHotkeyUI(helper);
 
+                AddInvasionEventsUI(helper); // Task94: 外部襲来イベント（Workshopコメント要望）
+
                 OptionsRelationsPage.Build(helper);
 
                 AddFactionIconUI(helper);
@@ -46,6 +48,20 @@ namespace CSWarfront.Game
             {
                 ModConfig.LogError("OnSettingsUI error: " + e);
             }
+        }
+
+        /// <summary>Task94（Workshopコメント要望）: 外部襲来イベントのON/OFFと頻度。
+        /// ONにすると、ランダムなタイミングでマップ端に襲撃部隊（未使用勢力所属・防衛側と自動敵対）が
+        /// スポーンし、最寄りの基地へ攻めてくる。自分の基地を建てて防衛するプレイ向け。</summary>
+        private static void AddInvasionEventsUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup("Invasion events (waves attack from outside the city)");
+            group.AddCheckbox("Enable invasion events", WarfrontSettings.InvasionEventsEnabled,
+                v => WarfrontSettings.InvasionEventsEnabled = v);
+            group.AddDropdown("Invasion frequency",
+                new[] { "Low (about every 5 days)", "Medium (about every 2-3 days)", "High (about every day)" },
+                WarfrontSettings.InvasionFrequencyIndex,
+                i => { if (i >= 0 && i <= 2) WarfrontSettings.InvasionFrequencyIndex = i; });
         }
 
         /// <summary>Task48: 範囲選択した部隊への指揮コマンド（自由進撃/停止/集結待機）のホットキー割り当てUI。

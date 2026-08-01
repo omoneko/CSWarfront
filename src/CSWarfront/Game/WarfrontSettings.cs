@@ -34,6 +34,16 @@ namespace CSWarfront.Game
             get { return new[] { "Red", "Blue", "Green", "Yellow", "Magenta" }; }
         }
 
+        // --- Task94: 外部襲来イベント（Workshopコメント要望「敵が都市の外から攻めてくるオプション」） ---
+
+        /// <summary>ONの間、Core.InvasionEventsがランダムなタイミングでマップ端に襲撃部隊を
+        /// スポーンさせる（既定OFF＝従来どおり手動で敵基地を建てるプレイ）。
+        /// 他のWarfrontSettingsと同じくメモリ内保持のみ（セッション既定へ戻る、MVP方針）。</summary>
+        public static bool InvasionEventsEnabled = false;
+
+        /// <summary>襲来頻度（0=Low/1=Medium/2=High、Core.InvasionEvents.ChancePerCheckのインデックス）。</summary>
+        public static int InvasionFrequencyIndex = 1;
+
         // --- Task49: ユニット上の勢力アイコン（小さな球、Game/UnitVisuals）表示切り替え ---
 
         private static bool _showFactionIcons = true; // 既定ON

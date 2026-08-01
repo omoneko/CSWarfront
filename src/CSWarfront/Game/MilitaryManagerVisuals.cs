@@ -55,6 +55,13 @@ namespace CSWarfront.Game
         {
             if (State == null) return;
 
+            // Task94: 外部襲来の発生通知（simスレッドが立てたフラグをメインスレッドで消費）。
+            if (_invasionToastPending)
+            {
+                _invasionToastPending = false;
+                UI.CommandToast.Show("Invasion force approaching the city!");
+            }
+
             _visualSnapshot.Clear();
             _baseVisualSnapshot.Clear();
             _shotSnapshot.Clear();
