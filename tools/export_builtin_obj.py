@@ -147,6 +147,9 @@ NAME_MAP = {
     'ballisticmissile': 'Prop_BallisticMissile',
     'interceptor': 'Prop_Interceptor',
     'interceptormissile': 'Prop_Interceptor',
+    # Task99: 補給トラック（20_Supply_Truck、2026-08-03ユーザー追加）。これまでのAPCモデル代用
+    # （UnitMeshSourceのフォールバック）を専用モデルで置き換える。
+    'supplytruck': 'Unit_SupplyTruck',
 }
 
 # NAME_MAPのうち、.blend側にオブジェクトがまだ存在しなくてもエラーにしないもの
