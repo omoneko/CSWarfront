@@ -66,6 +66,16 @@ namespace CSWarfront.Core
         /// FindPath失敗時に立て、失敗し続けるユニットが毎tick予算を消費するのを防ぐ（Task23レビュー）。</summary>
         public float PathRetryCooldown;
 
+        /// <summary>Task99: 弾薬ゲージ（0..1、v9で永続化）。射撃しているtickだけ減り（AmmoRules）、
+        /// 基地圏内自動補給（ResupplyStep）・補給トラック（SupplyTruckStep）で回復する。
+        /// 0で射撃停止（移動・占領は可能）。生産直後は満タン。</summary>
+        public float Ammo = 1f;
+
+        /// <summary>Task99: 補給トラック（UnitCategory.SupplyTruck）の積載量（0..1、v9で永続化）。
+        /// 基地でSupplyStockから積載し、前線の味方陸上ユニットへの弾薬転送で減る（SupplyTruckStep）。
+        /// トラック以外のユニットでは常に0のまま使われない。</summary>
+        public float SupplyLoad;
+
         /// <summary>Task98: スタック検知の基準位置（実行時のみ・非永続化）。ここからMinProgressDistance
         /// 以上動くたびに現在位置へ更新され、StuckHoursが0へ戻る（StuckCleanupStep参照）。</summary>
         public WorldPos? StuckAnchor;

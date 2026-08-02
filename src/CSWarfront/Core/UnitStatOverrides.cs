@@ -7,6 +7,7 @@ namespace CSWarfront.Core
     public struct UnitStatOverride
     {
         public float? Hp, Attack, Range, Armor, SpeedKmh, Splash, Cost, BuildTime, Accuracy, FireIntervalHours;
+        public float? AmmoCombatHours; // Task99: 弾薬ゲージの連続射撃可能時間（0=弾薬無限）
     }
 
     /// <summary>
@@ -40,5 +41,6 @@ namespace CSWarfront.Core
         public static float BuildTime(UnitCategory c, float def) { UnitStatOverride o; return _map.TryGetValue(c, out o) && o.BuildTime.HasValue ? o.BuildTime.Value : def; }
         public static float Accuracy(UnitCategory c, float def) { UnitStatOverride o; return _map.TryGetValue(c, out o) && o.Accuracy.HasValue ? o.Accuracy.Value : def; }
         public static float FireInterval(UnitCategory c, float def) { UnitStatOverride o; return _map.TryGetValue(c, out o) && o.FireIntervalHours.HasValue ? o.FireIntervalHours.Value : def; }
+        public static float AmmoHours(UnitCategory c, float def) { UnitStatOverride o; return _map.TryGetValue(c, out o) && o.AmmoCombatHours.HasValue ? o.AmmoCombatHours.Value : def; }
     }
 }

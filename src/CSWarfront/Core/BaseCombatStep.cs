@@ -59,6 +59,10 @@ namespace CSWarfront.Core
                 // Task85: 戦闘機（対空専任）・空母（プラットフォーム専任）は拠点を一切攻撃しない。
                 if (!TargetingRules.CanAttackBase(type.Category)) continue;
 
+                // Task99: 弾切れは拠点攻撃も停止（CombatStepの対ユニット射撃と同じ規約）。
+                if (!AmmoRules.HasAmmo(u, type)) continue;
+
+                bool firedAtAnyBase = false;
                 for (int j = 0; j < state.Bases.Count; j++)
                 {
                     var b = state.Bases[j];
@@ -97,7 +101,12 @@ namespace CSWarfront.Core
                     // ため）。TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
                     // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
                     FireEffects.EmitThrottled(state, u, type, b.Position, 0, dt);
+                    firedAtAnyBase = true;
                 }
+
+                // Task99: このtickに1つでも拠点を攻撃していれば弾薬を消費する（複数拠点へ同時に
+                // 撃っていても消費は1tickぶん＝対ユニット射撃と同じ消費速度に揃える）。
+                if (firedAtAnyBase) AmmoRules.ConsumeFire(u, type, dt);
             }
         }
     }

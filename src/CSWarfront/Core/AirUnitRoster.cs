@@ -107,7 +107,8 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(UnitStatOverrides.Accuracy(b.Category, b.Accuracy), tier),
                 UnitStatOverrides.FireInterval(b.Category, b.FireIntervalHours),
                 b.ShotKind,
-                TargetDomainsFor(b.Category));
+                TargetDomainsFor(b.Category),
+                UnitStatOverrides.AmmoHours(b.Category, AmmoRules.DefaultCombatHours(b.Category))); // Task99
         }
 
         /// <summary>Task85（旧Task61の「Air can hit everything」を廃止）: 兵科ごとの標的ドメイン。

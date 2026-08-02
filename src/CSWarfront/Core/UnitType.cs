@@ -45,11 +45,16 @@ namespace CSWarfront.Core
         // type.Category.IsKamikaze()を見て早期continueするため、このフラグを見る分岐はもう存在しない
         // （旧: CombatStep.cs/BaseCombatStep.csのif(type.IsOneShot)分岐、Task61）。
 
+        /// <summary>Task99: 弾薬ゲージの「連続射撃可能時間」（ゲーム内時間）。射撃している間だけ
+        /// UnitInstance.Ammo が dt/AmmoCombatHours ずつ減る（AmmoRules）。0=弾薬無限（弾薬制の
+        /// 対象外。空母・自爆ドローン等）。既定0のオプション引数のため既存の呼び出し元は不変。</summary>
+        public float AmmoCombatHours { get; private set; }
+
         public UnitType(string typeKey, Domain domain, UnitCategory category, byte tier,
             float maxHp, float attack, float range, float armor, float speed,
             float splashRadius, float cost, float buildTime, string assetPrefabName,
             float accuracy, float fireIntervalHours, ShotKind shotKind,
-            DomainMask canTargetDomains)
+            DomainMask canTargetDomains, float ammoCombatHours = 0f)
         {
             TypeKey = typeKey; Domain = domain; Category = category; Tier = tier;
             MaxHP = maxHp; Attack = attack; Range = range; Armor = armor; Speed = speed;
@@ -59,6 +64,7 @@ namespace CSWarfront.Core
             FireIntervalHours = fireIntervalHours;
             ShotKind = shotKind;
             CanTargetDomains = canTargetDomains;
+            AmmoCombatHours = ammoCombatHours;
         }
     }
 

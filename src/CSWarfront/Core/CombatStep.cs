@@ -24,6 +24,16 @@ namespace CSWarfront.Core
                 // 下の第2パス（死亡はCurrentHP<=0から導出するという単一の真実源）がそのまま拾う。
                 if (type.Category.IsKamikaze()) continue;
 
+                // Task99: 弾切れ（Ammo<=0）は射撃停止のみ——ターゲットを解除して非交戦へ戻す
+                // （移動・占領は可能なまま）。補給（ResupplyStep/SupplyTruckStep）で回復すれば
+                // 次tickから通常どおり交戦に復帰する。Invader・弾薬制対象外はHasAmmoが常にtrue。
+                if (!AmmoRules.HasAmmo(self, type))
+                {
+                    if (self.State == UnitState.Engaging) self.State = UnitState.Idle;
+                    self.TargetId = null;
+                    continue;
+                }
+
                 // ターゲット選定は依然として単純な「射程内最近接の敵」（TargetSearch）。
                 // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
                 // Task61: type.CanTargetDomainsで領域フィルタをかける（AntiAir以外の陸上兵科は航空ユニットを
@@ -74,6 +84,9 @@ namespace CSWarfront.Core
                 // ダメージを与えたこのtickでのみFireCooldownをdt分だけ減算する。0以下になった瞬間だけ
                 // ShotEventを1つ積み、FireIntervalHoursへリセットする（乱数不使用・決定的）。
                 FireEffects.EmitThrottled(state, self, type, target.Position, target.InstanceId, dt);
+
+                // Task99: 射撃したtickだけ弾薬を消費する（連続ダメージ方式に合わせた連続消費）。
+                AmmoRules.ConsumeFire(self, type, dt);
             }
             // 2) 死亡判定
             // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
@@ -122,6 +135,10 @@ namespace CSWarfront.Core
             state.AddShot(new ShotEvent(self.Position, target.Position,
                 usesMissile ? ShotKind.SamMissile : ShotKind.Gunfire,
                 self.FactionId, self.InstanceId, target.InstanceId, type.Category, !hit));
+
+            // Task99: 1発撃つたびに発射間隔ぶんの弾薬を消費（外れても消費する。期待消費速度は
+            // 連続方式のdt消費と一致する——1発/FireIntervalHoursの離散射撃のため）。
+            AmmoRules.ConsumeFire(self, type, type.FireIntervalHours);
         }
 
         /// <summary>撃破報酬（Task35）を killerFactionId の勢力へ加算する。victimType/勢力が見つからなければ

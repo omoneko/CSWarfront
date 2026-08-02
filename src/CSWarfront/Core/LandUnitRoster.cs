@@ -139,7 +139,8 @@ namespace CSWarfront.Core
                 TierScaling.Accuracy(UnitStatOverrides.Accuracy(b.Category, b.Accuracy), tier),
                 UnitStatOverrides.FireInterval(b.Category, b.FireIntervalHours),
                 b.ShotKind,
-                canTarget);
+                canTarget,
+                UnitStatOverrides.AmmoHours(b.Category, AmmoRules.DefaultCombatHours(b.Category))); // Task99
         }
     }
 }

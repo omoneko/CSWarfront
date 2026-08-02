@@ -58,6 +58,10 @@ namespace CSWarfront.Core
                 // Task85: 空母は発着艦プラットフォーム専任で脅威にも攻撃しない。
                 if (!TargetingRules.CanAttackThreat(type.Category)) continue;
 
+                // Task99: 弾切れは対脅威射撃も停止（CombatStep/BaseCombatStepと同じ規約）。
+                if (!AmmoRules.HasAmmo(self, type)) continue;
+
+                bool firedAtAnyThreat = false;
                 for (int j = 0; j < state.Threats.Count; j++)
                 {
                     var threat = state.Threats[j];
@@ -88,7 +92,11 @@ namespace CSWarfront.Core
                     // （脅威には論理ユニットIDが無い。Game層はTargetId==0を「ユニットでない対象」
                     // として扱う既存の契約をそのまま利用する）。
                     FireEffects.EmitThrottled(state, self, type, threat.Position, 0, dt);
+                    firedAtAnyThreat = true;
                 }
+
+                // Task99: 弾薬消費（BaseCombatStepと同じ「1tickぶんを1回」の規約）。
+                if (firedAtAnyThreat) AmmoRules.ConsumeFire(self, type, dt);
             }
         }
     }

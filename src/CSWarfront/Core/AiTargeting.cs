@@ -108,6 +108,19 @@ namespace CSWarfront.Core
                 Domain domain = type != null ? type.Domain : Domain.Land; // 型が引けない防御的ケースは従来通りLand扱い
                 bool isLand = domain == Domain.Land;
 
+                // Task99: 弾切れの航空・海上ユニットには新しい進軍目標を与えず、Idleへ戻して
+                // 既存の帰還ロジック（MovementStep.ResolveHomeObjective）に自基地/空母へ連れ帰らせる。
+                // 帰還先の基地圏内でResupplyStepが弾薬を回復させ、回復すれば（HasAmmoがtrueに戻れば）
+                // 次の呼び出しから自動的に通常の進軍＝再出撃になる。陸上ユニットは対象外
+                // （弾切れでも移動・拠点占領は可能という仕様のため、進軍は続ける）。
+                if (!isLand && type != null && type.AmmoCombatHours > 0f && !AmmoRules.HasAmmo(u, type))
+                {
+                    u.OrderTargetPos = null;
+                    u.ClearPath();
+                    u.State = UnitState.Idle;
+                    continue;
+                }
+
                 WorldPos targetPos;
                 if (divertTarget.HasValue)
                 {

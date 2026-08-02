@@ -110,7 +110,8 @@ namespace CSWarfront.Game
                     Cost = ParseAttr(el, "cost"),
                     BuildTime = ParseAttr(el, "buildTime"),
                     Accuracy = ParseAttr(el, "accuracy"),
-                    FireIntervalHours = ParseAttr(el, "fireIntervalHours")
+                    FireIntervalHours = ParseAttr(el, "fireIntervalHours"),
+                    AmmoCombatHours = ParseAttr(el, "ammoCombatHours") // Task99: 連続射撃可能時間（0=弾薬無限）
                 };
                 UnitStatOverrides.Set(category, o);
                 applied++;
@@ -175,9 +176,10 @@ namespace CSWarfront.Game
             w.WriteLine(string.Format(inv,
                 "  <Unit category=\"{0}\" hp=\"{1:0.##}\" attack=\"{2:0.##}\" range=\"{3:0.##}\" armor=\"{4:0.##}\"" +
                 " speedKmh=\"{5:0.##}\" splash=\"{6:0.##}\" cost=\"{7:0.##}\" buildTime=\"{8:0.##}\"" +
-                " accuracy=\"{9:0.##}\" fireIntervalHours=\"{10:0.##}\" />",
+                " accuracy=\"{9:0.##}\" fireIntervalHours=\"{10:0.##}\" ammoCombatHours=\"{11:0.##}\" />",
                 t.Category, t.MaxHP, t.Attack, t.Range, t.Armor,
-                speedKmh, t.SplashRadius, t.Cost, t.BuildTime, t.Accuracy, t.FireIntervalHours));
+                speedKmh, t.SplashRadius, t.Cost, t.BuildTime, t.Accuracy, t.FireIntervalHours,
+                t.AmmoCombatHours));
         }
 
         private static string ResolveModPath()
