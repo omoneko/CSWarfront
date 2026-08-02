@@ -19,6 +19,10 @@ public class AiProductionPolicyTests
         LandUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(treasury);
+        // Task99: 3資源経済。このファイルの各テストは「資金の予算(spendCap)」の意味論を検証するため、
+        // 人的資源は常に潤沢・生産力は0にする——生産力コストは全額が資金代替(×FundsPerProduction)に
+        // なり、affordabilityが従来どおり資金残高だけで決まる（閾値は各テストで換算済み）。
+        f.AddManpower(1000000f);
         f.UnlockedTier = unlockedTier;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -45,6 +49,7 @@ public class AiProductionPolicyTests
         AirUnitRoster.RegisterAll(s.Types);
         var red = new Faction(0, "Red");
         red.AddTreasury(treasury);
+        red.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨（コメント参照）
         red.UnlockedTier = unlockedTier;
         s.Factions.Add(red);
         var blue = new Faction(1, "Blue");
@@ -241,8 +246,10 @@ public class AiProductionPolicyTests
         // invariant that must ALWAYS still hold: the reserve floor caps spendCap at
         // Treasury-ResearchReserve, so no tier costing more than that cap is ever chosen, and the
         // category is still Tank (composition target unchanged, no hostiles observed here).
-        // Tank_T3 costs 132 <= spendCap(282-150=132); Tank_T4 costs 168 > 132 must never appear.
-        var s = WithFullRoster(282f, unlockedTier: 4);
+        // Task99換算: 生産力0のため、資金でのユニット費用 = ProductionCost×2 = Cost×0.7×2 = Cost×1.4。
+        // Tank_T3の資金費用 = 132×1.4 = 184.8 <= spendCap(334.8-150=184.8)。
+        // Tank_T4 = 168×1.4 = 235.2 > 184.8 なので絶対に現れてはならない。
+        var s = WithFullRoster(334.8f, unlockedTier: 4);
         AddLivingUnits(s, UnitCategory.DroneInfantry, 1, 1); // non-bootstrap: reserve applies
         bool sawT1Through3 = false;
         for (uint seed = 0; seed < 500; seed++)
@@ -262,16 +269,16 @@ public class AiProductionPolicyTests
     public void At_max_tier_the_whole_treasury_is_available_no_reserve_held_back()
     {
         // OLD test asserted exactly Tier5 (the old "always max tier" rule). Task80's hedge normally
-        // prefers cheaper tiers, so a literal "always T5" assertion no longer holds. What must still
-        // hold: Treasury=204 exactly covers Tank_T5 (204) but NOT Tank_T1 (60) once wrongly reduced
-        // by the reserve (204-150=54 < 60). If the reserve were still being withheld at max tier
-        // (regression), spendCap would be 54 and EVERY decision would be None. Producing anything at
-        // all proves the full treasury is spendable at UnlockedTier=5.
-        var s = WithFullRoster(204f, unlockedTier: 5);
+        // prefers cheaper tiers, so a literal "always T5" assertion no longer holds.
+        // Task99換算: 生産力0のため資金費用 = Cost×1.4。Treasury=100 は Tank_T1（60×1.4=84）を
+        // ちょうど賄えるが、もし最大Tierでも研究準備金が誤って差し引かれる退行があれば
+        // spendCap=100-150<0 となり全decisionがNoneになる。何かが生産されること自体が
+        // 「Tier5解禁済みなら資金全額が使える」ことの証明。
+        var s = WithFullRoster(100f, unlockedTier: 5);
         UnitType chosen = FindFirstProducedType(s, maxSeed: 2000);
         Assert.NotNull(chosen);
         Assert.Equal(UnitCategory.Tank, chosen.Category);
-        Assert.True(chosen.Cost <= 204f);
+        Assert.Equal((byte)1, chosen.Tier); // 資金100で買えるのはT1（84）のみ
     }
 
     [Fact]
@@ -328,6 +335,7 @@ public class AiProductionPolicyTests
         NavalUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(10000f);
+        f.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨
         f.UnlockedTier = 5;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
@@ -355,6 +363,7 @@ public class AiProductionPolicyTests
         AirUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(10000f);
+        f.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨
         f.UnlockedTier = 5;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.AirForce, new WorldPos(0, 0, 0));

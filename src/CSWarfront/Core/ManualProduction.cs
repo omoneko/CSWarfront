@@ -57,7 +57,9 @@ namespace CSWarfront.Core
 
             if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
 
-            if (!owner.TrySpend(type.Cost)) return QueueResult.NotAffordable;
+            // Task99: 3資源支払い（人的資源＋生産力、不足分は資金代替）。手動生産はプレイヤーの
+            // 明示操作なので研究準備金の温存はせず、資金全額を代替上限にする。
+            if (!UnitCosts.TryPay(owner, type, owner.Treasury)) return QueueResult.NotAffordable;
 
             b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
             return QueueResult.Ok;

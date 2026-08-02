@@ -200,7 +200,7 @@ namespace CSWarfront.Core
             for (int i = 0; i < preference.Length; i++)
             {
                 uint tierSeed = AiCombatScoring.Hash(seed ^ TierHedgeSalt ^ (uint)(i * 2654435761u));
-                UnitType type = ChooseTierHedged(state, preference[i], faction.UnlockedTier, spendCap, tierSeed);
+                UnitType type = ChooseTierHedged(state, faction, preference[i], faction.UnlockedTier, spendCap, tierSeed);
                 if (type != null)
                     return new AiDecision { Choice = AiSpendChoice.Produce, TypeKey = type.TypeKey };
             }
@@ -342,7 +342,7 @@ namespace CSWarfront.Core
         /// 1つも無ければnull（呼び出し側のcross-category fallbackが次点の兵科を試す）。
         /// 全3ロスター(Land/Sea/Air)のTypeKeyは全て"&lt;Category&gt;_T&lt;tier&gt;"という共通形式
         /// （*UnitRoster.TypeKey参照）のため、Types.All()を毎回走査せずキーを直接組み立てて引ける。</summary>
-        private static UnitType ChooseTierHedged(WarState state, UnitCategory category, byte unlockedTier, float spendCap, uint seed)
+        private static UnitType ChooseTierHedged(WarState state, Faction faction, UnitCategory category, byte unlockedTier, float spendCap, uint seed)
         {
             UnitType[] candidates = new UnitType[MaxTierCount];
             float[] scores = new float[MaxTierCount];
@@ -353,7 +353,9 @@ namespace CSWarfront.Core
             {
                 UnitType t = state.Types.Get(category + "_T" + tier);
                 if (t == null) continue; // このカテゴリはこの基地のロスターに存在しない（通常起きない防御的ケース）
-                if (t.Cost > spendCap) continue;
+                // Task99: 3資源経済。「買えるか」は人的資源＋生産力（資金代替はspendCapまで）で判定する
+                // （旧: t.Cost > spendCap の資金単独判定）。
+                if (!UnitCosts.CanAfford(faction, t, spendCap)) continue;
 
                 candidates[count] = t;
                 scores[count] = AiCombatScoring.TierValue(t);

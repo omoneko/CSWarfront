@@ -70,7 +70,8 @@ namespace CSWarfront.Core
                 if (carrier.CarrierBuildProgress <= 0f)
                 {
                     // 建造着手: 費用を一括徴収する。払えなければ何もせず次tickに再試行（MissileStockpileと同じ方針）。
-                    if (!faction.TrySpend(buildType.Cost)) continue;
+                    // Task99: 3資源支払い（人的資源＋生産力、不足分は資金代替。上限は資金全額）。
+                    if (!UnitCosts.TryPay(faction, buildType, faction.Treasury)) continue;
                     carrier.CarrierBuildProgress = StartProgress;
                 }
 

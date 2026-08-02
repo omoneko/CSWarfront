@@ -83,7 +83,12 @@ namespace CSWarfront.Core
                         // 応じた兵科構成表しか選ばないため通常は不要だが、将来の実装ミスで領域不一致の
                         // TypeKeyが返ってきても、ここでキュー投入自体をブロックする（二重の安全網）。
                         if (!DomainMaskUtil.Contains(b.SpawnableDomains, type.Domain)) break;
-                        if (!f.TrySpend(type.Cost)) break;
+                        // Task99: 3資源支払い（人的資源＋生産力、不足分は資金代替）。AIは研究準備金を
+                        // 温存するため、資金代替の上限にDecideのspendCapと同じ「Treasury-研究準備金」を使う
+                        // （Tier5解禁済みなら準備金は不要＝全額使える。Decide内のspendCap算出と同じ規則）。
+                        float fundsCap = f.UnlockedTier < 5 ? f.Treasury - AiProductionPolicy.ResearchReserve : f.Treasury;
+                        if (fundsCap < 0f) fundsCap = 0f;
+                        if (!UnitCosts.TryPay(f, type, fundsCap)) break;
                         b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
                     }
                 }

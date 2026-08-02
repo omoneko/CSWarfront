@@ -18,6 +18,8 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
+        s.Factions[0].AddManpower(200f);   // Task99: 3資源経済（Tank=人的資源30%/生産力70%）
+        s.Factions[0].AddProduction(200f);
         s.Factions[0].UnlockedTier = 5;
         s.Types.Register(MvpUnitTypes.Tank_T1()); // Cost 60
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -29,7 +31,10 @@ public class ProductionPlanningTests
         Assert.Equal(2, s.Bases[0].Queue.Count);
         Assert.Equal("Tank_T1", s.Bases[0].Queue[0].TypeKey);
         Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
-        Assert.Equal(80f, s.Factions[0].Treasury, 3); // 200 - 2*60
+        // Task99: 支払いは人的資源+生産力（生産力が足りている間、資金は使われない）。
+        Assert.Equal(200f - 2f * 60f * 0.3f, s.Factions[0].Manpower, 3);
+        Assert.Equal(200f - 2f * 60f * 0.7f, s.Factions[0].Production, 3);
+        Assert.Equal(200f, s.Factions[0].Treasury, 3);
     }
 
     [Fact]
@@ -39,6 +44,8 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(10000f);
+        s.Factions[0].AddManpower(10000f);
+        s.Factions[0].AddProduction(10000f);
         s.Factions[0].UnlockedTier = 5;
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -50,7 +57,7 @@ public class ProductionPlanningTests
         ProductionPlanning.Advance(s);
 
         Assert.Empty(s.Bases[0].Queue);
-        Assert.Equal(10000f, s.Factions[0].Treasury, 3);
+        Assert.Equal(10000f, s.Factions[0].Manpower, 3);
     }
 
     [Fact]
@@ -60,6 +67,8 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(10000f);
+        s.Factions[0].AddManpower(10000f);
+        s.Factions[0].AddProduction(10000f);
         s.Factions[0].UnlockedTier = 5;
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -137,6 +146,8 @@ public class ProductionPlanningTests
         LandUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(treasury);
+        f.AddManpower(treasury);   // Task99: 3資源経済（資金と同じスケールで付与）
+        f.AddProduction(treasury);
         f.UnlockedTier = unlockedTier;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -216,6 +227,8 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
+        s.Factions[0].AddManpower(200f);   // Task99: 3資源経済
+        s.Factions[0].AddProduction(200f);
         s.Factions[0].UnlockedTier = 5; // isolate the AutoProduce wiring from research non-determinism
         s.Types.Register(MvpUnitTypes.Tank_T1());
 
@@ -232,7 +245,9 @@ public class ProductionPlanningTests
 
         Assert.Empty(playerControlled.Queue);
         Assert.Equal(2, aiControlled.Queue.Count);
-        Assert.Equal(80f, s.Factions[0].Treasury, 3); // 200 - 2*60, spent only on the AI base
+        // Task99: 支払いは人的資源+生産力（AI基地の2両ぶんのみ消費、資金は不変）。
+        Assert.Equal(200f - 2f * 60f * 0.7f, s.Factions[0].Production, 3);
+        Assert.Equal(200f, s.Factions[0].Treasury, 3);
     }
 
     // --- Task63: MissileBase branches into MissileStockpile instead of the unit Queue ---

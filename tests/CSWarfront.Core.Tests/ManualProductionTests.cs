@@ -11,6 +11,8 @@ public class ManualProductionTests
         {
             var f = new Faction(ownerId.Value, "Red");
             f.AddTreasury(treasury);
+            f.AddManpower(treasury);   // Task99: 3資源経済（資金と同じスケールで付与）
+            f.AddProduction(treasury);
             s.Factions.Add(f);
         }
         var b = new MilitaryBase(100, BaseType.Army, new WorldPos(0, 0, 0));
@@ -24,13 +26,15 @@ public class ManualProductionTests
     [Fact]
     public void TryEnqueue_Ok_appends_order_and_spends_treasury()
     {
-        var s = WithBase(100f); // Infantry_T1 costs 20
+        var s = WithBase(100f); // Infantry_T1 costs 20（Task99: 人的資源60%/生産力40%）
         QueueResult r = ManualProduction.TryEnqueue(s, 100, "Infantry_T1");
 
         Assert.Equal(QueueResult.Ok, r);
         Assert.Single(s.Bases[0].Queue);
         Assert.Equal("Infantry_T1", s.Bases[0].Queue[0].TypeKey);
-        Assert.Equal(80f, s.Factions[0].Treasury, 3);
+        Assert.Equal(100f - 20f * 0.6f, s.Factions[0].Manpower, 3);
+        Assert.Equal(100f - 20f * 0.4f, s.Factions[0].Production, 3);
+        Assert.Equal(100f, s.Factions[0].Treasury, 3); // 生産力が足りている間、資金は使われない
     }
 
     [Fact]
@@ -73,6 +77,8 @@ public class ManualProductionTests
         NavalUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(1000f);
+        f.AddManpower(1000f);
+        f.AddProduction(1000f);
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
         b.OwnerFactionId = 0;
@@ -109,6 +115,8 @@ public class ManualProductionTests
         AirUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(1000f);
+        f.AddManpower(1000f);
+        f.AddProduction(1000f);
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.AirForce, new WorldPos(0, 0, 0));
         b.OwnerFactionId = 0;

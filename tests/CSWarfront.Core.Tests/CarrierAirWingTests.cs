@@ -13,6 +13,9 @@ public class CarrierAirWingTests
         var s = new WarState();
         var faction = new Faction(0, "Red");
         faction.AddTreasury(treasury);
+        // Task99: 3資源経済。人的資源は潤沢・生産力0にして、費用が従来どおり資金残高だけで
+        // 決まるようにする（資金費用 = ProductionCost×2 = Cost×0.8×2 = Cost×1.6、Air系share=0.2）。
+        faction.AddManpower(1000000f);
         faction.UnlockedTier = unlockedTier;
         s.Factions.Add(faction);
 
@@ -64,7 +67,8 @@ public class CarrierAirWingTests
 
         // Cycle is AirSuperiority, AirSuperiority, TacticalBomber, SuicideDrone at Tier1:
         // 200 + 200 + 260 + 90 = 750 (AirUnitRoster Tier1 costs).
-        Assert.Equal(100000f - 750f, faction.Treasury, 2);
+        // Task99: 生産力0のため資金費用は750×1.6=1200（WithCarrierのコメント参照）。
+        Assert.Equal(100000f - 750f * 1.6f, faction.Treasury, 2);
     }
 
     [Fact]

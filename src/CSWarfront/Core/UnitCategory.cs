@@ -25,6 +25,11 @@ namespace CSWarfront.Core
         /// （CombatStep/BaseCombatStep/ThreatCombatStep）には一切乗らず、専用のKamikazeStepが
         /// 交戦フロー全体（目標ロック→ダイブ→体当たり起爆）を扱う。既存メンバーの並びを一切変更せず
         /// 末尾に追加（列挙のint値に依存する永続化が万一存在しても既存値を破壊しないため）。</summary>
-        SuicideDrone
+        SuicideDrone,
+        /// <summary>補給トラック（Task99: 経済・補給システム）。非武装（Attack0・CanTargetDomains=None）で
+        /// 通常の射撃パイプラインに乗らず、専用のSupplyTruckStepが積載→配送→転送→帰還を扱う。
+        /// AI進軍（InvasionOrders.AssignAdvance）・戦闘編成カウント（ProductionPlanning.MaxUnitsPerFaction）
+        /// の対象外で、台数はSupplyTruckStep.MaxTrucksPerFactionで別枠管理。末尾追加（列挙値の互換維持）。</summary>
+        SupplyTruck
     }
 }
