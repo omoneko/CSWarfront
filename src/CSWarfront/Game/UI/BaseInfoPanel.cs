@@ -427,6 +427,10 @@ namespace CSWarfront.Game.UI
 
                 sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
                 sb.Append("\nTreasury: ").Append(snapshot.OwnerTreasury.ToString("0"));
+                // Task99: 3資源経済＋補給物資（住宅→Manpower、商業/オフィス→Treasury、工業→Production）。
+                sb.Append("\nManpower: ").Append(snapshot.OwnerManpower.ToString("0"))
+                  .Append("  Production: ").Append(snapshot.OwnerProduction.ToString("0"))
+                  .Append("  Supplies: ").Append(snapshot.OwnerSupplyStock.ToString("0"));
 
                 // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切
                 // 出ていなかったため「未実装」に見えていた。0のときも表示することでその事実を伝える。

@@ -323,6 +323,14 @@ namespace CSWarfront.Game.UI
                 sb.Append("\nArmor: ").Append(snapshot.Armor.ToString("0")).Append("    Speed: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
                 sb.Append("\nAccuracy: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
                 if (snapshot.AccuracyBoosted) sb.Append(" (Spotted)");
+                // Task99: 弾薬ゲージ（弾薬無限の兵科・Invaderは非表示）。弾切れは明示的に警告する。
+                if (snapshot.HasAmmoGauge)
+                {
+                    sb.Append("\nAmmo: ").Append((snapshot.Ammo * 100f).ToString("0")).Append("%");
+                    if (snapshot.Ammo <= 0f) sb.Append("  [OUT OF AMMO]");
+                }
+                if (snapshot.IsSupplyTruck)
+                    sb.Append("\nSupplies: ").Append((snapshot.SupplyLoad * 100f).ToString("0")).Append("%");
                 sb.Append("\nStatus: ").Append(StateLabel(snapshot.State));
                 sb.Append("\nTarget: ").Append(snapshot.TargetId.HasValue ? "Unit#" + snapshot.TargetId.Value : "none");
                 sb.Append("\nPath: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "Direct");

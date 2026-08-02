@@ -37,6 +37,14 @@ namespace CSWarfront.Game
         /// <summary>プレイヤーの指揮コマンド（Task48）。UnitInfoPanelが「自由進撃/停止/集結待機/AI」の
         /// いずれかとして表示する。</summary>
         public UnitOrder Order;
+
+        /// <summary>Task99: 弾薬ゲージ（0..1）。HasAmmoGauge=falseなら表示しない（弾薬無限の兵科）。</summary>
+        public float Ammo;
+        public bool HasAmmoGauge;
+
+        /// <summary>Task99: 補給トラックの積載量（0..1）。IsSupplyTruck=trueのときのみ表示する。</summary>
+        public float SupplyLoad;
+        public bool IsSupplyTruck;
     }
 
     /// <summary>
@@ -73,7 +81,12 @@ namespace CSWarfront.Game
                 TargetId = unit.TargetId,
                 PathIndex = unit.PathIndex,
                 PathCount = unit.Path != null ? unit.Path.Count : 0,
-                Order = unit.Order
+                Order = unit.Order,
+                Ammo = unit.Ammo, // Task99
+                HasAmmoGauge = type != null && type.AmmoCombatHours > 0f
+                    && unit.FactionId != Faction.InvaderFactionId,
+                SupplyLoad = unit.SupplyLoad,
+                IsSupplyTruck = type != null && type.Category == UnitCategory.SupplyTruck
             };
         }
     }

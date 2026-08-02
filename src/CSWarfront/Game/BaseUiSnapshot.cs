@@ -70,6 +70,11 @@ namespace CSWarfront.Game
 
         /// <summary>建造中か（MissileStockpile.IsBuildingの写し、Task63）。</summary>
         public bool IsBuildingMissile;
+
+        // --- Task99: 3資源経済＋補給物資（所有勢力のプールの写し） ---
+        public float OwnerManpower;
+        public float OwnerProduction;
+        public float OwnerSupplyStock;
     }
 
     /// <summary>
@@ -97,6 +102,7 @@ namespace CSWarfront.Game
             float ownerResearchPoints = 0f;
             byte ownerUnlockedTier = 1;
             float ownerNextTierCost = 0f;
+            float ownerManpower = 0f, ownerProduction = 0f, ownerSupplyStock = 0f; // Task99
             if (mb.OwnerFactionId.HasValue)
             {
                 byte owner = mb.OwnerFactionId.Value;
@@ -104,6 +110,9 @@ namespace CSWarfront.Game
                 if (f != null)
                 {
                     ownerTreasury = f.Treasury;
+                    ownerManpower = f.Manpower;         // Task99: 3資源＋補給物資
+                    ownerProduction = f.Production;
+                    ownerSupplyStock = f.SupplyStock;
                     // Task35: 研究点・解禁Tier・次のTierまでのコストをUI表示用に写す。
                     ownerResearchPoints = f.ResearchPoints;
                     ownerUnlockedTier = f.UnlockedTier;
@@ -135,6 +144,9 @@ namespace CSWarfront.Game
                 ProducingProgress = producingProgress,
                 ProducingBuildTime = producingBuildTime,
                 OwnerTreasury = ownerTreasury,
+                OwnerManpower = ownerManpower,       // Task99
+                OwnerProduction = ownerProduction,
+                OwnerSupplyStock = ownerSupplyStock,
                 OwnerUnitCount = ownerUnitCount,
                 AutoProduce = mb.AutoProduce,
                 AutoLaunchMissiles = mb.AutoLaunchMissiles,
