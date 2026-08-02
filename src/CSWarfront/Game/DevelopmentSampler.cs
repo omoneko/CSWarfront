@@ -29,9 +29,28 @@ namespace CSWarfront.Game
                 Vector3 p = buf[i].m_position;
                 // 発展度＝建物レベル+1（MVP簡略。人口密度等は後日加味）。
                 float dev = buf[i].m_level + 1;
-                list.Add(new DevelopmentSample { Position = new WorldPos(p.x, p.y, p.z), Development = dev });
+                list.Add(new DevelopmentSample
+                {
+                    Position = new WorldPos(p.x, p.y, p.z),
+                    Development = dev,
+                    Zone = ZoneFor(buf[i].Info.m_class.m_service) // Task99: 3資源経済のゾーン分類
+                });
             }
             return list;
+        }
+
+        /// <summary>Task99: CSのService種別→3資源経済のゾーン分類（住宅→人的資源、商業/オフィス→資金、
+        /// 工業→生産力）。それ以外（公共サービス等）はOther＝どの資源にも寄与しない。</summary>
+        private static ZoneKind ZoneFor(ItemClass.Service service)
+        {
+            switch (service)
+            {
+                case ItemClass.Service.Residential: return ZoneKind.Residential;
+                case ItemClass.Service.Commercial: return ZoneKind.CommercialOffice;
+                case ItemClass.Service.Office: return ZoneKind.CommercialOffice;
+                case ItemClass.Service.Industrial: return ZoneKind.Industrial;
+                default: return ZoneKind.Other;
+            }
         }
     }
 }

@@ -335,9 +335,17 @@ namespace CSWarfront.Game
                     foreach (var b in State.Bases)
                     {
                         if (b.OwnerFactionId == null) continue;
-                        float inc = TerritoryIncome.ForBase(b, samples, IncomeRate);
-                        State.FindFaction(b.OwnerFactionId.Value)?.AddTreasury(inc);
-                        b.LastIncome = inc; // Task35: UIが基地パネルへ表示するためのキャッシュ（非永続化）
+                        // Task99: 3資源経済。1km圏のゾーン別発展度から住宅→人的資源、
+                        // 商業/オフィス→資金、工業→生産力を産出する（旧: 全建物→資金のみ）。
+                        ZonedIncome inc = TerritoryIncome.ZonedForBase(b, samples, IncomeRate);
+                        Faction owner = State.FindFaction(b.OwnerFactionId.Value);
+                        if (owner != null)
+                        {
+                            owner.AddTreasury(inc.Funds);
+                            owner.AddManpower(inc.Manpower);
+                            owner.AddProduction(inc.Production);
+                        }
+                        b.LastIncome = inc.Funds; // Task35: UIが基地パネルへ表示するためのキャッシュ（非永続化）
                     }
                 }
 

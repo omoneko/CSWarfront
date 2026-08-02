@@ -99,6 +99,10 @@ namespace CSWarfront.Game
             {
                 var f = new Faction(i, names[i]);
                 f.AddTreasury(200f);
+                // Task99: 3資源経済の初期付与（都市が未発達でも最初の部隊を編成できるように。
+                // 開始資金200と同じ趣旨。値はWarStateSerializerのv8以前ロード時の既定とも揃える）。
+                f.AddManpower(200f);
+                f.AddProduction(200f);
                 state.Factions.Add(f);
             }
 

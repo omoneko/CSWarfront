@@ -28,7 +28,36 @@ namespace CSWarfront.Core
 
         public Faction(byte id, string name) { Id = id; Name = name; UnlockedTier = 1; }
 
+        // --- Task99: 3資源経済（人的資源/生産力。資金=Treasuryは既存プールを流用） ---
+        // 産出: 経済tickで基地1km圏のゾーン別発展度から（住宅→Manpower、商業/オフィス→Treasury、
+        // 工業→Production、TerritoryIncome.ZonedForBase）。消費: ユニット/補給トラック生産と
+        // 補給物資（UnitCosts/ResupplyStep参照。研究・ミサイルは従来どおりTreasury）。
+
+        /// <summary>人的資源（住宅地区の発展度から産出。ユニット生産の人員コスト）。</summary>
+        public float Manpower { get; private set; }
+
+        /// <summary>生産力（工業地区の発展度から産出。ユニットの装備コスト・補給物資の原資）。</summary>
+        public float Production { get; private set; }
+
         public void AddTreasury(float amount) { if (amount > 0f) Treasury += amount; }
+
+        public void AddManpower(float amount) { if (amount > 0f) Manpower += amount; }
+
+        public void AddProduction(float amount) { if (amount > 0f) Production += amount; }
+
+        public bool TrySpendManpower(float amount)
+        {
+            if (amount < 0f || Manpower < amount) return false;
+            Manpower -= amount;
+            return true;
+        }
+
+        public bool TrySpendProduction(float amount)
+        {
+            if (amount < 0f || Production < amount) return false;
+            Production -= amount;
+            return true;
+        }
 
         /// <summary>研究点を加算する。非正の値は無視する（AddTreasuryと同じ規約、Task35）。</summary>
         public void AddResearchPoints(float amount) { if (amount > 0f) ResearchPoints += amount; }
