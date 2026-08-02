@@ -39,6 +39,23 @@ namespace CSWarfront.Core
         /// <summary>生産力（工業地区の発展度から産出。ユニットの装備コスト・補給物資の原資）。</summary>
         public float Production { get; private set; }
 
+        /// <summary>補給物資ストック（勢力共通プール、上限ResupplyStep.SupplyStockCap）。
+        /// 経済tickで生産力から自動生産され（ResupplyStep.ProduceSupplies）、基地圏内自動補給と
+        /// 補給トラックの積載が消費する。v9で永続化。</summary>
+        public float SupplyStock { get; private set; }
+
+        public void AddSupply(float amount)
+        {
+            if (amount > 0f) SupplyStock += amount;
+        }
+
+        public bool TrySpendSupply(float amount)
+        {
+            if (amount < 0f || SupplyStock < amount) return false;
+            SupplyStock -= amount;
+            return true;
+        }
+
         public void AddTreasury(float amount) { if (amount > 0f) Treasury += amount; }
 
         public void AddManpower(float amount) { if (amount > 0f) Manpower += amount; }

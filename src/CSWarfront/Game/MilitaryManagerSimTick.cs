@@ -276,6 +276,11 @@ namespace CSWarfront.Game
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
+                // Task99: 基地/空母圏内の自動補給（弾薬回復、SupplyStock消費）と補給トラックの
+                // 配車・転送。移動の直後＝このtickの最終位置で「圏内かどうか」を判定する。
+                ResupplyStep.Advance(State, dt);
+                SupplyTruckStep.Advance(State, dt);
+
                 // Task98: 水際等でスタックしたユニットの自動消滅（移動直後＝このtickの実際の変位を
                 // 見た上で判定する。自拠点付近・非Moving状態は対象外、無音無爆発でDead化のみ）。
                 int stuckDespawned = StuckCleanupStep.Advance(State, dt);
@@ -347,6 +352,12 @@ namespace CSWarfront.Game
                         }
                         b.LastIncome = inc.Funds; // Task35: UIが基地パネルへ表示するためのキャッシュ（非永続化）
                     }
+
+                    // Task99: 補給物資の自動生産（生産力→SupplyStock、不足時は資金代替）と
+                    // 補給トラックの自動維持（陸軍基地ごと、勢力30台上限）。どちらも経済tickの頻度で十分。
+                    foreach (var f in State.Factions)
+                        ResupplyStep.ProduceSupplies(f);
+                    SupplyTruckStep.MaintainTrucks(State);
                 }
 
                 // 死亡ユニットの掃除。見た目（GameObject）は表現を持たないためここでの結合は不要

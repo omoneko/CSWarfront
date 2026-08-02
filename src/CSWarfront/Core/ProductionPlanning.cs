@@ -24,11 +24,16 @@ namespace CSWarfront.Core
         public static void Advance(WarState state)
         {
             // Task97: 勢力別の生存ユニット数を一度だけ数える（+1はInvader勢力のぶん）。
+            // Task99: 補給トラックは戦闘150体の上限とは別枠（SupplyTruckStep.MaxTrucksPerFaction）の
+            // ため、ここでは数えない。
             var aliveCounts = new int[Faction.InvaderFactionId + 1];
             for (int ui = 0; ui < state.Units.Count; ui++)
             {
                 UnitInstance u = state.Units[ui];
-                if (u.IsAlive && u.FactionId < aliveCounts.Length) aliveCounts[u.FactionId]++;
+                if (!u.IsAlive || u.FactionId >= aliveCounts.Length) continue;
+                UnitType ut = state.Types.Get(u.TypeKey);
+                if (ut != null && ut.Category == UnitCategory.SupplyTruck) continue;
+                aliveCounts[u.FactionId]++;
             }
 
             for (int fi = 0; fi < state.Factions.Count; fi++)

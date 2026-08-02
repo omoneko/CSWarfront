@@ -23,11 +23,13 @@ namespace CSWarfront.Core
     /// </summary>
     public static class TargetingRules
     {
-        /// <summary>この兵科は拠点（MilitaryBase）を攻撃できるか。戦闘機（対空専任）と空母
-        /// （プラットフォーム専任）のみfalse。</summary>
+        /// <summary>この兵科は拠点（MilitaryBase）を攻撃できるか。戦闘機（対空専任）・空母
+        /// （プラットフォーム専任）・補給トラック（Task99: 非武装。Attack0でもCombatMath.DamagePerHitの
+        /// 最低保証1が通ってしまうため、ここで明示的に除外する）のみfalse。</summary>
         public static bool CanAttackBase(UnitCategory category)
         {
-            return category != UnitCategory.AirSuperiority && category != UnitCategory.Carrier;
+            return category != UnitCategory.AirSuperiority && category != UnitCategory.Carrier
+                && category != UnitCategory.SupplyTruck;
         }
 
         /// <summary>攻撃側ドメインに応じた拠点HPの下限。地上のみ0まで削れる（＝占領できる）。
@@ -37,10 +39,11 @@ namespace CSWarfront.Core
             return attackerDomain == Domain.Land ? 0f : 1f;
         }
 
-        /// <summary>この兵科は外部脅威（KAIJU/Alien）を攻撃できるか。空母のみfalse。</summary>
+        /// <summary>この兵科は外部脅威（KAIJU/Alien）を攻撃できるか。空母と補給トラック
+        /// （Task99: 非武装、CanAttackBaseと同じ理由）のみfalse。</summary>
         public static bool CanAttackThreat(UnitCategory category)
         {
-            return category != UnitCategory.Carrier;
+            return category != UnitCategory.Carrier && category != UnitCategory.SupplyTruck;
         }
     }
 }

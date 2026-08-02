@@ -152,6 +152,7 @@ namespace CSWarfront.Game
                     WriteTemplateRow(w, LandUnitRoster.Get(UnitCategory.Artillery, 1));
                     WriteTemplateRow(w, LandUnitRoster.Get(UnitCategory.DroneInfantry, 1));
                     WriteTemplateRow(w, LandUnitRoster.Get(UnitCategory.AntiAir, 1));
+                    WriteTemplateRow(w, LandUnitRoster.Get(UnitCategory.SupplyTruck, 1)); // Task99
                     WriteTemplateRow(w, NavalUnitRoster.Get(UnitCategory.Destroyer, 1));
                     WriteTemplateRow(w, NavalUnitRoster.Get(UnitCategory.Carrier, 1));
                     WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.AirSuperiority, 1));
