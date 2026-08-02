@@ -20,8 +20,16 @@ namespace CSWarfront.Core
         //           (b)ユニットの部隊命令（InstanceIdキーのOrder/RallyPoint並列ブロック）を追加
         //           （Task92：「ロードで飛行中ミサイルが消える／命令がAI制御へ戻る」の解消）。
         //           v7以前を読んだ場合はどちらも従来どおり（飛翔中なし・全員AiControlled）。
+        // v8 -> v9: ペイロード全体の末尾に (a)勢力の3資源（Manpower/Production/SupplyStock、Idキーの
+        //           並列ブロック）、(b)ユニットの弾薬/積載（Ammo/SupplyLoad、InstanceIdキーの並列
+        //           ブロック）を追加（Task99: 経済・補給システム）。v8以前を読んだ場合は
+        //           資源=初期付与相当（Manpower/Production各200、SupplyStock200）・弾薬満タン・
+        //           積載0で復元される（Invaderは資源0のまま＝使わないので不問）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 8;
+        private const int Version = 9;
+
+        /// <summary>v8以前のセーブに与える3資源の既定値（新規ゲームの初期付与と同額）。</summary>
+        private const float LegacyResourceGrant = 200f;
 
         public static byte[] Serialize(WarState s)
         {
@@ -94,6 +102,22 @@ namespace CSWarfront.Core
                     w.Write((int)u.Order);
                     w.Write(u.RallyPoint.HasValue);
                     WritePos(w, u.RallyPoint.HasValue ? u.RallyPoint.Value : new WorldPos(0, 0, 0));
+                }
+
+                // v9（Task99）: 勢力の3資源（Idキーの並列ブロック。勢力ブロック本体は互換のため触らない）。
+                w.Write(s.Factions.Count);
+                foreach (var f in s.Factions)
+                {
+                    w.Write(f.Id);
+                    w.Write(f.Manpower); w.Write(f.Production); w.Write(f.SupplyStock);
+                }
+
+                // v9（Task99）: ユニットの弾薬/積載（InstanceIdキーの並列ブロック）。
+                w.Write(s.Units.Count);
+                foreach (var u in s.Units)
+                {
+                    w.Write(u.InstanceId);
+                    w.Write(u.Ammo); w.Write(u.SupplyLoad);
                 }
 
                 w.Flush();
@@ -223,6 +247,45 @@ namespace CSWarfront.Core
                         if (u == null) continue; // 整合性が崩れたセーブでも例外にしない（防御的）
                         u.Order = order;
                         if (hasRally) u.RallyPoint = rally;
+                    }
+                }
+
+                // v9（Task99）: 3資源＋弾薬/積載。v8以前は既定値（バージョンコメント参照）。
+                if (version >= 9)
+                {
+                    int frcount = r.ReadInt32();
+                    for (int i = 0; i < frcount; i++)
+                    {
+                        byte fid = r.ReadByte();
+                        float manpower = r.ReadSingle(), production = r.ReadSingle(), supply = r.ReadSingle();
+                        Faction f = s.FindFaction(fid);
+                        if (f == null) continue; // 防御的（部隊命令ブロックと同じ規約）
+                        f.AddManpower(manpower);
+                        f.AddProduction(production);
+                        f.AddSupply(supply);
+                    }
+
+                    int uacount = r.ReadInt32();
+                    for (int i = 0; i < uacount; i++)
+                    {
+                        uint iid = r.ReadUInt32();
+                        float ammo = r.ReadSingle(), load = r.ReadSingle();
+                        UnitInstance u = s.FindUnit(iid);
+                        if (u == null) continue;
+                        u.Ammo = ammo;
+                        u.SupplyLoad = load;
+                    }
+                }
+                else
+                {
+                    // 旧セーブへの初期付与（新規ゲームと同額。既存の軍を経済停止で即枯渇させないため）。
+                    // 弾薬はUnitInstanceの既定値（満タン）のままでよい。
+                    foreach (Faction f in s.Factions)
+                    {
+                        if (f.Id == Faction.InvaderFactionId) continue;
+                        f.AddManpower(LegacyResourceGrant);
+                        f.AddProduction(LegacyResourceGrant);
+                        f.AddSupply(LegacyResourceGrant);
                     }
                 }
             }

@@ -49,6 +49,26 @@ public class WarStateSerializerTests
     }
 
     [Fact]
+    public void Roundtrip_v9_preserves_resources_ammo_and_supply_load()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        s.FindFaction(0).AddManpower(111f);
+        s.FindFaction(0).AddProduction(222f);
+        s.FindFaction(0).AddSupply(333f);
+        s.FindUnit(7).Ammo = 0.45f;
+        s.FindUnit(7).SupplyLoad = 0.6f;
+
+        var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
+
+        Assert.Equal(111f, r.FindFaction(0).Manpower, 3);
+        Assert.Equal(222f, r.FindFaction(0).Production, 3);
+        Assert.Equal(333f, r.FindFaction(0).SupplyStock, 3);
+        Assert.Equal(0.45f, r.FindUnit(7).Ammo, 3);
+        Assert.Equal(0.6f, r.FindUnit(7).SupplyLoad, 3);
+    }
+
+    [Fact]
     public void Deserialize_empty_returns_fresh_state()
     {
         var types = new UnitTypeRegistry();
@@ -225,6 +245,11 @@ public class WarStateSerializerTests
         Assert.Equal(50f, r.FindFaction(0).Treasury, 3);
         Assert.Equal(0f, r.FindFaction(0).ResearchPoints, 3);
         Assert.Equal((byte)1, r.FindFaction(0).UnlockedTier);
+        // Task99: v8以前のセーブは3資源の初期付与（200）を受ける（Invaderは対象外）。
+        Assert.Equal(200f, r.FindFaction(0).Manpower, 3);
+        Assert.Equal(200f, r.FindFaction(0).Production, 3);
+        Assert.Equal(200f, r.FindFaction(0).SupplyStock, 3);
+        Assert.Equal(0f, r.FindFaction(Faction.InvaderFactionId).Manpower, 3);
     }
 
     // --- Task59: v4 -> v5, ThreatRelations (5 factions x ThreatKind) appended at the very end ---
