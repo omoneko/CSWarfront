@@ -179,6 +179,9 @@ namespace CSWarfront.Game
                 case UnitCategory.AirSuperiority: modelName = "Unit_Fighter"; return true;
                 case UnitCategory.TacticalBomber: modelName = "Unit_Bomber"; return true;
                 case UnitCategory.SuicideDrone: modelName = "Unit_SuicideDrone"; return true;
+                // Task99: 補給トラックは専用モデルが用意されるまでAPCモデルで代用する（箱型車両で
+                // 見た目の違和感が最も少ない。プリミティブCubeへのフォールバックを避けるため）。
+                case UnitCategory.SupplyTruck: modelName = "Unit_Apc"; return true;
                 default: modelName = null; return false;
             }
         }
