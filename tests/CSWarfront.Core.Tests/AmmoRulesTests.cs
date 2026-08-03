@@ -56,19 +56,81 @@ public class AmmoRulesTests
     }
 
     [Fact]
-    public void Invader_units_never_run_dry()
+    public void Invader_units_consume_ammo_and_stop_when_dry()
     {
+        // Task100（実機フィードバック「侵攻部隊側が有利すぎる」）: Invaderも弾薬制。
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
         InvasionEvents.EnsureInvaderFaction(s);
         var invader = new UnitInstance(3, "Tank_T1", Faction.InvaderFactionId, 1000f, new WorldPos(-30, 0, 0));
-        invader.Ammo = 0f; // 仮に0でも撃てる（HasAmmoが常にtrue）
         s.Units.Add(invader);
+
+        CombatStep.Advance(s, 2f);
+        Assert.Equal(1f - 2f / 8f, invader.Ammo, 3); // 通常勢力と同じく消費する
+
+        // 弾切れにすると射撃が完全に止まる（redへのダメージ源はinvaderとblueだが、blueも
+        // 弾切れにして「invaderが撃てない」ことをredのHP不変で観測する）。
+        invader.Ammo = 0f;
+        blue.Ammo = 0f;
         float redHp = red.CurrentHP;
-
         CombatStep.Advance(s, 1f);
+        Assert.Equal(redHp, red.CurrentHP, 3);
+    }
 
-        Assert.True(red.CurrentHP < redHp, "expected the invader to keep firing with zero ammo");
-        Assert.Equal(0f, invader.Ammo, 3); // 消費もしない（0のまま）
+    [Fact]
+    public void Invader_kills_scavenge_ammo()
+    {
+        // Task100: Invaderの補給は「守備部隊の撃破」のみ（現地調達、+25%/killで上限1）。
+        var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
+        InvasionEvents.EnsureInvaderFaction(s);
+        var invader = new UnitInstance(3, "Tank_T1", Faction.InvaderFactionId, 1000f, new WorldPos(60, 0, 0));
+        invader.Ammo = 0.1f;
+        s.Units.Add(invader);
+        blue.Position = new WorldPos(90, 0, 0); // invaderの射程内・redの射程外
+        blue.CurrentHP = 1f;                    // 次の一撃で撃破される
+        red.Position = new WorldPos(5000, 0, 5000); // 巻き込まれないよう退避
+
+        CombatStep.Advance(s, 0.05f);
+
+        Assert.False(blue.IsAlive);
+        // 消費(0.05/8)より撃破報酬(+0.25)が大きい＝正味で増えている。
+        Assert.True(invader.Ammo > 0.1f, "expected the invader to scavenge ammo from the kill");
+        Assert.True(invader.Ammo <= 1f);
+    }
+
+    [Fact]
+    public void Normal_faction_kills_do_not_scavenge_ammo()
+    {
+        var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
+        blue.CurrentHP = 1f;
+        blue.Ammo = 0f; // 反撃で赤の弾薬が変わらないように
+        red.Ammo = 0.5f;
+
+        CombatStep.Advance(s, 0.05f);
+
+        Assert.False(blue.IsAlive);
+        Assert.True(red.Ammo < 0.5f, "expected only consumption, no scavenging, for normal factions");
+    }
+
+    [Fact]
+    public void Invaders_never_refill_from_base_zones()
+    {
+        // Task100: 占領基地の圏内でもInvaderは回復しない（撃破のみが補給源）。
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        InvasionEvents.EnsureInvaderFaction(s);
+        LandUnitRoster.RegisterAll(s.Types);
+        Faction invaderFaction = s.FindFaction(Faction.InvaderFactionId);
+        invaderFaction.AddSupply(100f); // 仮にストックがあっても
+        var b = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0));
+        b.OwnerFactionId = Faction.InvaderFactionId; // 占領済みの基地
+        s.Bases.Add(b);
+        var invader = new UnitInstance(1, "Tank_T1", Faction.InvaderFactionId, 100f, new WorldPos(50, 0, 0));
+        invader.Ammo = 0f;
+        s.Units.Add(invader);
+
+        ResupplyStep.Advance(s, 10f);
+
+        Assert.Equal(0f, invader.Ammo, 3);
     }
 
     [Fact]

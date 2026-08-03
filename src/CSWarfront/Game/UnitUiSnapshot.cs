@@ -83,8 +83,8 @@ namespace CSWarfront.Game
                 PathCount = unit.Path != null ? unit.Path.Count : 0,
                 Order = unit.Order,
                 Ammo = unit.Ammo, // Task99
-                HasAmmoGauge = type != null && type.AmmoCombatHours > 0f
-                    && unit.FactionId != Faction.InvaderFactionId,
+                // Task100: Invaderも弾薬制になった（現地調達方式）ためゲージを表示する。
+                HasAmmoGauge = type != null && type.AmmoCombatHours > 0f,
                 SupplyLoad = unit.SupplyLoad,
                 IsSupplyTruck = type != null && type.Category == UnitCategory.SupplyTruck
             };

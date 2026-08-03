@@ -73,7 +73,9 @@ namespace CSWarfront.Core
 
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null || type.AmmoCombatHours <= 0f) continue; // 弾薬制の対象外
-                if (u.FactionId == Faction.InvaderFactionId) continue;    // 弾薬無限（防御的）
+                // Task100: Invaderは補給網を一切使えない（現地調達方式＝敵撃破でのみ回復、
+                // AmmoRules.RewardInvaderKill）。占領した基地の圏内でも回復させない。
+                if (u.FactionId == Faction.InvaderFactionId) continue;
 
                 Faction f = state.FindFaction(u.FactionId);
                 if (f == null || f.SupplyStock <= 0f) continue;

@@ -78,7 +78,11 @@ namespace CSWarfront.Core
                 // 同tick内で同じ的へ複数回ダメージが入っても二重付与しない。
                 bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= dmg;
-                if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
+                if (wasAlive && target.CurrentHP <= 0f)
+                {
+                    AwardKillReward(state, self.FactionId, targetType);
+                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invaderの現地調達（撃破で弾薬回復）
+                }
 
                 // Task54: 被弾地点を「戦闘域」として報告する（民間交通の迂回用）。近傍への報告は
                 // CombatZoneTracker側でマージされるため、ここでは間引き不要。
@@ -132,7 +136,11 @@ namespace CSWarfront.Core
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * type.FireIntervalHours * matchup;
                 bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= dmg;
-                if (wasAlive && target.CurrentHP <= 0f) AwardKillReward(state, self.FactionId, targetType);
+                if (wasAlive && target.CurrentHP <= 0f)
+                {
+                    AwardKillReward(state, self.FactionId, targetType);
+                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invaderの現地調達（撃破で弾薬回復）
+                }
                 state.CombatZones.ReportCombat(target.Position);
             }
 
