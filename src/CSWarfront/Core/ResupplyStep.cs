@@ -101,6 +101,46 @@ namespace CSWarfront.Core
                 u.Ammo += refill;
                 if (u.Ammo > 1f) u.Ammo = 1f;
             }
+
+            // Task101: 築城（Bunker/ArtilleryPost）の弾薬回復。稼働中の施設が、自身の位置から
+            // ResupplyRadius以内の補給源（通常基地=勢力プール、または備蓄のあるDepot）から
+            // ユニットと同じレート・同じ消費で回復する。
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                MilitaryBase fort = state.Bases[b];
+                if (fort.Type != BaseType.Bunker && fort.Type != BaseType.ArtilleryPost) continue;
+                if (fort.OwnerFactionId == null || fort.CurrentHP <= 0f || fort.FortAmmo >= 1f) continue;
+
+                Faction f = state.FindFaction(fort.OwnerFactionId.Value);
+                if (f == null) continue;
+
+                MilitaryBase source = null;
+                bool nearNormalBase = false;
+                for (int k = 0; k < state.Bases.Count; k++)
+                {
+                    MilitaryBase mb = state.Bases[k];
+                    if (mb.OwnerFactionId == null || mb.OwnerFactionId.Value != fort.OwnerFactionId.Value) continue;
+                    if (mb.BaseId == fort.BaseId) continue;
+                    if (fort.Position.HorizontalDistanceTo(mb.Position) > ResupplyRadius) continue;
+                    if (!FortificationRules.IsFortification(mb.Type)) { nearNormalBase = true; break; }
+                    if (mb.Type == BaseType.SupplyDepot && mb.StoredSupplies > 0f && source == null) source = mb;
+                }
+                float fortAvailable = nearNormalBase ? f.SupplyStock : (source != null ? source.StoredSupplies : 0f);
+                if (fortAvailable <= 0f) continue;
+
+                float fortRefill = RefillPerHour * dt;
+                if (fortRefill > 1f - fort.FortAmmo) fortRefill = 1f - fort.FortAmmo;
+                float fortCost = fortRefill * SupplyPerFullReload;
+                if (fortCost > fortAvailable)
+                {
+                    fortCost = fortAvailable;
+                    fortRefill = fortCost / SupplyPerFullReload;
+                }
+                if (nearNormalBase) f.TrySpendSupply(fortCost);
+                else source.StoredSupplies -= fortCost;
+                fort.FortAmmo += fortRefill;
+                if (fort.FortAmmo > 1f) fort.FortAmmo = 1f;
+            }
         }
 
         /// <summary>自勢力の補給点からResupplyRadius以内か（消費元は区別しない、トラックの

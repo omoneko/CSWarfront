@@ -273,6 +273,10 @@ namespace CSWarfront.Game
                 // MovementStepより前に呼ぶことで、このtickで決めた立ち位置へ同じtick内で動き出せるようにする。
                 CoverSeekStep.Advance(State, dt);
 
+                // Task101: 歩兵の陣地志向（敵接近時に塹壕/掩蔽壕へ）。CoverSeekStepの直後に走り、
+                // 陣地が使える場合は遮蔽の決定を上書きする（陣地＞建物の陰、FortSeekStepコメント参照）。
+                FortSeekStep.Advance(State, dt);
+
                 // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
                 MovementStep.Advance(State, dt);
 
@@ -300,6 +304,10 @@ namespace CSWarfront.Game
                 // FactionStatus.Refreshが毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても
                 // 基地を取り戻せば復活する）。ThreatCombatStepは通常の戦闘に「加えて」実行するだけで、
                 // ターゲット選定を奪い合わない（射程内なら両方に同時に撃つ、Core/ThreatCombatStep参照）。
+                // Task101: 築城（掩蔽壕/砲兵陣地）の自動射撃。CombatStepの前に置くことで、
+                // ここで撃破したユニットをCombatStep第2パス（死亡判定・KillEvent）が同tickで拾う
+                // （KamikazeStepと同じパターン）。
+                FortCombatStep.Advance(State, dt);
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
                 ThreatCombatStep.Advance(State, dt);

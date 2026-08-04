@@ -49,6 +49,35 @@ namespace CSWarfront.Core
             _points.Add(new CoverPoint(position, radius));
         }
 
+        /// <summary>Task101: fromからtoへの射線（水平線分）が遮蔽物（建物円）に遮られるか。
+        /// 掩蔽壕の「建物非貫通」射撃判定用。fromの近傍ignoreNearFromRadius以内の遮蔽物は
+        /// 発射側自身の建物とみなして無視する。目標側の遮蔽は正当に射線を遮る
+        /// （建物に張り付いた敵は撃てない＝遮蔽の意味を保つ）。</summary>
+        public bool BlocksLine(WorldPos from, WorldPos to, float ignoreNearFromRadius)
+        {
+            float abx = to.X - from.X, abz = to.Z - from.Z;
+            float lenSq = abx * abx + abz * abz;
+
+            for (int i = 0; i < _points.Count; i++)
+            {
+                CoverPoint cp = _points[i];
+
+                float fx = cp.Position.X - from.X, fz = cp.Position.Z - from.Z;
+                float distFromSq = fx * fx + fz * fz;
+                float ignore = ignoreNearFromRadius + cp.Radius;
+                if (distFromSq <= ignore * ignore) continue; // 発射側自身の建物
+
+                // 点と線分の最短距離（2D）。
+                float t = lenSq > 0f ? (fx * abx + fz * abz) / lenSq : 0f;
+                if (t < 0f) t = 0f;
+                if (t > 1f) t = 1f;
+                float cx = from.X + abx * t - cp.Position.X;
+                float cz = from.Z + abz * t - cp.Position.Z;
+                if (cx * cx + cz * cz < cp.Radius * cp.Radius) return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// unitPosからsearchRadius以内の遮蔽物の中で、threatPosから最もよく身を隠せる位置を探す。
         /// 見つかった場合、戻り値のWorldPosはその遮蔽物の「脅威から見て奥側」の立ち位置

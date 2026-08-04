@@ -179,6 +179,7 @@ namespace CSWarfront.Core
                 UnitType targetType = state.Types.Get(targetUnit.TypeKey);
                 float targetArmor = targetType != null ? targetType.Armor : 0f;
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor);
+                dmg *= FortDefenseBonus.Multiplier(state, targetUnit, targetType); // Task101: 塹壕/掩蔽壕上の歩兵
 
                 bool wasAlive = targetUnit.CurrentHP > 0f;
                 targetUnit.CurrentHP -= dmg;

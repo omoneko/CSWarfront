@@ -76,6 +76,15 @@ namespace CSWarfront.Core
         /// トラック以外のユニットでは常に0のまま使われない。</summary>
         public float SupplyLoad;
 
+        /// <summary>Task101: このユニットを運搬しているユニット（輸送ヘリ/軍用列車）のInstanceId。
+        /// 非null=搭乗中（v10で永続化）。搭乗中は全step（移動/戦闘/補給/スタック/AI進軍）から除外され、
+        /// 攻撃対象にもならない（TargetSearch/UnitSpatialGridが候補から外す）。位置は運搬役が毎tick
+        /// 追従させ、運搬役が死亡したら道連れ（無音消滅）になる（TransportHeliStep/TrainStep）。</summary>
+        public uint? CarriedByUnitId;
+
+        /// <summary>搭乗中か（CarriedByUnitId != null の可読ヘルパ）。</summary>
+        public bool IsCarried => CarriedByUnitId.HasValue;
+
         /// <summary>Task101: 補給トラックの現在の積載が補給拠点/貨物駅の備蓄由来か（実行時のみ・
         /// 非永続化）。拠点で積んだ物資を同じ/別の拠点へ積み直す無限シャッフルを防ぐため、
         /// 「拠点への備蓄輸送」は勢力プール（陸軍基地）で積んだトラックだけが行う（SupplyTruckStep）。

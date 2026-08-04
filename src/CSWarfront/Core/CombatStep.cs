@@ -73,6 +73,7 @@ namespace CSWarfront.Core
                 // Task86: 航空ユニットはパス移動で射程内滞在時間が減るぶん、AirCombat.DamageMultiplierで補正する。
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup * accuracy
                     * AirCombat.DamageMultiplier(type);
+                dmg *= FortDefenseBonus.Multiplier(state, target, targetType); // Task101: 塹壕/掩蔽壕上の歩兵は被ダメ減
                 // 撃破報酬（Task35）: このダメージでHPが初めて0以下へ落ちた瞬間だけ、攻撃側(self)の勢力へ
                 // Research.KillReward を与える。wasAlive フラグで「このダメージがとどめだったか」を判定し、
                 // 同tick内で同じ的へ複数回ダメージが入っても二重付与しない。
