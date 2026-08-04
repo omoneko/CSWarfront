@@ -69,6 +69,38 @@ public class WarStateSerializerTests
     }
 
     [Fact]
+    public void Roundtrip_v10_preserves_fort_state_and_carry_links()
+    {
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        var depot = new MilitaryBase(300, BaseType.SupplyDepot, new WorldPos(1, 0, 1));
+        depot.OwnerFactionId = 0;
+        depot.StoredSupplies = 123f;
+        var bunker = new MilitaryBase(301, BaseType.Bunker, new WorldPos(2, 0, 2));
+        bunker.OwnerFactionId = 0;
+        bunker.FortAmmo = 0.4f;
+        var station = new MilitaryBase(302, BaseType.CargoStation, new WorldPos(3, 0, 3));
+        station.OwnerFactionId = 0;
+        station.RailConnected = true;
+        s.Bases.Add(depot); s.Bases.Add(bunker); s.Bases.Add(station);
+        s.FindUnit(7).CarriedByUnitId = 42u;
+
+        var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
+
+        Assert.Equal(123f, FindBase(r, 300).StoredSupplies, 3);
+        Assert.Equal(0.4f, FindBase(r, 301).FortAmmo, 3);
+        Assert.True(FindBase(r, 302).RailConnected);
+        Assert.Equal(BaseType.Bunker, FindBase(r, 301).Type);
+        Assert.Equal(42u, r.FindUnit(7).CarriedByUnitId);
+    }
+
+    private static MilitaryBase FindBase(WarState s, ushort id)
+    {
+        foreach (var b in s.Bases) if (b.BaseId == id) return b;
+        return null;
+    }
+
+    [Fact]
     public void Deserialize_empty_returns_fresh_state()
     {
         var types = new UnitTypeRegistry();

@@ -25,8 +25,12 @@ namespace CSWarfront.Core
         //           ブロック）を追加（Task99: 経済・補給システム）。v8以前を読んだ場合は
         //           資源=初期付与相当（Manpower/Production各200、SupplyStock200）・弾薬満タン・
         //           積載0で復元される（Invaderは資源0のまま＝使わないので不問）。
+        // v9 -> v10: ペイロード全体の末尾に (a)基地の築城/備蓄状態（BaseIdキー並列:
+        //           StoredSupplies/FortAmmo/RailConnected）、(b)ユニットの搭乗状態
+        //           （InstanceIdキー並列: CarriedByUnitId）を追加（Task101: Update3）。
+        //           v9以前は既定値（備蓄0・築城弾薬満タン・レール未接続・未搭乗）。
         // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
-        private const int Version = 9;
+        private const int Version = 10;
 
         /// <summary>v8以前のセーブに与える3資源の既定値（新規ゲームの初期付与と同額）。</summary>
         private const float LegacyResourceGrant = 200f;
@@ -118,6 +122,23 @@ namespace CSWarfront.Core
                 {
                     w.Write(u.InstanceId);
                     w.Write(u.Ammo); w.Write(u.SupplyLoad);
+                }
+
+                // v10（Task101）: 基地の築城/備蓄状態（BaseIdキーの並列ブロック）。
+                w.Write(s.Bases.Count);
+                foreach (var b in s.Bases)
+                {
+                    w.Write(b.BaseId);
+                    w.Write(b.StoredSupplies); w.Write(b.FortAmmo); w.Write(b.RailConnected);
+                }
+
+                // v10（Task101）: ユニットの搭乗状態（InstanceIdキーの並列ブロック）。
+                w.Write(s.Units.Count);
+                foreach (var u in s.Units)
+                {
+                    w.Write(u.InstanceId);
+                    w.Write(u.CarriedByUnitId.HasValue);
+                    w.Write(u.CarriedByUnitId.HasValue ? u.CarriedByUnitId.Value : 0u);
                 }
 
                 w.Flush();
@@ -288,8 +309,42 @@ namespace CSWarfront.Core
                         f.AddSupply(LegacyResourceGrant);
                     }
                 }
+
+                // v10（Task101）: 築城/備蓄＋搭乗。v9以前は既定値
+                // （StoredSupplies0/FortAmmo1/RailConnected false/未搭乗）のままでよい。
+                if (version >= 10)
+                {
+                    int bscount = r.ReadInt32();
+                    for (int i = 0; i < bscount; i++)
+                    {
+                        ushort bid = r.ReadUInt16();
+                        float stored = r.ReadSingle(); float fortAmmo = r.ReadSingle(); bool rail = r.ReadBoolean();
+                        MilitaryBase b = FindBaseById(s, bid);
+                        if (b == null) continue; // 防御的
+                        b.StoredSupplies = stored;
+                        b.FortAmmo = fortAmmo;
+                        b.RailConnected = rail;
+                    }
+
+                    int uccount = r.ReadInt32();
+                    for (int i = 0; i < uccount; i++)
+                    {
+                        uint iid = r.ReadUInt32();
+                        bool carried = r.ReadBoolean(); uint carrier = r.ReadUInt32();
+                        UnitInstance u = s.FindUnit(iid);
+                        if (u == null) continue;
+                        if (carried) u.CarriedByUnitId = carrier;
+                    }
+                }
             }
             return s;
+        }
+
+        private static MilitaryBase FindBaseById(WarState s, ushort baseId)
+        {
+            for (int i = 0; i < s.Bases.Count; i++)
+                if (s.Bases[i].BaseId == baseId) return s.Bases[i];
+            return null;
         }
 
         private static void WritePos(BinaryWriter w, WorldPos p) { w.Write(p.X); w.Write(p.Y); w.Write(p.Z); }
