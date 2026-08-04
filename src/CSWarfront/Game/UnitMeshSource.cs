@@ -182,6 +182,10 @@ namespace CSWarfront.Game
                 // Task99: 補給トラック専用モデル（models.blend 20_Supply_Truck、2026-08-03ユーザー作成の
                 // 6×6幌付きトラック 7.77×2.78×2.91m。当初のAPCモデル代用を置き換えた）。
                 case UnitCategory.SupplyTruck: modelName = "Unit_SupplyTruck"; return true;
+                // Task101: Update3の新兵科（models.blend 25_Transport_Helo/26_Attack_Helo/28_Freight_Train）。
+                case UnitCategory.TransportHelicopter: modelName = "Unit_TransportHeli"; return true;
+                case UnitCategory.AttackHelicopter: modelName = "Unit_AttackHeli"; return true;
+                case UnitCategory.MilitaryTrain: modelName = "Unit_MilitaryTrain"; return true;
                 default: modelName = null; return false;
             }
         }

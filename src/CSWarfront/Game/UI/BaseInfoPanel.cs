@@ -432,6 +432,20 @@ namespace CSWarfront.Game.UI
                   .Append("  Production: ").Append(snapshot.OwnerProduction.ToString("0"))
                   .Append("  Supplies: ").Append(snapshot.OwnerSupplyStock.ToString("0"));
 
+                // Task101: 野戦築城の状態表示（該当種別のみ）。
+                if (snapshot.Type == BaseType.SupplyDepot || snapshot.Type == BaseType.CargoStation)
+                {
+                    sb.Append("\nStored supplies: ").Append(snapshot.StoredSupplies.ToString("0"))
+                      .Append(" / ").Append(FortificationRules.StoredSupplyCap(snapshot.Type).ToString("0"));
+                    if (snapshot.Type == BaseType.CargoStation)
+                        sb.Append(snapshot.RailConnected ? "  [Rail: connected]" : "  [Rail: NOT CONNECTED]");
+                }
+                else if (snapshot.Type == BaseType.Bunker || snapshot.Type == BaseType.ArtilleryPost)
+                {
+                    sb.Append("\nFort ammo: ").Append((snapshot.FortAmmo * 100f).ToString("0")).Append("%");
+                    if (snapshot.FortAmmo <= 0f) sb.Append("  [OUT OF AMMO]");
+                }
+
                 // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切
                 // 出ていなかったため「未実装」に見えていた。0のときも表示することでその事実を伝える。
                 sb.Append("\nIncome: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");

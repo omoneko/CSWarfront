@@ -54,13 +54,19 @@ namespace CSWarfront.Game.UI
         private const string NoSelectionLabel = "(none selected)";
 
         // 行の並び。UnitAssetBindingsBaseTypesの表示ラベル定数をそのまま流用する（UI文言の一元管理）。
-        private static readonly BaseType[] RowTypes = { BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase };
+        // Task101: 野戦築城5種（Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）の指定行を追加。
+        private static readonly BaseType[] RowTypes =
+        {
+            BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase,
+            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.SupplyDepot, BaseType.Trench, BaseType.CargoStation
+        };
         private static readonly string[] RowDisplayNames =
         {
             UnitAssetBindings.ArmyBaseDisplayName,
             UnitAssetBindings.NavyBaseDisplayName,
             UnitAssetBindings.AirBaseDisplayName,
-            UnitAssetBindings.MissileBaseDisplayName
+            UnitAssetBindings.MissileBaseDisplayName,
+            "Bunker", "Artillery Position", "Supply Depot", "Trench", "Cargo Station"
         };
 
         private static UICheckBox _customOnlyCheckbox;
@@ -68,9 +74,9 @@ namespace CSWarfront.Game.UI
         private static UILabel _countLabel;
         private static UILabel _hintLabel;
 
-        private static readonly UIDropDown[] _rowDropdowns = new UIDropDown[4];
-        private static readonly UILabel[] _rowLabels = new UILabel[4];
-        private static readonly UIButton[] _rowResetButtons = new UIButton[4];
+        private static readonly UIDropDown[] _rowDropdowns = new UIDropDown[9];
+        private static readonly UILabel[] _rowLabels = new UILabel[9];
+        private static readonly UIButton[] _rowResetButtons = new UIButton[9];
 
         private static readonly List<string> _filteredNames = new List<string>();
         private static bool _customOnly = true;

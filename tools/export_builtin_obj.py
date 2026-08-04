@@ -150,6 +150,16 @@ NAME_MAP = {
     # Task99: 補給トラック（20_Supply_Truck、2026-08-03ユーザー追加）。これまでのAPCモデル代用
     # （UnitMeshSourceのフォールバック）を専用モデルで置き換える。
     'supplytruck': 'Unit_SupplyTruck',
+    # Task101（Update3、2026-08-04ユーザー追加の8種）: 野戦築城4種＋ヘリ2種＋鉄道2種。
+    # 24_Trenchはモデル差し替えがあったため必ず再エクスポートすること。
+    'bunker': 'Fort_Bunker',
+    'artilleryposition': 'Fort_ArtilleryPost',
+    'supplypoint': 'Fort_SupplyDepot',
+    'trench': 'Fort_Trench',
+    'transporthelo': 'Unit_TransportHeli',
+    'attackhelo': 'Unit_AttackHeli',
+    'railyard': 'Fort_CargoStation',
+    'freighttrain': 'Unit_MilitaryTrain',
 }
 
 # NAME_MAPのうち、.blend側にオブジェクトがまだ存在しなくてもエラーにしないもの

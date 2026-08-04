@@ -75,6 +75,11 @@ namespace CSWarfront.Game
         public float OwnerManpower;
         public float OwnerProduction;
         public float OwnerSupplyStock;
+
+        // --- Task101: 野戦築城（この基地自身の備蓄/施設弾薬/レール接続の写し） ---
+        public float StoredSupplies;
+        public float FortAmmo;
+        public bool RailConnected;
     }
 
     /// <summary>
@@ -147,6 +152,9 @@ namespace CSWarfront.Game
                 OwnerManpower = ownerManpower,       // Task99
                 OwnerProduction = ownerProduction,
                 OwnerSupplyStock = ownerSupplyStock,
+                StoredSupplies = mb.StoredSupplies,  // Task101
+                FortAmmo = mb.FortAmmo,
+                RailConnected = mb.RailConnected,
                 OwnerUnitCount = ownerUnitCount,
                 AutoProduce = mb.AutoProduce,
                 AutoLaunchMissiles = mb.AutoLaunchMissiles,

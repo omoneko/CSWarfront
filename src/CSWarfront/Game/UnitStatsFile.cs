@@ -158,6 +158,9 @@ namespace CSWarfront.Game
                     WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.AirSuperiority, 1));
                     WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.TacticalBomber, 1));
                     WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.SuicideDrone, 1));
+                    WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.AttackHelicopter, 1));    // Task101
+                    WriteTemplateRow(w, AirUnitRoster.Get(UnitCategory.TransportHelicopter, 1)); // Task101
+                    WriteTemplateRow(w, LandUnitRoster.Get(UnitCategory.MilitaryTrain, 1));      // Task101
                     w.WriteLine("</UnitStats>");
                 }
                 ModConfig.Log("UnitStatsFile: wrote default template to " + path);
