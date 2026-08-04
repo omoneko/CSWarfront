@@ -25,11 +25,29 @@ namespace CSWarfront.Core
     {
         /// <summary>この兵科は拠点（MilitaryBase）を攻撃できるか。戦闘機（対空専任）・空母
         /// （プラットフォーム専任）・補給トラック（Task99: 非武装。Attack0でもCombatMath.DamagePerHitの
-        /// 最低保証1が通ってしまうため、ここで明示的に除外する）のみfalse。</summary>
+        /// 最低保証1が通ってしまうため、ここで明示的に除外する）・ヘリ2種と軍用列車（Task101:
+        /// 攻撃ヘリは地上ユニット専任、輸送ヘリ/列車は非武装）はfalse。</summary>
         public static bool CanAttackBase(UnitCategory category)
         {
             return category != UnitCategory.AirSuperiority && category != UnitCategory.Carrier
-                && category != UnitCategory.SupplyTruck;
+                && category != UnitCategory.SupplyTruck
+                && category != UnitCategory.AttackHelicopter && category != UnitCategory.TransportHelicopter
+                && category != UnitCategory.MilitaryTrain;
+        }
+
+        /// <summary>Task101: この兵科はヘリコプターか（対ヘリ規則の対象）。</summary>
+        public static bool IsHelicopter(UnitCategory category)
+        {
+            return category == UnitCategory.AttackHelicopter || category == UnitCategory.TransportHelicopter;
+        }
+
+        /// <summary>Task101: ヘリコプターを攻撃できるのは戦車・対空・戦闘機のみ
+        /// （ユーザー仕様。TargetSearch/UnitSpatialGridがヘリ標的の候補判定に使う。
+        /// 戦車はCanTargetDomains=Landのままだが、対ヘリに限りこの例外で標的にできる）。</summary>
+        public static bool CanTargetHelicopter(UnitCategory attacker)
+        {
+            return attacker == UnitCategory.Tank || attacker == UnitCategory.AntiAir
+                || attacker == UnitCategory.AirSuperiority;
         }
 
         /// <summary>攻撃側ドメインに応じた拠点HPの下限。地上のみ0まで削れる（＝占領できる）。
@@ -39,11 +57,13 @@ namespace CSWarfront.Core
             return attackerDomain == Domain.Land ? 0f : 1f;
         }
 
-        /// <summary>この兵科は外部脅威（KAIJU/Alien）を攻撃できるか。空母と補給トラック
-        /// （Task99: 非武装、CanAttackBaseと同じ理由）のみfalse。</summary>
+        /// <summary>この兵科は外部脅威（KAIJU/Alien）を攻撃できるか。空母・補給トラック
+        /// （Task99: 非武装）・ヘリ2種と軍用列車（Task101）はfalse。</summary>
         public static bool CanAttackThreat(UnitCategory category)
         {
-            return category != UnitCategory.Carrier && category != UnitCategory.SupplyTruck;
+            return category != UnitCategory.Carrier && category != UnitCategory.SupplyTruck
+                && category != UnitCategory.AttackHelicopter && category != UnitCategory.TransportHelicopter
+                && category != UnitCategory.MilitaryTrain;
         }
     }
 }

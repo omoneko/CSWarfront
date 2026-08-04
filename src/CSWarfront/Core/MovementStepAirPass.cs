@@ -28,6 +28,10 @@ namespace CSWarfront.Core
         private static bool AdvanceAirPass(WarState state, UnitInstance u, UnitType type, float stepLen,
             IHeightSampler height)
         {
+            // Task101: ヘリはホバリング型（レーストラック航過をしない。通常のAdvanceAir巡航＝
+            // 接近して射程内に留まる移動へフォールバックさせる）。
+            if (TargetingRules.IsHelicopter(type.Category)) return false;
+
             // 離脱レグ中: アンカーの生死・射程を問わず離脱点まで飛び切る（クラスコメントの3）。
             if (u.AirPassEgress.HasValue)
             {

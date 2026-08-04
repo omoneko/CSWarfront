@@ -60,6 +60,10 @@ namespace CSWarfront.Core
             // 一切発行しないため）。旧ロスターの値をそのまま残してあるのは、他の2種と同じBaseStats
             // 形状を保つため（このカテゴリでは単に無視されるだけで実害は無い）。
             new BaseStats(UnitCategory.SuicideDrone,     40f, 260f, 20f, 0f, 420f, 35f,  90f,  6f, 0.90f, 0.50f, ShotKind.DirectFire),
+            // Task101: 攻撃ヘリ（地上専任・ホバリング型＝レーストラック航過なし・低空60m）と
+            // 輸送ヘリ（非武装の兵站機、TransportHeliStepが運用。生産キューには乗らない自動維持）。
+            new BaseStats(UnitCategory.AttackHelicopter, 90f,  45f, 100f, 3f, 220f,  0f, 220f, 12f, 0.80f, 0.50f, ShotKind.Gunfire),
+            new BaseStats(UnitCategory.TransportHelicopter, 60f, 0f,  0f, 1f, 220f,  0f,  80f,  6f, 0f,    1f,    ShotKind.Gunfire),
         };
 
         /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（LandUnitRoster.TypeKeyと同じ形式）。</summary>
@@ -124,6 +128,8 @@ namespace CSWarfront.Core
             {
                 case UnitCategory.AirSuperiority: return DomainMask.Air;
                 case UnitCategory.TacticalBomber: return DomainMask.Land | DomainMask.Sea;
+                case UnitCategory.AttackHelicopter: return DomainMask.Land; // Task101: 地上専任（ヘリ同士・固定翼・艦船は不可）
+                case UnitCategory.TransportHelicopter: return DomainMask.None; // Task101: 非武装
                 default: return DomainMask.All;
             }
         }

@@ -86,6 +86,9 @@ namespace CSWarfront.Core
         /// 設定する（道路の高さに合わせるMovementStepの陸上ロジックとは全く別の垂直方向の扱い）。</summary>
         public const float CruiseAltitude = 120f;
 
+        /// <summary>Task101: ヘリコプター（TargetingRules.IsHelicopter）の巡航高度。固定翼より低空。</summary>
+        public const float HeliCruiseAltitude = 60f;
+
         /// <summary>Task79: 自爆ドローン（UnitCategoryFlags.IsKamikaze）が目標をロックしてダイブする際の
         /// 速度倍率。type.Speed（通常の巡航速度）にこれを掛けた値をダイブの実効速度として使う——
         /// 「目標に向かって加速して突っ込む」という体当たり特攻らしい見た目にするための、ドキュメント化
@@ -190,7 +193,8 @@ namespace CSWarfront.Core
                     if (!objective.HasValue) continue;
 
                     if (type.Domain == Domain.Air)
-                        AdvanceAir(u, stepLen, objective.Value, height);
+                        AdvanceAir(u, stepLen, objective.Value, height,
+                            TargetingRules.IsHelicopter(type.Category) ? HeliCruiseAltitude : CruiseAltitude); // Task101
                     else // Domain.Sea
                         AdvanceSea(u, stepLen, objective.Value, water, dt);
                     continue;
@@ -436,7 +440,8 @@ namespace CSWarfront.Core
         /// サンプリングに失敗すれば従来のYをそのまま維持する（クラス冒頭のIHeightSampler供給パターンと
         /// 同じ安全側フォールバック）。地表からの相対高度を毎tick取り直すため、山岳地帯の上を飛べば
         /// 自然にYも上下する。</summary>
-        private static void AdvanceAir(UnitInstance u, float stepLen, WorldPos objective, IHeightSampler height)
+        private static void AdvanceAir(UnitInstance u, float stepLen, WorldPos objective, IHeightSampler height,
+            float altitude = CruiseAltitude)
         {
             float dist = u.Position.HorizontalDistanceTo(objective);
             float nx, nz;
@@ -451,7 +456,7 @@ namespace CSWarfront.Core
             float ny = u.Position.Y; // サンプリング失敗時は従来のYを維持（フォールバック）。
             float groundY;
             if (height != null && height.TrySampleHeight(nx, nz, out groundY))
-                ny = groundY + CruiseAltitude;
+                ny = groundY + altitude;
 
             u.Position = new WorldPos(nx, ny, nz);
         }

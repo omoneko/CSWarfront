@@ -67,6 +67,14 @@ namespace CSWarfront.Core
             float bestNemesisDist = float.MaxValue;
             int bestNemesisIdx = int.MaxValue;
 
+            // Task101: 対ヘリ規則の判定に攻撃側の兵科が要る（TargetSearchの総当たり版と同じ）。
+            UnitCategory? selfCategory = null;
+            if (types != null)
+            {
+                UnitType selfType = types.Get(self.TypeKey);
+                if (selfType != null) selfCategory = selfType.Category;
+            }
+
             int cxMin = CellOf(self.Position.X - range), cxMax = CellOf(self.Position.X + range);
             int czMin = CellOf(self.Position.Z - range), czMax = CellOf(self.Position.Z + range);
             for (int cx = cxMin; cx <= cxMax; cx++)
@@ -81,6 +89,7 @@ namespace CSWarfront.Core
                         int idx = cell[c];
                         UnitInstance u = _units[idx];
                         if (u.InstanceId == self.InstanceId || !u.IsAlive) continue;
+                        if (u.IsCarried) continue; // Task101: 搭乗中は攻撃対象にならない
                         Relation r = rel.Get(self.FactionId, u.FactionId);
                         if (!r.IsHostile()) continue;
                         float d = self.Position.HorizontalDistanceTo(u.Position);
@@ -89,8 +98,19 @@ namespace CSWarfront.Core
                         if (types != null)
                         {
                             UnitType targetType = types.Get(u.TypeKey);
-                            if (targetType != null && !DomainMaskUtil.Contains(attackerCanTarget, targetType.Domain))
-                                continue;
+                            if (targetType != null)
+                            {
+                                // Task101: ヘリ標的の専用規則（総当たり版TargetSearchと同一）。
+                                if (TargetingRules.IsHelicopter(targetType.Category))
+                                {
+                                    if (!selfCategory.HasValue || !TargetingRules.CanTargetHelicopter(selfCategory.Value))
+                                        continue;
+                                }
+                                else if (!DomainMaskUtil.Contains(attackerCanTarget, targetType.Domain))
+                                {
+                                    continue;
+                                }
+                            }
                         }
 
                         if (r == Relation.Nemesis)

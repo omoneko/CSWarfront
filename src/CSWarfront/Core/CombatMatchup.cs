@@ -116,6 +116,21 @@ namespace CSWarfront.Core
             // Carrier（空母）: 打撃力より生存性のプラットフォーム。全カテゴリに対し弱い(0.6)。
             for (int t = 0; t < CategoryCount; t++)
                 Table[(int)UnitCategory.Carrier, t] = 0.6f;
+
+            // --- Task101: ヘリコプター ---
+            // AttackHelicopter: 対機甲に強く（1.6）、歩兵1.2、補給トラック狩り1.5。
+            Set(UnitCategory.AttackHelicopter, UnitCategory.Tank, 1.6f);
+            Set(UnitCategory.AttackHelicopter, UnitCategory.Apc, 1.6f);
+            Set(UnitCategory.AttackHelicopter, UnitCategory.MechInfantry, 1.2f);
+            Set(UnitCategory.AttackHelicopter, UnitCategory.Infantry, 1.2f);
+            Set(UnitCategory.AttackHelicopter, UnitCategory.SupplyTruck, 1.5f);
+            // 対ヘリ: 対空2.5（SAM本領）/戦闘機2.0/戦車0.6（機銃での応射、有効打にはなりにくい）。
+            Set(UnitCategory.AntiAir, UnitCategory.AttackHelicopter, 2.5f);
+            Set(UnitCategory.AntiAir, UnitCategory.TransportHelicopter, 2.5f);
+            Set(UnitCategory.AirSuperiority, UnitCategory.AttackHelicopter, 2.0f);
+            Set(UnitCategory.AirSuperiority, UnitCategory.TransportHelicopter, 2.0f);
+            Set(UnitCategory.Tank, UnitCategory.AttackHelicopter, 0.6f);
+            Set(UnitCategory.Tank, UnitCategory.TransportHelicopter, 0.6f);
         }
 
         private static void Set(UnitCategory attacker, UnitCategory target, float multiplier)

@@ -40,6 +40,8 @@ namespace CSWarfront.Core
         public static float DamageMultiplier(UnitType type)
         {
             if (type == null) return 1f;
+            // Task101: ヘリはホバリング型（レーストラック航過をしない＝射程内に留まる）ため補正なし。
+            if (TargetingRules.IsHelicopter(type.Category)) return 1f;
             return (type.Domain == Domain.Air && !type.Category.IsKamikaze()) ? PassDamageCompensation : 1f;
         }
     }

@@ -30,6 +30,15 @@ namespace CSWarfront.Core
         /// 通常の射撃パイプラインに乗らず、専用のSupplyTruckStepが積載→配送→転送→帰還を扱う。
         /// AI進軍（InvasionOrders.AssignAdvance）・戦闘編成カウント（ProductionPlanning.MaxUnitsPerFaction）
         /// の対象外で、台数はSupplyTruckStep.MaxTrucksPerFactionで別枠管理。末尾追加（列挙値の互換維持）。</summary>
-        SupplyTruck
+        SupplyTruck,
+        /// <summary>輸送ヘリ（Task101）: 非武装の自動維持兵站ユニット（TransportHeliStep）。
+        /// 基地→補給拠点の物資輸送＋歩兵の前線空輸。対ヘリ規則はTargetingRules.CanTargetHelicopter。</summary>
+        TransportHelicopter,
+        /// <summary>攻撃ヘリ（Task101）: 航空基地の通常生産兵科。地上ユニット専任（対基地・対脅威不可）、
+        /// ホバリング型（レーストラック航過なし・低空60m）。</summary>
+        AttackHelicopter,
+        /// <summary>軍用貨物列車（Task101）: 非武装・レール専用移動（TrainStep）。物資・陸上ユニットを
+        /// 貨物駅間で輸送する。</summary>
+        MilitaryTrain
     }
 }

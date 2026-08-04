@@ -36,6 +36,9 @@ namespace CSWarfront.Core
                 case UnitCategory.AirSuperiority:
                 case UnitCategory.TacticalBomber:
                 case UnitCategory.SuicideDrone:
+                case UnitCategory.AttackHelicopter:     // Task101
+                case UnitCategory.TransportHelicopter:
+                case UnitCategory.MilitaryTrain:
                     return 0.2f;
                 default:
                     return 0.4f;

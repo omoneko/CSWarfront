@@ -109,9 +109,10 @@ namespace CSWarfront.Core
         /// 定義しないため、平時・交戦時のどちらでも候補は同じ。</summary>
         private static readonly UnitCategory[] AirCategories =
         {
-            UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, UnitCategory.SuicideDrone
+            UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, UnitCategory.SuicideDrone,
+            UnitCategory.AttackHelicopter // Task101: 攻撃ヘリも航空基地の通常生産兵科
         };
-        private static readonly float[] AirTargets = { 0.45f, 0.35f, 0.20f };
+        private static readonly float[] AirTargets = { 0.35f, 0.30f, 0.15f, 0.20f };
 
         /// <summary>Task61: 基地のSpawnableDomainsから、平時フォールバックで使う兵科構成表を選ぶ。
         /// Sea → SeaCategories/SeaTargets、Air → AirCategories/AirTargets、それ以外（Army含む）は

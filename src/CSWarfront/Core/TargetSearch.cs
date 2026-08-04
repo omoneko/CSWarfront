@@ -27,9 +27,18 @@ namespace CSWarfront.Core
             UnitInstance bestNemesis = null;
             float bestNemesisDist = float.MaxValue;
 
+            // Task101: 対ヘリ規則（TargetingRules.CanTargetHelicopter）の判定に攻撃側の兵科が要る。
+            UnitCategory? selfCategory = null;
+            if (types != null)
+            {
+                UnitType selfType = types.Get(self.TypeKey);
+                if (selfType != null) selfCategory = selfType.Category;
+            }
+
             foreach (var u in all)
             {
                 if (u.InstanceId == self.InstanceId || !u.IsAlive) continue;
+                if (u.IsCarried) continue; // Task101: 搭乗中（ヘリ/列車の中）は攻撃対象にならない
                 Relation r = rel.Get(self.FactionId, u.FactionId);
                 if (!r.IsHostile()) continue;
                 float d = self.Position.HorizontalDistanceTo(u.Position);
@@ -38,8 +47,20 @@ namespace CSWarfront.Core
                 if (types != null)
                 {
                     UnitType targetType = types.Get(u.TypeKey);
-                    if (targetType != null && !DomainMaskUtil.Contains(attackerCanTarget, targetType.Domain))
-                        continue;
+                    if (targetType != null)
+                    {
+                        // Task101: ヘリは専用規則（戦車・対空・戦闘機のみ攻撃可）。戦車は
+                        // CanTargetDomains=Landのままだが対ヘリに限り標的にできる（双方向の例外）。
+                        if (TargetingRules.IsHelicopter(targetType.Category))
+                        {
+                            if (!selfCategory.HasValue || !TargetingRules.CanTargetHelicopter(selfCategory.Value))
+                                continue;
+                        }
+                        else if (!DomainMaskUtil.Contains(attackerCanTarget, targetType.Domain))
+                        {
+                            continue;
+                        }
+                    }
                 }
 
                 if (r == Relation.Nemesis)

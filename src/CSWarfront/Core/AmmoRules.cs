@@ -39,6 +39,7 @@ namespace CSWarfront.Core
                     return 4f;
                 case UnitCategory.AirSuperiority:
                 case UnitCategory.TacticalBomber:
+                case UnitCategory.AttackHelicopter: // Task101: ヘリも同じ再武装ループ
                     return 3f; // 2〜3ソーティ相当（弾切れ→基地/空母で再武装→再出撃のループを作る）
                 default:
                     return 0f; // Carrier / SuicideDrone / SupplyTruck / 未実装カテゴリ = 弾薬無限
