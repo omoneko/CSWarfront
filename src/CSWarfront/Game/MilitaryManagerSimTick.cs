@@ -340,6 +340,9 @@ namespace CSWarfront.Game
                     foreach (var b in State.Bases)
                     {
                         if (b.OwnerFactionId == null) continue;
+                        // Task101: 築城・貨物駅は収入を生まない（1km圏収入は軍事基地4種のみ。
+                        // 塹壕を並べるだけで収入が倍々になるのを防ぐ）。
+                        if (FortificationRules.IsFortification(b.Type)) { b.LastIncome = 0f; continue; }
                         // Task99: 3資源経済。1km圏のゾーン別発展度から住宅→人的資源、
                         // 商業/オフィス→資金、工業→生産力を産出する（旧: 全建物→資金のみ）。
                         ZonedIncome inc = TerritoryIncome.ZonedForBase(b, samples, IncomeRate);

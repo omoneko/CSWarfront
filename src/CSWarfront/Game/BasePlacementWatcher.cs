@@ -237,6 +237,9 @@ namespace CSWarfront.Game
                 // Task61: 陸軍/海軍/航空、TryMatchが特定した種別でMilitaryBaseを作る（従来は常にArmy固定だった）。
                 var mb = new MilitaryBase(id, matchedType, new WorldPos(pos.x, pos.y, pos.z));
                 mb.OwnerFactionId = WarfrontSettings.BuildFactionId;
+                // Task101: 種別ごとの既定HP（通常基地500/築城は各種の値、FortificationRules参照）。
+                mb.MaxHP = FortificationRules.DefaultMaxHP(matchedType);
+                mb.CurrentHP = mb.MaxHP;
                 // 新設基地は一定期間占領されない（Task24）：プレイヤーが両陣営の基地を配置し終える前に
                 // 一方的に占領されてしまう不具合の対策。
                 mb.CaptureGraceHours = MilitaryBase.NewBaseGraceHours;
@@ -246,7 +249,9 @@ namespace CSWarfront.Game
                 bool isHq = false;
                 if (f != null)
                 {
-                    if (f.HomeBaseId == null)
+                    // Task101: 築城（塹壕・掩蔽壕等）は本拠地(HQ)にしない（HQ=勢力の存続を賭ける
+                    // 軍事基地という意味付けを保つ）。
+                    if (f.HomeBaseId == null && !FortificationRules.IsFortification(matchedType))
                     {
                         f.HomeBaseId = id;
                         mb.IsHeadquarters = true;

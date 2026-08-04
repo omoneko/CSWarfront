@@ -14,6 +14,14 @@ namespace CSWarfront.Core
                 if (b.CurrentHP > 0f || b.OwnerFactionId == null) continue;
                 byte oldOwner = b.OwnerFactionId.Value;
 
+                // Task101: 占領不可の築城（Bunker/ArtilleryPost）はHP0で機能停止（中立化・再稼働なし）。
+                // 地形としての守備ボーナス（FortDefenseBonus）だけは残る。
+                if (!FortificationRules.IsCapturable(b.Type))
+                {
+                    b.OwnerFactionId = null;
+                    continue;
+                }
+
                 // 圏内・敵対の攻撃側から最近接を新所有者に
                 UnitInstance nearest = null; float best = float.MaxValue;
                 for (int i = 0; i < state.Units.Count; i++)

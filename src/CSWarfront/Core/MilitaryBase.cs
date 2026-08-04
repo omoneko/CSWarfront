@@ -77,11 +77,33 @@ namespace CSWarfront.Core
                     case BaseType.Navy: return DomainMask.Sea;
                     case BaseType.AirForce: return DomainMask.Air;
                     case BaseType.MissileBase: return DomainMask.None;
-                    case BaseType.Army:
+                    case BaseType.Army: return DomainMask.Land;
                     default:
-                        return DomainMask.Land;
+                        // Task101: 野戦築城・貨物駅（Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）
+                        // はユニットを生産しない。defaultをNoneへ変更（旧defaultはLandだったが、
+                        // Armyを明示したため既存4種の挙動は不変）。
+                        return DomainMask.None;
                 }
             }
         }
+
+        // --- Task101（Update3）: 野戦築城・貨物駅の追加状態 ---
+
+        /// <summary>備蓄物資（SupplyDepot/CargoStation専用、上限FortificationRules.StoredSupplyCap、
+        /// v10で永続化）。占領時はこのフィールドごと新所有者のものになる（＝備蓄奪取）。</summary>
+        public float StoredSupplies;
+
+        /// <summary>築城の弾薬ゲージ（Bunker/ArtilleryPost専用、0..1、v10で永続化）。
+        /// FortCombatStepが射撃tickに消費し、ResupplyStepが補給圏内で回復させる。</summary>
+        public float FortAmmo = 1f;
+
+        /// <summary>貨物駅がレール網に接続されているか（CargoStation専用、v10で永続化）。
+        /// Game層BasePlacementWatcherが配置時に100m以内のレールで判定。未接続の駅は
+        /// 鉄道輸送（TrainStep）に使われない（備蓄・占領は機能する）。</summary>
+        public bool RailConnected;
+
+        /// <summary>築城の発砲エフェクト間引き用クールダウン（実行時のみ・非永続化。
+        /// UnitInstance.FireCooldownと同じ方針）。</summary>
+        public float FortFireCooldown;
     }
 }

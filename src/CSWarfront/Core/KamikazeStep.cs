@@ -143,6 +143,7 @@ namespace CSWarfront.Core
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 MilitaryBase b = state.Bases[j];
+                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: 塹壕は攻撃対象外
                 if (b.CaptureGraceHours > 0f) continue; // 猶予中は対象から完全除外（ロックすらしない）
                 if (b.OwnerFactionId == null) continue;
                 if (b.OwnerFactionId.Value == self.FactionId) continue;

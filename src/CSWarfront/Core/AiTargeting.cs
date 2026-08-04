@@ -21,6 +21,7 @@ namespace CSWarfront.Core
             {
                 var b = state.Bases[j];
                 if (b.OwnerFactionId == null) continue;
+                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: 塹壕は進軍目標にしない
                 if (navyOnly && b.Type != BaseType.Navy) continue;
                 Relation r = state.Relations.Get(factionId, b.OwnerFactionId.Value);
                 if (!r.IsHostile()) continue;
