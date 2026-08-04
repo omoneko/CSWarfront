@@ -70,6 +70,7 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive || u.Ammo >= 1f) continue;
+                if (u.IsCarried) continue; // Task101: 搭乗中は補給対象外（降機後に回復させる）
 
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null || type.AmmoCombatHours <= 0f) continue; // 弾薬制の対象外

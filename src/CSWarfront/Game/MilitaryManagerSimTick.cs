@@ -284,6 +284,7 @@ namespace CSWarfront.Game
                 // 配車・転送。移動の直後＝このtickの最終位置で「圏内かどうか」を判定する。
                 ResupplyStep.Advance(State, dt);
                 SupplyTruckStep.Advance(State, dt);
+                TransportHeliStep.Advance(State, dt); // Task101: 輸送ヘリ兵站＋搭乗ユニットの位置追従
 
                 // Task98: 水際等でスタックしたユニットの自動消滅（移動直後＝このtickの実際の変位を
                 // 見た上で判定する。自拠点付近・非Moving状態は対象外、無音無爆発でDead化のみ）。
@@ -369,6 +370,7 @@ namespace CSWarfront.Game
                     foreach (var f in State.Factions)
                         ResupplyStep.ProduceSupplies(f);
                     SupplyTruckStep.MaintainTrucks(State);
+                    TransportHeliStep.MaintainHelis(State); // Task101: 輸送ヘリの自動維持
                 }
 
                 // 死亡ユニットの掃除。見た目（GameObject）は表現を持たないためここでの結合は不要

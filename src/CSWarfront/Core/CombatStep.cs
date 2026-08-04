@@ -24,9 +24,12 @@ namespace CSWarfront.Core
                 // 下の第2パス（死亡はCurrentHP<=0から導出するという単一の真実源）がそのまま拾う。
                 if (type.Category.IsKamikaze()) continue;
 
-                // Task99: 補給トラックは非武装（CanTargetDomains=Noneのため探索しても候補が空になるが、
-                // 探索コスト自体を省くためここで早期スキップする）。
-                if (type.Category == UnitCategory.SupplyTruck) continue;
+                // Task99/101: 非武装ユニット（補給トラック/輸送ヘリ/軍用列車）と搭乗中ユニットは
+                // 射撃パイプラインに乗らない。
+                if (type.Category == UnitCategory.SupplyTruck
+                    || type.Category == UnitCategory.TransportHelicopter
+                    || type.Category == UnitCategory.MilitaryTrain) continue;
+                if (self.IsCarried) continue;
 
                 // Task99: 弾切れ（Ammo<=0）は射撃停止のみ——ターゲットを解除して非交戦へ戻す
                 // （移動・占領は可能なまま）。補給（ResupplyStep/SupplyTruckStep）で回復すれば

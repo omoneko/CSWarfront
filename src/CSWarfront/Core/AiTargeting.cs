@@ -109,9 +109,13 @@ namespace CSWarfront.Core
                 Domain domain = type != null ? type.Domain : Domain.Land; // 型が引けない防御的ケースは従来通りLand扱い
                 bool isLand = domain == Domain.Land;
 
-                // Task99: 補給トラックはAI進軍の対象外（SupplyTruckStepが積載/配送/帰還の全移動を扱う。
-                // ここで敵基地への進軍目標を与えると非武装のまま前線へ突っ込んでしまう）。
-                if (type != null && type.Category == UnitCategory.SupplyTruck) continue;
+                // Task99/101: 兵站ユニット（補給トラック/輸送ヘリ/軍用列車）と搭乗中ユニットは
+                // AI進軍の対象外（それぞれ専用step＝SupplyTruckStep/TransportHeliStep/TrainStepが
+                // 全移動を扱う。ここで敵基地への進軍目標を与えると非武装のまま前線へ突っ込んでしまう）。
+                if (type != null && (type.Category == UnitCategory.SupplyTruck
+                    || type.Category == UnitCategory.TransportHelicopter
+                    || type.Category == UnitCategory.MilitaryTrain)) continue;
+                if (u.IsCarried) continue;
 
                 // Task99: 弾切れの航空・海上ユニットには新しい進軍目標を与えず、Idleへ戻して
                 // 既存の帰還ロジック（MovementStep.ResolveHomeObjective）に自基地/空母へ連れ帰らせる。

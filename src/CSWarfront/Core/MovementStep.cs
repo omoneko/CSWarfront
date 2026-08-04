@@ -151,6 +151,7 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
+                if (u.IsCarried) continue; // Task101: 搭乗中は運搬役（ヘリ/列車）が位置を管理する
                 if (u.Order == UnitOrder.Hold) continue; // Task48: 停止命令＝常に不動。
 
                 UnitType type = state.Types.Get(u.TypeKey);

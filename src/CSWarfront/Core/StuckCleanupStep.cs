@@ -43,6 +43,7 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
+                if (u.IsCarried) { u.StuckAnchor = null; u.StuckHours = 0f; continue; } // Task101: 搭乗中は対象外
 
                 if (u.State != UnitState.Moving)
                 {

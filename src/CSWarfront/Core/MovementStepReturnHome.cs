@@ -25,6 +25,11 @@ namespace CSWarfront.Core
         {
             if (u.State != UnitState.Idle) return null; // Moving/Engagingは通常の目的地/パス移動が扱う
 
+            // Task101: 輸送ヘリ・軍用列車は専用step（TransportHeliStep/TrainStep）が全移動を管理する
+            // ——航空基地へ勝手に帰ろうとさせない（輸送ヘリの母基地は陸軍基地）。
+            if (type.Category == UnitCategory.TransportHelicopter
+                || type.Category == UnitCategory.MilitaryTrain) return null;
+
             BaseType homeBaseType;
             if (type.Domain == Domain.Air) homeBaseType = BaseType.AirForce;
             else if (type.Domain == Domain.Sea) homeBaseType = BaseType.Navy;
