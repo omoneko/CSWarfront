@@ -7,16 +7,16 @@ using Xunit;
 public class LandUnitRosterTests
 {
     [Fact]
-    public void All_yields_exactly_40_types()
+    public void All_yields_exactly_45_types()
     {
         List<UnitType> all = LandUnitRoster.All().ToList();
-        Assert.Equal(40, all.Count); // Task99: 7戦闘兵科+SupplyTruck = 8カテゴリ×5Tier
+        Assert.Equal(45, all.Count); // Task101: 7戦闘兵科+SupplyTruck+MilitaryTrain = 9カテゴリ×5Tier
     }
 
     [Fact]
     public void All_keys_match_Category_T_tier_format()
     {
-        var pattern = new Regex("^(Infantry|MechInfantry|Apc|Tank|Artillery|DroneInfantry|AntiAir|SupplyTruck)_T[1-5]$");
+        var pattern = new Regex("^(Infantry|MechInfantry|Apc|Tank|Artillery|DroneInfantry|AntiAir|SupplyTruck|MilitaryTrain)_T[1-5]$");
         foreach (UnitType t in LandUnitRoster.All())
         {
             Assert.Matches(pattern, t.TypeKey);
@@ -25,12 +25,12 @@ public class LandUnitRosterTests
     }
 
     [Fact]
-    public void All_covers_8_categories_times_5_tiers_with_no_duplicates()
+    public void All_covers_9_categories_times_5_tiers_with_no_duplicates()
     {
         var keys = new HashSet<string>();
         foreach (UnitType t in LandUnitRoster.All())
             Assert.True(keys.Add(t.TypeKey), "duplicate key: " + t.TypeKey);
-        Assert.Equal(40, keys.Count); // Task99: 8カテゴリ×5Tier
+        Assert.Equal(45, keys.Count); // Task101: 9カテゴリ×5Tier
     }
 
     [Fact]
@@ -147,4 +147,5 @@ public class LandUnitRosterTests
         Assert.Null(registry.Get("NoSuchUnit"));
     }
 }
+
 

@@ -83,6 +83,8 @@ namespace CSWarfront.Core
             // Task99: 補給トラック（非武装・低HP・道路速度。Attack/Range/Accuracy=0、射撃パイプラインには
             // 乗らない——CanTargetDomains=None＋TargetingRules除外。SupplyTruckStepが積載/配送/転送を扱う）。
             new BaseStats(UnitCategory.SupplyTruck,    40f,  0f,   0f,  1f, 45f,  0f, 30f, 3f, 0f,    1f,    ShotKind.Gunfire),
+            // Task101: 軍用貨物列車（非武装・高HP・レール専用移動。TrainStepが運用、生産キューには乗らない）。
+            new BaseStats(UnitCategory.MilitaryTrain, 500f,  0f,   0f,  5f, 160f, 0f, 150f, 6f, 0f,   1f,    ShotKind.Gunfire),
         };
 
         /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（例: Tank, 3 -&gt; "Tank_T3"）。</summary>
@@ -125,7 +127,8 @@ namespace CSWarfront.Core
             DomainMask canTarget = b.Category == UnitCategory.AntiAir
                 ? DomainMask.Land | DomainMask.Air
                 : DomainMask.Land;
-            if (b.Category == UnitCategory.SupplyTruck) canTarget = DomainMask.None; // Task99: 非武装
+            if (b.Category == UnitCategory.SupplyTruck ||
+                b.Category == UnitCategory.MilitaryTrain) canTarget = DomainMask.None; // Task99/101: 非武装
 
             // Task92: 基礎値はUnitStatOverrides（Game層がunit-stats.xmlから供給）で上書きできる。
             // 上書きが無ければロスターのハードコード値のまま。TierScalingは上書き後の値へ通常どおりかかる。

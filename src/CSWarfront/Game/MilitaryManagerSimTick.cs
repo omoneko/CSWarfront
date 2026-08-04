@@ -33,6 +33,11 @@ namespace CSWarfront.Game
 
         // Task94: 襲来発生をメインスレッドのトースト表示へ伝えるフラグ（sim→mainの一方向、boolのため良性）。
         private static bool _invasionToastPending;
+
+        // Task101: 線路網（State.Rails）の構築タイマー（道路網と同じパターン）。
+        private static float _railBuildRetryAccum;
+        private static float _railRebuildAccum;
+        private static bool _hasAttemptedRailBuild;
         private const float RoadBuildRetryIntervalHours = 0.25f;
 
         private const float CoverRebuildIntervalHours = 12f;
@@ -198,6 +203,31 @@ namespace CSWarfront.Game
                     }
                 }
 
+                // Task101: 線路網（State.Rails）の構築/再構築。道路網と同じ供給パターン（12hごと）。
+                // 再構築のたびに貨物駅のレール接続判定（RailConnected）も引き直す。
+                if (State.Rails == null)
+                {
+                    _railBuildRetryAccum += dt;
+                    if (!_hasAttemptedRailBuild || _railBuildRetryAccum >= RoadBuildRetryIntervalHours)
+                    {
+                        _hasAttemptedRailBuild = true;
+                        _railBuildRetryAccum = 0f;
+                        State.Rails = RailGraphBuilder.Build();
+                        if (State.Rails != null) CargoStationRules.RefreshConnectivity(State);
+                    }
+                }
+                else
+                {
+                    _railRebuildAccum += dt;
+                    if (_railRebuildAccum >= RoadRebuildIntervalHours)
+                    {
+                        _railRebuildAccum = 0f;
+                        var rebuiltRail = RailGraphBuilder.Build();
+                        if (rebuiltRail != null) State.Rails = rebuiltRail;
+                        CargoStationRules.RefreshConnectivity(State);
+                    }
+                }
+
                 // 地表高さサンプラー（State.Height）の供給（Task53）。RoadGraph/Coverと違って毎tick
                 // 作り直す必要のある「スナップショット」ではなく、TerrainManagerへその場で問い合わせる
                 // 薄いアダプタなので、一度だけ生成して以後はそのまま使い回す（未供給時はnullのまま
@@ -285,6 +315,7 @@ namespace CSWarfront.Game
                 ResupplyStep.Advance(State, dt);
                 SupplyTruckStep.Advance(State, dt);
                 TransportHeliStep.Advance(State, dt); // Task101: 輸送ヘリ兵站＋搭乗ユニットの位置追従
+                TrainStep.Advance(State, dt);         // Task101: 軍用列車の運行（積載/搭乗/走行/降車）
 
                 // Task98: 水際等でスタックしたユニットの自動消滅（移動直後＝このtickの実際の変位を
                 // 見た上で判定する。自拠点付近・非Moving状態は対象外、無音無爆発でDead化のみ）。
@@ -371,6 +402,7 @@ namespace CSWarfront.Game
                         ResupplyStep.ProduceSupplies(f);
                     SupplyTruckStep.MaintainTrucks(State);
                     TransportHeliStep.MaintainHelis(State); // Task101: 輸送ヘリの自動維持
+                    TrainStep.MaintainTrains(State);        // Task101: 軍用列車の自動維持（駅ペアごと）
                 }
 
                 // 死亡ユニットの掃除。見た目（GameObject）は表現を持たないためここでの結合は不要

@@ -160,6 +160,15 @@ namespace CSWarfront.Core
                 float stepLen = type.Speed * GlobalSpeedMultiplier * dt;
                 if (stepLen <= 0f) continue;
 
+                // Task101: 軍用列車はレール専用移動（TrainStepが張ったPathのウェイポイントを
+                // そのまま辿る。直線フォールバック・水域/遮蔽/道路チェックは一切適用しない——
+                // レール上は常に通行可能とみなす。Pathが無ければ動かない）。
+                if (type.Category == UnitCategory.MilitaryTrain)
+                {
+                    AdvanceTrain(u, stepLen);
+                    continue;
+                }
+
                 // Task61: Sea/Airは陸上の道路経路(Path)・遮蔽(CoverDestination)・territory-based
                 // slowdownを一切使わない、完全に別の移動則（クラス冒頭コメント参照）。CoverSeekStepが
                 // そもそもLand以外にはCoverDestinationを設定しないため、通常はu.CoverDestinationが
@@ -460,6 +469,35 @@ namespace CSWarfront.Core
                 ny = groundY + altitude;
 
             u.Position = new WorldPos(nx, ny, nz);
+        }
+
+        /// <summary>Task101: 軍用列車のレール専用移動。Path（TrainStepがRailGraphで張ったレール
+        /// ウェイポイント列）を順に辿るだけ（水域・遮蔽・地形の判定なし。Yはウェイポイントの値
+        /// ＝レールの高さをそのまま使う）。Pathが無い/消化済みなら動かない。</summary>
+        private static void AdvanceTrain(UnitInstance u, float stepLen)
+        {
+            if (u.Path == null || u.PathIndex >= u.Path.Count) return;
+
+            while (stepLen > 0f && u.Path != null && u.PathIndex < u.Path.Count)
+            {
+                WorldPos wp = u.Path[u.PathIndex];
+                float dist = u.Position.HorizontalDistanceTo(wp);
+                if (dist <= stepLen || dist <= 0.01f)
+                {
+                    u.Position = wp;
+                    stepLen -= dist;
+                    u.PathIndex++;
+                    continue;
+                }
+                float t = stepLen / dist;
+                u.Position = new WorldPos(
+                    u.Position.X + (wp.X - u.Position.X) * t,
+                    u.Position.Y + (wp.Y - u.Position.Y) * t,
+                    u.Position.Z + (wp.Z - u.Position.Z) * t);
+                stepLen = 0f;
+            }
+
+            if (u.Path != null && u.PathIndex >= u.Path.Count) u.ClearPath(); // 走破: TrainStepが次の行動を決める
         }
 
         // Task79: ResolveKamikazeTarget/AdvanceKamikazeはMovementStepKamikaze.csへ分離した
