@@ -167,6 +167,56 @@ public class SupplyTruckStepTests
         Assert.Equal(UnitState.Idle, truck.State); // 配送対象なし＝基地付近で待機
     }
 
+    // --- Task101: 補給拠点との連携 ---
+
+    [Fact]
+    public void Idle_loaded_truck_hauls_pool_supplies_into_a_depot()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var depot = new MilitaryBase(2, BaseType.SupplyDepot, new WorldPos(Far, 0, 0));
+        depot.OwnerFactionId = 0;
+        s.Bases.Add(depot);
+        var truck = AddTruck(s, new WorldPos(Far, 0, 0), load: 1f); // 拠点の目の前・プール由来の荷
+
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(1f * SupplyTruckStep.SupplyPerTruckLoad, depot.StoredSupplies, 3); // 30を荷下ろし
+        Assert.Equal(0f, truck.SupplyLoad, 3);
+    }
+
+    [Fact]
+    public void Depot_loaded_cargo_is_never_hauled_back_into_depots()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var depot = new MilitaryBase(2, BaseType.SupplyDepot, new WorldPos(Far, 0, 0));
+        depot.OwnerFactionId = 0;
+        s.Bases.Add(depot);
+        var truck = AddTruck(s, new WorldPos(Far, 0, 0), load: 1f);
+        truck.SupplyLoadFromDepot = true; // 拠点で積んだ荷
+
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(0f, depot.StoredSupplies, 3); // 積み直さない（シャッフル防止）
+        Assert.Equal(1f, truck.SupplyLoad, 3);
+    }
+
+    [Fact]
+    public void Empty_truck_reloads_at_the_nearest_stocked_depot()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b); // 勢力プールは空
+        var depot = new MilitaryBase(2, BaseType.SupplyDepot, new WorldPos(Far, 0, 0));
+        depot.OwnerFactionId = 0;
+        depot.StoredSupplies = 100f;
+        s.Bases.Add(depot);
+        var truck = AddTruck(s, new WorldPos(Far + 10, 0, 0)); // 拠点のすぐ側・空荷
+
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(1f, truck.SupplyLoad, 3); // 拠点の備蓄から満載
+        Assert.True(truck.SupplyLoadFromDepot);
+        Assert.Equal(100f - SupplyTruckStep.SupplyPerTruckLoad, depot.StoredSupplies, 3);
+    }
+
     [Fact]
     public void Player_held_trucks_are_left_alone()
     {

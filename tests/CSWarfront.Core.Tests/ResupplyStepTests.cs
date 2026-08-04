@@ -109,6 +109,56 @@ public class ResupplyStepTests
         Assert.Equal(0.1f, tank.Ammo, 3);
     }
 
+    // --- Task101: 補給拠点（SupplyDepot）の200m自動補給 ---
+
+    [Fact]
+    public void Depot_zone_refills_from_stored_supplies_not_the_faction_pool()
+    {
+        var s = new WarState();
+        var f = new Faction(0, "Red");
+        f.AddSupply(500f); // 勢力プール（使われないはず）
+        s.Factions.Add(f);
+        LandUnitRoster.RegisterAll(s.Types);
+        var depot = new MilitaryBase(1, BaseType.SupplyDepot, new WorldPos(0, 0, 0));
+        depot.OwnerFactionId = 0;
+        depot.StoredSupplies = 100f;
+        s.Bases.Add(depot);
+        var tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(100, 0, 0));
+        tank.Ammo = 0f;
+        s.Units.Add(tank);
+
+        ResupplyStep.Advance(s, 1f);
+
+        Assert.Equal(ResupplyStep.RefillPerHour, tank.Ammo, 3);
+        Assert.Equal(100f - ResupplyStep.RefillPerHour * ResupplyStep.SupplyPerFullReload, depot.StoredSupplies, 3);
+        Assert.Equal(500f, f.SupplyStock, 3); // プールは減らない
+    }
+
+    [Fact]
+    public void Empty_depot_and_non_depot_fortifications_do_not_refill()
+    {
+        var s = new WarState();
+        var f = new Faction(0, "Red");
+        f.AddSupply(500f);
+        s.Factions.Add(f);
+        LandUnitRoster.RegisterAll(s.Types);
+        var emptyDepot = new MilitaryBase(1, BaseType.SupplyDepot, new WorldPos(0, 0, 0));
+        emptyDepot.OwnerFactionId = 0; // 備蓄0
+        var bunker = new MilitaryBase(2, BaseType.Bunker, new WorldPos(50, 0, 0));
+        bunker.OwnerFactionId = 0;
+        var station = new MilitaryBase(3, BaseType.CargoStation, new WorldPos(-50, 0, 0));
+        station.OwnerFactionId = 0;
+        station.StoredSupplies = 100f; // 駅は自動補給点ではない
+        s.Bases.Add(emptyDepot); s.Bases.Add(bunker); s.Bases.Add(station);
+        var tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(20, 0, 0));
+        tank.Ammo = 0f;
+        s.Units.Add(tank);
+
+        ResupplyStep.Advance(s, 1f);
+
+        Assert.Equal(0f, tank.Ammo, 3); // どこからも回復しない（勢力プールは通常基地圏でのみ）
+    }
+
     [Fact]
     public void Carrier_resupplies_its_own_aircraft_but_not_land_units()
     {

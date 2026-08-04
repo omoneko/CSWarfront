@@ -113,28 +113,64 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>空荷: 基地へ戻り、着いたらSupplyStockから積載する。</summary>
+        /// <summary>空荷: 最寄りの積載元（陸軍基地=勢力プール、または備蓄のある補給拠点/貨物駅）へ
+        /// 向かい、着いたら積載する（Task101: 拠点・駅からの積出に対応）。</summary>
         private static void AdvanceEmptyTruck(WarState state, UnitInstance u, MilitaryBase home, ref int pathComputations)
         {
-            if (u.Position.HorizontalDistanceTo(home.Position) > LoadRadius)
-            {
-                SetDestination(state, u, home.Position, ref pathComputations);
-                return;
-            }
-
             Faction f = state.FindFaction(u.FactionId);
-            if (f == null || f.SupplyStock <= 0f)
+            MilitaryBase source = FindNearestLoadSource(state, u, f);
+            if (source == null)
             {
-                Wait(u); // 物資が無い: 基地で待機
+                // どこにも物資が無い: 陸軍基地付近で待機。
+                if (u.Position.HorizontalDistanceTo(home.Position) > LoadRadius)
+                    SetDestination(state, u, home.Position, ref pathComputations);
+                else
+                    Wait(u);
                 return;
             }
 
+            if (u.Position.HorizontalDistanceTo(source.Position) > LoadRadius)
+            {
+                SetDestination(state, u, source.Position, ref pathComputations);
+                return;
+            }
+
+            bool fromDepot = FortificationRules.IsFortification(source.Type);
+            float available = fromDepot ? source.StoredSupplies : f.SupplyStock;
             float room = 1f - u.SupplyLoad;
-            float loadable = f.SupplyStock / SupplyPerTruckLoad;
+            float loadable = available / SupplyPerTruckLoad;
             float load = room < loadable ? room : loadable;
-            f.TrySpendSupply(load * SupplyPerTruckLoad);
+            if (load <= 0f) { Wait(u); return; }
+
+            if (fromDepot) source.StoredSupplies -= load * SupplyPerTruckLoad;
+            else f.TrySpendSupply(load * SupplyPerTruckLoad);
             u.SupplyLoad += load;
+            u.SupplyLoadFromDepot = fromDepot; // 拠点由来の荷は拠点へ積み直さない（UnitInstanceのコメント参照）
             Wait(u); // 積載完了。次tickのAdvanceLoadedTruckが配送先を決める
+        }
+
+        /// <summary>Task101: 積載元の候補=自軍の陸軍基地（勢力プールに物資がある場合）＋
+        /// 稼働中で備蓄のある自軍SupplyDepot/CargoStation。最寄りを返す（無ければnull）。</summary>
+        private static MilitaryBase FindNearestLoadSource(WarState state, UnitInstance u, Faction f)
+        {
+            MilitaryBase best = null;
+            float bestDist = float.MaxValue;
+            bool poolHasStock = f != null && f.SupplyStock > 0f;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                MilitaryBase mb = state.Bases[b];
+                if (mb.OwnerFactionId == null || mb.OwnerFactionId.Value != u.FactionId) continue;
+
+                bool valid;
+                if (mb.Type == BaseType.Army) valid = poolHasStock;
+                else if (mb.Type == BaseType.SupplyDepot || mb.Type == BaseType.CargoStation) valid = mb.StoredSupplies > 0f;
+                else valid = false;
+                if (!valid) continue;
+
+                float d = u.Position.HorizontalDistanceTo(mb.Position);
+                if (d < bestDist) { bestDist = d; best = mb; }
+            }
+            return best;
         }
 
         /// <summary>積載あり: 補給対象へ向かい、届いたら転送する。対象が無ければ基地付近で待機。</summary>
@@ -144,7 +180,29 @@ namespace CSWarfront.Core
             UnitInstance target = FindNeediestLandUnit(state, u);
             if (target == null)
             {
-                // 補給を必要とする味方がいない: 基地付近まで戻って待機。
+                // Task101: 補給を必要とする味方がいない間は、補給拠点への備蓄輸送を行う
+                // （勢力プール由来の荷のみ。拠点由来の荷の積み直しはしない＝無限シャッフル防止）。
+                MilitaryBase depot = u.SupplyLoadFromDepot ? null : FindNearestDepotWithRoom(state, u);
+                if (depot != null)
+                {
+                    if (u.Position.HorizontalDistanceTo(depot.Position) > LoadRadius)
+                    {
+                        SetDestination(state, u, depot.Position, ref pathComputations);
+                        return;
+                    }
+                    // 荷下ろし: 備蓄の空きぶんだけ移す。
+                    float cap = FortificationRules.StoredSupplyCap(depot.Type);
+                    float roomSupplies = cap - depot.StoredSupplies;
+                    float carried = u.SupplyLoad * SupplyPerTruckLoad;
+                    float transfer = carried < roomSupplies ? carried : roomSupplies;
+                    depot.StoredSupplies += transfer;
+                    u.SupplyLoad -= transfer / SupplyPerTruckLoad;
+                    if (u.SupplyLoad < 0.001f) u.SupplyLoad = 0f;
+                    Wait(u);
+                    return;
+                }
+
+                // 輸送先も無い: 基地付近まで戻って待機。
                 if (u.Position.HorizontalDistanceTo(home.Position) > LoadRadius)
                     SetDestination(state, u, home.Position, ref pathComputations);
                 else
@@ -208,6 +266,24 @@ namespace CSWarfront.Core
             if (allyType.AmmoCombatHours <= 0f) return false; // 弾薬制の対象外（トラック含む）
             if (ResupplyStep.IsNearResupplyPoint(state, ally, allyType)) return false; // 基地圏内は基地が賄う
             return true;
+        }
+
+        /// <summary>Task101: 備蓄に空きのある自軍SupplyDepot（稼働中）のうち最寄り。無ければnull。
+        /// CargoStationへの備蓄輸送は行わない（駅は鉄道輸送=TrainStepが満たす）。</summary>
+        private static MilitaryBase FindNearestDepotWithRoom(WarState state, UnitInstance u)
+        {
+            MilitaryBase best = null;
+            float bestDist = float.MaxValue;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                MilitaryBase mb = state.Bases[b];
+                if (mb.OwnerFactionId == null || mb.OwnerFactionId.Value != u.FactionId) continue;
+                if (mb.Type != BaseType.SupplyDepot) continue;
+                if (mb.StoredSupplies >= FortificationRules.StoredSupplyCap(mb.Type)) continue;
+                float d = u.Position.HorizontalDistanceTo(mb.Position);
+                if (d < bestDist) { bestDist = d; best = mb; }
+            }
+            return best;
         }
 
         private static MilitaryBase FindNearestOwnArmyBase(WarState state, UnitInstance u)

@@ -76,6 +76,12 @@ namespace CSWarfront.Core
         /// トラック以外のユニットでは常に0のまま使われない。</summary>
         public float SupplyLoad;
 
+        /// <summary>Task101: 補給トラックの現在の積載が補給拠点/貨物駅の備蓄由来か（実行時のみ・
+        /// 非永続化）。拠点で積んだ物資を同じ/別の拠点へ積み直す無限シャッフルを防ぐため、
+        /// 「拠点への備蓄輸送」は勢力プール（陸軍基地）で積んだトラックだけが行う（SupplyTruckStep）。
+        /// ロードで既定falseに戻っても、最悪1回の拠点間輸送が起きるだけで実害なし。</summary>
+        public bool SupplyLoadFromDepot;
+
         /// <summary>Task98: スタック検知の基準位置（実行時のみ・非永続化）。ここからMinProgressDistance
         /// 以上動くたびに現在位置へ更新され、StuckHoursが0へ戻る（StuckCleanupStep参照）。</summary>
         public WorldPos? StuckAnchor;

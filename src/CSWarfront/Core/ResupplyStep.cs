@@ -78,35 +78,62 @@ namespace CSWarfront.Core
                 if (u.FactionId == Faction.InvaderFactionId) continue;
 
                 Faction f = state.FindFaction(u.FactionId);
-                if (f == null || f.SupplyStock <= 0f) continue;
+                if (f == null) continue;
 
-                if (!IsNearResupplyPoint(state, u, type)) continue;
+                // Task101: 補給源は「通常基地/空母（勢力プール消費）」または「補給拠点（備蓄消費）」。
+                MilitaryBase depot;
+                if (!TryFindResupplySource(state, u, type, out depot)) continue;
+                float available = depot != null ? depot.StoredSupplies : f.SupplyStock;
+                if (available <= 0f) continue;
 
                 float refill = RefillPerHour * dt;
                 if (refill > 1f - u.Ammo) refill = 1f - u.Ammo;
 
                 // 物資が足りなければ払えるぶんだけ回復（部分回復）。
                 float supplyCost = refill * SupplyPerFullReload;
-                if (supplyCost > f.SupplyStock)
+                if (supplyCost > available)
                 {
-                    supplyCost = f.SupplyStock;
+                    supplyCost = available;
                     refill = supplyCost / SupplyPerFullReload;
                 }
-                f.TrySpendSupply(supplyCost);
+                if (depot != null) depot.StoredSupplies -= supplyCost;
+                else f.TrySpendSupply(supplyCost);
                 u.Ammo += refill;
                 if (u.Ammo > 1f) u.Ammo = 1f;
             }
         }
 
-        /// <summary>自勢力の基地（全種別）からResupplyRadius以内か。航空ユニットに限り、
-        /// 自勢力の生存空母も補給点として扱う。</summary>
+        /// <summary>自勢力の補給点からResupplyRadius以内か（消費元は区別しない、トラックの
+        /// 「基地圏内は配送不要」判定用の簡易版）。</summary>
         public static bool IsNearResupplyPoint(WarState state, UnitInstance u, UnitType type)
         {
+            MilitaryBase depot;
+            return TryFindResupplySource(state, u, type, out depot);
+        }
+
+        /// <summary>Task101: ResupplyRadius以内の補給源を探す。優先順位は
+        /// ①通常基地4種（勢力プール消費、depot=null）②航空ユニット限定で自軍空母（同、depot=null）
+        /// ③稼働中（Owner有り）かつ備蓄のあるSupplyDepot（備蓄消費、depotに返す）。
+        /// 貨物駅・掩蔽壕・塹壕等は自動補給点ではない。見つからなければfalse。</summary>
+        public static bool TryFindResupplySource(WarState state, UnitInstance u, UnitType type, out MilitaryBase depot)
+        {
+            depot = null;
+            MilitaryBase nearestDepot = null;
+            float nearestDepotDist = float.MaxValue;
+
             for (int b = 0; b < state.Bases.Count; b++)
             {
                 MilitaryBase mb = state.Bases[b];
                 if (mb.OwnerFactionId == null || mb.OwnerFactionId.Value != u.FactionId) continue;
-                if (u.Position.HorizontalDistanceTo(mb.Position) <= ResupplyRadius) return true;
+                float d = u.Position.HorizontalDistanceTo(mb.Position);
+                if (d > ResupplyRadius) continue;
+
+                if (!FortificationRules.IsFortification(mb.Type)) return true; // 通常基地=勢力プール
+                if (mb.Type == BaseType.SupplyDepot && mb.StoredSupplies > 0f && d < nearestDepotDist)
+                {
+                    nearestDepotDist = d;
+                    nearestDepot = mb;
+                }
             }
 
             if (type.Domain == Domain.Air)
@@ -120,6 +147,8 @@ namespace CSWarfront.Core
                     if (u.Position.HorizontalDistanceTo(other.Position) <= ResupplyRadius) return true;
                 }
             }
+
+            if (nearestDepot != null) { depot = nearestDepot; return true; }
             return false;
         }
     }
