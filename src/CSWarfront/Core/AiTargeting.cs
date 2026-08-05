@@ -93,7 +93,7 @@ namespace CSWarfront.Core
             // Task105（鉄道の積極利用）: この勢力の稼働駅ペアを1回だけ列挙しておく（駅が無ければ空）。
             // 陸上ユニットの道路経路を「鉄道経由が得なら乗車駅へ」差し替えるのに使う。
             System.Collections.Generic.List<TrainStep.StationPair> railPairs =
-                TrainStep.FindStationPairs(state, factionId);
+                TrainStep.RoutesOf(state, factionId);
             // Task96: 外部襲来（Invader勢力）の部隊が生きている間は、外部脅威（KAIJU/Alien）に次ぐ
             // 優先度で迎撃対象にする（敵基地への進軍より優先。詳細はFindInvaderToInterceptのコメント参照）。
             if (!divertTarget.HasValue) divertTarget = FindInvaderToIntercept(state, factionId);

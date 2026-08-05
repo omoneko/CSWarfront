@@ -59,7 +59,7 @@ namespace CSWarfront.Core
                 Faction f = state.Factions[fi];
                 if (f.Eliminated || f.Id == Faction.InvaderFactionId) continue;
 
-                List<StationPair> pairs = FindStationPairs(state, f.Id);
+                List<StationPair> pairs = RoutesOf(state, f.Id);
                 if (pairs.Count == 0) continue;
 
                 int want = pairs.Count < MaxTrainsPerFaction ? pairs.Count : MaxTrainsPerFaction;
@@ -98,7 +98,7 @@ namespace CSWarfront.Core
                     if (type == null || type.Category != UnitCategory.MilitaryTrain) continue;
                     if (train.Order == UnitOrder.Hold || train.Order == UnitOrder.RallyHold) continue;
 
-                    if (pairs == null) pairs = FindStationPairs(state, f.Id);
+                    if (pairs == null) pairs = RoutesOf(state, f.Id);
                     if (pairs.Count == 0)
                     {
                         // 路線が1本も成立していない（駅が1つだけ／レール未接続／占領された等）:
@@ -284,8 +284,36 @@ namespace CSWarfront.Core
             }
         }
 
+        /// <summary>
+        /// Task109（ユーザー報告「列車が移動しなくなった」）: 路線一覧のキャッシュ付き取得。
+        ///
+        /// <see cref="FindStationPairs"/>は駅ペアごとにA*を1回走らせる。曲線サンプリングでレール網の
+        /// ノード数が309→1347へ増え、かつ駅6つ＝15ペアになった結果、これを毎tick・しかも2箇所
+        /// （TrainStep.AdvanceとInvasionOrders.AssignAdvance）から呼んでいた従来のままでは
+        /// simスレッドが経路探索で埋まり、列車どころか全体の進行が止まっていた。
+        ///
+        /// 路線はレール網か駅の増減でしか変わらないので、レール網の再構築時に
+        /// <see cref="InvalidateRoutes"/>で捨てるだけの素朴なキャッシュで足りる（未キャッシュなら
+        /// その場で1回だけ計算して覚える＝呼び出し側は何も気にしなくてよい）。
+        /// </summary>
+        public static List<StationPair> RoutesOf(WarState state, byte factionId)
+        {
+            List<StationPair> cached;
+            if (state.RailRoutes.TryGetValue(factionId, out cached) && cached != null) return cached;
+
+            cached = FindStationPairs(state, factionId);
+            state.RailRoutes[factionId] = cached;
+            return cached;
+        }
+
+        /// <summary>路線キャッシュを捨てる（レール網の再構築時にGame層が呼ぶ）。</summary>
+        public static void InvalidateRoutes(WarState state)
+        {
+            state.RailRoutes.Clear();
+        }
+
         /// <summary>自軍の稼働駅からなるペア（レールで接続・MinStationDistance以上）をBaseId昇順で列挙する。
-        /// 経路存在チェックはA*1回/ペア（駅数は少ない想定。呼び出しは勢力ごとに1回/tickまで）。</summary>
+        /// 経路存在チェックはA*1回/ペア。重いので直接呼ばず<see cref="RoutesOf"/>を使うこと。</summary>
         public static List<StationPair> FindStationPairs(WarState state, byte factionId)
         {
             var stations = new List<MilitaryBase>();
@@ -298,20 +326,36 @@ namespace CSWarfront.Core
             stations.Sort((x, y) => x.BaseId.CompareTo(y.BaseId));
 
             var pairs = new List<StationPair>();
+            if (state.Rails == null || stations.Count < 2) return pairs;
+
+            // Task109: 到達可能かどうかはA*ではなく連結成分で判定する（無向グラフなので同値）。
+            // 従来はペアごとにA*を走らせており、駅6つ＝15ペア×ノード1300超の探索を毎tick2箇所から
+            // 呼んでいたためsimスレッドが経路探索で埋まっていた（列車が動かなくなった直接の原因）。
+            // 連結成分はグラフ全体を1回なめるだけで求まる。
+            var components = state.Rails.ComputeComponentIds();
+            var stationComponent = new int[stations.Count];
+            var stationNode = new ushort[stations.Count];
+            for (int i = 0; i < stations.Count; i++)
+            {
+                ushort nodeId;
+                int comp;
+                stationComponent[i] =
+                    state.Rails.TryFindNearestNode(CargoStationRules.RailPointOf(stations[i]),
+                        CargoStationRules.RailSnapRadius * 2f, out nodeId)
+                    && components.TryGetValue(nodeId, out comp) ? comp : -1;
+                stationNode[i] = nodeId;
+            }
+
             for (int a = 0; a < stations.Count; a++)
             {
+                if (stationComponent[a] < 0) continue;
                 for (int b = a + 1; b < stations.Count; b++)
                 {
+                    if (stationComponent[b] != stationComponent[a]) continue; // 別々の線路網
+                    // Task108: 同じレールノードにスナップした＝走る区間が無い（従来はこれが路線として
+                    // 成立してしまい、担当列車が「経路ゼロで出発」を繰り返して一切動かなかった）。
+                    if (stationNode[a] == stationNode[b]) continue;
                     if (stations[a].Position.HorizontalDistanceTo(stations[b].Position) < MinStationDistance) continue;
-                    if (state.Rails == null) continue;
-                    // Task108: 経路はレール進入点どうしで引く（駅建物の座標は線路上にないことがある）。
-                    var path = state.Rails.FindPath(
-                        CargoStationRules.RailPointOf(stations[a]), CargoStationRules.RailPointOf(stations[b]),
-                        CargoStationRules.RailSnapRadius * 2f);
-                    // Task108: 空リスト＝両駅が同じレールノードにスナップした（＝走る区間が無い）。
-                    // 従来はnullでないため路線として成立してしまい、担当列車が「経路ゼロで出発」を
-                    // 繰り返して一切動かなかった。
-                    if (path == null || path.Count == 0) continue;
                     pairs.Add(new StationPair { A = stations[a], B = stations[b] });
                 }
             }

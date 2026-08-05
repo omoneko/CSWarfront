@@ -28,6 +28,13 @@ namespace CSWarfront.Core
         /// 未供給ならnull＝鉄道輸送（TrainStep）は一切動かない。RoadGraphクラスをレール用に再利用。</summary>
         public RoadGraph Rails;
 
+        /// <summary>Task109: 勢力ごとの鉄道路線（駅ペア）のキャッシュ（実行時のみ・非永続化）。
+        /// 算出にはペアごとのA*が要るため毎tickやり直すとsimスレッドが経路探索で埋まる
+        /// （実際に「列車が動かない＝全体が詰まる」不具合を起こした）。レール網の再構築時に
+        /// TrainStep.InvalidateRoutesで捨て、必要になった時に1回だけ作り直す。</summary>
+        public readonly System.Collections.Generic.Dictionary<byte, System.Collections.Generic.List<TrainStep.StationPair>>
+            RailRoutes = new System.Collections.Generic.Dictionary<byte, System.Collections.Generic.List<TrainStep.StationPair>>();
+
         /// <summary>Task94: 外部襲来イベント（InvasionEvents）の判定タイマー（実行時のみ・非永続化。
         /// ロードで0に戻っても「次の判定が最大6時間遅れる」だけで実害なし）。</summary>
         public float InvasionCheckAccum;

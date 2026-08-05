@@ -46,7 +46,7 @@ namespace CSWarfront.Game
 
                     if (stations == 0 && trains == 0) continue; // 鉄道要素を持たない勢力は黙る
 
-                    List<TrainStep.StationPair> pairs = TrainStep.FindStationPairs(State, f.Id);
+                    List<TrainStep.StationPair> pairs = TrainStep.RoutesOf(State, f.Id);
                     StringBuilder sb = new StringBuilder();
                     sb.Append("RailRoutes: f").Append(f.Id)
                       .Append(" stations=").Append(stations)
@@ -58,11 +58,55 @@ namespace CSWarfront.Game
 
                     // 路線が1本も成立しないときだけ、駅ごと/ペアごとの内訳を出す（原因の切り分け用）。
                     if (pairs.Count == 0 && operational >= 2) LogRouteFailureDetail(f.Id);
+
+                    // Task109: 列車が動かないときの切り分け用に、編成ごとの状態を出す。
+                    if (trains > 0) LogTrainStates(f.Id, pairs);
                 }
             }
             catch (System.Exception e)
             {
                 ModConfig.LogError("LogRailRoutes error: " + e);
+            }
+        }
+
+        /// <summary>Task109: 編成ごとの状態（担当路線・位置・両駅までの距離・経路の消化状況・積荷）。
+        /// 「路線はあるのに列車が動かない」ときに、どこで止まっているのかを一行で判別するためのもの。
+        /// 担当路線の割り当てはTrainStep.Advanceと同じ規則（列挙順でラウンドロビン）で再現する。</summary>
+        private static void LogTrainStates(byte factionId, List<TrainStep.StationPair> pairs)
+        {
+            int trainIndex = 0;
+            for (int i = 0; i < State.Units.Count; i++)
+            {
+                UnitInstance u = State.Units[i];
+                if (!u.IsAlive || u.FactionId != factionId) continue;
+                UnitType t = State.Types.Get(u.TypeKey);
+                if (t == null || t.Category != UnitCategory.MilitaryTrain) continue;
+
+                var sb = new StringBuilder();
+                sb.Append("RailRoutes:   train").Append(u.InstanceId)
+                  .Append(" state=").Append(u.State)
+                  .Append(" order=").Append(u.Order)
+                  .Append(" pos=").Append(u.Position.X.ToString("0")).Append(",").Append(u.Position.Z.ToString("0"))
+                  .Append(" path=").Append(u.Path == null ? "none" : u.PathIndex + "/" + u.Path.Count)
+                  .Append(" load=").Append(u.SupplyLoad.ToString("0.00"));
+
+                if (pairs.Count > 0)
+                {
+                    TrainStep.StationPair pair = pairs[trainIndex % pairs.Count];
+                    WorldPos a = CargoStationRules.RailPointOf(pair.A);
+                    WorldPos b = CargoStationRules.RailPointOf(pair.B);
+                    sb.Append(" route=").Append(pair.A.BaseId).Append("-").Append(pair.B.BaseId)
+                      .Append(" distA=").Append(u.Position.HorizontalDistanceTo(a).ToString("0"))
+                      .Append(" distB=").Append(u.Position.HorizontalDistanceTo(b).ToString("0"))
+                      .Append(" arriveRadius=").Append(TrainStep.StationArriveRadius.ToString("0"));
+                }
+                else
+                {
+                    sb.Append(" route=none");
+                }
+
+                ModConfig.Log(sb.ToString());
+                trainIndex++;
             }
         }
 

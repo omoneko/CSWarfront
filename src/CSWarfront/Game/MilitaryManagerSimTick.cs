@@ -221,7 +221,11 @@ namespace CSWarfront.Game
                         _hasAttemptedRailBuild = true;
                         _railBuildRetryAccum = 0f;
                         State.Rails = RailGraphBuilder.Build();
-                        if (State.Rails != null) CargoStationRules.RefreshConnectivity(State);
+                        if (State.Rails != null)
+                        {
+                            CargoStationRules.RefreshConnectivity(State);
+                            TrainStep.InvalidateRoutes(State); // Task109: 路線キャッシュを作り直させる
+                        }
                     }
                 }
                 else
@@ -233,6 +237,10 @@ namespace CSWarfront.Game
                         var rebuiltRail = RailGraphBuilder.Build();
                         if (rebuiltRail != null) State.Rails = rebuiltRail;
                         CargoStationRules.RefreshConnectivity(State);
+                        // Task109: 路線（駅ペア）はペアごとにA*が要る重い計算なので、レール網や駅が
+                        // 変わりうるこのタイミングでだけ捨てて作り直す（毎tick再計算するとsimスレッドが
+                        // 経路探索で埋まり、列車どころか全体が止まる）。
+                        TrainStep.InvalidateRoutes(State);
                         LogRailRoutes(); // Task107: 列車が動かないときの原因切り分け用
                     }
                 }
