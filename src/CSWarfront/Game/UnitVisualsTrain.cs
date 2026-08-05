@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CSWarfront.Core;
+using CSWarfront.Game.Models;
 using UnityEngine;
 
 namespace CSWarfront.Game
@@ -9,32 +10,36 @@ namespace CSWarfront.Game
     /// Task108（ユーザー要望「線路上を移動するときは車体の連結部で線路に沿うように曲がってほしい」）:
     /// 軍用貨物列車の「連接表示」。
     ///
-    /// 列車モデルは全長約100mの一体メッシュなので、そのまま1つの剛体として置くとカーブで線路から
-    /// 大きくはみ出す（機関車と最後尾が同じ向きを向いてしまう）。ここでは、
-    ///   1. 生成時にメッシュを「車両ごと」に切り分ける（連結部＝ジオメトリが存在しないZ方向の隙間で分割）
-    ///   2. 先頭が通った軌跡（Trail）を記録し、各車両を「先頭から自分の距離だけ後ろの軌跡上の点」へ置く
-    /// ことで、実際に走った線路の形に沿って車体が折れ曲がるようにする。
+    /// モデル側が車両ごとの独立オブジェクトへ分割されている（2026-08-05にユーザーが更新。
+    /// Unit_MilitaryTrain＝機関車＋Coach/Van/TankWagon/Flatの4両）。ここでは、
+    ///   1. 生成時に後続車両のモデルを読み込み、編成順に「先頭からの距離」を割り当てる
+    ///      （距離＝各車両の実寸＋連結間隔から算出。モデルを差し替えれば自動的に追従する）
+    ///   2. 先頭が通った軌跡（Trail）を記録し、各車両を「先頭から自分の距離だけ後ろの軌跡上の点」へ、
+    ///      その地点の接線方向で置く
+    /// ことで、実際に走った線路の形に沿って編成が折れ曲がる。
     ///
-    /// メッシュが読めない（isReadable=false のCSアセット等）／車両の切れ目が見つからない場合は、
-    /// 何もせず従来どおり一体の剛体として描画する（安全側フォールバック）。
+    /// 後続車両のモデルが1つも読めない場合は何もしない（＝先頭車だけの従来表示。安全側フォールバック）。
     /// すべてメインスレッド専用（UnitVisualsと同じ規約）。
     /// </summary>
     public static partial class UnitVisuals
     {
+        /// <summary>編成順（先頭車Unit_MilitaryTrainの後ろに、この順で連結する）。</summary>
+        private static readonly string[] TrailingCarModels =
+        {
+            "Unit_MilitaryTrainCoach",
+            "Unit_MilitaryTrainVan",
+            "Unit_MilitaryTrainTankWagon",
+            "Unit_MilitaryTrainFlat"
+        };
+
+        /// <summary>連結器のすき間（m）。車両どうしが密着して見えないようにする。</summary>
+        private const float CouplingGap = 1.0f;
+
         /// <summary>軌跡を記録する間隔（m）。細かいほど曲線再現が滑らかだが点が増える。</summary>
         private const float TrailSampleSpacing = 2f;
 
         /// <summary>保持する軌跡点の最大数（TrailSampleSpacing×これ＝再現できる編成長の上限）。</summary>
         private const int MaxTrailPoints = 200;
-
-        /// <summary>車両の切れ目とみなすZ方向の空白の長さ（m）。連結部の隙間はこれ以上あるとみなす。</summary>
-        private const float MinCarGap = 0.8f;
-
-        /// <summary>車両分割の走査に使うZ方向のビン幅（m）。</summary>
-        private const float CarBinSize = 0.5f;
-
-        /// <summary>分割後の車両数の上限（極端なメッシュでの暴発防止）。</summary>
-        private const int MaxCars = 16;
 
         /// <summary>このTypeKeyは連接表示の対象か（現状は軍用貨物列車のみ）。</summary>
         private static bool IsArticulatedType(string typeKey)
@@ -45,52 +50,51 @@ namespace CSWarfront.Game
             return category == UnitCategory.MilitaryTrain;
         }
 
-        /// <summary>メッシュを車両ごとに切り分け、各車両のGameObjectをrootの子として生成する。
-        /// 成功したらtrueを返し、entryへ車両と「先頭からの距離」を格納する（呼び出し側は一体表示の
-        /// レンダラーを止めること）。分割できなければfalse（従来どおり一体表示のまま）。</summary>
-        private static bool TryBuildTrainCars(GameObject root, Mesh mesh, Material[] materials, Material single,
-            float pivotOffsetY, out GameObject[] cars, out float[] behindHead)
+        /// <summary>後続車両をrootの子として生成し、各車両の「先頭からの距離」を返す。
+        /// 1両も作れなければfalse（＝先頭車だけの従来表示）。</summary>
+        private static bool TryBuildTrainCars(GameObject root, Mesh headMesh,
+            out GameObject[] cars, out float[] behindHead)
         {
             cars = null;
             behindHead = null;
 
             try
             {
-                Vector3[] vertices = mesh.vertices; // isReadable=falseならここで例外→フォールバック
-                if (vertices == null || vertices.Length == 0) return false;
-
-                List<float[]> slices = FindCarSlices(mesh, vertices);
-                if (slices == null || slices.Count < 2) return false;
-
-                float frontZ = mesh.bounds.max.z;
                 var builtCars = new List<GameObject>();
                 var offsets = new List<float>();
 
-                for (int i = 0; i < slices.Count; i++)
+                // 先頭車の中心から後端までの距離を起点に、後ろへ積み上げていく。
+                float cursor = headMesh.bounds.size.z * 0.5f;
+
+                for (int i = 0; i < TrailingCarModels.Length; i++)
                 {
-                    float minZ = slices[i][0], maxZ = slices[i][1];
-                    float centreZ = (minZ + maxZ) * 0.5f;
+                    Mesh mesh;
+                    Material[] materials;
+                    if (!WarfrontModelProvider.TryGetModel(TrailingCarModels[i], out mesh, out materials)) continue;
+                    if (mesh == null) continue;
 
-                    Mesh carMesh = BuildSliceMesh(mesh, vertices, minZ, maxZ, pivotOffsetY, centreZ);
-                    if (carMesh == null) continue;
+                    float length = mesh.bounds.size.z;
+                    cursor += CouplingGap + length * 0.5f;
 
-                    var carGo = new GameObject("Car" + i);
+                    var carGo = new GameObject("Car_" + TrailingCarModels[i]);
                     carGo.transform.SetParent(root.transform, false);
-                    MeshFilter filter = carGo.AddComponent<MeshFilter>();
-                    filter.sharedMesh = carMesh;
-                    MeshRenderer renderer = carGo.AddComponent<MeshRenderer>();
+
+                    // 車両GameObjectは毎フレーム軌跡上へワールド座標で置く。モデルの上下ピボット補正
+                    // （底面をY=0に合わせる）は先頭車と同じく子の"Model"側で吸収する。
+                    var model = new GameObject("Model");
+                    model.transform.SetParent(carGo.transform, false);
+                    model.transform.localPosition = new Vector3(0f, -mesh.bounds.min.y, 0f);
+                    MeshFilter filter = model.AddComponent<MeshFilter>();
+                    filter.sharedMesh = mesh;
+                    MeshRenderer renderer = model.AddComponent<MeshRenderer>();
                     if (materials != null && materials.Length > 0) renderer.sharedMaterials = materials;
-                    else if (single != null) renderer.sharedMaterial = single;
 
                     builtCars.Add(carGo);
-                    offsets.Add(frontZ - centreZ); // 先頭からこの距離だけ後ろを走る
+                    offsets.Add(cursor);
+                    cursor += length * 0.5f;
                 }
 
-                if (builtCars.Count < 2)
-                {
-                    for (int i = 0; i < builtCars.Count; i++) UnityEngine.Object.Destroy(builtCars[i]);
-                    return false;
-                }
+                if (builtCars.Count == 0) return false;
 
                 cars = builtCars.ToArray();
                 behindHead = offsets.ToArray();
@@ -98,117 +102,8 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                ModConfig.LogError("UnitVisuals.TryBuildTrainCars: falling back to a rigid body: " + e.Message);
+                ModConfig.LogError("UnitVisuals.TryBuildTrainCars: falling back to the locomotive only: " + e);
                 return false;
-            }
-        }
-
-        /// <summary>三角形の重心Zのヒストグラムから「ジオメトリが無いZ帯＝連結部」を見つけ、
-        /// 車両ごとの[minZ, maxZ]の並びを返す（前から後ろの順）。</summary>
-        private static List<float[]> FindCarSlices(Mesh mesh, Vector3[] vertices)
-        {
-            float minZ = mesh.bounds.min.z, maxZ = mesh.bounds.max.z;
-            float span = maxZ - minZ;
-            if (span <= MinCarGap * 2f) return null;
-
-            int binCount = Mathf.Clamp(Mathf.CeilToInt(span / CarBinSize), 1, 4096);
-            var occupied = new bool[binCount];
-
-            for (int sub = 0; sub < mesh.subMeshCount; sub++)
-            {
-                int[] tris = mesh.GetTriangles(sub);
-                for (int t = 0; t + 2 < tris.Length; t += 3)
-                {
-                    float z = (vertices[tris[t]].z + vertices[tris[t + 1]].z + vertices[tris[t + 2]].z) / 3f;
-                    int bin = Mathf.Clamp((int)((z - minZ) / span * binCount), 0, binCount - 1);
-                    occupied[bin] = true;
-                }
-            }
-
-            int gapBins = Mathf.Max(1, Mathf.CeilToInt(MinCarGap / (span / binCount)));
-            var slices = new List<float[]>();
-            int runStart = -1;
-            int emptyRun = 0;
-            for (int b = 0; b < binCount; b++)
-            {
-                if (occupied[b])
-                {
-                    if (runStart < 0) runStart = b;
-                    emptyRun = 0;
-                }
-                else if (runStart >= 0)
-                {
-                    emptyRun++;
-                    if (emptyRun >= gapBins)
-                    {
-                        AddSlice(slices, minZ, span, binCount, runStart, b - emptyRun);
-                        runStart = -1;
-                        emptyRun = 0;
-                    }
-                }
-            }
-            if (runStart >= 0) AddSlice(slices, minZ, span, binCount, runStart, binCount - 1);
-
-            if (slices.Count > MaxCars) return null;
-            slices.Reverse(); // 前（+Z）から後ろの順に並べ替える
-            return slices;
-        }
-
-        private static void AddSlice(List<float[]> slices, float minZ, float span, int binCount, int firstBin, int lastBin)
-        {
-            float binSize = span / binCount;
-            slices.Add(new[] { minZ + firstBin * binSize, minZ + (lastBin + 1) * binSize });
-        }
-
-        /// <summary>指定Z範囲の三角形だけを含むメッシュを作る。頂点配列は全体を使い回し
-        /// （未参照頂点があっても描画に影響しない）、原点が車両の中心＆底面になるよう平行移動する。
-        /// サブメッシュ構成は元のまま保つ＝マテリアル割り当てがそのまま通る。</summary>
-        private static Mesh BuildSliceMesh(Mesh source, Vector3[] vertices, float minZ, float maxZ,
-            float pivotOffsetY, float centreZ)
-        {
-            var shifted = new Vector3[vertices.Length];
-            for (int i = 0; i < vertices.Length; i++)
-                shifted[i] = new Vector3(vertices[i].x, vertices[i].y + pivotOffsetY, vertices[i].z - centreZ);
-
-            var carMesh = new Mesh();
-            carMesh.vertices = shifted;
-            Vector3[] normals = source.normals;
-            if (normals != null && normals.Length == vertices.Length) carMesh.normals = normals;
-            Vector2[] uv = source.uv;
-            if (uv != null && uv.Length == vertices.Length) carMesh.uv = uv;
-            carMesh.subMeshCount = source.subMeshCount;
-
-            bool any = false;
-            for (int sub = 0; sub < source.subMeshCount; sub++)
-            {
-                int[] tris = source.GetTriangles(sub);
-                var kept = new List<int>();
-                for (int t = 0; t + 2 < tris.Length; t += 3)
-                {
-                    float z = (vertices[tris[t]].z + vertices[tris[t + 1]].z + vertices[tris[t + 2]].z) / 3f;
-                    if (z < minZ || z > maxZ) continue;
-                    kept.Add(tris[t]); kept.Add(tris[t + 1]); kept.Add(tris[t + 2]);
-                }
-                if (kept.Count > 0) any = true;
-                carMesh.SetTriangles(kept.ToArray(), sub);
-            }
-
-            if (!any) { UnityEngine.Object.Destroy(carMesh); return null; }
-            carMesh.RecalculateBounds();
-            if (source.normals == null || source.normals.Length != vertices.Length) carMesh.RecalculateNormals();
-            return carMesh;
-        }
-
-        /// <summary>ビジュアル破棄時: 車両ごとに生成したMeshを解放する（GameObjectを消しても
-        /// Meshは自動では解放されないため）。</summary>
-        private static void DestroyTrainCarMeshes(VisualEntry entry)
-        {
-            if (entry == null || entry.Cars == null) return;
-            for (int i = 0; i < entry.Cars.Length; i++)
-            {
-                if (entry.Cars[i] == null) continue;
-                MeshFilter filter = entry.Cars[i].GetComponent<MeshFilter>();
-                if (filter != null && filter.sharedMesh != null) UnityEngine.Object.Destroy(filter.sharedMesh);
             }
         }
 

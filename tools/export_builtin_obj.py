@@ -159,7 +159,14 @@ NAME_MAP = {
     'transporthelo': 'Unit_TransportHeli',
     'attackhelo': 'Unit_AttackHeli',
     'railyard': 'Fort_CargoStation',
-    'freighttrain': 'Unit_MilitaryTrain',
+    # 2026-08-05: 軍用貨物列車を車両ごとの独立オブジェクトへ分割（連接表示のため）。
+    # 先頭車＝Unit_MilitaryTrain（従来名を維持: ユニットの既定モデル解決はこの名前を使う）、
+    # 以降の車両はGame/UnitVisualsTrain.csが編成順に連結して描画する。
+    'trainloco': 'Unit_MilitaryTrain',
+    'traincoach': 'Unit_MilitaryTrainCoach',
+    'trainvan': 'Unit_MilitaryTrainVan',
+    'traintankwagon': 'Unit_MilitaryTrainTankWagon',
+    'trainflat': 'Unit_MilitaryTrainFlat',
 }
 
 # NAME_MAPのうち、.blend側にオブジェクトがまだ存在しなくてもエラーにしないもの

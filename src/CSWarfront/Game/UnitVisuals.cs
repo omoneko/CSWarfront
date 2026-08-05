@@ -304,7 +304,6 @@ namespace CSWarfront.Game
                 {
                     if (kv.Value != null && kv.Value.GameObject != null)
                     {
-                        DestroyTrainCarMeshes(kv.Value); // Task108: 車両ごとに生成したMeshも解放する
                         UnityEngine.Object.Destroy(kv.Value.GameObject);
                     }
                 }
@@ -407,16 +406,12 @@ namespace CSWarfront.Game
 
                 go.transform.position = s.Position;
 
-                // Task108: 軍用貨物列車は一体の剛体だとカーブで線路から大きくはみ出すため、
-                // メッシュを車両ごとに切り分けて軌跡上に並べる（UnitVisualsTrain.cs）。
+                // Task108: 軍用貨物列車は「先頭車（このmesh）＋後続車両」の連接編成として描画する
+                // （1両ずつ軌跡上に並べるのでカーブで編成が折れ曲がる。UnitVisualsTrain.cs）。
                 GameObject[] cars = null;
                 float[] carBehindHead = null;
-                if (IsArticulatedType(s.TypeKey) &&
-                    TryBuildTrainCars(go, mesh, useBuiltInMaterials ? builtInMaterials : null, material,
-                        pivotOffsetY, out cars, out carBehindHead))
-                {
-                    renderer.enabled = false; // 一体表示は止める（当たり判定・タグはルートのまま）
-                }
+                if (IsArticulatedType(s.TypeKey))
+                    TryBuildTrainCars(go, mesh, out cars, out carBehindHead);
 
                 if (fromAssignedProp || fromBuiltInModel)
                 {
@@ -640,7 +635,6 @@ namespace CSWarfront.Game
                 {
                     if (entry != null && entry.GameObject != null)
                     {
-                        DestroyTrainCarMeshes(entry); // Task108
                         UnityEngine.Object.Destroy(entry.GameObject);
                     }
                     _visuals.Remove(instanceId);
