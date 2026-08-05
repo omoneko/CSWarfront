@@ -230,6 +230,24 @@ public class TrainStepTests
     }
 
     [Fact]
+    public void Train_off_the_rails_is_put_back_on_them_before_departing()
+    {
+        // 線路から離れた場所に居る列車（駅建物の位置に手動生産された等）は、最初のウェイポイントまで
+        // 直線で「宙を飛ぶ」のではなく、レール上へ載せ直してから走り出す。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        f.AddSupply(1000f);
+        var train = new UnitInstance(100, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
+            new WorldPos(0, 40, 120)); // レール(z=0,y=1)から120m離れた上空
+        s.Units.Add(train);
+
+        TrainStep.Advance(s, 0.1f);
+
+        Assert.True(train.Position.HorizontalDistanceTo(new WorldPos(0, 1, 0)) <= TrainStep.RailSnapTolerance,
+            "expected the train to be snapped onto the rail network before departing");
+        Assert.Equal(UnitState.Moving, train.State);
+    }
+
+    [Fact]
     public void Train_without_any_route_runs_to_the_nearest_station_instead_of_freezing()
     {
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);

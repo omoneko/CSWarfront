@@ -212,8 +212,24 @@ namespace CSWarfront.Core
             DepartTo(state, train, best);
         }
 
+        /// <summary>レール上に居るとみなす許容距離（m）。これを超えて線路から離れていたら載せ直す。</summary>
+        public const float RailSnapTolerance = 15f;
+
         private static void DepartTo(WarState state, UnitInstance train, MilitaryBase station)
         {
+            // Task109（ユーザー報告「列車がレールの無いところを走る／宙を飛ぶ」）: 経路は必ずレール上の
+            // ノードから始まる。列車がそこから離れた位置に居ると（駅建物の位置に手動生産された直後、
+            // 担当路線の変更後など）、最初のウェイポイントまで直線＝線路の無い空中を進んでしまう。
+            // 出発前に最寄りのレールノードへ載せ直して、必ず線路の上から走り出すようにする。
+            ushort nodeId;
+            WorldPos onRail;
+            if (state.Rails.TryFindNearestNode(train.Position, CargoStationRules.RailEntryRadius, out nodeId)
+                && state.Rails.TryGetNodePosition(nodeId, out onRail)
+                && train.Position.HorizontalDistanceTo(onRail) > RailSnapTolerance)
+            {
+                train.Position = onRail;
+            }
+
             WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: 行き先はレール進入点
             var path = state.Rails.FindPath(train.Position, dest, CargoStationRules.RailSnapRadius * 2f);
             if (path == null || path.Count == 0)

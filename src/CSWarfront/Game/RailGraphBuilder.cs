@@ -36,6 +36,9 @@ namespace CSWarfront.Game
 
         private static bool _failureAlreadyLogged;
 
+        /// <summary>Task109: 曲線が信用できず直線に落としたセグメント数（ビルドごとにリセット、ログ用）。</summary>
+        private static int _curveRejections;
+
         /// <summary>CSのNetNode idをグラフの自前idへ写す（初出なら採番してノードを作る）。</summary>
         private static ushort MapNode(RoadGraph graph, Dictionary<ushort, ushort> map, ref ushort nextId,
             ushort netNodeId, Vector3 pos)
@@ -50,37 +53,79 @@ namespace CSWarfront.Game
             return graphId;
         }
 
-        /// <summary>セグメントのベジエ曲線に沿って中間ノードを挿し、startId→…→endIdの折れ線として繋ぐ
-        /// （曲線が短い/ノードid空間が尽きた場合は端点どうしを直接繋ぐ）。</summary>
-        private static void AddCurvedSegment(RoadGraph graph, ref ushort nextId, NetSegment segment,
-            Vector3 startPos, Vector3 endPos, ushort startId, ushort endId)
+        /// <summary>セグメントの曲線に沿って中間ノードを挿し、startId→…→endIdの折れ線として繋ぐ
+        /// （曲線が取れない/短い/ノードid空間が尽きた場合は端点どうしを直接繋ぐ）。
+        ///
+        /// Task109（ユーザー報告「列車がレールの無いところを走る／宙を飛ぶ」）: 曲線は
+        /// NetSegment.CalculateMiddlePointsで自前に組み立てるのをやめ、CS自身がレーンごとに保持している
+        /// 実際の走行曲線（NetLane.m_bezier＝バニラの列車が走る線そのもの）から取る。あわせて、
+        /// サンプル点が端点から常識外に離れていたらそのセグメントは直線扱いに落とす安全弁を入れる
+        /// （どんな理由で曲線がおかしくても、線路から大きく外れた経路にはならない）。</summary>
+        private static void AddCurvedSegment(RoadGraph graph, ref ushort nextId, ushort segmentId,
+            NetSegment segment, NetInfo info, Vector3 startPos, Vector3 endPos, ushort startId, ushort endId)
         {
             float length = segment.m_averageLength;
             if (length <= 0f) length = Vector3.Distance(startPos, endPos);
             int samples = Mathf.Clamp(Mathf.CeilToInt(length / SegmentSampleSpacing) - 1, 0, MaxSamplesPerSegment);
 
-            if (samples <= 0 || nextId >= MaxGraphNodes - samples)
+            Bezier3 curve;
+            if (samples <= 0 || nextId >= MaxGraphNodes - samples || !TryGetRailLaneBezier(segment, info, out curve))
             {
                 graph.AddEdge(startId, endId);
                 return;
             }
 
-            Vector3 mid1, mid2;
-            NetSegment.CalculateMiddlePoints(startPos, segment.m_startDirection, endPos, segment.m_endDirection,
-                true, true, out mid1, out mid2);
-            var curve = new Bezier3(startPos, mid1, mid2, endPos);
+            // 安全弁: 端点間の中点から見て、サンプル点が「セグメント長の半分＋余裕」より遠ければ、
+            // 曲線が信用できない（＝線路から外れる）ので直線に落とす。
+            Vector3 chordMid = (startPos + endPos) * 0.5f;
+            float sanityRadius = length * 0.5f + SegmentSampleSpacing;
 
-            ushort previous = startId;
+            var points = new Vector3[samples];
             for (int s = 1; s <= samples; s++)
             {
                 Vector3 p = curve.Position((float)s / (samples + 1));
+                if (Vector3.Distance(p, chordMid) > sanityRadius)
+                {
+                    _curveRejections++;
+                    graph.AddEdge(startId, endId);
+                    return;
+                }
+                points[s - 1] = p;
+            }
+
+            ushort previous = startId;
+            for (int s = 0; s < points.Length; s++)
+            {
                 ushort id = nextId;
                 nextId++;
-                graph.AddNode(id, new WorldPos(p.x, p.y, p.z));
+                graph.AddNode(id, new WorldPos(points[s].x, points[s].y, points[s].z));
                 graph.AddEdge(previous, id);
                 previous = id;
             }
             graph.AddEdge(previous, endId);
+        }
+
+        /// <summary>このセグメントの「列車が走るレーン」の走行曲線を返す（CS自身が計算・保持しているもの）。
+        /// レーンを辿れない/列車レーンが無い場合はfalse。</summary>
+        private static bool TryGetRailLaneBezier(NetSegment segment, NetInfo info, out Bezier3 bezier)
+        {
+            bezier = default(Bezier3);
+            if (info == null || info.m_lanes == null) return false;
+
+            NetLane[] lanes = Singleton<NetManager>.instance.m_lanes.m_buffer;
+            uint laneId = segment.m_lanes;
+            for (int i = 0; i < info.m_lanes.Length && laneId != 0u && laneId < lanes.Length; i++)
+            {
+                NetInfo.Lane lane = info.m_lanes[i];
+                if (lane != null && (lane.m_vehicleType & VehicleInfo.VehicleType.Train) != 0)
+                {
+                    bezier = lanes[laneId].m_bezier;
+                    // 長さ0（未計算）のレーンは使わない。
+                    return Vector3.Distance(bezier.a, bezier.d) > 0.01f || lanes[laneId].m_length > 0.01f;
+                }
+                laneId = lanes[laneId].m_nextLane;
+            }
+            return false;
         }
 
         /// <summary>Task108: このNetInfoは列車が走れる線路か。従来はItemClass（PublicTransport /
@@ -125,7 +170,8 @@ namespace CSWarfront.Game
               .Append(" segmentsAccepted=").Append(segmentsAccepted)
               .Append(" weldedNodes=").Append(welded)
               .Append(" components=").Append(sizes.Count)
-              .Append(" largestComponent=").Append(largest);
+              .Append(" largestComponent=").Append(largest)
+              .Append(" straightenedSegments=").Append(_curveRejections); // Task109: 曲線が怪しく直線化した数
             if (rejected.Count > 0)
             {
                 sb.Append(" rejectedRailLikeInfos=");
@@ -152,6 +198,7 @@ namespace CSWarfront.Game
                 NetSegment[] segments = nm.m_segments.m_buffer;
                 NetNode[] nodes = nm.m_nodes.m_buffer;
 
+                _curveRejections = 0;
                 var graph = new RoadGraph();
                 int segmentsAccepted = 0;
                 var rejected = new Dictionary<string, int>(); // Task108: 何を落としているかの内訳
@@ -194,7 +241,8 @@ namespace CSWarfront.Game
                     // CSのセグメントは直線ではなくベジエ曲線であり、端点2つだけを辺にすると曲線区間が
                     // 弦（ショートカット）に化ける。曲線を約SegmentSampleSpacingごとにサンプリングして
                     // 中間ノードを挿し、線路の形そのものを辿らせる。
-                    AddCurvedSegment(graph, ref nextSyntheticId, segments[i], startPos, endPos, startId, endId);
+                    AddCurvedSegment(graph, ref nextSyntheticId, (ushort)i, segments[i], info,
+                        startPos, endPos, startId, endId);
                     segmentsAccepted++;
                 }
 
