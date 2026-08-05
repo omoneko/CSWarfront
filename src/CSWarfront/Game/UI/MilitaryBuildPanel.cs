@@ -213,6 +213,15 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
+                // Task106: 塹壕はライン敷設モード（2点右クリックで連続配置。バニラ配置ツールを
+                // 使わないため「道路に接して配置」要件を受けない）。
+                if (RowTypes[rowIndex] == BaseType.Trench)
+                {
+                    TrenchLineTargeting.Begin();
+                    if (_panel != null) _panel.Hide(); // 地面クリックの邪魔にならないよう閉じる
+                    return;
+                }
+
                 // バニラの建設ツールを直接このプレハブで起動する（BuildingToolは常設のバニラツール
                 // なのでSetTool<T>の事前登録は不要）。以後の配置・回転・解除は通常の建設操作そのまま。
                 BuildingTool tool = ToolsModifierControl.SetTool<BuildingTool>();

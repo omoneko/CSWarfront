@@ -49,6 +49,7 @@ namespace CSWarfront.Game
                 BasePlacementWatcher.Unsubscribe();
                 MilitaryManager.Reset();
                 UI.MilitaryBuildPanel.Reset(); // Task102: 破棄済みUI参照を持ち越さない
+                UI.TrenchLineTargeting.Reset(); // Task106: ターゲティング状態を持ち越さない
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelUnloading: " + e); }
         }

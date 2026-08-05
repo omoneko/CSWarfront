@@ -94,6 +94,13 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("MilitaryBuildPanel update: " + e); }
 
+            // Task106: 塹壕ライン敷設のターゲティング（2点右クリック）。
+            try
+            {
+                TrenchLineTargeting.Update();
+            }
+            catch (System.Exception e) { ModConfig.LogError("TrenchLineTargeting update: " + e); }
+
             // Task62: コマンド発行時の画面中央トースト。UnitCommandInputがShow()を呼ぶ側なので、
             // ここでは冪等な生成とフェード/非表示の時間経過管理だけを毎フレーム行う。
             try

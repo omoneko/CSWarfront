@@ -100,6 +100,14 @@ namespace CSWarfront.Game
                 // この直後のProductionPlanningから同tickで生産対象になる。
                 BasePlacementWatcher.ProcessPending(State);
 
+                // Task106: 塹壕ライン敷設（UIが積んだ2点間へCreateBuildingで連続配置。生成された建物は
+                // 次tickのBasePlacementWatcher.ProcessPendingが論理塹壕として登録する）。
+                ProcessPendingTrenchLines();
+
+                // Task106: 築城系建物の問題アイコン（道路未接続・電気・水道等）を消す
+                // （野戦築城は都市インフラ不要という扱い）。
+                SuppressFortificationProblems();
+
                 // Task71: 勢力別アセットのオーバーレイ生成/破棄（BaseVisuals、メインスレッド）が
                 // 記録した「この拠点のバニラ見た目を隠すべきか」のペンディングをCS建物バッファへ
                 // 反映する（要件2、スタッキング防止）。BasePlacementWatcher.ProcessPendingの直後
