@@ -76,8 +76,10 @@ namespace CSWarfront.Game
 
             // 起点も終点も含めて等間隔に置く（1点クリック相当なら1個だけ）。
             int segments = Mathf.Min(MaxTrenchSegmentsPerLine, Mathf.FloorToInt(length / TrenchSegmentSpacing) + 1);
-            // 建物のローカルZ（footprintの長辺）をライン方向へ向ける。
-            float angle = Mathf.Atan2(dir.x, dir.z);
+            // 塹壕モデルの溝はローカルX方向に走っている（実機確認: ローカルZを向けると
+            // ライン方向に対して90°直交して見えた）。そのため+90°回してモデルの長辺＝溝を
+            // ライン方向と平行にする。
+            float angle = Mathf.Atan2(dir.x, dir.z) + Mathf.PI * 0.5f;
 
             BuildingManager bm = Singleton<BuildingManager>.instance;
             SimulationManager sm = Singleton<SimulationManager>.instance;
