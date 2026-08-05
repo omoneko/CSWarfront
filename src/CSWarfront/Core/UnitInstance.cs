@@ -91,6 +91,15 @@ namespace CSWarfront.Core
         /// ロードで既定falseに戻っても、最悪1回の拠点間輸送が起きるだけで実害なし。</summary>
         public bool SupplyLoadFromDepot;
 
+        /// <summary>Task110（ユーザー要望「荷下ろしのための時間が必要なので駅に着いたら一時停車」）:
+        /// 軍用貨物列車の停車残り時間（ゲーム内時間、実行時のみ・非永続化）。0より大きい間は駅処理を
+        /// 一切行わずその場に停まる。ロードで0に戻っても、次の停車から通常どおり時間を取るだけ。</summary>
+        public float StationDwell;
+
+        /// <summary>Task110: 現在停車中の駅での荷役（荷下ろし・降車・積載・搭乗）が済んだか
+        /// （実行時のみ・非永続化）。荷役→停車→発車の順序を1駅につき1回だけ通すためのフラグ。</summary>
+        public bool StationServiced;
+
         /// <summary>Task98: スタック検知の基準位置（実行時のみ・非永続化）。ここからMinProgressDistance
         /// 以上動くたびに現在位置へ更新され、StuckHoursが0へ戻る（StuckCleanupStep参照）。</summary>
         public WorldPos? StuckAnchor;

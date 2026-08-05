@@ -6,6 +6,15 @@ public class TrainStepTests
 {
     private const float Span = 3000f; // 駅間距離（MinStationDistance=2000より大きい）
 
+    /// <summary>Task110: 駅では「荷役 → StationDwellHours停車 → 発車」の順に進むため、テストから
+    /// 1回の到着処理を最後まで進めたいときに使う（荷役 → 停車時間を消化 → 発車判定）。</summary>
+    private static void ServiceAndDepart(WarState s)
+    {
+        TrainStep.Advance(s, 0.1f);                          // 荷役して停車に入る
+        TrainStep.Advance(s, TrainStep.StationDwellHours);   // 停車時間を消化
+        TrainStep.Advance(s, 0.1f);                          // 発車判定
+    }
+
     /// <summary>駅2つ（(0,0)と(Span,0)）を直線レールで結んだ状態。陸軍基地は(0,0)側。</summary>
     private static WarState RailState(out Faction f, out MilitaryBase stationA, out MilitaryBase stationB)
     {
@@ -73,10 +82,14 @@ public class TrainStepTests
             new WorldPos(0, 1, 0)); // 基地側駅Aに停車中
         s.Units.Add(train);
 
-        TrainStep.Advance(s, 0.1f); // 積載+出発
+        TrainStep.Advance(s, 0.1f); // 荷役（積載）してその場で停車
         Assert.Equal(1f, train.SupplyLoad, 3);
         Assert.Equal(1000f - TrainStep.CargoSupply, f.SupplyStock, 3);
-        Assert.Equal(UnitState.Moving, train.State);
+        Assert.Equal(UnitState.Idle, train.State); // Task110: 停車中はまだ発車しない
+
+        TrainStep.Advance(s, TrainStep.StationDwellHours);
+        TrainStep.Advance(s, 0.1f);
+        Assert.Equal(UnitState.Moving, train.State); // 停車時間を終えて発車
 
         // 走行（MovementStepのレール移動）→ 到着まで回す。
         for (int i = 0; i < 200 && train.SupplyLoad > 0f; i++)
@@ -184,10 +197,10 @@ public class TrainStepTests
             new WorldPos(0, 1, 0)); // レール上、駅の真横
         s.Units.Add(train);
 
-        TrainStep.Advance(s, 0.1f);
+        ServiceAndDepart(s);
 
         Assert.Equal(1f, train.SupplyLoad, 3);                 // 駅に着いた扱いで積載できた
-        Assert.Equal(UnitState.Moving, train.State);           // 反対の駅へ出発した
+        Assert.Equal(UnitState.Moving, train.State);           // 停車時間のあと反対の駅へ出発した
         Assert.NotNull(train.Path);
     }
 
@@ -200,7 +213,7 @@ public class TrainStepTests
             s.Units.Add(new UnitInstance(id, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
                 new WorldPos(0, 1, 0)));
 
-        TrainStep.Advance(s, 0.1f);
+        ServiceAndDepart(s);
 
         foreach (var t in s.Units)
             Assert.Equal(UnitState.Moving, t.State); // 1編成だけ動いて残りが永久停止、にならない
@@ -236,13 +249,14 @@ public class TrainStepTests
         // 直線で「宙を飛ぶ」のではなく、レール上へ載せ直してから走り出す。
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
         f.AddSupply(1000f);
+        // 駅の到着圏(150m)の外・レールから200m離れた上空。線路へ直線で飛ぶのではなく載せ直される。
         var train = new UnitInstance(100, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
-            new WorldPos(0, 40, 120)); // レール(z=0,y=1)から120m離れた上空
+            new WorldPos(600, 40, 200));
         s.Units.Add(train);
 
         TrainStep.Advance(s, 0.1f);
 
-        Assert.True(train.Position.HorizontalDistanceTo(new WorldPos(0, 1, 0)) <= TrainStep.RailSnapTolerance,
+        Assert.True(train.Position.HorizontalDistanceTo(new WorldPos(600, 1, 0)) <= TrainStep.RailSnapTolerance,
             "expected the train to be snapped onto the rail network before departing");
         Assert.Equal(UnitState.Moving, train.State);
     }

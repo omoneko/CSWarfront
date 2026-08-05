@@ -34,6 +34,16 @@ namespace CSWarfront.Core
         /// Task105: 1000→300（鉄道の積極利用。少しでも得なら乗る）。</summary>
         public const float BoardDetourAdvantage = 300f;
 
+        /// <summary>Task110（ユーザー要望「荷下ろしのための時間が必要なので駅に着いたら一時停車」）:
+        /// 駅での停車時間（ゲーム内時間）。到着→荷役→この時間だけ停車→発車、という流れになる。
+        /// 6時間＝1倍速で実時間およそ3秒。</summary>
+        public const float StationDwellHours = 6f;
+
+        /// <summary>Task110: 基地側駅で積む物資が無い等、やることが無くて待機するときの再評価間隔
+        /// （ゲーム内時間）。従来は毎tick駅処理（全ユニット走査を含む搭乗判定・乗客数え上げ）を
+        /// 走らせ続けていたため、停車中の列車が数両いるだけで無駄な負荷になっていた。</summary>
+        public const float IdleRecheckHours = 2f;
+
         /// <summary>駅への到着判定半径。Task107: 60→150。駅はレールから最大CargoStationRules.
         /// RailSnapRadius(100m)離れていてよいのに対し、列車はレール上しか走れない（＝駅建物まで
         /// 最大100m届かない）ため、60mでは永久に「到着」と判定されず、駅の手前でDepartToを
@@ -113,15 +123,22 @@ namespace CSWarfront.Core
                     // 永久停止していた。ラウンドロビンで必ずどれかの路線を担当させる。
                     StationPair pair = pairs[trainIndex % pairs.Count];
                     trainIndex++;
-                    AdvanceTrainCycle(state, f, train, pair);
+                    AdvanceTrainCycle(state, f, train, pair, dt);
                 }
             }
         }
 
-        private static void AdvanceTrainCycle(WarState state, Faction f, UnitInstance train, StationPair pair)
+        private static void AdvanceTrainCycle(WarState state, Faction f, UnitInstance train, StationPair pair, float dt)
         {
+            // Task110: 停車中（荷役の所要時間・待機の再評価待ち）は何もしない。駅処理は全ユニット走査を
+            // 含むので、ここで抜けること自体が負荷削減にもなっている。
+            if (train.StationDwell > 0f)
+            {
+                train.StationDwell -= dt;
+                return;
+            }
+
             MilitaryBase home = HomeStation(state, pair, f.Id);
-            MilitaryBase away = home.BaseId == pair.A.BaseId ? pair.B : pair.A;
 
             // Task108（ユーザー報告「列車が振動しながらスタックする」）: 走行中（経路を消化中）は
             // 駅処理を一切走らせない。従来は到着判定半径(150m)の内側にいる限り毎tick DepartToが
@@ -151,6 +168,34 @@ namespace CSWarfront.Core
 
             MilitaryBase other = atStation.BaseId == pair.A.BaseId ? pair.B : pair.A;
 
+            // Task110: 到着したらまず荷役を1回だけ行い、そのぶんの時間だけ停車する（発車は次の評価）。
+            // 荷役済み（＝停車時間を終えて戻ってきた）ならこのブロックを飛ばして発車判定へ進む。
+            if (!train.StationServiced)
+            {
+                ServiceAtStation(state, f, train, atStation, home, other);
+                train.StationServiced = true;
+                train.StationDwell = StationDwellHours;
+                train.OrderTargetPos = null;
+                train.State = UnitState.Idle; // 停車中
+                return;
+            }
+
+            // 5) 出発判定: 積荷/乗客があれば反対駅へ。空なら基地側駅へ戻る（既に基地側なら待機）。
+            train.StationServiced = false;
+            bool hasCargo = train.SupplyLoad > 0f || CountPassengers(state, train.InstanceId) > 0;
+            if (hasCargo) { DepartTo(state, train, other); return; }
+            if (atStation.BaseId != home.BaseId) { DepartTo(state, train, home); return; }
+
+            // 基地側駅で積むものが無い: しばらく待ってから再評価する（毎tick駅処理を回さない）。
+            train.OrderTargetPos = null;
+            train.State = UnitState.Idle;
+            train.StationDwell = IdleRecheckHours;
+        }
+
+        /// <summary>Task110: 駅での荷役（荷下ろし→降車→積載→搭乗）をまとめて1回行う。</summary>
+        private static void ServiceAtStation(WarState state, Faction f, UnitInstance train,
+            MilitaryBase atStation, MilitaryBase home, MilitaryBase other)
+        {
             // 1) 荷下ろし（基地側駅以外＝前線側の駅でのみ。備蓄の空きぶんだけ）。
             if (train.SupplyLoad > 0f && atStation.BaseId != home.BaseId)
             {
@@ -178,12 +223,6 @@ namespace CSWarfront.Core
 
             // 4) 搭乗（どちらの駅でも可: 反対側の駅の方が目的地へ大きく近いユニットだけが乗る）。
             BoardEligibleUnits(state, train, atStation, other);
-
-            // 5) 出発判定: 積荷/乗客があれば反対駅へ。空なら基地側駅へ戻る（既に基地側なら待機）。
-            bool hasCargo = train.SupplyLoad > 0f || CountPassengers(state, train.InstanceId) > 0;
-            if (hasCargo) DepartTo(state, train, other);
-            else if (atStation.BaseId != home.BaseId) DepartTo(state, train, home);
-            else { train.OrderTargetPos = null; train.State = UnitState.Idle; }
         }
 
         /// <summary>Task107: 担当路線が無い列車を、最寄りの自軍稼働駅までレール上で移動させて待機させる
@@ -244,6 +283,7 @@ namespace CSWarfront.Core
             train.PathTarget = dest;
             train.OrderTargetPos = dest;
             train.State = UnitState.Moving;
+            train.StationServiced = false; // Task110: 次に着いた駅では必ず荷役から始める
         }
 
         private static void BoardEligibleUnits(WarState state, UnitInstance train, MilitaryBase here, MilitaryBase other)
