@@ -221,6 +221,30 @@ namespace CSWarfront.Core
             return false;
         }
 
+        /// <summary>Task110: 指定地点からmaxDistance以内にある連結成分ごとの最寄りノードと距離を返す
+        /// （成分番号→(ノードid, 水平距離)）。「どの線路網が駅たちに共有されているか」の投票
+        /// （CargoStationRules.RefreshConnectivity）に使う。同距離はノードid昇順で決定的。</summary>
+        public Dictionary<int, KeyValuePair<ushort, float>> FindNearestNodePerComponent(WorldPos p, float maxDistance)
+        {
+            var result = new Dictionary<int, KeyValuePair<ushort, float>>();
+            Dictionary<ushort, int> components = Components;
+            foreach (var kv in _nodes)
+            {
+                float d = p.HorizontalDistanceTo(kv.Value.Position);
+                if (d > maxDistance) continue;
+                int component;
+                if (!components.TryGetValue(kv.Key, out component)) continue;
+
+                KeyValuePair<ushort, float> best;
+                if (!result.TryGetValue(component, out best)
+                    || d < best.Value || (d == best.Value && kv.Key < best.Key))
+                {
+                    result[component] = new KeyValuePair<ushort, float>(kv.Key, d);
+                }
+            }
+            return result;
+        }
+
         /// <summary>Task108: 最も多くのノードを含む連結成分（＝実質的な「本線網」）の番号を返す。
         /// ノードが無ければfalse。同数の場合は成分番号の小さい方（決定的）。</summary>
         public bool TryGetLargestComponent(Dictionary<ushort, int> components, out int largestComponent)

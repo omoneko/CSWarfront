@@ -262,6 +262,28 @@ public class TrainStepTests
     }
 
     [Fact]
+    public void Stations_prefer_their_shared_line_over_a_bigger_nearby_mainline()
+    {
+        // 実機で「列車が域外方向の既設本線を往復する」原因: 進入点を「最大の連結成分」から選んでいた
+        // ため、マップの縦断本線（ノード数が最大）が駅のすぐ横の軍用線に勝ってしまった。
+        // 「駅たちが共有する成分」を選び、同数なら駅からの距離で決める。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+
+        // 駅から200m離れた場所を並走する「巨大な既設本線」（ノード数では圧勝、両駅から300m以内）。
+        var rails = s.Rails;
+        for (ushort n = 100; n < 160; n++)
+            rails.AddNode(n, new WorldPos((n - 100) * (Span / 59f), 1, 200));
+        for (ushort n = 100; n < 159; n++)
+            rails.AddEdge(n, (ushort)(n + 1));
+
+        CargoStationRules.RefreshConnectivity(s);
+
+        Assert.True(a.RailEntry.HasValue && b.RailEntry.HasValue);
+        Assert.Equal(0f, a.RailEntry.Value.Z, 1); // 軍用線(z=0)に載っている（本線z=200ではない）
+        Assert.Equal(0f, b.RailEntry.Value.Z, 1);
+    }
+
+    [Fact]
     public void Train_beside_a_disconnected_siding_still_departs()
     {
         // 実機で満載の列車が駅に停まったまま動かなくなったケース: 駅のすぐ横に本線と分断された

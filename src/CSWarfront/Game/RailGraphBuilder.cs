@@ -151,7 +151,7 @@ namespace CSWarfront.Game
         }
 
         private static void LogComponentSummary(RoadGraph graph, int segmentsAccepted, int welded,
-            Dictionary<string, int> rejected)
+            Dictionary<string, int> rejected, int outsideExcluded)
         {
             var components = graph.ComputeComponentIds();
             var sizes = new Dictionary<int, int>();
@@ -171,7 +171,8 @@ namespace CSWarfront.Game
               .Append(" weldedNodes=").Append(welded)
               .Append(" components=").Append(sizes.Count)
               .Append(" largestComponent=").Append(largest)
-              .Append(" straightenedSegments=").Append(_curveRejections); // Task109: 曲線が怪しく直線化した数
+              .Append(" straightenedSegments=").Append(_curveRejections) // Task109: 曲線が怪しく直線化した数
+              .Append(" outsideExcluded=").Append(outsideExcluded);      // Task110: 域外接続の除外数
             if (rejected.Count > 0)
             {
                 sb.Append(" rejectedRailLikeInfos=");
@@ -199,6 +200,7 @@ namespace CSWarfront.Game
                 NetNode[] nodes = nm.m_nodes.m_buffer;
 
                 _curveRejections = 0;
+                int outsideExcluded = 0; // Task110: 域外接続に触れる区間の除外数（ログ用）
                 var graph = new RoadGraph();
                 int segmentsAccepted = 0;
                 var rejected = new Dictionary<string, int>(); // Task108: 何を落としているかの内訳
@@ -232,6 +234,16 @@ namespace CSWarfront.Game
                     if ((nodes[startNode].m_flags & NetNode.Flags.Created) == 0) continue;
                     if ((nodes[endNode].m_flags & NetNode.Flags.Created) == 0) continue;
 
+                    // Task110（ユーザー要望「都市内の線路の上のみを通る」）: マップ端の域外接続へ
+                    // 繋がる区間は採用しない。軍用列車が域外接続ノードを経由して市外方向へ
+                    // ルーティングされるのを根元で断つ（バニラの列車運行には一切干渉しない）。
+                    if ((nodes[startNode].m_flags & NetNode.Flags.Outside) != 0
+                        || (nodes[endNode].m_flags & NetNode.Flags.Outside) != 0)
+                    {
+                        outsideExcluded++;
+                        continue;
+                    }
+
                     Vector3 startPos = nodes[startNode].m_position;
                     Vector3 endPos = nodes[endNode].m_position;
                     ushort startId = MapNode(graph, netNodeToGraph, ref nextSyntheticId, startNode, startPos);
@@ -250,7 +262,7 @@ namespace CSWarfront.Game
                 // 状態になったため、線路網が何個の塊に割れているかを毎回ログする（軍用列車が
                 // 走れない原因の一次切り分け。健全なら大きな成分1つに集約されるはず）。
                 int welded = graph.WeldCoincidentNodes(NodeWeldRadius, NodeWeldHeightTolerance);
-                LogComponentSummary(graph, segmentsAccepted, welded, rejected);
+                LogComponentSummary(graph, segmentsAccepted, welded, rejected, outsideExcluded);
                 _failureAlreadyLogged = false;
                 return graph;
             }

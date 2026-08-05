@@ -18,37 +18,83 @@ namespace CSWarfront.Core
 
         /// <summary>全貨物駅のRailConnected／RailEntry（列車が実際に発着するレール上の地点）を
         /// 引き直す（レール網の構築/再構築のたびにGame層が呼ぶ）。
-        /// 進入点は「本線網（最大の連結成分）でRailEntryRadius以内の最寄りノード」を第一候補とし、
-        /// 見つからなければ従来どおりRailSnapRadius以内の最寄りノードへフォールバックする。</summary>
+        ///
+        /// Task110（ユーザー報告「列車が線路以外を通って域外まで往復する」）: 進入点の選び方を
+        /// 「最大の連結成分」から「駅たちが共有している連結成分」へ変更した。曲線サンプリングで
+        /// ノード数が線路の長さに比例するようになった結果、マップに元から敷かれている長大な既設線
+        /// （域外接続へ続く縦断本線）が常に最大成分になり、全駅の進入点がそちらへ吸われて、列車が
+        /// 都市の軍用線ではなく既設線を域外方向へ走っていた。
+        ///
+        /// 選定規則（決定的）:
+        ///  1. 各駅からRailEntryRadius以内にある成分ごとの最寄りノードを集める。
+        ///  2. 「届く駅の数」が最多の成分を選ぶ（＝駅たちを実際に結んでいる網）。
+        ///  3. 同数なら、駅からの距離の合計が最小の成分（＝駅のすぐ横を走っている網）。
+        /// 勝った成分に届かない駅は、従来どおりRailSnapRadius以内の最寄りノードへフォールバックする
+        /// （別勢力が別の網に駅を建てているケースはこちらで機能する）。</summary>
         public static void RefreshConnectivity(WarState state)
         {
-            Dictionary<ushort, int> components = null;
-            int mainComponent = 0;
-            bool hasMain = false;
-            if (state.Rails != null)
-            {
-                components = state.Rails.ComputeComponentIds();
-                hasMain = state.Rails.TryGetLargestComponent(components, out mainComponent);
-            }
-
+            var stations = new List<MilitaryBase>();
             for (int i = 0; i < state.Bases.Count; i++)
             {
                 MilitaryBase b = state.Bases[i];
                 if (b.Type != BaseType.CargoStation) continue;
-
                 b.RailEntry = null;
-                if (state.Rails == null) { b.RailConnected = false; continue; }
+                b.RailConnected = false;
+                stations.Add(b);
+            }
+            if (state.Rails == null || stations.Count == 0) return;
 
-                // 本線網の進入点が少し遠くても（RailSnapRadius超でも）採用する——駅の真横にある
-                // 引き込み線だけを掴んで孤立するより、本線へ出られる方が常に望ましい。
-                ushort nodeId = 0;
-                bool found = hasMain && state.Rails.TryFindNearestNode(
-                    b.Position, RailEntryRadius, components, mainComponent, out nodeId);
-                if (!found) found = state.Rails.TryFindNearestNode(b.Position, RailSnapRadius, out nodeId);
+            // 1. 駅ごとの「成分→(最寄りノード, 距離)」と、成分ごとの得票・距離合計を集計する。
+            var perStation = new Dictionary<int, KeyValuePair<ushort, float>>[stations.Count];
+            var votes = new Dictionary<int, int>();
+            var distanceSum = new Dictionary<int, float>();
+            for (int i = 0; i < stations.Count; i++)
+            {
+                perStation[i] = state.Rails.FindNearestNodePerComponent(stations[i].Position, RailEntryRadius);
+                foreach (var kv in perStation[i])
+                {
+                    int c;
+                    votes.TryGetValue(kv.Key, out c);
+                    votes[kv.Key] = c + 1;
+                    float sum;
+                    distanceSum.TryGetValue(kv.Key, out sum);
+                    distanceSum[kv.Key] = sum + kv.Value.Value;
+                }
+            }
 
-                b.RailConnected = found;
+            // 2-3. 得票最多 → 距離合計最小 → 成分番号最小、の順で決定的に選ぶ。
+            int winner = -1;
+            foreach (var kv in votes)
+            {
+                if (winner < 0) { winner = kv.Key; continue; }
+                int cmp = kv.Value.CompareTo(votes[winner]);
+                if (cmp > 0 || (cmp == 0 && distanceSum[kv.Key] < distanceSum[winner])
+                    || (cmp == 0 && distanceSum[kv.Key] == distanceSum[winner] && kv.Key < winner))
+                {
+                    winner = kv.Key;
+                }
+            }
+
+            for (int i = 0; i < stations.Count; i++)
+            {
+                MilitaryBase b = stations[i];
+                ushort nodeId;
+                KeyValuePair<ushort, float> hit;
+                if (winner >= 0 && perStation[i].TryGetValue(winner, out hit))
+                {
+                    nodeId = hit.Key;
+                }
+                else if (!state.Rails.TryFindNearestNode(b.Position, RailSnapRadius, out nodeId))
+                {
+                    continue; // どの網にも届かない: 未接続のまま
+                }
+
                 WorldPos entry;
-                if (found && state.Rails.TryGetNodePosition(nodeId, out entry)) b.RailEntry = entry;
+                if (state.Rails.TryGetNodePosition(nodeId, out entry))
+                {
+                    b.RailEntry = entry;
+                    b.RailConnected = true;
+                }
             }
         }
 
