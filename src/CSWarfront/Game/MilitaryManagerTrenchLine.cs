@@ -23,11 +23,11 @@ namespace CSWarfront.Game
     /// </summary>
     public static partial class MilitaryManager
     {
-        /// <summary>塹壕セグメントの配置間隔（m）。モデル16×32の長辺と一致させ、継ぎ目が揃うようにする。</summary>
-        public const float TrenchSegmentSpacing = 32f;
-
         /// <summary>1本のラインで配置するセグメント数の上限（暴発防止）。</summary>
         public const int MaxTrenchSegmentsPerLine = 64;
+
+        /// <summary>建物フットプリント1セルの一辺（m）。CSの建物グリッドは8m/セル。</summary>
+        private const float CellSizeMeters = 8f;
 
         private struct TrenchLineRequest { public Vector3 Start, End; }
 
@@ -74,12 +74,24 @@ namespace CSWarfront.Game
             float length = delta.magnitude;
             Vector3 dir = length > 0.01f ? delta / length : Vector3.forward;
 
-            // 起点も終点も含めて等間隔に置く（1点クリック相当なら1個だけ）。
-            int segments = Mathf.Min(MaxTrenchSegmentsPerLine, Mathf.FloorToInt(length / TrenchSegmentSpacing) + 1);
-            // 塹壕モデルの溝はローカルX方向に走っている（実機確認: ローカルZを向けると
-            // ライン方向に対して90°直交して見えた）。そのため+90°回してモデルの長辺＝溝を
-            // ライン方向と平行にする。
-            float angle = Mathf.Atan2(dir.x, dir.z) + Mathf.PI * 0.5f;
+            // どちらのローカル軸が長辺かはアセット依存なのでフットプリント（8m/セル）から判定し、
+            // 配置間隔もその長辺の実寸にする（セグメント同士が隙間なく繋がる）。
+            float sizeX = Mathf.Max(1, info.m_cellWidth) * CellSizeMeters;   // ローカルX方向の長さ
+            float sizeZ = Mathf.Max(1, info.m_cellLength) * CellSizeMeters;  // ローカルZ方向の長さ
+            bool longAxisIsX = sizeX > sizeZ;
+            float spacing = longAxisIsX ? sizeX : sizeZ;
+
+            // CSの建物回転は Quaternion.AngleAxis(m_angle * Rad2Deg, Vector3.down)（Building.
+            // CalculateMeshRotation のILで確認済み）。すなわち「up軸まわりに -m_angle 回す」ため、
+            //   ローカル+Z → (-sin θ, 0, cos θ)   … 長辺がZなら θ = Atan2(-dir.x, dir.z)
+            //   ローカル+X → ( cos θ, 0, sin θ)   … 長辺がXなら θ = Atan2(dir.z, dir.x)
+            // で長辺をライン方向へ一致させられる（従来の Atan2(dir.x, dir.z) はX成分が反転した
+            // 別方向を向いていた）。
+            float angle = longAxisIsX ? Mathf.Atan2(dir.z, dir.x) : Mathf.Atan2(-dir.x, dir.z);
+
+            // 引いた線分そのものを塹壕で覆う（各セグメントの中心を spacing 間隔で線分上に並べる）。
+            int segments = Mathf.Min(MaxTrenchSegmentsPerLine,
+                Mathf.Max(1, Mathf.RoundToInt(length / spacing)));
 
             BuildingManager bm = Singleton<BuildingManager>.instance;
             SimulationManager sm = Singleton<SimulationManager>.instance;
@@ -89,7 +101,7 @@ namespace CSWarfront.Game
             int placed = 0;
             for (int i = 0; i < segments; i++)
             {
-                Vector3 pos = start + dir * (i * TrenchSegmentSpacing);
+                Vector3 pos = start + dir * ((i + 0.5f) * spacing);
                 pos.y = tm.SampleDetailHeight(pos);
 
                 // 建設費は通常どおり市の資金から支払う（払えなくなったら中断）。
@@ -114,7 +126,9 @@ namespace CSWarfront.Game
             }
             ModConfig.Log("TrenchLine: placed " + placed + " trench segment(s) from (" +
                 start.x.ToString("0") + "," + start.z.ToString("0") + ") to (" +
-                end.x.ToString("0") + "," + end.z.ToString("0") + ")");
+                end.x.ToString("0") + "," + end.z.ToString("0") + ") footprint=" +
+                info.m_cellWidth + "x" + info.m_cellLength + " cells, longAxis=" +
+                (longAxisIsX ? "X" : "Z") + ", spacing=" + spacing.ToString("0") + "m");
         }
 
         /// <summary>simスレッド（OnSimTick、_stateLock内）: 築城系建物の問題アイコン（道路未接続・
@@ -123,15 +137,23 @@ namespace CSWarfront.Game
         private static void SuppressFortificationProblems()
         {
             if (State == null) return;
-            Building[] buffer = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+            BuildingManager bm = Singleton<BuildingManager>.instance;
+            Building[] buffer = bm.m_buildings.m_buffer;
+            Notification.ProblemStruct none = Notification.ProblemStruct.None;
             for (int i = 0; i < State.Bases.Count; i++)
             {
                 MilitaryBase b = State.Bases[i];
                 if (!FortificationRules.IsFortification(b.Type)) continue;
                 if (b.BaseId >= buffer.Length) continue;
                 if ((buffer[b.BaseId].m_flags & Building.Flags.Created) == 0) continue;
-                // 注: このCS1バージョンではProblem型はNotification.Problem1（後期パッチで改名済み）。
-                buffer[b.BaseId].m_problems = Notification.Problem1.None;
+
+                Notification.ProblemStruct old = buffer[b.BaseId].m_problems;
+                if (old == none) continue;
+                buffer[b.BaseId].m_problems = none;
+                // 重要: 問題アイコンはレンダーグループへ焼き込まれる（Notification.PopulateGroupData）ため、
+                // m_problemsを書き換えるだけでは画面上のアイコンが消えない。バニラのAIと同じく
+                // UpdateNotificationsを呼んでグループを更新させる（simスレッドから呼ぶのが正しい）。
+                bm.UpdateNotifications(b.BaseId, old, none);
             }
         }
     }
