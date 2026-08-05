@@ -38,6 +38,17 @@ namespace CSWarfront.Game
         private const float DefaultMuzzleHeight = 3f;
         private const float BaseTargetHeight = 8f;
 
+        // Task108（ユーザー指摘「砲兵陣地の発射高さがモデルとズレている」）: 築城施設（掩蔽壕/
+        // 砲兵陣地）は論理ユニットではないため銃口オフセットを引けず（ShotEvent.AttackerId==0）、
+        // 上のDefaultMuzzleHeight(3m)にフォールバックしていた。同梱モデルから実測した高さに置き換える:
+        //   Models/Fort_ArtilleryPost.obj … 全高3.6m。中央の榴弾砲の砲身まわりが約2.2〜2.9m
+        //   Models/Fort_Bunker.obj        … 全高5.3m（アンテナ込み）。本体の銃眼は約1.1〜1.6m
+        // 施設からの射撃は兵科で施設種別が一意に決まる（砲兵陣地=Artillery / 掩蔽壕=Infantry、
+        // Core/FortCombatStep.cs の attackerCategory 参照）。別サイズのアセットを指定した場合は
+        // この2つの値を調整する。
+        private const float ArtilleryPostMuzzleHeight = 2.4f;
+        private const float BunkerMuzzleHeight = 1.3f;
+
         // Gunfire（Infantry/MechInfantry/Apc/DroneInfantry/AntiAir）: 細く短いトレーサー＋小さなマズルフラッシュ。
         // Task43: 1発→3点バースト化に合わせて、1発ごとの表示時間を0.08s→0.06sへわずかに短縮した
         // （バースト間隔0.07sより短く保ち、次弾が出る前に前弾が消え切るようにするため）。
@@ -70,6 +81,12 @@ namespace CSWarfront.Game
         private const float ArcTrailMaxLagT = 0.3f;
         private const float ImpactPuffDuration = 0.3f;
         private const float ImpactPuffSize = 3.5f;
+
+        // Task108（ユーザー要望「曲射にも砲口フラッシュを足す」）: 曲射は従来、光跡が飛び始めるだけで
+        // 発射側に何も出ていなかった（直射/銃撃にはSpawnTracerのマズルフラッシュがある）。砲らしい
+        // 重さを出すため、直射より一回り大きく・わずかに長く残るフラッシュを発射点に出す。
+        private const float ArcMuzzleFlashSize = 3.2f;
+        private const float ArcMuzzleFlashDuration = 0.18f;
 
         // 暖色系固定（勢力色でチントしない）。
         private static readonly Color GunfireColor = new Color(1f, 0.92f, 0.55f);     // 暖かい黄白色
@@ -263,7 +280,7 @@ namespace CSWarfront.Game
             // Task43: 発射/着弾位置を地面レベルからモデル中央の高さへ持ち上げる。攻撃側(From)は
             // AttackerIdの、着弾側(To)はTargetIdの見た目の高さを使う。TargetId==0は基地（または
             // 不明な対象＝論理ユニットではない）を意味し、見た目のルックアップを試みず既定値を使う。
-            from.y += ResolveAttackerMuzzleHeight(e.AttackerId);
+            from.y += ResolveAttackerMuzzleHeight(e.AttackerId, e.Category);
             to.y += ResolveTargetMuzzleHeight(e.TargetId);
 
             if (cameraPos.HasValue)
@@ -299,6 +316,7 @@ namespace CSWarfront.Game
                         GetDirectFireMaterial());
                     break;
                 case ShotKind.IndirectFire:
+                    SpawnMuzzleFlash(from, ArcMuzzleFlashSize, ArcMuzzleFlashDuration); // Task108
                     SpawnArc(from, to);
                     break;
                 case ShotKind.SamMissile:
@@ -311,15 +329,21 @@ namespace CSWarfront.Game
             PlayShotSound(e, from, cameraPos);
         }
 
-        /// <summary>攻撃側(From)の見た目の高さ（Task43）。attackerIdが0（論理ユニットでない）か、
-        /// 見た目がまだ無い（生成前/破棄済み）場合はDefaultMuzzleHeightにフォールバックする。</summary>
-        private static float ResolveAttackerMuzzleHeight(uint attackerId)
+        /// <summary>攻撃側(From)の見た目の高さ（Task43）。見た目がまだ無い（生成前/破棄済み）場合は
+        /// DefaultMuzzleHeightにフォールバックする。
+        /// Task108: attackerIdが0＝築城施設からの射撃（FortCombatStep）なので、施設のモデルに
+        /// 合わせた高さを兵科から引く（上の定数コメント参照）。</summary>
+        private static float ResolveAttackerMuzzleHeight(uint attackerId, UnitCategory category)
         {
             if (attackerId != 0)
             {
                 float offset;
                 if (UnitVisuals.TryGetMuzzleOffset(attackerId, out offset)) return offset;
+                return DefaultMuzzleHeight;
             }
+
+            if (category == UnitCategory.Artillery) return ArtilleryPostMuzzleHeight; // 砲兵陣地
+            if (category == UnitCategory.Infantry) return BunkerMuzzleHeight;         // 掩蔽壕
             return DefaultMuzzleHeight;
         }
 
@@ -368,6 +392,38 @@ namespace CSWarfront.Game
             catch (Exception e)
             {
                 ModConfig.LogError("CombatFx.SpawnTracer error: " + e);
+            }
+        }
+
+        /// <summary>Task108: 発射点だけの短命なフラッシュ（光跡を伴わない）。曲射（砲口フラッシュ）用。
+        /// Tracerフェーズを流用するが、Lineを持たないためStepTracerは球の縮小だけを進める。
+        /// エフェクト総数の上限を超えていれば黙って省略する（見た目の飾りより本体の弾道を優先する）。</summary>
+        private static void SpawnMuzzleFlash(Vector3 at, float size, float duration)
+        {
+            if (_effects.Count >= MaxLiveEffects) return;
+
+            Material flashMaterial = GetFlashMaterial();
+            if (flashMaterial == null) return;
+
+            try
+            {
+                var go = new GameObject("CSWarfrontMuzzleFlash");
+                Transform flash = CreateSmallSphere(go.transform, at, size, flashMaterial);
+
+                _effects.Add(new Effect
+                {
+                    Root = go,
+                    Phase = Phase.Tracer,
+                    Elapsed = 0f,
+                    Duration = duration,
+                    Line = null,
+                    FlashOrShell = flash,
+                    InitialFlashSize = size
+                });
+            }
+            catch (Exception e)
+            {
+                ModConfig.LogError("CombatFx.SpawnMuzzleFlash error: " + e);
             }
         }
 
