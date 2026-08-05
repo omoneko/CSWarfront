@@ -68,8 +68,10 @@ namespace CSWarfront.Core
                 {
                     if (!UnitCosts.TryPay(f, trainType, f.Treasury)) break;
                     MilitaryBase home = HomeStation(state, pairs[p], f.Id);
+                    // Task108: 駅建物ではなくレール進入点に出現させる（＝最初から線路の上に居る）。
+                    WorldPos spawn = CargoStationRules.RailPointOf(home);
                     var u = new UnitInstance(state.AllocInstanceId(), trainType.TypeKey, f.Id, trainType.MaxHP,
-                        new WorldPos(home.Position.X, home.Position.Y, home.Position.Z));
+                        new WorldPos(spawn.X, spawn.Y, spawn.Z));
                     u.State = UnitState.Idle;
                     state.Units.Add(u);
                 }
@@ -121,17 +123,22 @@ namespace CSWarfront.Core
             MilitaryBase home = HomeStation(state, pair, f.Id);
             MilitaryBase away = home.BaseId == pair.A.BaseId ? pair.B : pair.A;
 
+            // Task108: 到着判定・経路の行き先は駅建物ではなく「レール進入点」で測る（列車はレール上
+            // しか走れないため、駅建物の座標そのものには到達しえない）。
             MilitaryBase atStation = null;
-            if (train.Position.HorizontalDistanceTo(pair.A.Position) <= StationArriveRadius) atStation = pair.A;
-            else if (train.Position.HorizontalDistanceTo(pair.B.Position) <= StationArriveRadius) atStation = pair.B;
+            if (train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.A)) <= StationArriveRadius)
+                atStation = pair.A;
+            else if (train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.B)) <= StationArriveRadius)
+                atStation = pair.B;
 
             if (atStation == null)
             {
                 // 走行中: Pathがあれば走り続ける（MovementStep.AdvanceTrain）。無ければ（ロード直後・
                 // 新造直後・ペア変更後）最寄りの担当駅へ経路を張り直す。
                 if (train.Path != null && train.PathIndex < train.Path.Count) return;
-                MilitaryBase nearest = train.Position.HorizontalDistanceTo(pair.A.Position)
-                    <= train.Position.HorizontalDistanceTo(pair.B.Position) ? pair.A : pair.B;
+                MilitaryBase nearest =
+                    train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.A))
+                    <= train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.B)) ? pair.A : pair.B;
                 DepartTo(state, train, nearest);
                 return;
             }
@@ -184,7 +191,7 @@ namespace CSWarfront.Core
                 MilitaryBase b = state.Bases[i];
                 if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
                 if (!CargoStationRules.IsOperational(b)) continue;
-                float d = train.Position.HorizontalDistanceTo(b.Position);
+                float d = train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(b));
                 if (d < bestDist) { bestDist = d; best = b; }
             }
 
@@ -201,18 +208,19 @@ namespace CSWarfront.Core
 
         private static void DepartTo(WarState state, UnitInstance train, MilitaryBase station)
         {
-            var path = state.Rails.FindPath(train.Position, station.Position, CargoStationRules.RailSnapRadius * 2f);
-            if (path == null)
+            WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: 行き先はレール進入点
+            var path = state.Rails.FindPath(train.Position, dest, CargoStationRules.RailSnapRadius * 2f);
+            if (path == null || path.Count == 0)
             {
-                // レールが分断された等: 経路が張れない間は動かない（次tickで再試行）。
+                // レールが分断された／既に同じノード上にいる: 経路が張れない間は動かない（次tickで再試行）。
                 train.OrderTargetPos = null;
                 train.State = UnitState.Idle;
                 return;
             }
             train.Path = path;
             train.PathIndex = 0;
-            train.PathTarget = station.Position;
-            train.OrderTargetPos = station.Position;
+            train.PathTarget = dest;
+            train.OrderTargetPos = dest;
             train.State = UnitState.Moving;
         }
 
@@ -274,9 +282,14 @@ namespace CSWarfront.Core
                 {
                     if (stations[a].Position.HorizontalDistanceTo(stations[b].Position) < MinStationDistance) continue;
                     if (state.Rails == null) continue;
-                    var path = state.Rails.FindPath(stations[a].Position, stations[b].Position,
+                    // Task108: 経路はレール進入点どうしで引く（駅建物の座標は線路上にないことがある）。
+                    var path = state.Rails.FindPath(
+                        CargoStationRules.RailPointOf(stations[a]), CargoStationRules.RailPointOf(stations[b]),
                         CargoStationRules.RailSnapRadius * 2f);
-                    if (path == null) continue;
+                    // Task108: 空リスト＝両駅が同じレールノードにスナップした（＝走る区間が無い）。
+                    // 従来はnullでないため路線として成立してしまい、担当列車が「経路ゼロで出発」を
+                    // 繰り返して一切動かなかった。
+                    if (path == null || path.Count == 0) continue;
                     pairs.Add(new StationPair { A = stations[a], B = stations[b] });
                 }
             }

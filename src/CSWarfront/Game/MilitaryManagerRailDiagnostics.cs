@@ -54,18 +54,95 @@ namespace CSWarfront.Game
                       .Append(" routes=").Append(pairs.Count)
                       .Append(" trains=").Append(trains)
                       .Append(" supplyStock=").Append(f.SupplyStock.ToString("0"));
-                    if (pairs.Count == 0 && operational >= 2)
-                        sb.Append(" (stations too close or not on the same rail network)");
-                    else if (pairs.Count == 0 && stations > operational)
-                        sb.Append(" (station not within ")
-                          .Append(CargoStationRules.RailSnapRadius.ToString("0"))
-                          .Append("m of a rail line)");
                     ModConfig.Log(sb.ToString());
+
+                    // 路線が1本も成立しないときだけ、駅ごと/ペアごとの内訳を出す（原因の切り分け用）。
+                    if (pairs.Count == 0 && operational >= 2) LogRouteFailureDetail(f.Id);
                 }
             }
             catch (System.Exception e)
             {
                 ModConfig.LogError("LogRailRoutes error: " + e);
+            }
+        }
+
+        /// <summary>路線が1本も成立しないときの内訳。駅ごとに「スナップ先のレールノード」「レール網の
+        /// どの連結成分か」を、駅ペアごとに「距離」「経路探索の結果」を出す。これで
+        ///   - 別々の線路網に建っている（component が違う）
+        ///   - 近すぎる（distance < MinStationDistance）
+        ///   - 同じノードにスナップしている（区間長ゼロ）
+        /// のどれなのかが一意に分かる。</summary>
+        private static void LogRouteFailureDetail(byte factionId)
+        {
+            if (State.Rails == null)
+            {
+                ModConfig.Log("RailRoutes:   rail graph is not built yet");
+                return;
+            }
+
+            Dictionary<ushort, int> components = State.Rails.ComputeComponentIds();
+            var stations = new List<MilitaryBase>();
+            for (int i = 0; i < State.Bases.Count; i++)
+            {
+                MilitaryBase b = State.Bases[i];
+                if (b.Type != BaseType.CargoStation) continue;
+                if (b.OwnerFactionId == null || b.OwnerFactionId.Value != factionId) continue;
+                stations.Add(b);
+            }
+
+            var snapped = new Dictionary<ushort, int>();   // BaseId -> component (-1: スナップ不可)
+            var snappedNode = new Dictionary<ushort, ushort>();
+            for (int i = 0; i < stations.Count; i++)
+            {
+                MilitaryBase b = stations[i];
+                // 実際に列車が発着する地点（RailEntry、未解決なら駅の位置）で判定する。
+                WorldPos entry = CargoStationRules.RailPointOf(b);
+                ushort nodeId;
+                bool ok = State.Rails.TryFindNearestNode(entry, CargoStationRules.RailEntryRadius, out nodeId);
+                int comp;
+                if (!ok || !components.TryGetValue(nodeId, out comp)) comp = -1;
+                snapped[b.BaseId] = comp;
+                snappedNode[b.BaseId] = ok ? nodeId : (ushort)0;
+                ModConfig.Log("RailRoutes:   station" + b.BaseId +
+                    " pos=" + b.Position.X.ToString("0") + "," + b.Position.Z.ToString("0") +
+                    " railEntry=" + (b.RailEntry.HasValue
+                        ? entry.X.ToString("0") + "," + entry.Z.ToString("0") +
+                          " (" + b.Position.HorizontalDistanceTo(entry).ToString("0") + "m away)"
+                        : "unresolved") +
+                    " railNode=" + (ok ? nodeId.ToString() : "none") + " component=" + comp);
+            }
+
+            for (int a = 0; a < stations.Count; a++)
+            {
+                for (int b2 = a + 1; b2 < stations.Count; b2++)
+                {
+                    MilitaryBase sa = stations[a], sb2 = stations[b2];
+                    float dist = sa.Position.HorizontalDistanceTo(sb2.Position);
+                    string why;
+                    if (dist < TrainStep.MinStationDistance)
+                    {
+                        why = "too close (min " + TrainStep.MinStationDistance.ToString("0") + "m)";
+                    }
+                    else if (snapped[sa.BaseId] < 0 || snapped[sb2.BaseId] < 0)
+                    {
+                        why = "not snapped to any rail node";
+                    }
+                    else if (snapped[sa.BaseId] != snapped[sb2.BaseId])
+                    {
+                        why = "different rail networks (" + snapped[sa.BaseId] + " vs " + snapped[sb2.BaseId] + ")";
+                    }
+                    else
+                    {
+                        var path = State.Rails.FindPath(
+                            CargoStationRules.RailPointOf(sa), CargoStationRules.RailPointOf(sb2),
+                            CargoStationRules.RailSnapRadius * 2f);
+                        why = path == null ? "no path (A* failed)"
+                            : path.Count == 0 ? "both stations snap to the same node (" + snappedNode[sa.BaseId] + ")"
+                            : "OK (" + path.Count + " waypoints)";
+                    }
+                    ModConfig.Log("RailRoutes:   pair " + sa.BaseId + "-" + sb2.BaseId +
+                        " dist=" + dist.ToString("0") + "m -> " + why);
+                }
             }
         }
     }

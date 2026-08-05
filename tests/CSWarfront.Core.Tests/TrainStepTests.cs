@@ -207,6 +207,29 @@ public class TrainStepTests
     }
 
     [Fact]
+    public void Station_beside_an_isolated_siding_still_enters_from_the_main_line()
+    {
+        // 実機で「駅は4つとも稼働なのに路線が0本」だったケース: 駅の真横のレールノードが本線から
+        // 分断された引き込み線だと、そこへスナップした駅どうしは経路が引けない。進入点は
+        // 本線網（最大の連結成分）から選ぶ。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+
+        // 本線から独立した引き込み線（2ノード）を駅Bのすぐ横に置く。
+        var rails = s.Rails;
+        rails.AddNode(100, new WorldPos(Span, 1, 40));
+        rails.AddNode(101, new WorldPos(Span + 20f, 1, 40));
+        rails.AddEdge(100, 101);
+
+        b.Position = new WorldPos(Span, 0, 30); // 引き込み線まで10m、本線まで30m
+        CargoStationRules.RefreshConnectivity(s);
+
+        Assert.True(b.RailConnected);
+        Assert.True(b.RailEntry.HasValue);
+        Assert.Equal(0f, b.RailEntry.Value.Z, 1); // 本線(z=0)側を掴んでいる（引き込み線のz=40ではない）
+        Assert.Single(TrainStep.FindStationPairs(s, 0));
+    }
+
+    [Fact]
     public void Train_without_any_route_runs_to_the_nearest_station_instead_of_freezing()
     {
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);

@@ -71,6 +71,13 @@ namespace CSWarfront.Game
             /// 交戦が続く限り目標の方を向き続け、交戦が終われば数秒で移動方向の向きに戻る。</summary>
             public float FacingHoldUntil;
 
+            /// <summary>Task108（ユーザー報告「ヘリが着陸するとき機体が下を向くのが不自然」）:
+            /// 向きを水平成分だけから決めるか。着陸/離陸の垂直移動でも機首は水平のまま保たれる。
+            /// 航空ユニット（ヘリ・戦闘機・爆撃機）で true。自爆ドローンは目標へ突っ込む姿勢が
+            /// 見た目上重要なので false（従来どおり移動方向そのままを向く）。陸上/海上も false
+            /// （坂道でのわずかな前後傾きは地形に沿って見えるので残す）。</summary>
+            public bool LevelFlight;
+
             /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
             /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
             /// 表示位置にだけ減衰する横揺れオフセットを加える。</summary>
@@ -407,7 +414,14 @@ namespace CSWarfront.Game
 
                 ModConfig.Log("UnitVisuals: created visual for instance " + s.InstanceId + " type=" + s.TypeKey);
 
-                return new VisualEntry { GameObject = go, LastPosition = s.Position, MuzzleOffsetY = muzzleOffsetY, IconLocalHeightY = iconLocalHeightY };
+                return new VisualEntry
+                {
+                    GameObject = go,
+                    LastPosition = s.Position,
+                    MuzzleOffsetY = muzzleOffsetY,
+                    IconLocalHeightY = iconLocalHeightY,
+                    LevelFlight = IsLevelFlightType(s.TypeKey) // Task108
+                };
             }
             catch (Exception e)
             {
@@ -477,6 +491,22 @@ namespace CSWarfront.Game
             }
         }
 
+        /// <summary>Task108: このTypeKeyのユニットは「常に機体を水平に保つ」対象か
+        /// （＝向きを移動方向の水平成分だけから決める）。着陸/離陸の垂直移動で機首が真下/真上を
+        /// 向く不自然さを避けるためのもので、航空機・ヘリが対象。自爆ドローンは突入姿勢が
+        /// 見た目上重要なので対象外。解析できないTypeKeyは従来どおり（false）。</summary>
+        private static bool IsLevelFlightType(string typeKey)
+        {
+            UnitCategory category;
+            byte tier;
+            if (!TypeKeyParser.TryParse(typeKey, out category, out tier)) return false;
+            if (category.IsKamikaze()) return false;
+            return category == UnitCategory.AirSuperiority
+                || category == UnitCategory.TacticalBomber
+                || category == UnitCategory.AttackHelicopter
+                || category == UnitCategory.TransportHelicopter;
+        }
+
         private static void MoveVisual(VisualEntry entry, Vector3 newPosition)
         {
             if (entry == null || entry.GameObject == null) return;
@@ -493,6 +523,14 @@ namespace CSWarfront.Game
                 displayPosition += entry.EvadeDir * sway;
             }
             entry.GameObject.transform.position = displayPosition;
+
+            // Task108: 航空ユニットは向きを水平成分だけから決める（着陸/離陸の垂直移動で機首が
+            // 真下/真上を向くのを防ぐ）。水平成分がほぼ無い＝真下へ降りているだけなら向きは
+            // 現状維持（最後に飛んでいた方向を向いたまま降りる）。
+            if (entry.LevelFlight)
+            {
+                delta.y = 0f;
+            }
 
             // Task83: 直近に発砲したユニットは移動方向ではなく射撃方向を向く（静止中の交戦でも
             // 相手の方を向くよう、移動デルタの有無に関わらず毎フレーム適用する）。

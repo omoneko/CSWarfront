@@ -33,14 +33,66 @@ namespace CSWarfront.Core
             if (!nb.Neighbors.Contains(a)) nb.Neighbors.Add(a);
         }
 
+        /// <summary>Task108: 連結成分ごとに0,1,2…の番号を振ったノードid→成分番号の対応を返す
+        /// （番号はノードid昇順の探索順で決まる＝決定的）。「2つの地点が同じ網に載っているか」を
+        /// 経路探索を走らせずに判定・診断するために使う（軍用列車の路線が1本も成立しない不具合の
+        /// 原因切り分け＝レール網が分断されているのか、単に近すぎるのかを区別するため）。</summary>
+        public Dictionary<ushort, int> ComputeComponentIds()
+        {
+            var result = new Dictionary<ushort, int>(_nodes.Count);
+            var ordered = new List<ushort>(_nodes.Keys);
+            ordered.Sort();
+
+            int component = 0;
+            var queue = new Queue<ushort>();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                ushort seed = ordered[i];
+                if (result.ContainsKey(seed)) continue;
+
+                result[seed] = component;
+                queue.Enqueue(seed);
+                while (queue.Count > 0)
+                {
+                    ushort current = queue.Dequeue();
+                    List<ushort> neighbors = _nodes[current].Neighbors;
+                    for (int n = 0; n < neighbors.Count; n++)
+                    {
+                        ushort next = neighbors[n];
+                        if (result.ContainsKey(next)) continue;
+                        result[next] = component;
+                        queue.Enqueue(next);
+                    }
+                }
+                component++;
+            }
+            return result;
+        }
+
         /// <summary>水平距離でmaxDistance以内の最近傍ノードを探す。</summary>
         public bool TryFindNearestNode(WorldPos p, float maxDistance, out ushort nodeId)
+        {
+            return TryFindNearestNode(p, maxDistance, null, 0, out nodeId);
+        }
+
+        /// <summary>Task108: 連結成分を限定できる版。componentsにComputeComponentIdsの結果を、
+        /// requiredComponentにその成分番号を渡すと、その成分に属するノードだけを候補にする
+        /// （components==nullなら全ノードが候補＝上のオーバーロードと同じ）。
+        /// 「駅が自分の引き込み線（本線から分断された小さな成分）にスナップしてしまい、
+        /// 本線上の他の駅へ経路が引けない」ケースを避け、本線側のノードを掴ませるために使う。</summary>
+        public bool TryFindNearestNode(WorldPos p, float maxDistance, Dictionary<ushort, int> components,
+            int requiredComponent, out ushort nodeId)
         {
             ushort best = 0;
             float bestDist = float.MaxValue;
             bool found = false;
             foreach (var kv in _nodes)
             {
+                if (components != null)
+                {
+                    int c;
+                    if (!components.TryGetValue(kv.Key, out c) || c != requiredComponent) continue;
+                }
                 float d = p.HorizontalDistanceTo(kv.Value.Position);
                 if (d <= maxDistance && (d < bestDist || (d == bestDist && kv.Key < best)))
                 {
@@ -51,6 +103,42 @@ namespace CSWarfront.Core
             }
             nodeId = best;
             return found;
+        }
+
+        /// <summary>Task108: ノードidの座標を返す（駅のレール進入点をキャッシュするために使う）。</summary>
+        public bool TryGetNodePosition(ushort nodeId, out WorldPos position)
+        {
+            Node node;
+            if (_nodes.TryGetValue(nodeId, out node)) { position = node.Position; return true; }
+            position = default(WorldPos);
+            return false;
+        }
+
+        /// <summary>Task108: 最も多くのノードを含む連結成分（＝実質的な「本線網」）の番号を返す。
+        /// ノードが無ければfalse。同数の場合は成分番号の小さい方（決定的）。</summary>
+        public bool TryGetLargestComponent(Dictionary<ushort, int> components, out int largestComponent)
+        {
+            largestComponent = 0;
+            if (components == null || components.Count == 0) return false;
+
+            var counts = new Dictionary<int, int>();
+            foreach (var kv in components)
+            {
+                int c;
+                counts.TryGetValue(kv.Value, out c);
+                counts[kv.Value] = c + 1;
+            }
+
+            int bestCount = -1;
+            foreach (var kv in counts)
+            {
+                if (kv.Value > bestCount || (kv.Value == bestCount && kv.Key < largestComponent))
+                {
+                    bestCount = kv.Value;
+                    largestComponent = kv.Key;
+                }
+            }
+            return true;
         }
 
         /// <summary>

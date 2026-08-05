@@ -105,6 +105,14 @@ namespace CSWarfront.Core
         /// 鉄道輸送（TrainStep）に使われない（備蓄・占領は機能する）。</summary>
         public bool RailConnected;
 
+        /// <summary>Task108: この駅で列車が実際に発着するレール上の地点（CargoStation専用、実行時のみ・
+        /// 非永続化＝レール網の構築/再構築のたびにCargoStationRules.RefreshConnectivityが引き直す）。
+        /// 駅建物の位置そのものではなく「本線網の最寄りノード」を指す——駅の真横のノードが本線から
+        /// 分断された引き込み線だと、他の駅への経路が引けず列車が一切動けなくなるため。
+        /// 未解決（レール網が未構築等）の場合はnullで、その間は駅の位置で代用する
+        /// （CargoStationRules.RailPointOf）。</summary>
+        public WorldPos? RailEntry;
+
         /// <summary>築城の発砲エフェクト間引き用クールダウン（実行時のみ・非永続化。
         /// UnitInstance.FireCooldownと同じ方針）。</summary>
         public float FortFireCooldown;
