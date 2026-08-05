@@ -123,6 +123,13 @@ namespace CSWarfront.Core
             MilitaryBase home = HomeStation(state, pair, f.Id);
             MilitaryBase away = home.BaseId == pair.A.BaseId ? pair.B : pair.A;
 
+            // Task108（ユーザー報告「列車が振動しながらスタックする」）: 走行中（経路を消化中）は
+            // 駅処理を一切走らせない。従来は到着判定半径(150m)の内側にいる限り毎tick DepartToが
+            // 呼ばれ、そのたびに現在位置から経路を引き直していた——引き直しの起点スナップが
+            // 進行方向の1つ手前のノードになると後戻りし、次のtickでまた引き直す、という往復
+            // （＝その場で振動して前へ進めない）に陥っていた。
+            if (train.Path != null && train.PathIndex < train.Path.Count) return;
+
             // Task108: 到着判定・経路の行き先は駅建物ではなく「レール進入点」で測る（列車はレール上
             // しか走れないため、駅建物の座標そのものには到達しえない）。
             MilitaryBase atStation = null;
@@ -133,9 +140,8 @@ namespace CSWarfront.Core
 
             if (atStation == null)
             {
-                // 走行中: Pathがあれば走り続ける（MovementStep.AdvanceTrain）。無ければ（ロード直後・
-                // 新造直後・ペア変更後）最寄りの担当駅へ経路を張り直す。
-                if (train.Path != null && train.PathIndex < train.Path.Count) return;
+                // 経路を持たずに駅の外にいる（ロード直後・新造直後・ペア変更後・経路を走り切ったが
+                // 駅の圏内ではない）: 最寄りの担当駅へ経路を張り直す。
                 MilitaryBase nearest =
                     train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.A))
                     <= train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.B)) ? pair.A : pair.B;

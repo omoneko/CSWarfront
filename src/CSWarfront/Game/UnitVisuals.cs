@@ -78,6 +78,16 @@ namespace CSWarfront.Game
             /// （坂道でのわずかな前後傾きは地形に沿って見えるので残す）。</summary>
             public bool LevelFlight;
 
+            /// <summary>Task108: 連接表示（軍用貨物列車）の車両GameObject（前から後ろの順）。
+            /// null＝従来どおり一体の剛体として描画する。詳細はUnitVisualsTrain.cs。</summary>
+            public GameObject[] Cars;
+
+            /// <summary>各車両が先頭から何m後ろを走るか（Carsと同じ並び）。</summary>
+            public float[] CarBehindHead;
+
+            /// <summary>先頭が通った軌跡（古い→新しい）。各車両はこの上に配置される。</summary>
+            public List<Vector3> Trail;
+
             /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
             /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
             /// 表示位置にだけ減衰する横揺れオフセットを加える。</summary>
@@ -294,6 +304,7 @@ namespace CSWarfront.Game
                 {
                     if (kv.Value != null && kv.Value.GameObject != null)
                     {
+                        DestroyTrainCarMeshes(kv.Value); // Task108: 車両ごとに生成したMeshも解放する
                         UnityEngine.Object.Destroy(kv.Value.GameObject);
                     }
                 }
@@ -396,6 +407,17 @@ namespace CSWarfront.Game
 
                 go.transform.position = s.Position;
 
+                // Task108: 軍用貨物列車は一体の剛体だとカーブで線路から大きくはみ出すため、
+                // メッシュを車両ごとに切り分けて軌跡上に並べる（UnitVisualsTrain.cs）。
+                GameObject[] cars = null;
+                float[] carBehindHead = null;
+                if (IsArticulatedType(s.TypeKey) &&
+                    TryBuildTrainCars(go, mesh, useBuiltInMaterials ? builtInMaterials : null, material,
+                        pivotOffsetY, out cars, out carBehindHead))
+                {
+                    renderer.enabled = false; // 一体表示は止める（当たり判定・タグはルートのまま）
+                }
+
                 if (fromAssignedProp || fromBuiltInModel)
                 {
                     // 要件1: プロップ割り当てがある場合は可視性マーカー立方体を出さない。
@@ -420,7 +442,9 @@ namespace CSWarfront.Game
                     LastPosition = s.Position,
                     MuzzleOffsetY = muzzleOffsetY,
                     IconLocalHeightY = iconLocalHeightY,
-                    LevelFlight = IsLevelFlightType(s.TypeKey) // Task108
+                    LevelFlight = IsLevelFlightType(s.TypeKey), // Task108
+                    Cars = cars,
+                    CarBehindHead = carBehindHead
                 };
             }
             catch (Exception e)
@@ -542,6 +566,11 @@ namespace CSWarfront.Game
             {
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
+
+            // Task108: 連接車両（軍用貨物列車）を先頭の軌跡上へ並べ直す。
+            if (entry.Cars != null)
+                UpdateTrainCars(entry, displayPosition, entry.GameObject.transform.rotation);
+
             entry.LastPosition = newPosition;
         }
 
@@ -611,6 +640,7 @@ namespace CSWarfront.Game
                 {
                     if (entry != null && entry.GameObject != null)
                     {
+                        DestroyTrainCarMeshes(entry); // Task108
                         UnityEngine.Object.Destroy(entry.GameObject);
                     }
                     _visuals.Remove(instanceId);

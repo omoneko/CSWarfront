@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using ColossalFramework;
+using ColossalFramework.Math;
 using CSWarfront.Core;
 using UnityEngine;
 namespace CSWarfront.Game
@@ -23,7 +24,64 @@ namespace CSWarfront.Game
         /// <summary>融合を許す高低差（m）。立体交差（10m以上の桁下）を誤って繋げないための上限。</summary>
         private const float NodeWeldHeightTolerance = 3f;
 
+        /// <summary>Task108: 曲線セグメントを何mごとにサンプリングするか。細かいほど線路に忠実だが
+        /// ノード数が増える（idはushortのため上限あり）。20mあれば見た目上ほぼ線路どおりに走る。</summary>
+        private const float SegmentSampleSpacing = 20f;
+
+        /// <summary>1セグメントあたりの中間ノード数の上限（極端に長いセグメントでの暴発防止）。</summary>
+        private const int MaxSamplesPerSegment = 12;
+
+        /// <summary>自前id空間の上限（ushort）。ここに達したら以後は中間ノードを挿さず端点のみで繋ぐ。</summary>
+        private const int MaxGraphNodes = 60000;
+
         private static bool _failureAlreadyLogged;
+
+        /// <summary>CSのNetNode idをグラフの自前idへ写す（初出なら採番してノードを作る）。</summary>
+        private static ushort MapNode(RoadGraph graph, Dictionary<ushort, ushort> map, ref ushort nextId,
+            ushort netNodeId, Vector3 pos)
+        {
+            ushort graphId;
+            if (map.TryGetValue(netNodeId, out graphId)) return graphId;
+
+            graphId = nextId;
+            if (nextId < MaxGraphNodes) nextId++;
+            map[netNodeId] = graphId;
+            graph.AddNode(graphId, new WorldPos(pos.x, pos.y, pos.z));
+            return graphId;
+        }
+
+        /// <summary>セグメントのベジエ曲線に沿って中間ノードを挿し、startId→…→endIdの折れ線として繋ぐ
+        /// （曲線が短い/ノードid空間が尽きた場合は端点どうしを直接繋ぐ）。</summary>
+        private static void AddCurvedSegment(RoadGraph graph, ref ushort nextId, NetSegment segment,
+            Vector3 startPos, Vector3 endPos, ushort startId, ushort endId)
+        {
+            float length = segment.m_averageLength;
+            if (length <= 0f) length = Vector3.Distance(startPos, endPos);
+            int samples = Mathf.Clamp(Mathf.CeilToInt(length / SegmentSampleSpacing) - 1, 0, MaxSamplesPerSegment);
+
+            if (samples <= 0 || nextId >= MaxGraphNodes - samples)
+            {
+                graph.AddEdge(startId, endId);
+                return;
+            }
+
+            Vector3 mid1, mid2;
+            NetSegment.CalculateMiddlePoints(startPos, segment.m_startDirection, endPos, segment.m_endDirection,
+                true, true, out mid1, out mid2);
+            var curve = new Bezier3(startPos, mid1, mid2, endPos);
+
+            ushort previous = startId;
+            for (int s = 1; s <= samples; s++)
+            {
+                Vector3 p = curve.Position((float)s / (samples + 1));
+                ushort id = nextId;
+                nextId++;
+                graph.AddNode(id, new WorldPos(p.x, p.y, p.z));
+                graph.AddEdge(previous, id);
+                previous = id;
+            }
+            graph.AddEdge(previous, endId);
+        }
 
         /// <summary>Task108: このNetInfoは列車が走れる線路か。従来はItemClass（PublicTransport /
         /// PublicTransportTrain）だけで判定していたが、それだと駅の構内線・貨物線・Workshopの線路
@@ -97,6 +155,11 @@ namespace CSWarfront.Game
                 var graph = new RoadGraph();
                 int segmentsAccepted = 0;
                 var rejected = new Dictionary<string, int>(); // Task108: 何を落としているかの内訳
+                // Task108: グラフのノードidはCSのNetNode idをそのまま使わず、自前のid空間で採番する
+                // （曲線サンプリングで挿す中間ノードとidが衝突しないようにするため。このグラフのidを
+                // CS側へ戻す用途は無い＝位置しか使わないので、独自採番で問題ない）。
+                var netNodeToGraph = new Dictionary<ushort, ushort>();
+                ushort nextSyntheticId = 1;
 
                 for (int i = 0; i < segments.Length; i++)
                 {
@@ -124,9 +187,14 @@ namespace CSWarfront.Game
 
                     Vector3 startPos = nodes[startNode].m_position;
                     Vector3 endPos = nodes[endNode].m_position;
-                    graph.AddNode(startNode, new WorldPos(startPos.x, startPos.y, startPos.z));
-                    graph.AddNode(endNode, new WorldPos(endPos.x, endPos.y, endPos.z));
-                    graph.AddEdge(startNode, endNode);
+                    ushort startId = MapNode(graph, netNodeToGraph, ref nextSyntheticId, startNode, startPos);
+                    ushort endId = MapNode(graph, netNodeToGraph, ref nextSyntheticId, endNode, endPos);
+
+                    // Task108（ユーザー報告「列車が線路上を移動せず、駅間を直線的に建物を貫通して進む」）:
+                    // CSのセグメントは直線ではなくベジエ曲線であり、端点2つだけを辺にすると曲線区間が
+                    // 弦（ショートカット）に化ける。曲線を約SegmentSampleSpacingごとにサンプリングして
+                    // 中間ノードを挿し、線路の形そのものを辿らせる。
+                    AddCurvedSegment(graph, ref nextSyntheticId, segments[i], startPos, endPos, startId, endId);
                     segmentsAccepted++;
                 }
 
