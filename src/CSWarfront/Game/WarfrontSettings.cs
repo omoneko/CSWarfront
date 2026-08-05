@@ -74,6 +74,15 @@ namespace CSWarfront.Game
 
         private static KeyCode _selectionModeKey = KeyCode.Keypad0;
 
+        private static KeyCode _buildPanelKey = KeyCode.Keypad4;
+
+        /// <summary>Task102: 軍事建設パネル（MilitaryBuildPanel）の開閉トグルキー。既定 Numpad 4。</summary>
+        public static KeyCode BuildPanelKey
+        {
+            get { return _buildPanelKey; }
+            set { _buildPanelKey = value; }
+        }
+
         /// <summary>押すたびに部隊選択モード（ボックスドラッグでの範囲選択）のON/OFFをトグルする。
         /// ONの間だけドラッグによる範囲選択が働く。単発クリックでの選択（Game/UI/UnitSelection）は
         /// このモードの状態に関わらず常時動作する。既定 Numpad 0。実際のトグル処理は

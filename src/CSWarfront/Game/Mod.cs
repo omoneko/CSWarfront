@@ -82,6 +82,11 @@ namespace CSWarfront.Game
                 keyNames, IndexOf(WarfrontSettings.SelectionModeKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.SelectionModeKey = WarfrontSettings.KeyOptions[i]; });
 
+            // Task102: 軍事建設パネル（軍事建物9種のワンクリック配置）の開閉キー。
+            group.AddDropdown("Toggle military construction panel",
+                keyNames, IndexOf(WarfrontSettings.BuildPanelKey),
+                i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.BuildPanelKey = WarfrontSettings.KeyOptions[i]; });
+
             group.AddDropdown("Free advance (march at full speed toward the nearest hostile base)",
                 keyNames, IndexOf(WarfrontSettings.FreeAdvanceKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.FreeAdvanceKey = WarfrontSettings.KeyOptions[i]; });

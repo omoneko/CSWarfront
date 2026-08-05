@@ -48,6 +48,7 @@ namespace CSWarfront.Game
                 // クリアする（Reset後にイベントが飛んで pending に積まれるのを避けるための順序）。
                 BasePlacementWatcher.Unsubscribe();
                 MilitaryManager.Reset();
+                UI.MilitaryBuildPanel.Reset(); // Task102: 破棄済みUI参照を持ち越さない
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelUnloading: " + e); }
         }
