@@ -95,6 +95,12 @@ namespace CSWarfront.Game
             /// <summary>Task109: 直近のフレームで実際に動いたか（移動音の再生判定に使う）。</summary>
             public bool MovedThisFrame;
 
+            /// <summary>Task109: 移動音の付け直しを試みる時刻（Time.time基準）。wavの読込はコルーチンで
+            /// 非同期に進むため、ロード直後に生成されたユニットは生成時点ではクリップを掴めない。
+            /// 数回だけ間隔を空けて再試行し、それでも駄目なら諦める（float.MaxValue）。</summary>
+            public float EngineRetryAt;
+            public int EngineRetries;
+
             /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
             /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
             /// 表示位置にだけ減衰する横揺れオフセットを加える。</summary>
@@ -257,7 +263,14 @@ namespace CSWarfront.Game
                     // 除外しない＝両方で動作する（要件）。
                     UpdateFactionIcon(entry, s.FactionId, mainCamera);
 
-                    // Task109: 移動音（ループ）。移動している間だけ、可聴距離内で鳴らす。
+                    // Task109: 移動音（ループ）。wavの非同期読込が間に合わずクリップを掴めなかった
+                    // 個体は、数回だけ間隔を空けて付け直しを試みる。
+                    if (entry.Engine == null && entry.EngineRetries < 5 && Time.time >= entry.EngineRetryAt)
+                    {
+                        entry.Engine = UnitEngineAudio.TryAttach(entry.GameObject, s.TypeKey);
+                        entry.EngineRetries++;
+                        entry.EngineRetryAt = Time.time + 2f;
+                    }
                     UnitEngineAudio.Update(entry.Engine, entry.MovedThisFrame, s.Position, cameraPos);
                 }
                 catch (Exception e)

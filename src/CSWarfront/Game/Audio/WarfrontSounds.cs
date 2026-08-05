@@ -32,6 +32,14 @@ namespace CSWarfront.Game.Audio
         public const string Ricochet = "ricochet";
         public const string VehicleDestroyed = "vehicle_destroyed";
 
+        // Task109: 移動音（ループ再生）。ユーザー提供のmp3をモノラル22.05kHzのWAVへ変換したもの
+        // （3D定位のためモノラル必須）。軍用貨物列車だけはCS自身の列車音を借りるので、ここには無い
+        // （EngineSounds参照）。
+        public const string EngineGround = "engine_ground";
+        public const string EngineFighter = "engine_fighter";
+        public const string EngineBomber = "engine_bomber";
+        public const string EngineHelicopter = "engine_helicopter";
+
         private static readonly string[] RifleVariants = { Rifle1, Rifle2, Rifle3, Rifle4 };
         private static readonly string[] MgVariants = { Mg1, Mg2 };
         private static readonly string[] CannonVariants = { Cannon1, Cannon2, Cannon3 };
@@ -39,7 +47,8 @@ namespace CSWarfront.Game.Audio
         public static readonly string[] FileNames =
         {
             Rifle1, Rifle2, Rifle3, Rifle4, Mg1, Mg2, Cannon1, Cannon2, Cannon3,
-            AaMissile, Ricochet, VehicleDestroyed
+            AaMissile, Ricochet, VehicleDestroyed,
+            EngineGround, EngineFighter, EngineBomber, EngineHelicopter // Task109
         };
 
         private static bool _loadStarted;
