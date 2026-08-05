@@ -212,6 +212,9 @@ namespace CSWarfront.Core
                         b.MissileBuildProgress = 0f; // v5以前は既定値0（建造中でない）
                     }
                     b.AutoLaunchMissiles = version >= 7 ? r.ReadBoolean() : true; // v6以前は既定値true（従来の全自動発射）
+                    // Task101（ユーザー要望）: 塹壕は常に無所属の地形（所有付きで保存された古い
+                    // セーブもロード時に正規化する）。
+                    if (b.Type == BaseType.Trench) b.OwnerFactionId = null;
                     s.Bases.Add(b);
                 }
                 int ucount = r.ReadInt32();

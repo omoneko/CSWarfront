@@ -101,6 +101,22 @@ public class WarStateSerializerTests
     }
 
     [Fact]
+    public void Trenches_are_normalized_to_unowned_on_load()
+    {
+        // Task101（ユーザー要望「塹壕は勢力関係なく使える」）: 所有付きで保存された塹壕も
+        // ロード時に無所属へ正規化される。
+        var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
+        var s = Sample();
+        var trench = new MilitaryBase(400, BaseType.Trench, new WorldPos(5, 0, 5));
+        trench.OwnerFactionId = 0; // 旧セーブ相当（所有付き）
+        s.Bases.Add(trench);
+
+        var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
+
+        Assert.Null(FindBase(r, 400).OwnerFactionId);
+    }
+
+    [Fact]
     public void Deserialize_empty_returns_fresh_state()
     {
         var types = new UnitTypeRegistry();

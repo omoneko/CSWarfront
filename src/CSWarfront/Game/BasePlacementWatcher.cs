@@ -237,6 +237,10 @@ namespace CSWarfront.Game
                 // Task61: 陸軍/海軍/航空、TryMatchが特定した種別でMilitaryBaseを作る（従来は常にArmy固定だった）。
                 var mb = new MilitaryBase(id, matchedType, new WorldPos(pos.x, pos.y, pos.z));
                 mb.OwnerFactionId = WarfrontSettings.BuildFactionId;
+                // Task101（ユーザー要望「塹壕は勢力関係なく使える」）: 塹壕は完全に無所属の地形として
+                // 登録する（建設先勢力ドロップダウンの選択も無視。守備ボーナス・歩兵の陣地志向は
+                // 元々所有不問で、所有記録だけが残っていたのを廃止）。
+                if (matchedType == BaseType.Trench) mb.OwnerFactionId = null;
                 // Task101: 種別ごとの既定HP（通常基地500/築城は各種の値、FortificationRules参照）。
                 mb.MaxHP = FortificationRules.DefaultMaxHP(matchedType);
                 mb.CurrentHP = mb.MaxHP;
