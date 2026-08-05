@@ -4,18 +4,19 @@ namespace CSWarfront.Core
 {
     public enum UnitState { Idle, Moving, Engaging, Dead }
 
-    /// <summary>プレイヤーが個別部隊/選択範囲へ与える指揮コマンド（Task48・実行時のみ・非永続化）。
-    ///   AiControlled - 既定。AI(InvasionOrders)が目標基地を割り当てる従来通りの挙動。
-    ///   FreeAdvance  - 自由進撃。各自の最高速度で最寄りの敵拠点へ進み通常通り交戦する。AIが目標基地を
-    ///                  更新することはあるが、プレイヤーが別命令を出すまでこのモードのまま。
-    ///   Hold         - 停止。その場から一切動かない（移動系フィールドはUnitCommandsが割り当て時にクリア
-    ///                  する）が、射程内の敵には引き続き応戦する（受動防御）。
-    ///   RallyHold    - 集結待機。RallyPointへ移動し到着後は停止、移動中・停止後を問わず射程内の敵にしか
-    ///                  応戦しない（追撃や遮蔽移動、拠点への進撃は一切しない）。
+    /// <summary>Command the player gives to an individual unit / box selection (Task48; runtime-only, not persisted).
+    ///   AiControlled - default. The AI (InvasionOrders) assigns target bases; the traditional behavior.
+    ///   FreeAdvance  - free advance. Move at full speed to the nearest enemy base and engage normally. The
+    ///                  AI may update the target base, but the mode persists until the player issues another order.
+    ///   Hold         - halt. Never move from this spot (movement fields are cleared by UnitCommands on
+    ///                  assignment) but keep returning fire at enemies in range (passive defense).
+    ///   RallyHold    - rally and wait. Move to RallyPoint and stop on arrival; whether moving or stopped,
+    ///                  only return fire at enemies in range (no pursuit, no cover movement, no base advance).
     /// </summary>
     public enum UnitOrder { AiControlled, FreeAdvance, Hold, RallyHold }
 
-    /// <summary>実行時の1体。表現(車両ID)はGame層が別に保持し、ここには論理状態のみ。</summary>
+    /// <summary>One live unit. Its presentation (vehicle id) is held separately by the Game layer; only
+    /// logical state lives here.</summary>
     public class UnitInstance
     {
         public uint InstanceId;
@@ -26,178 +27,192 @@ namespace CSWarfront.Core
         public UnitState State;
         public uint? TargetId;
 
-        /// <summary>KamikazeStepがロックした外部脅威（ゴジラ/エイリアン）のExternalThreat.Id
-        /// （実行時のみ・非永続化、Task79）。TargetIdはUnitInstance向け、こちらはExternalThreat向けと
-        /// 対象の種類ごとに別フィールドへ分ける（両者のID空間は別物のため、1つのuint?フィールドへ
-        /// 混在させると衝突・誤読の余地が生まれるのを避けた）。自爆ドローン以外のカテゴリでは常にnullの
-        /// まま無視される。MovementStepのダイブ移動先の解決、KamikazeStepの起爆判定の両方から参照される。</summary>
+        /// <summary>ExternalThreat.Id of the external threat (Godzilla/alien) locked by KamikazeStep
+        /// (runtime-only, not persisted; Task79). TargetId is for UnitInstances; this is for ExternalThreats
+        /// — one field per target kind, because the two id spaces are unrelated and mixing them in a single
+        /// uint? field would invite collisions and misreads. Always null and ignored for categories other
+        /// than suicide drones. Read both by MovementStep (dive destination resolution) and KamikazeStep
+        /// (detonation check).</summary>
         public uint? TargetThreatId;
 
-        /// <summary>KamikazeStepがロックした敵対基地のMilitaryBase.BaseId（実行時のみ・非永続化、Task79）。
-        /// TargetId/TargetThreatIdと同じ「対象の種類ごとに別フィールド」方針。ユニット目標・外部脅威の
-        /// どちらも見つからなかった場合にのみ設定される（優先順位: ユニット→外部脅威→基地）。
-        /// 自爆ドローン以外のカテゴリでは常にnullのまま無視される。MovementStepのダイブ移動先の解決、
-        /// KamikazeStepの起爆判定の両方から参照される。</summary>
+        /// <summary>MilitaryBase.BaseId of the hostile base locked by KamikazeStep (runtime-only, not
+        /// persisted; Task79). Same "one field per target kind" policy as TargetId/TargetThreatId. Set only
+        /// when neither a unit target nor an external threat was found (priority: unit → external threat →
+        /// base). Always null and ignored for categories other than suicide drones. Read both by
+        /// MovementStep (dive destination resolution) and KamikazeStep (detonation check).</summary>
         public ushort? TargetBaseId;
 
         public WorldPos? OrderTargetPos;
 
-        /// <summary>Task86: 航空ユニットの交戦パス移動（レーストラック航過）の離脱点
-        /// （実行時のみ・非永続化）。MovementStepAirPass.AdvanceAirPassが設定/消費する。
-        /// 設定されている間は交戦アンカーの有無に関わらずこの点まで飛び切る（境界での
-        /// ふらつき防止）。航空以外のカテゴリでは常にnullのまま無視される。</summary>
+        /// <summary>Task86: egress point of an air unit's engagement pass (racetrack) movement
+        /// (runtime-only, not persisted). Set/consumed by MovementStepAirPass.AdvanceAirPass. While set, the
+        /// unit flies all the way to this point regardless of whether an engagement anchor exists (prevents
+        /// dithering at the boundary). Always null and ignored for non-air categories.</summary>
         public WorldPos? AirPassEgress;
 
-        /// <summary>プレイヤーの指揮コマンド（Task48）。既定はAiControlled。
-        /// Task92: v8でRallyPointとともに永続化されるようになった（「ロードで命令がAI制御へ戻る」の解消）。</summary>
+        /// <summary>The player's command (Task48). Defaults to AiControlled.
+        /// Task92: persisted since v8 together with RallyPoint (fixes "orders revert to AI control on load").</summary>
         public UnitOrder Order;
 
-        /// <summary>Order==RallyHold の目的地（実行時のみ・非永続化、Task48）。UnitCommands.ApplyRallyが設定する。</summary>
+        /// <summary>Destination while Order==RallyHold (runtime-only, not persisted; Task48). Set by
+        /// UnitCommands.ApplyRally.</summary>
         public WorldPos? RallyPoint;
 
-        /// <summary>道路経路の残り（実行時のみ・非永続化）。null/空なら直線移動へフォールバック。</summary>
+        /// <summary>Remaining road path (runtime-only, not persisted). Null/empty falls back to
+        /// straight-line movement.</summary>
         public List<WorldPos> Path;
-        /// <summary>次に目指す Path の要素番号。</summary>
+        /// <summary>Index of the next Path element to head for.</summary>
         public int PathIndex;
-        /// <summary>この経路が向かう最終目的地。OrderTargetPosが変わったら経路を捨てるための記録。</summary>
+        /// <summary>Final destination this path leads to. Recorded so the path can be discarded when
+        /// OrderTargetPos changes.</summary>
         public WorldPos? PathTarget;
 
-        /// <summary>次の経路探索(A*)試行までの残り時間（ゲーム内時間・実行時のみ・非永続化）。
-        /// FindPath失敗時に立て、失敗し続けるユニットが毎tick予算を消費するのを防ぐ（Task23レビュー）。</summary>
+        /// <summary>Time remaining until the next pathfinding (A*) attempt (in-game hours; runtime-only, not
+        /// persisted). Set on FindPath failure so a persistently failing unit does not consume the budget
+        /// every tick (Task23 review).</summary>
         public float PathRetryCooldown;
 
-        /// <summary>Task99: 弾薬ゲージ（0..1、v9で永続化）。射撃しているtickだけ減り（AmmoRules）、
-        /// 基地圏内自動補給（ResupplyStep）・補給トラック（SupplyTruckStep）で回復する。
-        /// 0で射撃停止（移動・占領は可能）。生産直後は満タン。</summary>
+        /// <summary>Task99: ammo gauge (0..1, persisted in v9). Drains only on ticks the unit fires
+        /// (AmmoRules); restored by in-base auto-resupply (ResupplyStep) and supply trucks (SupplyTruckStep).
+        /// At 0 the unit stops firing (moving and capturing still work). Full when freshly produced.</summary>
         public float Ammo = 1f;
 
-        /// <summary>Task99: 補給トラック（UnitCategory.SupplyTruck）の積載量（0..1、v9で永続化）。
-        /// 基地でSupplyStockから積載し、前線の味方陸上ユニットへの弾薬転送で減る（SupplyTruckStep）。
-        /// トラック以外のユニットでは常に0のまま使われない。</summary>
+        /// <summary>Task99: cargo load of a supply truck (UnitCategory.SupplyTruck) (0..1, persisted in v9).
+        /// Loaded from the faction's SupplyStock at a base; drained by transferring ammo to friendly land
+        /// units at the front (SupplyTruckStep). Always 0 and unused for non-truck units.</summary>
         public float SupplyLoad;
 
-        /// <summary>Task101: このユニットを運搬しているユニット（輸送ヘリ/軍用列車）のInstanceId。
-        /// 非null=搭乗中（v10で永続化）。搭乗中は全step（移動/戦闘/補給/スタック/AI進軍）から除外され、
-        /// 攻撃対象にもならない（TargetSearch/UnitSpatialGridが候補から外す）。位置は運搬役が毎tick
-        /// 追従させ、運搬役が死亡したら道連れ（無音消滅）になる（TransportHeliStep/TrainStep）。</summary>
+        /// <summary>Task101: InstanceId of the unit carrying this one (transport helicopter / military
+        /// train). Non-null = being carried (persisted in v10). While carried the unit is excluded from
+        /// every step (movement/combat/supply/stuck/AI advance) and cannot be targeted
+        /// (TargetSearch/UnitSpatialGrid drop it from candidates). Its position is synchronized every tick
+        /// by the carrier, and the carrier's death takes it along (silent removal) —
+        /// TransportHeliStep/TrainStep.</summary>
         public uint? CarriedByUnitId;
 
-        /// <summary>搭乗中か（CarriedByUnitId != null の可読ヘルパ）。</summary>
+        /// <summary>Whether being carried (readable helper for CarriedByUnitId != null).</summary>
         public bool IsCarried => CarriedByUnitId.HasValue;
 
-        /// <summary>Task101: 補給トラックの現在の積載が補給拠点/貨物駅の備蓄由来か（実行時のみ・
-        /// 非永続化）。拠点で積んだ物資を同じ/別の拠点へ積み直す無限シャッフルを防ぐため、
-        /// 「拠点への備蓄輸送」は勢力プール（陸軍基地）で積んだトラックだけが行う（SupplyTruckStep）。
-        /// ロードで既定falseに戻っても、最悪1回の拠点間輸送が起きるだけで実害なし。</summary>
+        /// <summary>Task101: whether a supply truck's current load came from a depot/cargo station stock
+        /// (runtime-only, not persisted). Prevents the infinite shuffle of re-loading depot stock into the
+        /// same or another depot: only trucks loaded from the faction pool (army bases) perform
+        /// "stock delivery to depots" (SupplyTruckStep). Reverting to the default false on load costs at
+        /// most one extra depot-to-depot transfer — harmless.</summary>
         public bool SupplyLoadFromDepot;
 
-        /// <summary>Task110（ユーザー要望「荷下ろしのための時間が必要なので駅に着いたら一時停車」）:
-        /// 軍用貨物列車の停車残り時間（ゲーム内時間、実行時のみ・非永続化）。0より大きい間は駅処理を
-        /// 一切行わずその場に停まる。ロードで0に戻っても、次の停車から通常どおり時間を取るだけ。</summary>
+        /// <summary>Task110 (user request "trains need time to unload, so pause at stations"):
+        /// remaining dwell time of a military train (in-game hours; runtime-only, not persisted). While
+        /// positive, no station processing runs and the train stays put. Resetting to 0 on load merely means
+        /// the next stop takes the normal time again.</summary>
         public float StationDwell;
 
-        /// <summary>Task110: 現在停車中の駅での荷役（荷下ろし・降車・積載・搭乗）が済んだか
-        /// （実行時のみ・非永続化）。荷役→停車→発車の順序を1駅につき1回だけ通すためのフラグ。</summary>
+        /// <summary>Task110: whether the cargo work (unload, disembark, load, board) at the currently
+        /// occupied station is done (runtime-only, not persisted). Sequences service → dwell → departure
+        /// exactly once per station call.</summary>
         public bool StationServiced;
 
-        /// <summary>Task98: スタック検知の基準位置（実行時のみ・非永続化）。ここからMinProgressDistance
-        /// 以上動くたびに現在位置へ更新され、StuckHoursが0へ戻る（StuckCleanupStep参照）。</summary>
+        /// <summary>Task98: anchor position for stuck detection (runtime-only, not persisted). Updated to
+        /// the current position each time the unit moves at least MinProgressDistance away from it, which
+        /// also resets StuckHours (see StuckCleanupStep).</summary>
         public WorldPos? StuckAnchor;
 
-        /// <summary>Task98: StuckAnchorからほぼ動けていない状態が続いているゲーム内時間
-        /// （実行時のみ・非永続化。ロードで0に戻っても判定が遅れるだけで実害なし）。</summary>
+        /// <summary>Task98: in-game hours the unit has remained essentially unable to move from StuckAnchor
+        /// (runtime-only, not persisted; resetting to 0 on load merely delays the verdict — harmless).</summary>
         public float StuckHours;
 
-        /// <summary>次の発砲エフェクト(ShotEvent)を出すまでの残りゲーム内時間（実行時のみ・非永続化、Task42）。
-        /// このユニットが実際にダメージを与えたtickでのみ dt 分だけ減算し、0以下になった時点で
-        /// ShotEventを1つ積んでから UnitType.FireIntervalHours にリセットする（CombatStep/BaseCombatStep
-        /// 参照）。ダメージを与えていないtickでは一切減算しない（＝待機中のユニットが「発砲権」を
-        /// 溜め込んで、次に交戦した瞬間に不自然な連射をすることがない）。既定値0のため、初めて
-        /// ダメージを与えたtickで即座に1発目が出る。</summary>
+        /// <summary>In-game time remaining until the next muzzle-effect (ShotEvent) may be emitted
+        /// (runtime-only, not persisted; Task42). Decremented by dt only on ticks in which this unit
+        /// actually dealt damage; when it reaches 0 one ShotEvent is queued and it resets to
+        /// UnitType.FireIntervalHours (see CombatStep/BaseCombatStep). Never decremented on ticks without
+        /// damage (so idle units cannot bank "firing rights" and burst-fire unnaturally the moment they next
+        /// engage). Default 0, so the first damaging tick emits the first shot immediately.</summary>
         public float FireCooldown;
 
-        /// <summary>交戦中に遮蔽（建物/Prop）から狙う立ち位置（実行時のみ・非永続化、Task44）。
-        /// CoverSeekStepが設定/クリアする。setされている間はMovementStepがPath/OrderTargetPosの代わりに
-        /// ここへ向けて移動する。nullなら従来通りの移動（進軍経路/直線）。</summary>
+        /// <summary>Standing position for firing from cover (building/prop) while engaging (runtime-only,
+        /// not persisted; Task44). Set/cleared by CoverSeekStep. While set, MovementStep moves here instead
+        /// of Path/OrderTargetPos. Null restores the traditional movement (advance path / straight line).</summary>
         public WorldPos? CoverDestination;
 
-        /// <summary>次にCoverSeekStepが遮蔽を再評価するまでの残りゲーム内時間（実行時のみ・非永続化、Task44）。
-        /// 毎tick探索するとコストが高く、かつ僅かなスコア差で立ち位置が頻繁に切り替わるジッタの原因になるため、
-        /// CoverSeekStep.CoverReevaluateHoursごとにのみ再評価する。既定値0のため、交戦を始めた最初のtickで
-        /// 即座に評価される。</summary>
+        /// <summary>In-game time remaining until CoverSeekStep re-evaluates cover (runtime-only, not
+        /// persisted; Task44). Searching every tick is expensive and causes jitter (the standing spot flips
+        /// on tiny score differences), so re-evaluation happens only every CoverSeekStep interval. Default 0,
+        /// so the first tick of an engagement evaluates immediately.</summary>
         public float CoverReevaluateCooldown;
 
-        /// <summary>CoverDestinationに到達した際、その場に留まって撃ち続けるか（true）、それとも
-        /// 遮蔽から遮蔽へ前進を続けるか（false）（実行時のみ・非永続化、Task45）。
-        /// CoverSeekStepが交戦中（脅威＝TargetId）のユニットにはtrueを、進軍中（脅威＝OrderTargetPos、
-        /// まだ交戦していない）のユニットにはfalseを設定する。MovementStepはCoverArrivalDistance以内に
-        /// 入った時、trueなら停止したままにし、falseならCoverDestinationをクリアして次の遮蔽へ
-        /// 移れるようにする（cover-to-coverのbounding advance）。</summary>
+        /// <summary>Whether to stay put and keep firing on reaching CoverDestination (true), or keep
+        /// advancing cover-to-cover (false) (runtime-only, not persisted; Task45). CoverSeekStep sets true
+        /// for engaging units (threat = TargetId) and false for advancing units (threat = OrderTargetPos,
+        /// not yet engaged). On entering CoverArrivalDistance, MovementStep keeps the unit stopped when
+        /// true, or clears CoverDestination when false so the unit can move on to the next cover
+        /// (cover-to-cover bounding advance).</summary>
         public bool CoverHold;
 
-        /// <summary>交戦中（State==Engaging）の現在のCoverDestination/CoverHoldが、どのTargetIdに対して
-        /// 決定されたものかを覚えておく（実行時のみ・非永続化、Task50）。CoverSeekStepは、交戦中の間
-        /// TargetIdがこの値と一致し続ける限り遮蔽の再評価を一切行わない（見つからなかった場合も含め、
-        /// 判断済みの結果をそのまま維持する）。これにより「同じ相手と戦い続けている間、僅かなスコア差で
-        /// 遮蔽位置が頻繁に切り替わり、建物の陰でせわしなく動き回って見える」不具合を防ぐ。
-        /// TargetIdが変わった（新しい相手と交戦を始めた）、または交戦をやめた瞬間にnullへ戻り、
-        /// 次の交戦開始時に改めて評価される。</summary>
+        /// <summary>Remembers which TargetId the current CoverDestination/CoverHold was decided against
+        /// while engaging (State==Engaging) (runtime-only, not persisted; Task50). As long as the TargetId
+        /// keeps matching this value during the engagement, CoverSeekStep never re-evaluates cover (the
+        /// decided outcome is kept as-is, including "none found"). Prevents the bug where, against the same
+        /// opponent, the cover position flipped constantly on tiny score differences and units fidgeted
+        /// restlessly behind buildings. Reset to null the moment the TargetId changes (new opponent) or the
+        /// engagement ends, so the next engagement re-evaluates afresh.</summary>
         public uint? CoverTargetId;
 
-        /// <summary>CoverDestinationでCoverHold==trueのまま実際に静止し続けている経過ゲーム内時間
-        /// （実行時のみ・非永続化、Task52）。MovementStep.AdvanceTowardCoverが計測し、
-        /// MovementStep.MaxCoverHoldHoursを超えたら強制的にCoverDestinationを解放する
-        /// （「隠れている間は動かないが、いつまでも隠れ続けはしない」というTask52の保証）。
-        /// 移動中（まだCoverDestinationへ到達していない間）は0のまま維持され、到達後の静止時間だけを
-        /// 計測する。新しい遮蔽が決定された瞬間（CoverSeekStep）に0へリセットされる。</summary>
+        /// <summary>Elapsed in-game time actually spent stationary at CoverDestination with CoverHold==true
+        /// (runtime-only, not persisted; Task52). Measured by MovementStep.AdvanceTowardCover; past
+        /// MovementStep.MaxCoverHoldHours the CoverDestination is force-released (Task52's guarantee: "hold
+        /// still while in cover, but never hide forever"). Stays 0 while travelling (before reaching the
+        /// CoverDestination) so only post-arrival stillness is measured. Reset to 0 the moment a new cover
+        /// is decided (CoverSeekStep).</summary>
         public float CoverHoldTimer;
 
-        /// <summary>State==EngagingでTargetIdが同じ相手を指し続けている経過ゲーム内時間
-        /// （実行時のみ・非永続化、Task52）。CoverSeekStepが毎tick加算/リセットし、
-        /// CoverSeekStep.MaxEngageHoldHoursを超えるとMovementStepはEngagingのままでも
-        /// OrderTargetPos/Pathへの移動を許可する（射程内ならCombatStepが移動しながらでも
-        /// 撃ち合いを継続する）。TargetIdが変わった、または交戦が終わった瞬間に0へリセットされる。</summary>
+        /// <summary>Elapsed in-game time during which State==Engaging and TargetId has kept pointing at the
+        /// same opponent (runtime-only, not persisted; Task52). Incremented/reset by CoverSeekStep each
+        /// tick; past CoverSeekStep.MaxEngageHoldHours, MovementStep allows movement toward
+        /// OrderTargetPos/Path even while Engaging (CombatStep keeps up the firefight while moving if the
+        /// opponent stays in range). Reset to 0 the moment the TargetId changes or the engagement ends.</summary>
         public float EngageHoldTimer;
 
-        /// <summary>膠着ウォッチドッグ（実行時のみ・非永続化、Task52）: 直近のチェックポイント時点での
-        /// OrderTargetPosまでの水平距離。nullは未計測（次tickで初期化される）を表す。
-        /// CoverSeekStep.StallEpsilon以上縮まるたびに更新され、StallTimerも同時に0へリセットされる。</summary>
+        /// <summary>Stall watchdog (runtime-only, not persisted; Task52): horizontal distance to
+        /// OrderTargetPos at the last checkpoint. Null = not yet measured (initialized next tick). Updated —
+        /// with StallTimer reset to 0 — every time the distance shrinks by at least
+        /// CoverSeekStep.StallEpsilon.</summary>
         public float? LastObjectiveDistance;
 
-        /// <summary>膠着ウォッチドッグ（実行時のみ・非永続化、Task52）: LastObjectiveDistanceから
-        /// CoverSeekStep.StallEpsilon以上前進できていない経過ゲーム内時間。
-        /// CoverSeekStep.StallTimeoutHoursを超えるとCoverSuppressionRemainingがセットされる。</summary>
+        /// <summary>Stall watchdog (runtime-only, not persisted; Task52): elapsed in-game time without
+        /// advancing at least CoverSeekStep.StallEpsilon from LastObjectiveDistance. Past
+        /// CoverSeekStep.StallTimeoutHours, CoverSuppressionRemaining is set.</summary>
         public float StallTimer;
 
-        /// <summary>膠着ウォッチドッグが発動した後、遮蔽探索を完全に無視して道路経路のみに従う
-        /// 残りゲーム内時間（実行時のみ・非永続化、Task52）。CoverSeekStep.Advanceが毎tick
-        /// dt分だけ減算し、0になったら通常の遮蔽ロジックへ自動的に戻る
-        /// （「suppresses cover after a stall and re-enables it later」の実装）。</summary>
+        /// <summary>After the stall watchdog fires: remaining in-game time during which cover search is
+        /// ignored entirely and only the road path is followed (runtime-only, not persisted; Task52).
+        /// CoverSeekStep.Advance decrements it by dt every tick; at 0 the normal cover logic automatically
+        /// resumes (the implementation of "suppresses cover after a stall and re-enables it later").</summary>
         public float CoverSuppressionRemaining;
 
-        /// <summary>UnitCategory.Carrierのみが使う: 現在建造中の艦載機の進捗（0..1、Task64）。
-        /// 0fは「建造中でない（次tickで新しい機体の建造着手を判定する）」を意味し、CarrierAirWing.Advanceが
-        /// 建造着手の瞬間に微小な正の値へ設定することで「建造中」と区別する（MilitaryBase.MissileBuildProgress
-        /// と同じ実行時のみ・非永続化パターン）。空母以外のユニットでは常に0のまま無視される。</summary>
+        /// <summary>Used only by UnitCategory.Carrier: build progress of the aircraft currently under
+        /// construction (0..1, Task64). 0f means "not building" (next tick decides whether to start a new
+        /// airframe); CarrierAirWing.Advance sets a tiny positive value at the moment construction starts to
+        /// distinguish "building" (the same runtime-only, non-persisted pattern as
+        /// MilitaryBase.MissileBuildProgress). Always 0 and ignored for non-carrier units.</summary>
         public float CarrierBuildProgress;
 
-        /// <summary>UnitCategory.Carrierのみが使う: これまでにこの空母が建造着手した艦載機の累計数
-        /// （実行時のみ・非永続化、Task64）。CarrierAirWing.NextBuildCategoryが「艦載機id＋この累計数」を
-        /// ハッシュして次に建造する兵科を決定的に選ぶための入力になる（seedにより偏らせつつも
-        /// System.Randomは使わない）。1回の建造に着手するたびに1つずつ増える。</summary>
+        /// <summary>Used only by UnitCategory.Carrier: cumulative count of aircraft this carrier has started
+        /// building (runtime-only, not persisted; Task64). Input to CarrierAirWing.NextBuildCategory, which
+        /// hashes "carrier id + this counter" to pick the next airframe class deterministically (seeded
+        /// variety without System.Random). Increments by one each time a build starts.</summary>
         public uint CarrierBuildCounter;
 
-        /// <summary>Task78: 海上ユニット(Domain.Sea)が直線移動・迂回(±30/60/90度)のいずれも水域に
-        /// 着地できず完全に足止めされている継続ゲーム内時間（実行時のみ・非永続化）。
-        /// MovementStep.AdvanceSeaが移動に成功するたび、または目的地(OrderTargetPos)が変わった
-        /// （＝新しい命令を受けた）瞬間に0へリセットする。MovementStep.SeaBlockedIdleHoursを
-        /// 超えたらState=Idleへ遷移し、以後は目的地が変わるまで一切移動を試みない
-        /// （毎tick迂回を探索し続けて見た目がスピンし続けるのを防ぐ、Task52のStallTimer相当のガード）。</summary>
+        /// <summary>Task78: continuous in-game time a sea unit (Domain.Sea) has been fully blocked — neither
+        /// the straight step nor the ±30/60/90-degree detours could land on water (runtime-only, not
+        /// persisted). MovementStep.AdvanceSea resets it to 0 on every successful move and the moment the
+        /// objective (OrderTargetPos) changes (= new orders). Past MovementStep.SeaBlockedIdleHours the unit
+        /// transitions to State=Idle and stops attempting to move until the objective changes (prevents the
+        /// endless per-tick detour searching that looked like spinning in place — the counterpart of
+        /// Task52's StallTimer).</summary>
         public float SeaBlockedHours;
 
-        /// <summary>SeaBlockedHoursの起点判定に使う、直近にAdvanceSeaが処理した目的地（実行時のみ・
-        /// 非永続化、Task78）。OrderTargetPos/RallyPointがこれと異なればMovementStepは「新しい命令」
-        /// とみなしSeaBlockedHoursを0へリセットする。</summary>
+        /// <summary>The last objective AdvanceSea processed, used as the reference for SeaBlockedHours
+        /// (runtime-only, not persisted; Task78). When OrderTargetPos/RallyPoint differs from this,
+        /// MovementStep treats it as "new orders" and resets SeaBlockedHours to 0.</summary>
         public WorldPos? SeaLastObjective;
 
         public UnitInstance(uint id, string typeKey, byte factionId, float hp, WorldPos pos)

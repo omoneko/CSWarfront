@@ -3,98 +3,101 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// ユニットに、近くの遮蔽物（建物/Prop、WarState.Cover）を活かした立ち位置
-    /// （UnitInstance.CoverDestination）を割り当てる（純ロジック、Task44/Task45/Task50/Task52）。
-    /// MilitaryManager.OnSimTickではMovementStepより前に呼ぶこと（このtickで決めた立ち位置へ
-    /// 同じtick内でMovementStepが動き出せるようにするため、RoadGraph→InvasionOrders→MovementStepと
-    /// 同じ「先に意思決定、後で移動」の順序）。
+    /// Assigns units a standing position (UnitInstance.CoverDestination) that exploits nearby cover
+    /// (buildings/props, WarState.Cover) — pure logic, Task44/Task45/Task50/Task52.
+    /// MilitaryManager.OnSimTick must call this BEFORE MovementStep (so a position decided this tick can be
+    /// moved toward within the same tick — the same "decide first, move after" ordering as
+    /// RoadGraph → InvasionOrders → MovementStep).
     ///
-    /// Task45で「交戦し始めたら遮蔽に向かう」から「自勢力圏を出た段階で遮蔽伝いに進む」へ変更した。
-    /// 各生存ユニットは以下の3モードのいずれかに分類される：
-    ///   1. 自勢力圏内（IsInFriendlyTerritory）: 遮蔽移動なし。道路沿いに速く移動させる。
-    ///   2. 圏外＋交戦中（State==Engaging、TargetIdの相手が生存）: 脅威(TargetIdの位置)から
-    ///      身を隠す立ち位置を選び、CoverHold=trueでその場に留まって撃ち続ける（ただしTask52の
-    ///      MaxCoverHoldHours/MaxEngageHoldHoursにより無期限には固定されない、後述）。
-    ///   3. 圏外＋進軍中（交戦していないがOrderTargetPosがある）: 目的地(OrderTargetPos＝進軍先の敵基地)
-    ///      を脅威方向とみなし、CoverUseIntervalHoursごとにだけ（毎tickではなく）候補を探す。
-    ///      目的地に確実に近づく（MinForwardProgress以上）かつ現在地からMaxCoverDetour以内の候補が
-    ///      あればそこをCoverHold=trueで設定する（Task52: 到着したら少し隠れて止まり、MovementStep側の
-    ///      MaxCoverHoldHoursで自動的に前進を再開する）。条件を満たす候補が無ければ道路経路(Path/
-    ///      OrderTargetPos)にそのまま任せる。
+    /// Task45 changed the model from "seek cover once engaged" to "advance cover-to-cover once outside
+    /// friendly territory". Every living unit falls into one of three modes:
+    ///   1. Inside friendly territory (IsInFriendlyTerritory): no cover movement — move fast along roads.
+    ///   2. Outside + engaging (State==Engaging with a living TargetId): pick a position hidden from the
+    ///      threat (the target's position) and hold there with CoverHold=true while firing (not pinned
+    ///      forever — capped by Task52's MaxCoverHoldHours/MaxEngageHoldHours, see below).
+    ///   3. Outside + advancing (not engaging but OrderTargetPos set): treat the objective (the enemy base
+    ///      being advanced on) as the threat direction and search for candidates only every
+    ///      CoverUseIntervalHours (not every tick). A candidate must make real progress toward the objective
+    ///      (at least MinForwardProgress) and lie within MaxCoverDetour of the current position; if one
+    ///      exists it is set with CoverHold=true (Task52: pause briefly in cover on arrival, then
+    ///      MovementStep's MaxCoverHoldHours automatically resumes the advance). With no qualifying
+    ///      candidate, the road path (Path/OrderTargetPos) is left in charge.
     ///
-    /// Task50: モード2（交戦中）は、同じ相手（TargetId）と戦い続けている間は遮蔽の再評価を一切
-    /// 行わない（UnitInstance.CoverTargetId参照）。TargetIdが変わる（新しい相手と交戦を始める）まで
-    /// 一切位置を選び直さない＝到達後は完全に停止したまま撃ち合う（Task52のホールド上限に達するまで）。
-    /// 遮蔽が見つからなかった場合も同様にその判断を記憶し、同じ相手との交戦中は毎tick探索し直さない。
+    /// Task50: mode 2 (engaging) never re-evaluates cover while fighting the same opponent (TargetId — see
+    /// UnitInstance.CoverTargetId). No position is re-picked until the TargetId changes (a new opponent),
+    /// i.e. after arrival the unit stands completely still and trades fire (until the Task52 hold cap).
+    /// A "no cover found" decision is remembered the same way — no re-searching every tick against the same
+    /// opponent.
     ///
-    /// Task52（「敵拠点への進軍が途中でスタックする」不具合の修正）: Task50は「同じ相手と交戦中は
-    /// 遮蔽から一切動かない」を導入したが、これは（a）長射程での睨み合いや（b）倒しきれない相手との
-    /// 交戦で恒久的なフリーズを引き起こしていた。加えて、モード3のbounding advanceも遮蔽が
-    /// 見つからず足踏みし続けることがあった。以下の仕組みで「進軍は必ず進む・遮蔽はあくまで時々の
-    /// 演出」というガードレールを敷く：
-    ///   1. 遮蔽は「時々」: モード3はCoverUseIntervalHoursごとにしか遮蔽を探さない（従来の0.5hより
-    ///      大幅に間隔を空けた）。候補はMinForwardProgress（前進量）とMaxCoverDetour（現在地からの
-    ///      迂回距離）の両方を満たす必要がある。
-    ///   2. 保持時間の上限: 遮蔽で静止する時間はMovementStep.MaxCoverHoldHoursで頭打ちにする
-    ///      （UnitInstance.CoverHoldTimerで計測、MovementStep側で管理）。モード2・モード3どちらの
-    ///      「保持」も対象。
-    ///   3. 交戦の膠着防止: 同じ相手と交戦し続ける時間をEngageHoldTimerで計測し、MaxEngageHoldHoursを
-    ///      超えたら（遮蔽の有無に関わらず）MovementStepが移動を再開させる（射程内なら移動しながらでも
-    ///      CombatStepが撃ち合いを継続する）。
-    ///   4. 膠着ウォッチドッグ: OrderTargetPosまでの距離が一定時間（StallTimeoutHours）
-    ///      StallEpsilon以上縮まらなければ、CoverSuppressedHoursの間だけ遮蔽探索そのものを完全に
-    ///      止め、道路経路をそのまま進ませる（Belt and braces：上記1〜3で捕捉しきれない膠着への保険）。
+    /// Task52 (fix for "advance toward enemy bases stalls partway"): Task50's "never leave cover against the
+    /// same opponent" caused permanent freezes in (a) long-range standoffs and (b) fights against opponents
+    /// that cannot be killed. Mode 3's bounding advance could also mark time forever when no cover was found.
+    /// The following guardrails ensure "the advance always progresses; cover is only an occasional flourish":
+    ///   1. Cover is occasional: mode 3 searches only every CoverUseIntervalHours (much sparser than the old
+    ///      0.5h). Candidates must satisfy both MinForwardProgress (forward gain) and MaxCoverDetour
+    ///      (deviation from the current position).
+    ///   2. Hold-time cap: time spent stationary in cover is capped by MovementStep.MaxCoverHoldHours
+    ///      (measured via UnitInstance.CoverHoldTimer, managed on the MovementStep side). Applies to both
+    ///      mode-2 and mode-3 holds.
+    ///   3. Stalemate prevention: time spent fighting the same opponent is measured by EngageHoldTimer; past
+    ///      MaxEngageHoldHours, MovementStep resumes movement regardless of cover (CombatStep keeps firing
+    ///      while moving if the opponent stays in range).
+    ///   4. Stall watchdog: if the distance to OrderTargetPos fails to shrink by StallEpsilon for
+    ///      StallTimeoutHours, cover search is suspended entirely for CoverSuppressedHours and the road path
+    ///      drives movement — belt and braces for stalls the above three cannot catch.
     ///
-    /// Task77（「地上ユニットが海の中に入っていける」不具合の対策の一部）: TryFindBestCoverが返す
-    /// 立ち位置（CoverMap.StandingPosition＝遮蔽物の脅威側の反対側へStandoffMargin分だけ離れた点）は、
-    /// 遮蔽物が海沿いにある場合、水域側へ計算されてしまうことがある。state.Water(IWaterSampler)が
-    /// 供給されており、その候補が水中と判定されれば「見つからなかった」のと同じ扱い（既存の
-    /// else分岐＝CoverDestination/CoverHoldをクリアし、Mode2は判断を記憶、Mode3は道路経路優先）にする。
-    /// これでMovementStep側のオフロード水域チェック（AdvanceStraight/MoveToward、MovementStep.cs参照）
-    /// と対になり、「そもそも水中の立ち位置を選ばせない」形で二重に防御する。
+    /// Task77 (part of the "ground units can walk into the sea" fix): the standing position returned by
+    /// TryFindBestCover (CoverMap.StandingPosition — StandoffMargin past the cover on the side away from the
+    /// threat) can land in the water when the cover sits on a shoreline. If state.Water (IWaterSampler) is
+    /// supplied and the candidate is in water, it is treated exactly like "no cover found" (the existing
+    /// else branch: clear CoverDestination/CoverHold; mode 2 remembers the decision, mode 3 defers to the
+    /// road path). Paired with MovementStep's off-road water checks (AdvanceStraight/MoveToward, see
+    /// MovementStep.cs), this gives two layers: never choose a watery standing spot in the first place.
     /// </summary>
     public static class CoverSeekStep
     {
-        /// <summary>モード3（進軍中のbounding advance）が遮蔽を探す間隔（ゲーム内時間、Task52）。
-        /// 毎tick探索すると「遮蔽から遮蔽へ跳び続けて実質止まらない」状態になりかねないため、
-        /// これだけ間隔を空けて「時々」だけ隠れるようにする。UnitInstance.CoverReevaluateCooldownで
-        /// 管理する（Task44から使っているフィールドをそのまま流用、意味だけTask52で変更）。</summary>
+        /// <summary>Interval at which mode 3 (bounding advance) searches for cover (in-game hours, Task52).
+        /// Searching every tick risks "hopping cover-to-cover and effectively never advancing", so the search
+        /// is spaced out — cover only "occasionally". Tracked via UnitInstance.CoverReevaluateCooldown (the
+        /// field reused from Task44; only its meaning changed in Task52).</summary>
         public const float CoverUseIntervalHours = 3f;
 
-        /// <summary>Mode3（進軍中のbounding advance）で候補の遮蔽を採用するために必要な、目的地への
-        /// 最小前進量（マップ単位）。これを満たさない候補は「前進にならない」として却下し、
-        /// 遮蔽を求めて後退・停滞するよりも道路沿いの進軍を優先させる（Task45）。</summary>
+        /// <summary>Minimum forward progress toward the objective (map units) a candidate cover must provide
+        /// to be adopted in mode 3 (bounding advance). Candidates below this "do not count as advancing" and
+        /// are rejected — advancing along the road beats retreating/stalling in search of cover (Task45).</summary>
         public const float MinForwardProgress = 5f;
 
-        /// <summary>Mode3で候補の遮蔽を採用するために許容する、現在地からの最大迂回距離（Task52）。
-        /// これを超える遠回りな遮蔽は「時々隠れる」の範囲を逸脱するため却下し、道路経路を優先する。</summary>
+        /// <summary>Maximum detour from the current position allowed for a mode-3 cover candidate (Task52).
+        /// Anything farther exceeds the "hide occasionally" budget and is rejected in favor of the road path.</summary>
         public const float MaxCoverDetour = 40f;
 
-        /// <summary>同じ相手（TargetId）と交戦し続けられる最大時間（ゲーム内時間、Task52）。
-        /// これを超えたら、遮蔽の有無に関わらずMovementStepが目的地への移動を再開させる
-        /// （交戦自体はCombatStepが毎tick射程で再判定するため、移動しながらでも撃ち合いは続く）。
-        /// UnitInstance.EngageHoldTimerで計測し、TargetIdが変わった/交戦が終わった瞬間に0へ戻す。</summary>
+        /// <summary>Maximum time a unit may keep fighting the same opponent (TargetId) (in-game hours,
+        /// Task52). Past this, MovementStep resumes movement toward the objective regardless of cover
+        /// (engagement itself is re-evaluated by range in CombatStep every tick, so the firefight continues
+        /// while moving). Measured via UnitInstance.EngageHoldTimer; reset to 0 the moment the TargetId
+        /// changes or the engagement ends.</summary>
         public const float MaxEngageHoldHours = 3f;
 
-        /// <summary>膠着ウォッチドッグ（Task52）: OrderTargetPosまでの距離をこの時間だけ監視し、
-        /// StallEpsilon以上縮まっていなければ膠着とみなす。</summary>
+        /// <summary>Stall watchdog (Task52): the distance to OrderTargetPos is observed over this window;
+        /// failing to shrink by StallEpsilon within it counts as a stall.</summary>
         public const float StallTimeoutHours = 2f;
 
-        /// <summary>膠着ウォッチドッグが「前進した」とみなす最小距離（マップ単位、Task52）。</summary>
+        /// <summary>Minimum distance the stall watchdog accepts as "made progress" (map units, Task52).</summary>
         public const float StallEpsilon = 5f;
 
-        /// <summary>膠着を検知した際、遮蔽探索を完全に止めて道路経路のみに任せる時間（ゲーム内時間、
-        /// Task52）。UnitInstance.CoverSuppressionRemainingで残り時間を管理する。</summary>
+        /// <summary>How long cover search is fully suspended, leaving only the road path, after a stall is
+        /// detected (in-game hours, Task52). Remaining time tracked in UnitInstance.CoverSuppressionRemaining.</summary>
         public const float CoverSuppressedHours = 4f;
 
-        /// <summary>カテゴリ別の遮蔽探索半径。0以下＝そのカテゴリは建物遮蔽の移動をしない
-        /// （Artilleryは後方から曲射するため、遮蔽物の陰に隠れる必要がない）。
-        /// Task104（ユーザー要望「高架の下に移動するのは非現実的なのでやめる。歩兵は付近に味方の
-        /// 装甲車や戦車があれば隠れるように」）: 歩兵系（Infantry/MechInfantry/DroneInfantry）は
-        /// 建物遮蔽の対象から外した（IsInfantryLike参照）。代わりに交戦中は「最寄りの味方装甲
-        /// （Tank/Apc）の後ろ」を立ち位置に選ぶ（TryFindArmorCover）。装甲がいなければその場で
-        /// 応戦する（建物や高架下へ走らない）。塹壕/掩蔽壕への陣地志向（FortSeekStep、後段で
-        /// このstepの決定を上書き）は従来どおり最優先。</summary>
+        /// <summary>Per-category cover search radius. Zero or less = that category never moves for building
+        /// cover (Artillery lobs shells from the rear and has no need to hide behind cover).
+        /// Task104 (user request "stop the unrealistic ducking under elevated roads; infantry should hide
+        /// behind nearby friendly armor instead"): infantry-like categories (Infantry/MechInfantry/
+        /// DroneInfantry) were removed from building cover (see IsInfantryLike). While engaging they instead
+        /// stand "behind the nearest friendly armor (Tank/Apc)" (TryFindArmorCover); with no armor nearby
+        /// they fight where they stand (no running to buildings or under overpasses). Seeking
+        /// trenches/bunkers (FortSeekStep, which later overrides this step's decision) still takes top
+        /// priority as before.</summary>
         private static readonly Dictionary<UnitCategory, float> SearchRadiusByCategory = new Dictionary<UnitCategory, float>
         {
             { UnitCategory.Apc, 45f },
@@ -103,10 +106,10 @@ namespace CSWarfront.Core
             { UnitCategory.Artillery, 0f },
         };
 
-        /// <summary>Task104: 歩兵が隠れる対象にする味方装甲を探す半径。</summary>
+        /// <summary>Task104: radius within which infantry look for friendly armor to hide behind.</summary>
         public const float ArmorCoverRadius = 60f;
 
-        /// <summary>Task104: 装甲車両の「後ろ」（脅威の反対側）に立つ距離。</summary>
+        /// <summary>Task104: how far "behind" the armor (on the side away from the threat) infantry stand.</summary>
         public const float ArmorCoverStandoff = 6f;
 
         private static bool IsInfantryLike(UnitCategory category)
@@ -115,8 +118,9 @@ namespace CSWarfront.Core
                 || category == UnitCategory.DroneInfantry;
         }
 
-        /// <summary>Task104: uからArmorCoverRadius以内の最寄りの味方装甲（Tank/Apc、生存・非搭乗）を
-        /// 探し、その「脅威の反対側」の立ち位置を返す。見つからなければfalse。</summary>
+        /// <summary>Task104: finds the nearest friendly armor (Tank/Apc, alive, not being carried) within
+        /// ArmorCoverRadius of u and returns the standing position on its side away from the threat.
+        /// Returns false if none is found.</summary>
         private static bool TryFindArmorCover(WarState state, UnitInstance u, WorldPos threatPos, out WorldPos coverPos)
         {
             coverPos = default(WorldPos);
@@ -146,8 +150,9 @@ namespace CSWarfront.Core
             return true;
         }
 
-        /// <summary>uが自勢力（u.FactionId）のいずれかの基地の勢力圏（水平距離がInfluenceRadius以内）に
-        /// いるか（Task45）。敵勢力の基地の勢力圏は数えない。基地が1つも無ければfalse。</summary>
+        /// <summary>Whether u is inside the influence area (horizontal distance within InfluenceRadius) of
+        /// any base owned by its own faction (u.FactionId) (Task45). Enemy bases' influence does not count.
+        /// False when the faction owns no bases.</summary>
         public static bool IsInFriendlyTerritory(WarState state, UnitInstance u)
         {
             for (int i = 0; i < state.Bases.Count; i++)
@@ -161,16 +166,16 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state, float dt)
         {
-            IWaterSampler water = state.Water; // Task77: null-safeなローカルへ1回だけ拾っておく。
+            IWaterSampler water = state.Water; // Task77: grab once into a null-safe local.
 
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
 
-                // Task48: Hold/RallyHold は「持ち場を守る受動防御」定義そのものなので遮蔽移動・
-                // Task52の各種タイマーの対象外（追撃や遮蔽から遮蔽への前進を一切しない）。
-                // FreeAdvanceはAiControlledと同じ扱いのためここでは特別扱いしない。
+                // Task48: Hold/RallyHold are the definition of "passive defense of a post", so they are
+                // exempt from cover movement and all Task52 timers (no pursuit, no cover-to-cover advance).
+                // FreeAdvance is treated the same as AiControlled and gets no special case here.
                 if (u.Order == UnitOrder.Hold || u.Order == UnitOrder.RallyHold)
                 {
                     ClearCover(u);
@@ -184,20 +189,20 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // Task61: Sea/Airは遮蔽移動の対象外（そもそも建物の陰に隠れるという概念がない領域）。
-                // MovementStepのSea/Air分岐はCoverDestinationを一切見ないため実害は無いが、ここで
-                // 明示的にスキップしておくことで「CoverSeekStepは常にLandユニットの状態しか触らない」
-                // という不変条件を保つ（将来Sea/Air用の別の駆け引き——例えば艦艇の隊列維持——を
-                // 追加する際の土台にもなる）。
+                // Task61: Sea/Air are exempt from cover movement (hiding behind buildings has no meaning in
+                // those domains). MovementStep's Sea/Air branches never read CoverDestination, so nothing
+                // breaks either way — but skipping explicitly preserves the invariant "CoverSeekStep only
+                // ever touches Land unit state" (also a foundation for future Sea/Air behaviors such as
+                // fleet formation keeping).
                 if (type.Domain != Domain.Land)
                 {
                     ClearCover(u);
                     continue;
                 }
 
-                // Mode 1: 自勢力圏内にいる間は遮蔽移動もTask52のタイマーも対象外にする
-                // （速く・道路沿いに移動させたい）。圏内に居る/戻った時点でクールダウンもリセットし、
-                // 圏外へ出た次のtickで即座に遮蔽の評価を始められるようにする。
+                // Mode 1: while inside friendly territory, exempt from cover movement and the Task52 timers
+                // (we want fast movement along roads). The cooldown is also reset while inside, so cover
+                // evaluation can start immediately on the first tick outside.
                 if (IsInFriendlyTerritory(state, u))
                 {
                     ClearCover(u);
@@ -211,8 +216,8 @@ namespace CSWarfront.Core
 
                 if (wasEngagingWithTarget && !targetAlive)
                 {
-                    // 交戦が終わった＝次に交戦し始めたら即座に再評価してほしいので、
-                    // クールダウン・Task52の各タイマーも一緒にリセットする。
+                    // The engagement is over — we want an immediate re-evaluation when the next one starts,
+                    // so the cooldown and the Task52 timers are reset together.
                     ClearCover(u);
                     u.CoverReevaluateCooldown = 0f;
                     continue;
@@ -220,20 +225,21 @@ namespace CSWarfront.Core
 
                 bool isEngaging = wasEngagingWithTarget && targetAlive;
 
-                // Task52 rule3: 同じ相手と交戦し続けている時間を、遮蔽の可否とは無関係に計測する
-                // （Artillery等、遮蔽を一切探さないカテゴリでも「交戦で永久に足止め」を防ぐため）。
+                // Task52 rule 3: measure time spent fighting the same opponent, independent of cover
+                // eligibility (so categories that never seek cover, e.g. Artillery, are also protected from
+                // being pinned forever by an engagement).
                 bool sameTarget = isEngaging && u.CoverTargetId.HasValue && u.CoverTargetId.Value == u.TargetId.Value;
                 u.EngageHoldTimer = isEngaging ? (sameTarget ? u.EngageHoldTimer + dt : dt) : 0f;
 
-                bool infantryLike = IsInfantryLike(type.Category); // Task104: 建物遮蔽なし・装甲遮蔽のみ
+                bool infantryLike = IsInfantryLike(type.Category); // Task104: no building cover; armor cover only
                 float searchRadius = SearchRadiusByCategory.TryGetValue(type.Category, out float r) ? r : 0f;
                 bool coverEligible = infantryLike || (searchRadius > 0f && state.Cover != null);
 
                 if (!coverEligible)
                 {
-                    // Artillery、または遮蔽マップ未供給: 遮蔽は一切探さない（Task44のまま）。
-                    // ただしCoverTargetIdはEngageHoldTimerの「同じ相手」判定に使うため、交戦中は
-                    // 維持する（次tickのsameTarget判定に必要）。
+                    // Artillery, or no cover map supplied: never search for cover (as in Task44).
+                    // CoverTargetId is still maintained while engaging because EngageHoldTimer's
+                    // "same opponent" check needs it next tick.
                     u.CoverDestination = null;
                     u.CoverHold = false;
                     u.CoverTargetId = isEngaging ? u.TargetId : null;
@@ -242,16 +248,18 @@ namespace CSWarfront.Core
 
                 if (isEngaging)
                 {
-                    // Task50: 同じ相手と交戦し続けている間は、既に決定済みの遮蔽（見つからなかった
-                    // という判断も含む）を一切変更しない。頻繁な位置変更を防ぐための最重要ガード。
+                    // Task50: while fighting the same opponent, never alter the cover decision already made
+                    // (including the decision that none was found). The single most important guard against
+                    // constant repositioning.
                     if (sameTarget) continue;
 
-                    // 新規の交戦、または相手が変わった: このtickで即座に（クールダウンを待たず）評価する。
+                    // New engagement, or the opponent changed: evaluate immediately (no cooldown wait).
                     u.CoverTargetId = u.TargetId;
                     u.CoverHoldTimer = 0f;
-                    // Task104: 歩兵系は「最寄りの味方装甲の後ろ」を遮蔽にする（建物遮蔽は使わない）。
-                    // Task77: 見つかった候補が水中（state.Water.IsWater）なら「見つからなかった」と
-                    // 同じ扱いにする（陸上ユニットを水際/水中の立ち位置へ誘導しない）。
+                    // Task104: infantry-like units take cover "behind the nearest friendly armor" (no
+                    // building cover).
+                    // Task77: a candidate that lands in water (state.Water.IsWater) is treated the same as
+                    // "not found" (never steer land units to waterline/underwater positions).
                     bool foundCover;
                     WorldPos coverPos;
                     if (infantryLike)
@@ -265,23 +273,24 @@ namespace CSWarfront.Core
                     }
                     else
                     {
-                        // 遮蔽が見つからなかった、という判断そのものを記憶する（CoverTargetIdは
-                        // 維持し、CoverDestination/CoverHoldのみクリアする＝ClearCoverは使わない。
-                        // ClearCoverはCoverTargetIdもnullへ戻してしまい、同じ相手との交戦中に
-                        // 毎tick探索し直すことになってしまうため）。
+                        // Remember the "no cover found" decision itself (CoverTargetId is kept; only
+                        // CoverDestination/CoverHold are cleared — ClearCover is NOT used here, because it
+                        // would null CoverTargetId too and cause a fresh search every tick against the same
+                        // opponent).
                         u.CoverDestination = null;
                         u.CoverHold = false;
                     }
                     continue;
                 }
 
-                // ここに来るのは非交戦（Mode3進軍中）のみ。次に交戦を始めたら即座に評価してほしいので
-                // ロックを解放しておく。
+                // Only non-engaging (mode-3 advancing) units reach here. Release the lock so the next
+                // engagement is evaluated immediately.
                 u.CoverTargetId = null;
 
-                // Task104: 歩兵系は進軍中のbounding advance（建物から建物へ隠れながら前進）を廃止
-                // （高架下や建物裏へ走り込む不自然な移動の原因だった）。道路沿いにまっすぐ進軍し、
-                // 交戦が始まったら上のMode2で味方装甲の後ろへ隠れる。
+                // Task104: infantry-like units no longer do the bounding advance (hiding building-to-building
+                // while advancing) — it was the cause of the unnatural dashes under overpasses and behind
+                // buildings. They advance straight along the road, and once a fight starts, mode 2 above
+                // tucks them behind friendly armor.
                 if (infantryLike)
                 {
                     u.CoverDestination = null;
@@ -289,20 +298,20 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // Task52 rule4: 進軍中の膠着ウォッチドッグ（OrderTargetPosが無ければ内部で自然にリセットする）。
+                // Task52 rule 4: the advance stall watchdog (self-resets internally when OrderTargetPos is gone).
                 UpdateStallWatchdog(u, dt);
 
                 if (!u.OrderTargetPos.HasValue)
                 {
-                    // 交戦もしていない・進軍目的地も無い（Idle等）→遮蔽移動の対象外。
+                    // Neither engaging nor advancing (Idle etc.) → exempt from cover movement.
                     u.CoverDestination = null;
                     u.CoverHold = false;
                     u.CoverHoldTimer = 0f;
                     continue;
                 }
 
-                // Task52 rule4: 膠着ウォッチドッグが発動中は遮蔽探索そのものを完全に止め、
-                // 道路経路(Path/OrderTargetPos)にそのまま任せる。
+                // Task52 rule 4: while the stall watchdog is active, suspend cover search entirely and let
+                // the road path (Path/OrderTargetPos) drive.
                 if (u.CoverSuppressionRemaining > 0f)
                 {
                     u.CoverDestination = null;
@@ -310,19 +319,20 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // Task52 rule1: 再評価クールダウン(CoverUseIntervalHours)。毎tick探索しない＝
-                // 「時々」だけ隠れる。設定済みでも未設定でも、間隔が空いていなければそのまま変えない
-                // （MovementStepがbounding到達時にCoverReevaluateCooldownを0へリセットするため、
-                // そのケースではここを素通りしてすぐ次の候補を探しに行く）。
+                // Task52 rule 1: the re-evaluation cooldown (CoverUseIntervalHours). No per-tick search =
+                // hide only "occasionally". Whether cover is currently set or not, nothing changes until the
+                // interval has elapsed (MovementStep resets CoverReevaluateCooldown to 0 on bounding arrival,
+                // in which case this falls straight through and the next candidate is searched right away).
                 u.CoverReevaluateCooldown -= dt;
                 if (u.CoverReevaluateCooldown > 0f) continue;
                 u.CoverReevaluateCooldown = CoverUseIntervalHours;
 
-                // Mode 3: 進軍中（交戦していない）。目的地(進軍先の敵基地)方向を脅威とみなし、
-                // 目的地に確実に近づく（MinForwardProgress）かつ現在地から近い（MaxCoverDetour）
-                // 候補があれば、その遮蔽へ立ち寄って少し隠れる（CoverHold=true、Task52）。
+                // Mode 3: advancing (not engaging). Treat the objective direction (the enemy base being
+                // advanced on) as the threat; if a candidate makes real progress toward it
+                // (MinForwardProgress) and is close by (MaxCoverDetour), stop over at that cover briefly
+                // (CoverHold=true, Task52).
                 WorldPos objective = u.OrderTargetPos.Value;
-                // Task77: モード2と同じく、候補が水中なら「見つからなかった」扱いにする。
+                // Task77: as in mode 2, a candidate in water counts as "not found".
                 if (state.Cover.TryFindBestCover(u.Position, objective, searchRadius, u.InstanceId, out WorldPos boundCover)
                     && !(water != null && water.IsWater(boundCover.X, boundCover.Z)))
                 {
@@ -337,8 +347,8 @@ namespace CSWarfront.Core
                     }
                     else
                     {
-                        // 前進にならない/遠すぎる候補しか無い＝遮蔽を求めて足踏み/大回りするより、
-                        // 道路沿いの進軍(Path/OrderTargetPos)をそのまま続けさせる方が良い。
+                        // Only candidates that do not advance / are too far exist — better to keep the road
+                        // advance (Path/OrderTargetPos) going than to mark time or detour for cover.
                         u.CoverDestination = null;
                         u.CoverHold = false;
                     }
@@ -351,14 +361,15 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>Task52 rule4: OrderTargetPosまでの距離が縮まり続けているかを監視する。
-        /// StallEpsilon以上縮まればチェックポイントを更新して安全（膠着ではない）とみなす。
-        /// StallTimeoutHoursの間縮まらなければ、CoverSuppressionRemainingをCoverSuppressedHoursへ
-        /// セットし、以後その時間は遮蔽探索を完全に止める（Advance側で読む）。
-        /// OrderTargetPosが無い場合はウォッチドッグ自体を無効化（チェックポイントをリセット）する。</summary>
+        /// <summary>Task52 rule 4: watches whether the distance to OrderTargetPos keeps shrinking. Shrinking
+        /// by at least StallEpsilon updates the checkpoint and counts as safe (not stalled). If it fails to
+        /// shrink for StallTimeoutHours, CoverSuppressionRemaining is set to CoverSuppressedHours and cover
+        /// search is fully suspended for that long (read on the Advance side). With no OrderTargetPos the
+        /// watchdog disables itself (checkpoint reset).</summary>
         private static void UpdateStallWatchdog(UnitInstance u, float dt)
         {
-            // 既に発動中の抑制時間は、進捗の有無に関わらず先に消化する（「後で自動的に再有効化される」ため）。
+            // An active suppression window is consumed first regardless of progress (it "re-enables
+            // automatically later").
             if (u.CoverSuppressionRemaining > 0f)
             {
                 u.CoverSuppressionRemaining -= dt;
@@ -376,7 +387,7 @@ namespace CSWarfront.Core
 
             if (!u.LastObjectiveDistance.HasValue || u.LastObjectiveDistance.Value - dist >= StallEpsilon)
             {
-                // 初回計測、または十分前進した：チェックポイントを更新し、膠着タイマーをリセットする。
+                // First measurement, or enough progress: update the checkpoint and reset the stall timer.
                 u.LastObjectiveDistance = dist;
                 u.StallTimer = 0f;
                 return;
@@ -387,16 +398,16 @@ namespace CSWarfront.Core
             {
                 u.CoverSuppressionRemaining = CoverSuppressedHours;
                 u.StallTimer = 0f;
-                u.LastObjectiveDistance = dist; // 次の判定ウィンドウをここから再スタートする
+                u.LastObjectiveDistance = dist; // restart the next observation window from here
             }
         }
 
-        /// <summary>CoverDestination/CoverHoldに加え、CoverTargetId（Task50の交戦中ロック）と
-        /// Task52で追加した各タイマー（CoverHoldTimer/EngageHoldTimer/StallTimer/
-        /// LastObjectiveDistance/CoverSuppressionRemaining）も全て解放する。
-        /// 「遮蔽・進軍の意思決定そのものを白紙に戻す」経路すべてで使う。交戦中に遮蔽が見つからなかった
-        /// 場合だけは、このメソッドを使わずCoverDestination/CoverHoldのみ直接クリアする
-        /// （CoverTargetIdは維持し、同じ相手との再探索を防ぐため。上のisEngagingブロック参照）。</summary>
+        /// <summary>Releases CoverDestination/CoverHold plus CoverTargetId (the Task50 engagement lock) and
+        /// every timer added in Task52 (CoverHoldTimer/EngageHoldTimer/StallTimer/LastObjectiveDistance/
+        /// CoverSuppressionRemaining). Used on every path that "wipes the cover/advance decision clean".
+        /// The one exception is "no cover found while engaging", which clears only
+        /// CoverDestination/CoverHold directly instead of calling this (CoverTargetId must be kept to
+        /// prevent re-searching against the same opponent — see the isEngaging block above).</summary>
         private static void ClearCover(UnitInstance u)
         {
             u.CoverDestination = null;

@@ -3,52 +3,58 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task101: 軍用貨物列車の運行（設計§3）。
+    /// Task101: military freight train operations (design §3).
     ///
-    /// 稼働駅ペア（自軍のCargoStation同士、レールで接続・MinStationDistance以上離れている）ごとに
-    /// 列車1編成を自動維持し、
-    ///   物資: 「基地側駅」（自軍陸軍基地に最も近い方）で勢力プールから積載 → 反対側の駅の
-    ///         StoredSuppliesへ荷下ろし（前線側の備蓄＝トラック/ヘリの積出元になる）
-    ///   ユニット: 駅BoardRadius内の「前線へ向かう」陸上ユニット（進軍目的地が反対側の駅の方が
-    ///         BoardDetourAdvantage以上近いもの）を搭乗させ、反対側の駅で降車（目的地・命令は
-    ///         保持したまま自走再開）
-    /// を往復する。列車→ペアの割り当てはステートレス（InstanceId昇順の列車を、(BaseId,BaseId)
-    /// 昇順のペアへ順に割り当てる＝毎tick決定的に再導出。セーブに割り当てを持たない）。
-    /// 搭乗の仕組み（CarriedByUnitId、位置追従・道連れ）はTransportHeliStepと共通。
+    /// For each operational station pair (two friendly CargoStations, rail-connected and at least
+    /// MinStationDistance apart) one train is automatically maintained. It shuttles:
+    ///   Supplies: loads from the faction pool at the "home station" (the one nearest a friendly army base),
+    ///         unloads into the far station's StoredSupplies (front-side stock = the pickup source for
+    ///         trucks/helicopters)
+    ///   Units: boards land units within BoardRadius of a station that are "headed for the front"
+    ///         (whose advance objective is at least BoardDetourAdvantage closer to the opposite station),
+    ///         and disembarks them at the opposite station (objective and orders retained; they resume
+    ///         marching on their own)
+    /// Train-to-pair assignment is stateless (trains in ascending InstanceId order are assigned to pairs in
+    /// ascending (BaseId,BaseId) order = deterministically re-derived every tick; nothing saved).
+    /// The carrying mechanism (CarriedByUnitId, position sync, shared fate) is common with TransportHeliStep.
     /// </summary>
     public static class TrainStep
     {
-        public const int MaxTrainsPerFaction = 6; // Task105: 4→6（鉄道の積極利用）
+        public const int MaxTrainsPerFaction = 6; // Task105: 4→6 (aggressive rail usage)
 
-        /// <summary>満載（SupplyLoad=1）が運ぶ補給物資量。</summary>
+        /// <summary>Supply amount a full load (SupplyLoad=1) carries.</summary>
         public const float CargoSupply = 200f;
 
-        public const float BoardRadius = 250f;          // Task105: 150→250（駅の集客範囲を拡大）
+        public const float BoardRadius = 250f;          // Task105: 150→250 (wider station catchment)
 
-        /// <summary>駅ペアとして成立する最小の駅間距離。Task107: 1500→400（実機で「駅を建てたのに
-        /// 列車が一切動かない」の主因が『2駅が1.5km以上離れていないとペアが1つも成立せず、
-        /// 担当路線の無い列車がその場で永久停止する』だったため、市内規模の路線でも成立するよう緩めた）。</summary>
+        /// <summary>Minimum distance between stations for a pair to qualify. Task107: 1500→400 (in-game the
+        /// main cause of "built stations but no train ever moves" was that no pair formed unless two
+        /// stations were 1.5km+ apart, leaving trains with no assigned route permanently parked; relaxed so
+        /// city-scale lines qualify).</summary>
         public const float MinStationDistance = 400f;
 
-        /// <summary>搭乗条件: 反対側の駅が進軍目的地へこの距離以上近いこと（「前線が遠方にある」判定）。
-        /// Task105: 1000→300（鉄道の積極利用。少しでも得なら乗る）。</summary>
+        /// <summary>Boarding condition: the opposite station must be at least this much closer to the unit's
+        /// advance objective ("the front is far away" test).
+        /// Task105: 1000→300 (aggressive rail usage — board whenever it is even slightly worthwhile).</summary>
         public const float BoardDetourAdvantage = 300f;
 
-        /// <summary>Task110（ユーザー要望「荷下ろしのための時間が必要なので駅に着いたら一時停車」）:
-        /// 駅での停車時間（ゲーム内時間）。到着→荷役→この時間だけ停車→発車、という流れになる。
-        /// 6時間＝1倍速で実時間およそ3秒。</summary>
+        /// <summary>Task110 (user request "trains need time to unload, so pause at stations"):
+        /// dwell time at a station (in-game hours). The sequence becomes arrive → cargo work → dwell for
+        /// this long → depart. 6 hours ≈ 3 real seconds at 1x speed.</summary>
         public const float StationDwellHours = 6f;
 
-        /// <summary>Task110: 基地側駅で積む物資が無い等、やることが無くて待機するときの再評価間隔
-        /// （ゲーム内時間）。従来は毎tick駅処理（全ユニット走査を含む搭乗判定・乗客数え上げ）を
-        /// 走らせ続けていたため、停車中の列車が数両いるだけで無駄な負荷になっていた。</summary>
+        /// <summary>Task110: re-evaluation interval while waiting with nothing to do (e.g. no supplies to
+        /// load at the home station) (in-game hours). Previously the station processing (which includes
+        /// whole-unit-list scans for boarding checks and passenger counting) ran every tick, so a few parked
+        /// trains alone were a pointless load.</summary>
         public const float IdleRecheckHours = 2f;
 
-        /// <summary>駅への到着判定半径。Task107: 60→150。駅はレールから最大CargoStationRules.
-        /// RailSnapRadius(100m)離れていてよいのに対し、列車はレール上しか走れない（＝駅建物まで
-        /// 最大100m届かない）ため、60mでは永久に「到着」と判定されず、駅の手前でDepartToを
-        /// 繰り返すだけのデッドロックになっていた（ユーザー報告「列車が文鎮化する」の主因）。
-        /// スナップ半径より確実に大きい値にして、レール上に停まった時点で到着とみなす。</summary>
+        /// <summary>Station arrival radius. Task107: 60→150. A station may sit up to
+        /// CargoStationRules.RailSnapRadius (100m) from the rails while the train can only travel on rails
+        /// (= it can never come within 100m of the building), so at 60m "arrived" was never satisfied and
+        /// the train deadlocked re-issuing DepartTo just short of the station (the main cause of the user
+        /// report "trains turn into paperweights"). Kept safely above the snap radius so stopping on the
+        /// rail next to the station counts as arrival.</summary>
         public const float StationArriveRadius = 150f;
 
         public struct StationPair
@@ -57,8 +63,8 @@ namespace CSWarfront.Core
             public MilitaryBase B;
         }
 
-        /// <summary>経済tickごと: ペア数（上限MaxTrainsPerFaction）まで列車を自動維持する。
-        /// スポーンは各ペアの基地側駅（UnitCosts支払い。Invader除外）。</summary>
+        /// <summary>Per economy tick: maintains trains up to the number of pairs (capped at
+        /// MaxTrainsPerFaction). Spawn at each pair's home station (paid via UnitCosts; Invaders excluded).</summary>
         public static void MaintainTrains(WarState state)
         {
             UnitType trainType = state.Types.Get(LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1));
@@ -78,7 +84,7 @@ namespace CSWarfront.Core
                 {
                     if (!UnitCosts.TryPay(f, trainType, f.Treasury)) break;
                     MilitaryBase home = HomeStation(state, pairs[p], f.Id);
-                    // Task108: 駅建物ではなくレール進入点に出現させる（＝最初から線路の上に居る）。
+                    // Task108: spawn at the rail entry point, not the station building (= on the track from the start).
                     WorldPos spawn = CargoStationRules.RailPointOf(home);
                     var u = new UnitInstance(state.AllocInstanceId(), trainType.TypeKey, f.Id, trainType.MaxHP,
                         new WorldPos(spawn.X, spawn.Y, spawn.Z));
@@ -97,7 +103,7 @@ namespace CSWarfront.Core
                 Faction f = state.Factions[fi];
                 if (f.Id == Faction.InvaderFactionId) continue;
 
-                List<StationPair> pairs = null;   // 必要になるまで作らない
+                List<StationPair> pairs = null;   // not built until needed
                 int trainIndex = 0;
 
                 for (int i = 0; i < state.Units.Count; i++)
@@ -111,18 +117,21 @@ namespace CSWarfront.Core
                     if (pairs == null) pairs = RoutesOf(state, f.Id);
                     if (pairs.Count == 0)
                     {
-                        // 路線が1本も成立していない（駅が1つだけ／レール未接続／占領された等）:
-                        // Task107: 従来はその場で永久停止していた（ユーザー報告「スポーンしても
-                        // 身動きできず文鎮化」の主因）。最寄りの自軍稼働駅までレール上を移動して
-                        // そこで待機する（駅が皆無なら本当に行き場が無いのでその場で待機）。
+                        // No route exists at all (only one station / rails disconnected / stations captured
+                        // etc.): Task107: previously the train parked forever on the spot (the main cause of
+                        // the user report "spawns but cannot move — a paperweight"). Instead it travels along
+                        // the rails to the nearest friendly operational station and waits there (with no
+                        // station at all there is genuinely nowhere to go, so it waits in place).
                         ParkAtNearestStation(state, f, train);
                         continue;
                     }
 
-                    // Task107: 列車1編成＝1ペア固定だと、ペア数より多い列車（手動生産ぶん）が全て
-                    // 永久停止していた。ラウンドロビンで必ずどれかの路線を担当させる。
-                    // Task110: ただし「その列車が居る線路網から行ける路線」を優先する——別網の路線を
-                    // 割り当てられた列車は、どこへも経路を張れず永久に停まってしまうため（実機で発生）。
+                    // Task107: with a fixed one-train-per-pair mapping, trains beyond the pair count
+                    // (manually produced ones) all parked forever. Round-robin ensures every train gets a
+                    // route.
+                    // Task110: but prefer "a route reachable from the rail network this train stands on" —
+                    // a train assigned a route on a different network can never lay a path anywhere and
+                    // parks forever (observed in-game).
                     StationPair pair = ChoosePair(state, pairs, train, trainIndex);
                     trainIndex++;
                     AdvanceTrainCycle(state, f, train, pair, dt);
@@ -130,9 +139,10 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>Task110: 担当路線の選択。ラウンドロビンの位置から順に見て、「この列車が今いる
-        /// 線路網から到達できる」最初の路線を選ぶ（到達できるものが無ければ従来どおりの割り当て）。
-        /// 判定は連結成分の一致のみ（キャッシュ済みなので安価）。</summary>
+        /// <summary>Task110: route selection. Starting from the round-robin position, picks the first route
+        /// "reachable from the rail network this train currently stands on" (falling back to the plain
+        /// round-robin assignment when none is reachable). The test is component-id equality only (cached,
+        /// hence cheap).</summary>
         private static StationPair ChoosePair(WarState state, List<StationPair> pairs, UnitInstance train, int trainIndex)
         {
             ushort trainNode;
@@ -156,8 +166,8 @@ namespace CSWarfront.Core
 
         private static void AdvanceTrainCycle(WarState state, Faction f, UnitInstance train, StationPair pair, float dt)
         {
-            // Task110: 停車中（荷役の所要時間・待機の再評価待ち）は何もしない。駅処理は全ユニット走査を
-            // 含むので、ここで抜けること自体が負荷削減にもなっている。
+            // Task110: while dwelling (cargo-work time / idle recheck delay) do nothing. Station processing
+            // includes whole-unit-list scans, so bailing out here is itself a load reduction.
             if (train.StationDwell > 0f)
             {
                 train.StationDwell -= dt;
@@ -166,15 +176,16 @@ namespace CSWarfront.Core
 
             MilitaryBase home = HomeStation(state, pair, f.Id);
 
-            // Task108（ユーザー報告「列車が振動しながらスタックする」）: 走行中（経路を消化中）は
-            // 駅処理を一切走らせない。従来は到着判定半径(150m)の内側にいる限り毎tick DepartToが
-            // 呼ばれ、そのたびに現在位置から経路を引き直していた——引き直しの起点スナップが
-            // 進行方向の1つ手前のノードになると後戻りし、次のtickでまた引き直す、という往復
-            // （＝その場で振動して前へ進めない）に陥っていた。
+            // Task108 (user report "train vibrates in place and gets stuck"): never run station processing
+            // while travelling (consuming a path). Previously DepartTo was called every tick while inside
+            // the 150m arrival radius, re-laying the path from the current position each time — when the
+            // start snap picked the node just behind the train it stepped backwards, then re-pathed next
+            // tick, and so on (= vibrating in place, never moving forward).
             if (train.Path != null && train.PathIndex < train.Path.Count) return;
 
-            // Task108: 到着判定・経路の行き先は駅建物ではなく「レール進入点」で測る（列車はレール上
-            // しか走れないため、駅建物の座標そのものには到達しえない）。
+            // Task108: arrival checks and path goals are measured against the "rail entry point", not the
+            // station building (the train can only travel on rails and can never reach the building's own
+            // coordinates).
             MilitaryBase atStation = null;
             if (train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.A)) <= StationArriveRadius)
                 atStation = pair.A;
@@ -183,8 +194,8 @@ namespace CSWarfront.Core
 
             if (atStation == null)
             {
-                // 経路を持たずに駅の外にいる（ロード直後・新造直後・ペア変更後・経路を走り切ったが
-                // 駅の圏内ではない）: 最寄りの担当駅へ経路を張り直す。
+                // Outside both stations without a path (just loaded / just built / pair changed / path
+                // consumed short of a station): lay a path to the nearest assigned station.
                 MilitaryBase nearest =
                     train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.A))
                     <= train.Position.HorizontalDistanceTo(CargoStationRules.RailPointOf(pair.B)) ? pair.A : pair.B;
@@ -194,35 +205,38 @@ namespace CSWarfront.Core
 
             MilitaryBase other = atStation.BaseId == pair.A.BaseId ? pair.B : pair.A;
 
-            // Task110: 到着したらまず荷役を1回だけ行い、そのぶんの時間だけ停車する（発車は次の評価）。
-            // 荷役済み（＝停車時間を終えて戻ってきた）ならこのブロックを飛ばして発車判定へ進む。
+            // Task110: on arrival, do the cargo work exactly once, then dwell for its duration (departure is
+            // decided at the next evaluation). If already serviced (= the dwell has just finished), skip
+            // this block and go on to the departure decision.
             if (!train.StationServiced)
             {
                 ServiceAtStation(state, f, train, atStation, home, other);
                 train.StationServiced = true;
                 train.StationDwell = StationDwellHours;
                 train.OrderTargetPos = null;
-                train.State = UnitState.Idle; // 停車中
+                train.State = UnitState.Idle; // dwelling
                 return;
             }
 
-            // 5) 出発判定: 積荷/乗客があれば反対駅へ。空なら基地側駅へ戻る（既に基地側なら待機）。
+            // 5) Departure: with cargo/passengers head for the opposite station; empty, return to the home
+            // station (or wait if already there).
             train.StationServiced = false;
             bool hasCargo = train.SupplyLoad > 0f || CountPassengers(state, train.InstanceId) > 0;
             if (hasCargo) { DepartTo(state, train, other); return; }
             if (atStation.BaseId != home.BaseId) { DepartTo(state, train, home); return; }
 
-            // 基地側駅で積むものが無い: しばらく待ってから再評価する（毎tick駅処理を回さない）。
+            // Nothing to load at the home station: wait a while before re-evaluating (no per-tick station
+            // processing).
             train.OrderTargetPos = null;
             train.State = UnitState.Idle;
             train.StationDwell = IdleRecheckHours;
         }
 
-        /// <summary>Task110: 駅での荷役（荷下ろし→降車→積載→搭乗）をまとめて1回行う。</summary>
+        /// <summary>Task110: performs the station cargo work (unload → disembark → load → board) in one go.</summary>
         private static void ServiceAtStation(WarState state, Faction f, UnitInstance train,
             MilitaryBase atStation, MilitaryBase home, MilitaryBase other)
         {
-            // 1) 荷下ろし（基地側駅以外＝前線側の駅でのみ。備蓄の空きぶんだけ）。
+            // 1) Unload (only at non-home = front-side stations; only as much as the stock has room for).
             if (train.SupplyLoad > 0f && atStation.BaseId != home.BaseId)
             {
                 float cap = FortificationRules.StoredSupplyCap(atStation.Type);
@@ -234,10 +248,11 @@ namespace CSWarfront.Core
                 if (train.SupplyLoad < 0.001f) train.SupplyLoad = 0f;
             }
 
-            // 2) 降車（搭乗兵は全員この駅で降りる。搭乗条件が「この駅の方が目的地に近い」だったため）。
+            // 2) Disembark (all passengers get off at this station — the boarding condition was "this
+            // station is closer to their objective").
             DisembarkAll(state, train);
 
-            // 3) 積載（基地側駅でのみ物資を積む）。
+            // 3) Load (supplies are loaded at the home station only).
             if (atStation.BaseId == home.BaseId && f.SupplyStock > 0f && train.SupplyLoad < 1f)
             {
                 float loadable = f.SupplyStock / CargoSupply;
@@ -247,12 +262,14 @@ namespace CSWarfront.Core
                 train.SupplyLoad += load;
             }
 
-            // 4) 搭乗（どちらの駅でも可: 反対側の駅の方が目的地へ大きく近いユニットだけが乗る）。
+            // 4) Board (allowed at either station: only units whose objective is much closer to the opposite
+            // station get on).
             BoardEligibleUnits(state, train, atStation, other);
         }
 
-        /// <summary>Task107: 担当路線が無い列車を、最寄りの自軍稼働駅までレール上で移動させて待機させる
-        /// （駅の圏内に既に居る／稼働駅が1つも無い場合はその場で待機）。</summary>
+        /// <summary>Task107: sends a train with no assigned route along the rails to the nearest friendly
+        /// operational station to wait there (waits in place when already inside a station's radius or when
+        /// no operational station exists at all).</summary>
         private static void ParkAtNearestStation(WarState state, Faction f, UnitInstance train)
         {
             MilitaryBase best = null;
@@ -268,26 +285,27 @@ namespace CSWarfront.Core
 
             if (best == null || bestDist <= StationArriveRadius)
             {
-                Wait(train); // Task110: 毎tick回さず、少し間を置いて再評価する
+                Wait(train); // Task110: do not re-run every tick; re-evaluate after a pause
                 return;
             }
 
-            if (train.Path != null && train.PathIndex < train.Path.Count) return; // 既に回送中
+            if (train.Path != null && train.PathIndex < train.Path.Count) return; // already deadheading
             DepartTo(state, train, best);
         }
 
-        /// <summary>レール上に居るとみなす許容距離（m）。これを超えて線路から離れていたら載せ直す。</summary>
+        /// <summary>Tolerance for counting as "on the rails" (m). Farther off the track than this and the
+        /// train is placed back on.</summary>
         public const float RailSnapTolerance = 15f;
 
         private static void DepartTo(WarState state, UnitInstance train, MilitaryBase station)
         {
-            WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: 行き先はレール進入点
+            WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: the goal is the rail entry point
 
-            // Task110（ユーザー報告「列車がスタックしている」）: 経路の起点は「行き先と行き来できる
-            // ノード」でなければならない。単純な最近傍スナップだと、駅のすぐ横にある別網（引き込み線）の
-            // ノードを掴んでしまうことがあり、そこからは目的地へ絶対に到達できないため経路探索が毎回
-            // 失敗し、満載の列車が駅に停まったまま動かなくなっていた（実機ログで確認）。
-            // 行き先のノードを先に決め、その連結成分の中から起点ノードを選ぶ。
+            // Task110 (user report "the train looks stuck"): the path's start node must be one that can
+            // reach the goal. A plain nearest-node snap can grab a node of a different network (a siding)
+            // right next to the station, from which the destination can never be reached — every path search
+            // failed and fully loaded trains sat at the station forever (confirmed in the live logs).
+            // Resolve the destination node first, then pick the start node from its connected component.
             ushort destNode;
             if (!state.Rails.TryFindNearestNode(dest, CargoStationRules.RailSnapRadius * 2f, out destNode))
             {
@@ -299,12 +317,12 @@ namespace CSWarfront.Core
             if (!state.Rails.TryFindNearestNodeInSameComponent(train.Position,
                     CargoStationRules.RailEntryRadius, destNode, out startNode))
             {
-                Wait(train); // その線路網へは物理的に入れない（担当路線の割り当てが次tickで見直される）
+                Wait(train); // physically cannot enter that rail network (route assignment is reconsidered next tick)
                 return;
             }
 
-            // Task109: 起点ノードから離れているなら線路の上へ載せ直す（線路の無い空中を直線で
-            // 飛んでいくのを防ぐ）。
+            // Task109: if the train is away from the start node, place it back on the track (prevents flying
+            // in a straight line through the air where there are no rails).
             WorldPos onRail;
             if (state.Rails.TryGetNodePosition(startNode, out onRail)
                 && train.Position.HorizontalDistanceTo(onRail) > RailSnapTolerance)
@@ -315,7 +333,7 @@ namespace CSWarfront.Core
             var path = state.Rails.FindPathBetweenNodes(startNode, destNode);
             if (path == null || path.Count == 0)
             {
-                // 既に行き先のノード上にいる/経路なし: 動かない（次tickで再評価）。
+                // Already on the destination node / no route: do not move (re-evaluate next tick).
                 Wait(train);
                 return;
             }
@@ -324,11 +342,12 @@ namespace CSWarfront.Core
             train.PathTarget = dest;
             train.OrderTargetPos = dest;
             train.State = UnitState.Moving;
-            train.StationServiced = false; // Task110: 次に着いた駅では必ず荷役から始める
+            train.StationServiced = false; // Task110: the next station reached always starts with cargo work
         }
 
-        /// <summary>Task110: 出発できないときの待機。次の評価まで少し間を置く（毎tick経路探索を
-        /// やり直さない）。担当路線の割り当ては毎tick見直されるので、到達できる路線が現れれば動き出す。</summary>
+        /// <summary>Task110: waiting when departure is impossible. Pauses until the next evaluation (no
+        /// per-tick path-search retries). Route assignment is reconsidered every tick, so the train starts
+        /// moving as soon as a reachable route appears.</summary>
         private static void Wait(UnitInstance train)
         {
             train.OrderTargetPos = null;
@@ -352,10 +371,10 @@ namespace CSWarfront.Core
 
                 WorldPos dest = u.OrderTargetPos.Value;
                 if (dest.HorizontalDistanceTo(other.Position) + BoardDetourAdvantage
-                    >= dest.HorizontalDistanceTo(here.Position)) continue; // 乗る価値なし（前線が近い/逆方向）
+                    >= dest.HorizontalDistanceTo(here.Position)) continue; // not worth boarding (front is near / opposite direction)
 
                 u.CarriedByUnitId = train.InstanceId;
-                u.ClearPath(); // 降車後はOrderTargetPosから経路を引き直す
+                u.ClearPath(); // after alighting, the path is re-laid from OrderTargetPos
             }
         }
 
@@ -369,22 +388,22 @@ namespace CSWarfront.Core
                 float ox = (n % 2 == 0 ? 1f : -1f) * 15f * ((n / 2) + 1);
                 u.CarriedByUnitId = null;
                 u.Position = new WorldPos(train.Position.X + ox, train.Position.Y, train.Position.Z + 15f);
-                u.State = UnitState.Moving; // 目的地(OrderTargetPos)は保持したまま自走再開
+                u.State = UnitState.Moving; // resumes marching with its retained objective (OrderTargetPos)
                 n++;
             }
         }
 
         /// <summary>
-        /// Task109（ユーザー報告「列車が移動しなくなった」）: 路線一覧のキャッシュ付き取得。
+        /// Task109 (user report "trains stopped moving"): cached route-list lookup.
         ///
-        /// <see cref="FindStationPairs"/>は駅ペアごとにA*を1回走らせる。曲線サンプリングでレール網の
-        /// ノード数が309→1347へ増え、かつ駅6つ＝15ペアになった結果、これを毎tick・しかも2箇所
-        /// （TrainStep.AdvanceとInvasionOrders.AssignAdvance）から呼んでいた従来のままでは
-        /// simスレッドが経路探索で埋まり、列車どころか全体の進行が止まっていた。
+        /// <see cref="FindStationPairs"/> runs one A* per station pair. After curve sampling grew the rail
+        /// graph from 309 to 1347 nodes, and six stations meant 15 pairs, calling it every tick — from two
+        /// places no less (TrainStep.Advance and InvasionOrders.AssignAdvance) — saturated the sim thread
+        /// with pathfinding and froze not just the trains but everything.
         ///
-        /// 路線はレール網か駅の増減でしか変わらないので、レール網の再構築時に
-        /// <see cref="InvalidateRoutes"/>で捨てるだけの素朴なキャッシュで足りる（未キャッシュなら
-        /// その場で1回だけ計算して覚える＝呼び出し側は何も気にしなくてよい）。
+        /// Routes only change when the rail network or the station set changes, so a naive cache that is
+        /// discarded via <see cref="InvalidateRoutes"/> on rail rebuild suffices (a miss computes once and
+        /// remembers — callers need not care).
         /// </summary>
         public static List<StationPair> RoutesOf(WarState state, byte factionId)
         {
@@ -396,14 +415,15 @@ namespace CSWarfront.Core
             return cached;
         }
 
-        /// <summary>路線キャッシュを捨てる（レール網の再構築時にGame層が呼ぶ）。</summary>
+        /// <summary>Discards the route cache (called by the Game layer when the rail network is rebuilt).</summary>
         public static void InvalidateRoutes(WarState state)
         {
             state.RailRoutes.Clear();
         }
 
-        /// <summary>自軍の稼働駅からなるペア（レールで接続・MinStationDistance以上）をBaseId昇順で列挙する。
-        /// 経路存在チェックはA*1回/ペア。重いので直接呼ばず<see cref="RoutesOf"/>を使うこと。</summary>
+        /// <summary>Enumerates pairs of the faction's operational stations (rail-connected, at least
+        /// MinStationDistance apart) in ascending BaseId order. Reachability costs one graph pass; heavy
+        /// enough that callers should use <see cref="RoutesOf"/> rather than calling this directly.</summary>
         public static List<StationPair> FindStationPairs(WarState state, byte factionId)
         {
             var stations = new List<MilitaryBase>();
@@ -418,10 +438,10 @@ namespace CSWarfront.Core
             var pairs = new List<StationPair>();
             if (state.Rails == null || stations.Count < 2) return pairs;
 
-            // Task109: 到達可能かどうかはA*ではなく連結成分で判定する（無向グラフなので同値）。
-            // 従来はペアごとにA*を走らせており、駅6つ＝15ペア×ノード1300超の探索を毎tick2箇所から
-            // 呼んでいたためsimスレッドが経路探索で埋まっていた（列車が動かなくなった直接の原因）。
-            // 連結成分はグラフ全体を1回なめるだけで求まる。
+            // Task109: reachability is decided by connected components, not A* (equivalent on an undirected
+            // graph). Previously an A* ran per pair — six stations = 15 pairs over a 1300+ node graph, called
+            // every tick from two places — and the sim thread drowned in pathfinding (the direct cause of
+            // "trains stopped moving"). Components take a single pass over the whole graph.
             var components = state.Rails.ComputeComponentIds();
             var stationComponent = new int[stations.Count];
             var stationNode = new ushort[stations.Count];
@@ -441,9 +461,10 @@ namespace CSWarfront.Core
                 if (stationComponent[a] < 0) continue;
                 for (int b = a + 1; b < stations.Count; b++)
                 {
-                    if (stationComponent[b] != stationComponent[a]) continue; // 別々の線路網
-                    // Task108: 同じレールノードにスナップした＝走る区間が無い（従来はこれが路線として
-                    // 成立してしまい、担当列車が「経路ゼロで出発」を繰り返して一切動かなかった）。
+                    if (stationComponent[b] != stationComponent[a]) continue; // different rail networks
+                    // Task108: both snapped to the same rail node = there is no stretch to run (this used to
+                    // qualify as a route, and the assigned train endlessly "departed" with a zero-length
+                    // path, never moving).
                     if (stationNode[a] == stationNode[b]) continue;
                     if (stations[a].Position.HorizontalDistanceTo(stations[b].Position) < MinStationDistance) continue;
                     pairs.Add(new StationPair { A = stations[a], B = stations[b] });
@@ -452,11 +473,12 @@ namespace CSWarfront.Core
             return pairs;
         }
 
-        /// <summary>Task105（鉄道の積極利用）: fromからdestへ向かうとき、鉄道経由（乗車駅まで自走→
-        /// 列車→降車駅から自走）の方がBoardDetourAdvantage以上得になる駅ペアがあれば、その乗車駅の
-        /// 位置を返す。AI進軍（InvasionOrders.AssignAdvance）が道路経路の目的地を乗車駅へ差し替えて
-        /// 「まず駅へ向かう→BoardRadius内で列車に拾われる」流れを作るために使う。
-        /// 既に乗車駅のすぐ側（StationArriveRadius×2以内）にいる場合はfalse（そのまま搭乗を待つ）。</summary>
+        /// <summary>Task105 (aggressive rail usage): when travelling from from to dest, if some station pair
+        /// makes the rail detour (march to the boarding station → train → march from the alighting station)
+        /// at least BoardDetourAdvantage cheaper, returns that boarding station's position. Used by the AI
+        /// advance (InvasionOrders.AssignAdvance) to redirect the road path's goal to the boarding station,
+        /// creating the flow "head for the station first → get picked up within BoardRadius".
+        /// Returns false when already right by a boarding station (keep waiting to board).</summary>
         public static bool TryFindBoardingStation(List<StationPair> pairs, WorldPos from, WorldPos dest,
             out WorldPos boardingStation)
         {
@@ -467,18 +489,20 @@ namespace CSWarfront.Core
 
             for (int i = 0; i < pairs.Count; i++)
             {
-                // 両方向（A乗車→B降車、B乗車→A降車）を試す。
+                // Try both directions (board A → alight B, board B → alight A).
                 for (int dir = 0; dir < 2; dir++)
                 {
                     MilitaryBase board = dir == 0 ? pairs[i].A : pairs[i].B;
                     MilitaryBase alight = dir == 0 ? pairs[i].B : pairs[i].A;
                     float toBoard = from.HorizontalDistanceTo(board.Position);
-                    // 既に駅の集客範囲内なら目的地の差し替えは不要（そのまま列車に拾われる）。
-                    // Task107: 判定をStationArriveRadius×2ではなくBoardRadiusにした（到着判定半径は
-                    // 列車側の都合で変わるが、ここで意味を持つのは「乗車できる範囲かどうか」のため）。
+                    // Already inside the station's catchment: no goal redirection needed (the train will
+                    // pick the unit up as-is).
+                    // Task107: the test uses BoardRadius rather than StationArriveRadius×2 (the arrival
+                    // radius varies for the train's own reasons; what matters here is "within boarding
+                    // range").
                     if (toBoard <= BoardRadius) continue;
                     float via = toBoard + alight.Position.HorizontalDistanceTo(dest);
-                    if (via + BoardDetourAdvantage >= direct) continue; // 鉄道経由が十分に得ではない
+                    if (via + BoardDetourAdvantage >= direct) continue; // rail is not clearly worthwhile
                     if (via < bestVia)
                     {
                         bestVia = via;
@@ -490,7 +514,7 @@ namespace CSWarfront.Core
             return found;
         }
 
-        /// <summary>ペアのうち「基地側」の駅＝自軍の陸軍基地への最短距離が小さい方（同点はA）。</summary>
+        /// <summary>The "home" station of a pair = the one nearer a friendly army base (ties go to A).</summary>
         private static MilitaryBase HomeStation(WarState state, StationPair pair, byte factionId)
         {
             float aDist = NearestArmyBaseDistance(state, pair.A.Position, factionId);
