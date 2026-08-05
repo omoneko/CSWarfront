@@ -67,8 +67,10 @@ public class CoverSeekStepTests
     }
 
     [Fact]
-    public void Advance_sets_CoverDestination_for_engaging_infantry_when_cover_available()
+    public void Advance_infantry_ignores_building_cover_without_friendly_armor()
     {
+        // Task104: 歩兵は建物遮蔽を使わない（高架下等へ走り込む不自然な移動の廃止）。
+        // 味方装甲がいなければ遮蔽なし。装甲遮蔽の正常系はFortDefenseBonusTests側で確認する。
         var s = BaseState();
         var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
         var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
@@ -76,13 +78,12 @@ public class CoverSeekStepTests
         self.TargetId = enemy.InstanceId;
 
         s.Cover = new CoverMap();
-        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        s.Cover.Add(new WorldPos(50, 0, 0), 5f); // 建物遮蔽があっても
 
         CoverSeekStep.Advance(s, 0.01f);
 
-        Assert.True(self.CoverDestination.HasValue);
-        // Task45: 交戦中の遮蔽は「保持」モード＝到着したらその場に留まって撃ち続ける。
-        Assert.True(self.CoverHold);
+        Assert.False(self.CoverDestination.HasValue);
+        Assert.False(self.CoverHold);
     }
 
     // Task44の旧仕様（テスト名の "not_engaging" が前提としていたこと）は「交戦していなければ
@@ -194,14 +195,14 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_does_not_reevaluate_while_engaging_the_same_target_even_long_after_cooldown_would_have_elapsed()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC（歩兵は装甲遮蔽のみ）
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
         self.State = UnitState.Engaging;
         self.TargetId = enemy.InstanceId;
 
         s.Cover = new CoverMap();
-        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // APCの探索半径45以内
 
         CoverSeekStep.Advance(s, 0.01f);
         Assert.True(self.CoverDestination.HasValue);
@@ -246,15 +247,15 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_reevaluates_immediately_when_the_engaged_target_changes()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         var enemy1 = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
         var enemy2 = AddUnit(s, 3, UnitCategory.Infantry, 1, new WorldPos(-100, 0, 0));
         self.State = UnitState.Engaging;
         self.TargetId = enemy1.InstanceId;
 
         s.Cover = new CoverMap();
-        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // APCの探索半径45以内
 
         CoverSeekStep.Advance(s, 0.01f);
         Assert.True(self.CoverDestination.HasValue);
@@ -393,8 +394,8 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_gives_forward_progressing_CoverDestination_when_advancing_outside_territory()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         self.State = UnitState.Moving;
         self.OrderTargetPos = new WorldPos(200, 0, 0); // 進軍先(敵基地)の方向
 
@@ -592,8 +593,8 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_skips_cover_seeking_while_CoverUseIntervalHours_cooldown_is_unexpired()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         self.State = UnitState.Moving;
         self.OrderTargetPos = new WorldPos(200, 0, 0);
         s.Cover = new CoverMap(); // no candidates yet
@@ -626,8 +627,8 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_watchdog_suppresses_cover_after_a_stall_and_re_enables_it_later()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         self.State = UnitState.Moving;
         self.OrderTargetPos = new WorldPos(1000, 0, 0);
         s.Cover = new CoverMap();
@@ -761,14 +762,14 @@ public class CoverSeekStepTests
     [Fact]
     public void Advance_still_picks_cover_when_WaterSampler_is_absent()
     {
-        var s = BaseState();
-        var self = AddUnit(s, 1, UnitCategory.Infantry, 0, new WorldPos(0, 0, 0));
+        var s = BaseState(); // Task104: 建物遮蔽の検証主体はAPC
+        var self = AddUnit(s, 1, UnitCategory.Apc, 0, new WorldPos(0, 0, 0));
         var enemy = AddUnit(s, 2, UnitCategory.Infantry, 1, new WorldPos(100, 0, 0));
         self.State = UnitState.Engaging;
         self.TargetId = enemy.InstanceId;
 
         s.Cover = new CoverMap();
-        s.Cover.Add(new WorldPos(50, 0, 0), 5f);
+        s.Cover.Add(new WorldPos(30, 0, 0), 5f); // APCの探索半径45以内
         Assert.Null(s.Water);
 
         CoverSeekStep.Advance(s, 0.01f);

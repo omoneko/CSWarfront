@@ -63,10 +63,11 @@ namespace CSWarfront.Game.UI
         /// 生産ボタンがTierLockedを報告する。何が研究で解禁されるか一目で分かるようにするため選択肢からは
         /// 外さない）。unlockedTier・spawnableDomainsのどちらも前回と同じであれば何もしない
         /// （毎フレーム呼ばれてもリストを再構築しない）。</summary>
-        private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier, DomainMask spawnableDomains)
+        private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier, DomainMask spawnableDomains,
+            BaseType baseType = BaseType.Army)
         {
             if (_unitDropdownItems != null && _lastUnitDropdownUnlockedTier == unlockedTier &&
-                _lastUnitDropdownDomains == spawnableDomains) return;
+                _lastUnitDropdownDomains == spawnableDomains && _lastUnitDropdownBaseType == baseType) return;
 
             // Task61: ロスターの切り替え時（陸軍→海軍基地など）は選択インデックスを維持する意味が
             // 無い（全く別の兵科リストになるため）ので先頭へ戻す。Tierのみが変わった場合は従来通り
@@ -82,6 +83,10 @@ namespace CSWarfront.Game.UI
             var keys = new List<string>();
             foreach (UnitType t in roster)
             {
+                // Task103: 兵科単位の生産可否（軍用列車は貨物駅のみ・貨物駅は列車のみ。
+                // 軍事拠点のメニューに列車を出さない）。
+                if (!FortificationRules.CanProduceUnit(baseType, t.Category)) continue;
+
                 string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
                 if (t.Tier > unlockedTier) label += " [Locked]";
                 items.Add(label);
@@ -91,6 +96,7 @@ namespace CSWarfront.Game.UI
             _unitDropdownTypeKeys = keys.ToArray();
             _lastUnitDropdownUnlockedTier = unlockedTier;
             _lastUnitDropdownDomains = spawnableDomains;
+            _lastUnitDropdownBaseType = baseType;
 
             if (_unitDropdown != null)
             {

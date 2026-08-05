@@ -78,10 +78,13 @@ namespace CSWarfront.Core
                     case BaseType.AirForce: return DomainMask.Air;
                     case BaseType.MissileBase: return DomainMask.None;
                     case BaseType.Army: return DomainMask.Land;
+                    // Task103: 貨物駅は軍用列車（Domain.Land）だけを手動生産できる（兵科の絞り込みは
+                    // FortificationRules.CanProduceUnitが担う。ドメインとしてはLandを許可する）。
+                    case BaseType.CargoStation: return DomainMask.Land;
                     default:
-                        // Task101: 野戦築城・貨物駅（Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）
-                        // はユニットを生産しない。defaultをNoneへ変更（旧defaultはLandだったが、
-                        // Armyを明示したため既存4種の挙動は不変）。
+                        // Task101: 野戦築城（Bunker/ArtilleryPost/SupplyDepot/Trench）はユニットを
+                        // 生産しない。defaultをNoneへ変更（旧defaultはLandだったが、Armyを明示した
+                        // ため既存4種の挙動は不変）。
                         return DomainMask.None;
                 }
             }

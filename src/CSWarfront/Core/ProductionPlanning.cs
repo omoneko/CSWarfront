@@ -48,6 +48,10 @@ namespace CSWarfront.Core
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
                     if (!b.AutoProduce) continue; // Task34: プレイヤーが手動管理を選んだ基地はAIが触らない
 
+                    // Task103: 築城・貨物駅はAI自動生産の対象外（貨物駅の列車は手動生産＋
+                    // TrainStep.MaintainTrainsの自動維持で賄う。補給拠点等は一切生産しない）。
+                    if (FortificationRules.IsFortification(b.Type)) continue;
+
                     // Task63: ミサイル基地はユニットのQueueを一切使わない（SpawnableDomains=Noneのため
                     // 以下のAiProductionPolicy.Decideも常にNoneしか返せない）。代わりにMissileStockpile経由で
                     // 「未着手なら1発分の建造を開始する」を試みるだけの単純な処理に分岐する。

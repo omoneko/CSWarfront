@@ -87,18 +87,64 @@ namespace CSWarfront.Core
         /// Task52）。UnitInstance.CoverSuppressionRemainingで残り時間を管理する。</summary>
         public const float CoverSuppressedHours = 4f;
 
-        /// <summary>カテゴリ別の遮蔽探索半径。0以下＝そのカテゴリは遮蔽移動をしない
-        /// （Artilleryは後方から曲射するため、遮蔽物の陰に隠れる必要がない）。</summary>
+        /// <summary>カテゴリ別の遮蔽探索半径。0以下＝そのカテゴリは建物遮蔽の移動をしない
+        /// （Artilleryは後方から曲射するため、遮蔽物の陰に隠れる必要がない）。
+        /// Task104（ユーザー要望「高架の下に移動するのは非現実的なのでやめる。歩兵は付近に味方の
+        /// 装甲車や戦車があれば隠れるように」）: 歩兵系（Infantry/MechInfantry/DroneInfantry）は
+        /// 建物遮蔽の対象から外した（IsInfantryLike参照）。代わりに交戦中は「最寄りの味方装甲
+        /// （Tank/Apc）の後ろ」を立ち位置に選ぶ（TryFindArmorCover）。装甲がいなければその場で
+        /// 応戦する（建物や高架下へ走らない）。塹壕/掩蔽壕への陣地志向（FortSeekStep、後段で
+        /// このstepの決定を上書き）は従来どおり最優先。</summary>
         private static readonly Dictionary<UnitCategory, float> SearchRadiusByCategory = new Dictionary<UnitCategory, float>
         {
-            { UnitCategory.Infantry, 60f },
-            { UnitCategory.MechInfantry, 60f },
-            { UnitCategory.DroneInfantry, 60f },
             { UnitCategory.Apc, 45f },
             { UnitCategory.Tank, 45f },
             { UnitCategory.AntiAir, 45f },
             { UnitCategory.Artillery, 0f },
         };
+
+        /// <summary>Task104: 歩兵が隠れる対象にする味方装甲を探す半径。</summary>
+        public const float ArmorCoverRadius = 60f;
+
+        /// <summary>Task104: 装甲車両の「後ろ」（脅威の反対側）に立つ距離。</summary>
+        public const float ArmorCoverStandoff = 6f;
+
+        private static bool IsInfantryLike(UnitCategory category)
+        {
+            return category == UnitCategory.Infantry || category == UnitCategory.MechInfantry
+                || category == UnitCategory.DroneInfantry;
+        }
+
+        /// <summary>Task104: uからArmorCoverRadius以内の最寄りの味方装甲（Tank/Apc、生存・非搭乗）を
+        /// 探し、その「脅威の反対側」の立ち位置を返す。見つからなければfalse。</summary>
+        private static bool TryFindArmorCover(WarState state, UnitInstance u, WorldPos threatPos, out WorldPos coverPos)
+        {
+            coverPos = default(WorldPos);
+            UnitInstance best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance o = state.Units[i];
+                if (!o.IsAlive || o.IsCarried || o.InstanceId == u.InstanceId) continue;
+                if (o.FactionId != u.FactionId) continue;
+                UnitType t = state.Types.Get(o.TypeKey);
+                if (t == null || (t.Category != UnitCategory.Tank && t.Category != UnitCategory.Apc)) continue;
+                float d = u.Position.HorizontalDistanceTo(o.Position);
+                if (d > ArmorCoverRadius) continue;
+                if (d < bestDist) { bestDist = d; best = o; }
+            }
+            if (best == null) return false;
+
+            float dx = best.Position.X - threatPos.X;
+            float dz = best.Position.Z - threatPos.Z;
+            float len = (float)System.Math.Sqrt(dx * dx + dz * dz);
+            if (len < 0.01f) { dx = 1f; dz = 0f; len = 1f; }
+            coverPos = new WorldPos(
+                best.Position.X + dx / len * ArmorCoverStandoff,
+                best.Position.Y,
+                best.Position.Z + dz / len * ArmorCoverStandoff);
+            return true;
+        }
 
         /// <summary>uが自勢力（u.FactionId）のいずれかの基地の勢力圏（水平距離がInfluenceRadius以内）に
         /// いるか（Task45）。敵勢力の基地の勢力圏は数えない。基地が1つも無ければfalse。</summary>
@@ -179,8 +225,9 @@ namespace CSWarfront.Core
                 bool sameTarget = isEngaging && u.CoverTargetId.HasValue && u.CoverTargetId.Value == u.TargetId.Value;
                 u.EngageHoldTimer = isEngaging ? (sameTarget ? u.EngageHoldTimer + dt : dt) : 0f;
 
+                bool infantryLike = IsInfantryLike(type.Category); // Task104: 建物遮蔽なし・装甲遮蔽のみ
                 float searchRadius = SearchRadiusByCategory.TryGetValue(type.Category, out float r) ? r : 0f;
-                bool coverEligible = searchRadius > 0f && state.Cover != null;
+                bool coverEligible = infantryLike || (searchRadius > 0f && state.Cover != null);
 
                 if (!coverEligible)
                 {
@@ -202,10 +249,16 @@ namespace CSWarfront.Core
                     // 新規の交戦、または相手が変わった: このtickで即座に（クールダウンを待たず）評価する。
                     u.CoverTargetId = u.TargetId;
                     u.CoverHoldTimer = 0f;
+                    // Task104: 歩兵系は「最寄りの味方装甲の後ろ」を遮蔽にする（建物遮蔽は使わない）。
                     // Task77: 見つかった候補が水中（state.Water.IsWater）なら「見つからなかった」と
                     // 同じ扱いにする（陸上ユニットを水際/水中の立ち位置へ誘導しない）。
-                    if (state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out WorldPos coverPos)
-                        && !(water != null && water.IsWater(coverPos.X, coverPos.Z)))
+                    bool foundCover;
+                    WorldPos coverPos;
+                    if (infantryLike)
+                        foundCover = TryFindArmorCover(state, u, target.Position, out coverPos);
+                    else
+                        foundCover = state.Cover.TryFindBestCover(u.Position, target.Position, searchRadius, u.InstanceId, out coverPos);
+                    if (foundCover && !(water != null && water.IsWater(coverPos.X, coverPos.Z)))
                     {
                         u.CoverDestination = coverPos;
                         u.CoverHold = true;
@@ -225,6 +278,16 @@ namespace CSWarfront.Core
                 // ここに来るのは非交戦（Mode3進軍中）のみ。次に交戦を始めたら即座に評価してほしいので
                 // ロックを解放しておく。
                 u.CoverTargetId = null;
+
+                // Task104: 歩兵系は進軍中のbounding advance（建物から建物へ隠れながら前進）を廃止
+                // （高架下や建物裏へ走り込む不自然な移動の原因だった）。道路沿いにまっすぐ進軍し、
+                // 交戦が始まったら上のMode2で味方装甲の後ろへ隠れる。
+                if (infantryLike)
+                {
+                    u.CoverDestination = null;
+                    u.CoverHold = false;
+                    continue;
+                }
 
                 // Task52 rule4: 進軍中の膠着ウォッチドッグ（OrderTargetPosが無ければ内部で自然にリセットする）。
                 UpdateStallWatchdog(u, dt);

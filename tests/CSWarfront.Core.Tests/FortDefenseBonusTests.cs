@@ -43,6 +43,43 @@ public class FortDefenseBonusTests
     }
 
     [Fact]
+    public void Engaging_infantry_hides_behind_friendly_armor_not_buildings()
+    {
+        // Task104: 歩兵の建物遮蔽を廃止し、交戦中は味方装甲（Tank/Apc）の後ろに隠れる。
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(0, 0, 50), 10f); // 建物（歩兵はもう使わない）
+        s.Cover = cover;
+
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        var tank = new UnitInstance(2, "Tank_T1", 0, 100f, new WorldPos(20, 0, 0)); // 味方装甲
+        var enemy = new UnitInstance(3, "Tank_T1", 1, 100f, new WorldPos(35, 0, 0));
+        infantry.State = UnitState.Engaging;
+        infantry.TargetId = enemy.InstanceId;
+        s.Units.Add(infantry); s.Units.Add(tank); s.Units.Add(enemy);
+
+        CoverSeekStep.Advance(s, 0.1f);
+
+        Assert.True(infantry.CoverHold);
+        Assert.True(infantry.CoverDestination.HasValue);
+        // 立ち位置は「装甲の、敵と反対側」＝装甲(20)より敵(35)から遠い側。
+        Assert.True(infantry.CoverDestination.Value.X < 20f,
+            "expected a position behind the friendly tank (away from the enemy)");
+
+        // 味方装甲がいなければ遮蔽なし（建物や高架下へは走らない）。
+        var loneInf = new UnitInstance(4, "Infantry_T1", 0, 100f, new WorldPos(200, 0, 0));
+        var loneEnemy = new UnitInstance(5, "Tank_T1", 1, 100f, new WorldPos(230, 0, 0));
+        loneInf.State = UnitState.Engaging;
+        loneInf.TargetId = loneEnemy.InstanceId;
+        s.Units.Add(loneInf); s.Units.Add(loneEnemy);
+        CoverSeekStep.Advance(s, 0.1f);
+        Assert.False(loneInf.CoverHold);
+    }
+
+    [Fact]
     public void Infantry_near_enemies_moves_to_the_fort_closest_to_the_enemy()
     {
         var s = new WarState();

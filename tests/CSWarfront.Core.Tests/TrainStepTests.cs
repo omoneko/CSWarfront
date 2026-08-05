@@ -127,6 +127,29 @@ public class TrainStepTests
     }
 
     [Fact]
+    public void Boarding_station_detour_is_chosen_when_rail_is_clearly_shorter()
+    {
+        // Task105: 鉄道経由が得なら乗車駅を返す（AssignAdvanceが道路経路の行き先を差し替える）。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        var pairs = TrainStep.FindStationPairs(s, 0);
+        Assert.Single(pairs);
+
+        // 駅Aの近く(300,0)から駅Bの先(Span+500)へ: 直行 vs 駅A乗車で大幅に得。
+        WorldPos station;
+        Assert.True(TrainStep.TryFindBoardingStation(pairs, new WorldPos(300, 0, 0),
+            new WorldPos(Span + 500f, 0, 0), out station));
+        Assert.Equal(0f, station.X, 1); // 乗車駅=A
+
+        // 目的地が近距離なら使わない。
+        Assert.False(TrainStep.TryFindBoardingStation(pairs, new WorldPos(300, 0, 0),
+            new WorldPos(600, 0, 0), out station));
+
+        // 既に駅前にいる場合は差し替え不要（そのまま搭乗待ち）。
+        Assert.False(TrainStep.TryFindBoardingStation(pairs, new WorldPos(50, 0, 0),
+            new WorldPos(Span + 500f, 0, 0), out station));
+    }
+
+    [Fact]
     public void Destroyed_train_takes_cargo_and_passengers_with_it()
     {
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);

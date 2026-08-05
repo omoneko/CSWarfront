@@ -57,5 +57,19 @@ namespace CSWarfront.Core
             if (type == BaseType.CargoStation) return 500f;
             return 0f;
         }
+
+        /// <summary>Task103（ユーザー要望）: この基地種別でこの兵科を生産できるか。
+        ///  - 軍用列車（MilitaryTrain）は貨物駅（CargoStation）でのみ生産できる。
+        ///  - 貨物駅は軍用列車以外を生産できない（SpawnableDomains=Landだが列車専用の生産所）。
+        ///  - 他の組み合わせは従来どおりSpawnableDomains（ドメイン一致）が決める。
+        /// ManualProduction.TryEnqueue・生産メニューのロスター構築（BaseInfoPanelProductionRoster）が
+        /// 参照する。AI自動生産（ProductionPlanning）は築城・貨物駅を丸ごとスキップするため、
+        /// 貨物駅での列車生産は手動のみ（AIの列車はTrainStep.MaintainTrainsの自動維持）。</summary>
+        public static bool CanProduceUnit(BaseType baseType, UnitCategory category)
+        {
+            if (category == UnitCategory.MilitaryTrain) return baseType == BaseType.CargoStation;
+            if (baseType == BaseType.CargoStation) return false; // 列車は上で許可済み。他は全て不可
+            return true;
+        }
     }
 }

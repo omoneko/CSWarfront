@@ -40,12 +40,37 @@ namespace CSWarfront.Game.UI
         private static UIButton[] _rowButtons;
         private static UIButton _toggleButton;
 
-        /// <summary>毎フレーム（メインスレッド）: 生成・ホットキー・メニュー連動。</summary>
+        /// <summary>このパネル経由で建設ツールを起動中か（Escキャンセル処理用）。</summary>
+        private static bool _placementActive;
+
+        /// <summary>毎フレーム（メインスレッド）: 生成・ホットキー・メニュー連動・Escキャンセル。</summary>
         public static void Update()
         {
             if (!PanelChrome.IsGameReadyForUi()) return;
 
             EnsureCreated();
+
+            // 実機バグ修正（ユーザー報告「Escを押しても建築状態からキャンセルされない」）:
+            // バニラでは建設メニュー（GeneratedGroupPanel）がEscを受けてツールを解除するが、
+            // 本パネルはメニュー外からSetToolしているためその経路が無い。ここでEscを検知して
+            // 明示的にDefaultToolへ戻し、同フレームで開いてしまったポーズメニューは閉じる
+            // （＝バニラ同様「1回目のEscは配置キャンセル、2回目でメニュー」という体感にする）。
+            if (_placementActive)
+            {
+                ToolBase current = ToolsModifierControl.toolController != null
+                    ? ToolsModifierControl.toolController.CurrentTool : null;
+                if (!(current is BuildingTool))
+                {
+                    _placementActive = false; // 配置完了/他ツールへ切替済み
+                }
+                else if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    ToolsModifierControl.SetTool<DefaultTool>();
+                    _placementActive = false;
+                    try { UIView.library.Hide("PauseMenu"); } catch (Exception) { /* 開いていなければ無視 */ }
+                    return;
+                }
+            }
 
             if (_panel != null && _panel.isVisible && PanelChrome.IsGameMenuOpen())
             {
@@ -87,13 +112,9 @@ namespace CSWarfront.Game.UI
                 _toggleButton.hoveredBgSprite = "ButtonMenuHovered";
                 _toggleButton.pressedBgSprite = "ButtonMenuPressed";
                 _toggleButton.relativePosition = new Vector3(10f, 300f);
+                // 実機バグ修正: ボタン全面を覆うUIDragHandleがクリックを奪うことがあるため、
+                // 常駐ボタンはドラッグ不可の固定位置にする（クリックの確実性を優先）。
                 _toggleButton.eventClick += (c, e) => Toggle();
-
-                // ドラッグで移動できるようにする（画面レイアウトの好みに合わせられるように）。
-                UIDragHandle drag = _toggleButton.AddUIComponent<UIDragHandle>();
-                drag.target = _toggleButton;
-                drag.size = _toggleButton.size;
-                drag.relativePosition = Vector3.zero;
             }
 
             if (_panel == null)
@@ -106,9 +127,11 @@ namespace CSWarfront.Game.UI
                 _panel.relativePosition = new Vector3(60f, 300f);
                 _panel.isVisible = false;
 
+                // 実機バグ修正: ドラッグハンドルが×ボタンまで覆ってクリックを奪っていたため、
+                // ハンドル幅を×ボタンの手前までに縮める。
                 UIDragHandle drag = _panel.AddUIComponent<UIDragHandle>();
                 drag.target = _panel;
-                drag.size = new Vector2(PanelWidth, 28f);
+                drag.size = new Vector2(PanelWidth - 34f, 28f);
                 drag.relativePosition = Vector3.zero;
 
                 UILabel title = _panel.AddUIComponent<UILabel>();
@@ -125,6 +148,7 @@ namespace CSWarfront.Game.UI
                 close.pressedBgSprite = "ButtonMenuPressed";
                 close.relativePosition = new Vector3(PanelWidth - 22f - 4f, 4f);
                 close.eventClick += (c, e) => _panel.Hide();
+                close.BringToFront();
 
                 _rowButtons = new UIButton[RowTypes.Length];
                 for (int i = 0; i < RowTypes.Length; i++)
@@ -199,7 +223,8 @@ namespace CSWarfront.Game.UI
                 }
                 tool.m_prefab = info;
                 tool.m_relocate = 0;
-                CommandToast.Show("Placing: " + RowDisplayNames[rowIndex]);
+                _placementActive = true; // Escキャンセル処理（Update）の対象にする
+                CommandToast.Show("Placing: " + RowDisplayNames[rowIndex] + "  (Esc to cancel)");
             }
             catch (Exception e)
             {
@@ -213,6 +238,7 @@ namespace CSWarfront.Game.UI
             _panel = null;
             _rowButtons = null;
             _toggleButton = null;
+            _placementActive = false;
         }
     }
 }

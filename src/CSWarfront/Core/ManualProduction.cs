@@ -55,6 +55,9 @@ namespace CSWarfront.Core
             // 領域のユニットは発注できない（例: 陸軍基地から駆逐艦や戦闘機を発注することはできない）。
             if (!DomainMaskUtil.Contains(b.SpawnableDomains, type.Domain)) return QueueResult.WrongDomain;
 
+            // Task103: 兵科単位の生産可否（軍用列車は貨物駅のみ・貨物駅は列車のみ）。
+            if (!FortificationRules.CanProduceUnit(b.Type, type.Category)) return QueueResult.WrongDomain;
+
             if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
 
             // Task99: 3資源支払い（人的資源＋生産力、不足分は資金代替）。手動生産はプレイヤーの

@@ -89,6 +89,11 @@ namespace CSWarfront.Core
         {
             int pathComputations = 0;
             WorldPos? divertTarget = FindNearbyThreatToOwnTerritory(state, factionId);
+
+            // Task105（鉄道の積極利用）: この勢力の稼働駅ペアを1回だけ列挙しておく（駅が無ければ空）。
+            // 陸上ユニットの道路経路を「鉄道経由が得なら乗車駅へ」差し替えるのに使う。
+            System.Collections.Generic.List<TrainStep.StationPair> railPairs =
+                TrainStep.FindStationPairs(state, factionId);
             // Task96: 外部襲来（Invader勢力）の部隊が生きている間は、外部脅威（KAIJU/Alien）に次ぐ
             // 優先度で迎撃対象にする（敵基地への進軍より優先。詳細はFindInvaderToInterceptのコメント参照）。
             if (!divertTarget.HasValue) divertTarget = FindInvaderToIntercept(state, factionId);
@@ -190,6 +195,16 @@ namespace CSWarfront.Core
                     if (pathComputations >= maxPathComputations) continue; // 予算超過。次回に持ち越し
 
                     pathComputations++;
+
+                    // Task105: 鉄道経由の方が十分に得なら、道路経路の行き先を乗車駅へ差し替える
+                    // （OrderTargetPos自体は最終目的地のまま＝駅到着後にBoardRadius内で列車に拾われ、
+                    // 降車後は保持している最終目的地へ自走を再開する。列車が来なければ経路消化後の
+                    // 直線フォールバックが従来どおり最終目的地へ向かわせるため詰まない）。
+                    WorldPos pathGoal = u.OrderTargetPos.Value;
+                    WorldPos boardingStation;
+                    if (!divertTarget.HasValue && railPairs.Count > 0 &&
+                        TrainStep.TryFindBoardingStation(railPairs, u.Position, pathGoal, out boardingStation))
+                        pathGoal = boardingStation;
                     // InstanceIdをseedにすることでユニットごとに安定した「好みの遠回り」を持たせる。
                     // InstanceIdは一意かつユニットの生存中不変なので、同じユニットが再試行しても
                     // 同じ経路を選び続け、フリップフロップ（毎回別の経路を選び直す）が起きない。
@@ -198,8 +213,8 @@ namespace CSWarfront.Core
                     // 全行程オフロード直線になっていた。無制限スナップなら「脅威に最も近い道路
                     // ノードまでは道路で行き、残りだけ直線」になる（ユーザー要望「可能な限り道路上を」）。
                     float destSnap = divertTarget.HasValue ? float.MaxValue : PathSnapRadius;
-                    var path = state.Roads.FindPath(u.Position, u.OrderTargetPos.Value, PathSnapRadius,
-                        u.InstanceId, PathJitter, destSnap);
+                    var path = state.Roads.FindPath(u.Position, pathGoal, PathSnapRadius,
+                        u.InstanceId, PathJitter, destSnap); // Task105: pathGoal=最終目的地 or 乗車駅
                     u.Path = path;
                     u.PathIndex = 0;
                     u.PathTarget = u.OrderTargetPos;

@@ -18,16 +18,17 @@ namespace CSWarfront.Core
     /// </summary>
     public static class TrainStep
     {
-        public const int MaxTrainsPerFaction = 4;
+        public const int MaxTrainsPerFaction = 6; // Task105: 4→6（鉄道の積極利用）
 
         /// <summary>満載（SupplyLoad=1）が運ぶ補給物資量。</summary>
         public const float CargoSupply = 200f;
 
-        public const float BoardRadius = 150f;
-        public const float MinStationDistance = 2000f;
+        public const float BoardRadius = 250f;          // Task105: 150→250（駅の集客範囲を拡大）
+        public const float MinStationDistance = 1500f;  // Task105: 2000→1500（短めの路線でも運行）
 
-        /// <summary>搭乗条件: 反対側の駅が進軍目的地へこの距離以上近いこと（「前線が遠方にある」判定）。</summary>
-        public const float BoardDetourAdvantage = 1000f;
+        /// <summary>搭乗条件: 反対側の駅が進軍目的地へこの距離以上近いこと（「前線が遠方にある」判定）。
+        /// Task105: 1000→300（鉄道の積極利用。少しでも得なら乗る）。</summary>
+        public const float BoardDetourAdvantage = 300f;
 
         /// <summary>駅への到着判定半径。</summary>
         public const float StationArriveRadius = 60f;
@@ -242,6 +243,41 @@ namespace CSWarfront.Core
                 }
             }
             return pairs;
+        }
+
+        /// <summary>Task105（鉄道の積極利用）: fromからdestへ向かうとき、鉄道経由（乗車駅まで自走→
+        /// 列車→降車駅から自走）の方がBoardDetourAdvantage以上得になる駅ペアがあれば、その乗車駅の
+        /// 位置を返す。AI進軍（InvasionOrders.AssignAdvance）が道路経路の目的地を乗車駅へ差し替えて
+        /// 「まず駅へ向かう→BoardRadius内で列車に拾われる」流れを作るために使う。
+        /// 既に乗車駅のすぐ側（StationArriveRadius×2以内）にいる場合はfalse（そのまま搭乗を待つ）。</summary>
+        public static bool TryFindBoardingStation(List<StationPair> pairs, WorldPos from, WorldPos dest,
+            out WorldPos boardingStation)
+        {
+            boardingStation = default(WorldPos);
+            float direct = from.HorizontalDistanceTo(dest);
+            float bestVia = float.MaxValue;
+            bool found = false;
+
+            for (int i = 0; i < pairs.Count; i++)
+            {
+                // 両方向（A乗車→B降車、B乗車→A降車）を試す。
+                for (int dir = 0; dir < 2; dir++)
+                {
+                    MilitaryBase board = dir == 0 ? pairs[i].A : pairs[i].B;
+                    MilitaryBase alight = dir == 0 ? pairs[i].B : pairs[i].A;
+                    float toBoard = from.HorizontalDistanceTo(board.Position);
+                    if (toBoard <= StationArriveRadius * 2f) continue; // 既に駅前: 目的地の差し替え不要
+                    float via = toBoard + alight.Position.HorizontalDistanceTo(dest);
+                    if (via + BoardDetourAdvantage >= direct) continue; // 鉄道経由が十分に得ではない
+                    if (via < bestVia)
+                    {
+                        bestVia = via;
+                        boardingStation = board.Position;
+                        found = true;
+                    }
+                }
+            }
+            return found;
         }
 
         /// <summary>ペアのうち「基地側」の駅＝自軍の陸軍基地への最短距離が小さい方（同点はA）。</summary>

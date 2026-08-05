@@ -73,6 +73,10 @@ namespace CSWarfront.Game.UI
         /// センチネル（有効な基地は必ずLand/Sea/Airのいずれか1ビット以上を持つため衝突しない）。</summary>
         private static DomainMask _lastUnitDropdownDomains = DomainMask.None;
 
+        /// <summary>Task103: 同上、最後に構築したときのBaseType（貨物駅⇔陸軍基地の切替でリストを
+        /// 作り直すため。どちらもSpawnableDomains=Landでドメインだけでは区別できない）。</summary>
+        private static BaseType _lastUnitDropdownBaseType = BaseType.Army;
+
         private static readonly StringBuilder _queueBuilder = new StringBuilder(128);
 
         /// <summary>ステータスラベルの下に生産セクションの各コントロールを生成する（Build()から一度だけ呼ばれる）。
@@ -204,7 +208,7 @@ namespace CSWarfront.Game.UI
             _lastOwnerFactionId = snapshot.OwnerFactionId;
             _lastOwnerUnlockedTier = snapshot.OwnerUnlockedTier;
             // Task35: 未解禁Tierの表示更新。Task61: 基地の生産可能領域に応じてLand/Sea/Airロスターを切り替える。
-            EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier, snapshot.SpawnableDomains);
+            EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier, snapshot.SpawnableDomains, snapshot.Type); // Task103
 
             if (_autoProduceButton != null)
             {
