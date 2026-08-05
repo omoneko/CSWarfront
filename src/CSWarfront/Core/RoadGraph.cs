@@ -33,6 +33,68 @@ namespace CSWarfront.Core
             if (!nb.Neighbors.Contains(a)) nb.Neighbors.Add(a);
         }
 
+        /// <summary>Task108: 位置がほぼ重なっているのに別idになっているノードどうしを辺で繋ぐ
+        /// （「融合」＝互いに行き来できる状態にする。idは消さず、隣接関係だけを足す）。
+        /// CSでは、駅の構内線と本線の接合部などで幾何的には繋がっているのにNetNodeが別々になって
+        /// いることがあり、そのままだと網が別々の連結成分に割れて経路探索が失敗する
+        /// （実機で「駅は全部稼働なのに路線が0本」になった不具合の対策）。
+        /// radiusは水平距離、heightToleranceは高低差の上限——立体交差（桁下）を誤って繋がない
+        /// ためのガード。追加した辺の本数を返す。ノードid昇順で走査するため結果は決定的。</summary>
+        public int WeldCoincidentNodes(float radius, float heightTolerance)
+        {
+            if (radius <= 0f) return 0;
+
+            // 総当たりを避けるため、radius幅のグリッドへバケット分けしてから近傍9マスだけ比較する。
+            var buckets = new Dictionary<long, List<ushort>>();
+            var ordered = new List<ushort>(_nodes.Keys);
+            ordered.Sort();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                Node n = _nodes[ordered[i]];
+                long key = BucketKey(n.Position, radius);
+                List<ushort> bucket;
+                if (!buckets.TryGetValue(key, out bucket)) { bucket = new List<ushort>(); buckets[key] = bucket; }
+                bucket.Add(n.Id);
+            }
+
+            int added = 0;
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                Node a = _nodes[ordered[i]];
+                int cx = (int)System.Math.Floor(a.Position.X / radius);
+                int cz = (int)System.Math.Floor(a.Position.Z / radius);
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        List<ushort> bucket;
+                        if (!buckets.TryGetValue(((long)(cx + dx) << 32) ^ (uint)(cz + dz), out bucket)) continue;
+                        for (int k = 0; k < bucket.Count; k++)
+                        {
+                            ushort otherId = bucket[k];
+                            if (otherId <= a.Id) continue; // 各ペアを1回だけ見る（決定的）
+                            Node b = _nodes[otherId];
+                            if (a.Position.HorizontalDistanceTo(b.Position) > radius) continue;
+                            float dy = a.Position.Y - b.Position.Y;
+                            if (dy < 0f) dy = -dy;
+                            if (dy > heightTolerance) continue;
+                            if (a.Neighbors.Contains(b.Id)) continue;
+                            AddEdge(a.Id, b.Id);
+                            added++;
+                        }
+                    }
+                }
+            }
+            return added;
+        }
+
+        private static long BucketKey(WorldPos p, float cellSize)
+        {
+            int cx = (int)System.Math.Floor(p.X / cellSize);
+            int cz = (int)System.Math.Floor(p.Z / cellSize);
+            return ((long)cx << 32) ^ (uint)cz;
+        }
+
         /// <summary>Task108: 連結成分ごとに0,1,2…の番号を振ったノードid→成分番号の対応を返す
         /// （番号はノードid昇順の探索順で決まる＝決定的）。「2つの地点が同じ網に載っているか」を
         /// 経路探索を走らせずに判定・診断するために使う（軍用列車の路線が1本も成立しない不具合の

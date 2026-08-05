@@ -194,4 +194,48 @@ public class RoadGraphTests
         Assert.Equal(100f, path[0].X, 2); // via B, not C
         Assert.Equal(0f, path[0].Z, 2);
     }
+
+    // --- Task108: 連結成分の解析とノード融合（軍用列車が走れない不具合の調査で追加）---
+
+    [Fact]
+    public void ComputeComponentIds_separates_disconnected_pieces()
+    {
+        var g = new RoadGraph();
+        g.AddNode(1, new WorldPos(0, 0, 0));
+        g.AddNode(2, new WorldPos(100, 0, 0));
+        g.AddEdge(1, 2);
+        g.AddNode(3, new WorldPos(1000, 0, 0)); // 孤立
+
+        var comps = g.ComputeComponentIds();
+        Assert.Equal(comps[1], comps[2]);
+        Assert.NotEqual(comps[1], comps[3]);
+
+        int largest;
+        Assert.True(g.TryGetLargestComponent(comps, out largest));
+        Assert.Equal(comps[1], largest);
+    }
+
+    [Fact]
+    public void WeldCoincidentNodes_joins_seams_but_not_overpasses()
+    {
+        var g = new RoadGraph();
+        g.AddNode(1, new WorldPos(0, 0, 0));
+        g.AddNode(2, new WorldPos(100, 0, 0));
+        g.AddEdge(1, 2);
+        // 継ぎ目: ほぼ同じ位置にある別idのノード（別ネットワーク側の端点）。
+        g.AddNode(3, new WorldPos(102, 0.5f, 0));
+        g.AddNode(4, new WorldPos(300, 0, 0));
+        g.AddEdge(3, 4);
+        // 立体交差: 水平には重なるが20m上（繋いではいけない）。
+        g.AddNode(5, new WorldPos(100, 20, 0));
+        g.AddNode(6, new WorldPos(100, 20, 300));
+        g.AddEdge(5, 6);
+
+        int added = g.WeldCoincidentNodes(6f, 3f);
+
+        Assert.Equal(1, added);
+        var comps = g.ComputeComponentIds();
+        Assert.Equal(comps[1], comps[4]);      // 継ぎ目が繋がった
+        Assert.NotEqual(comps[1], comps[5]);   // 立体交差は繋がっていない
+    }
 }
