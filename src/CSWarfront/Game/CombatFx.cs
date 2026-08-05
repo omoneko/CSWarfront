@@ -52,9 +52,12 @@ namespace CSWarfront.Game
         // Gunfire（Infantry/MechInfantry/Apc/DroneInfantry/AntiAir）: 細く短いトレーサー＋小さなマズルフラッシュ。
         // Task43: 1発→3点バースト化に合わせて、1発ごとの表示時間を0.08s→0.06sへわずかに短縮した
         // （バースト間隔0.07sより短く保ち、次弾が出る前に前弾が消え切るようにするため）。
+        // Task108（ユーザー指摘「砲撃の光跡が太すぎる。よりリアルに」）: トレーサーの太さとマズル
+        // フラッシュの大きさを実物寄りに絞った（銃撃0.15→0.08 / 直射0.35→0.15 / 曲射0.4→0.15、
+        // フラッシュも同様に縮小）。遠景で完全に消えない下限としてこの辺りが実用的な落としどころ。
         private const float GunfireTracerDuration = 0.06f;
-        private const float GunfireTracerWidth = 0.15f;
-        private const float GunfireFlashSize = 1.2f;
+        private const float GunfireTracerWidth = 0.08f;
+        private const float GunfireFlashSize = 0.7f;
 
         // Task43: 銃撃1回＝3点バースト。1発目は即座に、2/3発目はGunfireBurstRoundGap間隔で
         // 実時間ベースに遅延させて発射する（_pendingBursts、Update内でブロッキングなしに進める）。
@@ -63,29 +66,31 @@ namespace CSWarfront.Game
 
         // DirectFire（Tank、直射）: 同じトレーサーだが太く・明るく・やや長持ち＋一回り大きいフラッシュ。
         private const float DirectFireTracerDuration = 0.15f;
-        private const float DirectFireTracerWidth = 0.35f;
-        private const float DirectFireFlashSize = 2.2f;
+        private const float DirectFireTracerWidth = 0.15f; // Task108: 0.35→0.15
+        private const float DirectFireFlashSize = 1.4f;    // Task108: 2.2→1.4
 
         // IndirectFire（Artillery、曲射）: Fromから放物線を飛ぶ光跡（トレーサー、Task43でモデル球から変更）
         // ＋着弾時の短い噴煙。
         private const float ArcTravelDuration = 1.2f;
-        private const float ArcApexRatio = 0.25f;   // 頂点高さ = 水平距離 × この比率
+        private const float ArcApexRatio = 0.18f;   // 頂点高さ = 水平距離 × この比率（Task108: 0.25→0.18）
         private const float ArcApexMin = 4f;
         private const float ArcApexMax = 120f;
-        // Task43: 光跡（トレーサー）の見た目の太さと、狙う世界座標系での長さ（仕様の12〜16の中間）。
-        // 実際の遅延(TrailLagT)は経路長からこの長さに近づくよう逆算する（SpawnArc参照）ため、
-        // 短距離・長距離どちらの砲撃でもおおむね一定の長さの光跡に見える。
-        private const float ArcTrailWidth = 0.4f;
-        private const float ArcTrailLength = 14f;
-        private const float ArcTrailMinLagT = 0.02f;
-        private const float ArcTrailMaxLagT = 0.3f;
+
+        // Task108（ユーザー報告「砲兵陣地の光跡がものすごくずれて見える／砲口から着弾までの曲線だけで
+        // いい」）: 従来は光跡を頂点2個のLineRenderer（頭＝弾、尾＝TrailLagTぶん遅れた点）で描いていた
+        // ため、実際に描かれるのは放物線上の2点を結ぶ"弦"であり、弾道の曲線からは大きく外れて見えていた
+        // （距離が短いほど弦と曲線のズレが大きい）。ArcSegmentsぶんの折れ線で放物線そのものをなぞり、
+        // 発射点から現在の弾位置までを伸ばしていく「曲線」に置き換える。
+        private const int ArcSegments = 24;
+        /// <summary>Task108: 光跡の太さ。0.4は実物に対して太すぎる（ユーザー指摘）ため細くする。</summary>
+        private const float ArcTrailWidth = 0.15f;
         private const float ImpactPuffDuration = 0.3f;
         private const float ImpactPuffSize = 3.5f;
 
         // Task108（ユーザー要望「曲射にも砲口フラッシュを足す」）: 曲射は従来、光跡が飛び始めるだけで
         // 発射側に何も出ていなかった（直射/銃撃にはSpawnTracerのマズルフラッシュがある）。砲らしい
         // 重さを出すため、直射より一回り大きく・わずかに長く残るフラッシュを発射点に出す。
-        private const float ArcMuzzleFlashSize = 3.2f;
+        private const float ArcMuzzleFlashSize = 1.8f; // Task108: 3.2→1.8（フラッシュの縮小に合わせる）
         private const float ArcMuzzleFlashDuration = 0.18f;
 
         // 暖色系固定（勢力色でチントしない）。
@@ -119,9 +124,6 @@ namespace CSWarfront.Game
             public Vector3 From;
             public Vector3 To;
             public float ApexHeight;
-            /// <summary>光跡の尾が頭からどれだけ遅れるか（t=0..1の弧パラメータ上の遅延量、Task43）。
-            /// SpawnArcで経路長から逆算し、ショットの距離によらずおおむね一定の世界座標長に見えるようにする。</summary>
-            public float TrailLagT;
         }
 
         private static readonly List<Effect> _effects = new List<Effect>();
@@ -441,20 +443,13 @@ namespace CSWarfront.Game
                 var line = go.AddComponent<LineRenderer>();
                 line.sharedMaterial = trailMaterial;
                 line.useWorldSpace = true;
-                line.SetVertexCount(2);
+                line.SetVertexCount(ArcSegments + 1);
                 line.SetWidth(ArcTrailWidth, ArcTrailWidth);
-                // 初回StepArcTravelまでの1フレーム、伸び切った光跡が一瞬見えないよう発射点で頭と尾を揃えておく。
-                line.SetPosition(0, from);
-                line.SetPosition(1, from);
+                // 初回StepArcTravelまでの1フレーム、伸び切った光跡が一瞬見えないよう全頂点を発射点に畳んでおく。
+                for (int i = 0; i <= ArcSegments; i++) line.SetPosition(i, from);
 
                 float horizontalDist = Mathf.Sqrt((to.x - from.x) * (to.x - from.x) + (to.z - from.z) * (to.z - from.z));
                 float apex = Mathf.Clamp(horizontalDist * ArcApexRatio, ArcApexMin, ArcApexMax);
-
-                // 経路長（水平距離＋弧による上乗せの粗い見積もり）から、光跡がおおむねArcTrailLength
-                // （世界座標の長さ）に見えるよう尾の遅延量(t換算)を逆算する。近距離/遠距離どちらでも
-                // 極端に間延び/短縮しすぎないよう安全域にクランプする。
-                float approxPathLength = Mathf.Max(horizontalDist + apex, 1f);
-                float trailLagT = Mathf.Clamp(ArcTrailLength / approxPathLength, ArcTrailMinLagT, ArcTrailMaxLagT);
 
                 _effects.Add(new Effect
                 {
@@ -465,8 +460,7 @@ namespace CSWarfront.Game
                     Line = line,
                     From = from,
                     To = to,
-                    ApexHeight = apex,
-                    TrailLagT = trailLagT
+                    ApexHeight = apex
                 });
             }
             catch (Exception e)
@@ -519,15 +513,15 @@ namespace CSWarfront.Game
             return pos;
         }
 
-        /// <summary>Task43: 光跡（LineRenderer）の頭をt、尾をt-TrailLagTの弧上の位置へ進める。
-        /// 尾が頭より前に出ないようtailTを0未満にはしない（発射直後は頭と尾が同じ発射点に収束する）。</summary>
+        /// <summary>Task108: 発射点(t=0)から現在の弾位置(t)までの放物線を、ArcSegmentsぶんの折れ線で
+        /// なぞる（＝弾道そのものの曲線が伸びていく）。従来は頂点2個で「弧上の2点を結ぶ弦」を描いており、
+        /// 弾道の曲線から大きく外れて見えていた（ユーザー報告「光跡がものすごくずれて見える」）。</summary>
         private static void StepArcTravel(Effect fx)
         {
             if (fx.Line == null) return;
             float t = fx.Duration > 0f ? Mathf.Clamp01(fx.Elapsed / fx.Duration) : 1f;
-            float tailT = Mathf.Max(0f, t - fx.TrailLagT);
-            fx.Line.SetPosition(1, ArcPositionAt(fx, t));
-            fx.Line.SetPosition(0, ArcPositionAt(fx, tailT));
+            for (int i = 0; i <= ArcSegments; i++)
+                fx.Line.SetPosition(i, ArcPositionAt(fx, t * i / ArcSegments));
         }
 
         private static void StepImpactPuff(Effect fx)
