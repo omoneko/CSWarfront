@@ -111,8 +111,8 @@ namespace CSWarfront.Game.UI
                 _toggleButton.normalBgSprite = "ButtonMenu";
                 _toggleButton.hoveredBgSprite = "ButtonMenuHovered";
                 _toggleButton.pressedBgSprite = "ButtonMenuPressed";
-                // Task110: 画面左上の常駐アイコン群のすぐ下へ寄せる（ユーザー要望「タブボタンを上に」）。
-                _toggleButton.relativePosition = new Vector3(10f, 105f);
+                // Task110: 画面最上段のアイコンの並び（左上の丸ボタン2つの右隣）へ置く（ユーザー要望）。
+                _toggleButton.relativePosition = new Vector3(150f, 10f);
                 // 実機バグ修正: ボタン全面を覆うUIDragHandleがクリックを奪うことがあるため、
                 // 常駐ボタンはドラッグ不可の固定位置にする（クリックの確実性を優先）。
                 _toggleButton.eventClick += (c, e) => Toggle();
@@ -125,7 +125,7 @@ namespace CSWarfront.Game.UI
                 _panel.backgroundSprite = "MenuPanel2";
                 _panel.width = PanelWidth;
                 _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f) + Pad;
-                _panel.relativePosition = new Vector3(60f, 105f); // Task110: ボタンに合わせて上へ
+                _panel.relativePosition = new Vector3(150f, 55f); // Task110: 最上段のボタンの直下に開く
                 _panel.isVisible = false;
 
                 // 実機バグ修正: ドラッグハンドルが×ボタンまで覆ってクリックを奪っていたため、
