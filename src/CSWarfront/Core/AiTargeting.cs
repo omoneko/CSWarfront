@@ -158,6 +158,20 @@ namespace CSWarfront.Core
                         // 対象が無い間は自勢力の最寄り所有基地へ撤収させる（無ければその場でIdle）。
                         // 状態を持たず毎回再判定するだけなので、次の呼び出しで新たな脅威/敵基地が
                         // 現れれば自動的に通常の進軍へ戻る（Task58と同じ設計）。
+                        // Task107（ユーザー要望「目標がなくなった航空戦力は近くの航空基地/空母へ
+                        // 着陸して戻る」）: 航空/海上ユニットは「最寄りの自軍基地（種別不問）へ撤収」
+                        // ではなく、専用の帰還ロジックへ委ねる——MovementStep.ResolveHomeObjectiveが
+                        // 航空なら航空基地/空母、海上なら海軍基地だけを帰還先に選び、到着後は
+                        // MovementStep.AdvanceAirLandingが着陸させる（陸軍基地の上空へ飛んで
+                        // ホバリングし続ける、という中途半端な撤収を避ける）。
+                        if (!isLand)
+                        {
+                            u.OrderTargetPos = null;
+                            u.ClearPath();
+                            u.State = UnitState.Idle;
+                            continue;
+                        }
+
                         MilitaryBase home = FindNearestOwnedBase(state, factionId, u.Position);
                         if (home == null)
                         {

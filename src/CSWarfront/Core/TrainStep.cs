@@ -24,14 +24,22 @@ namespace CSWarfront.Core
         public const float CargoSupply = 200f;
 
         public const float BoardRadius = 250f;          // Task105: 150→250（駅の集客範囲を拡大）
-        public const float MinStationDistance = 1500f;  // Task105: 2000→1500（短めの路線でも運行）
+
+        /// <summary>駅ペアとして成立する最小の駅間距離。Task107: 1500→400（実機で「駅を建てたのに
+        /// 列車が一切動かない」の主因が『2駅が1.5km以上離れていないとペアが1つも成立せず、
+        /// 担当路線の無い列車がその場で永久停止する』だったため、市内規模の路線でも成立するよう緩めた）。</summary>
+        public const float MinStationDistance = 400f;
 
         /// <summary>搭乗条件: 反対側の駅が進軍目的地へこの距離以上近いこと（「前線が遠方にある」判定）。
         /// Task105: 1000→300（鉄道の積極利用。少しでも得なら乗る）。</summary>
         public const float BoardDetourAdvantage = 300f;
 
-        /// <summary>駅への到着判定半径。</summary>
-        public const float StationArriveRadius = 60f;
+        /// <summary>駅への到着判定半径。Task107: 60→150。駅はレールから最大CargoStationRules.
+        /// RailSnapRadius(100m)離れていてよいのに対し、列車はレール上しか走れない（＝駅建物まで
+        /// 最大100m届かない）ため、60mでは永久に「到着」と判定されず、駅の手前でDepartToを
+        /// 繰り返すだけのデッドロックになっていた（ユーザー報告「列車が文鎮化する」の主因）。
+        /// スナップ半径より確実に大きい値にして、レール上に停まった時点で到着とみなす。</summary>
+        public const float StationArriveRadius = 150f;
 
         public struct StationPair
         {
@@ -78,7 +86,7 @@ namespace CSWarfront.Core
                 if (f.Id == Faction.InvaderFactionId) continue;
 
                 List<StationPair> pairs = null;   // 必要になるまで作らない
-                int pairCursor = 0;
+                int trainIndex = 0;
 
                 for (int i = 0; i < state.Units.Count; i++)
                 {
@@ -89,16 +97,20 @@ namespace CSWarfront.Core
                     if (train.Order == UnitOrder.Hold || train.Order == UnitOrder.RallyHold) continue;
 
                     if (pairs == null) pairs = FindStationPairs(state, f.Id);
-                    if (pairCursor >= pairs.Count)
+                    if (pairs.Count == 0)
                     {
-                        // 担当ペアが無い（駅が壊れた/占領された等）: その場で待機。
-                        train.OrderTargetPos = null;
-                        train.State = UnitState.Idle;
+                        // 路線が1本も成立していない（駅が1つだけ／レール未接続／占領された等）:
+                        // Task107: 従来はその場で永久停止していた（ユーザー報告「スポーンしても
+                        // 身動きできず文鎮化」の主因）。最寄りの自軍稼働駅までレール上を移動して
+                        // そこで待機する（駅が皆無なら本当に行き場が無いのでその場で待機）。
+                        ParkAtNearestStation(state, f, train);
                         continue;
                     }
 
-                    StationPair pair = pairs[pairCursor];
-                    pairCursor++;
+                    // Task107: 列車1編成＝1ペア固定だと、ペア数より多い列車（手動生産ぶん）が全て
+                    // 永久停止していた。ラウンドロビンで必ずどれかの路線を担当させる。
+                    StationPair pair = pairs[trainIndex % pairs.Count];
+                    trainIndex++;
                     AdvanceTrainCycle(state, f, train, pair);
                 }
             }
@@ -159,6 +171,32 @@ namespace CSWarfront.Core
             if (hasCargo) DepartTo(state, train, other);
             else if (atStation.BaseId != home.BaseId) DepartTo(state, train, home);
             else { train.OrderTargetPos = null; train.State = UnitState.Idle; }
+        }
+
+        /// <summary>Task107: 担当路線が無い列車を、最寄りの自軍稼働駅までレール上で移動させて待機させる
+        /// （駅の圏内に既に居る／稼働駅が1つも無い場合はその場で待機）。</summary>
+        private static void ParkAtNearestStation(WarState state, Faction f, UnitInstance train)
+        {
+            MilitaryBase best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < state.Bases.Count; i++)
+            {
+                MilitaryBase b = state.Bases[i];
+                if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
+                if (!CargoStationRules.IsOperational(b)) continue;
+                float d = train.Position.HorizontalDistanceTo(b.Position);
+                if (d < bestDist) { bestDist = d; best = b; }
+            }
+
+            if (best == null || bestDist <= StationArriveRadius)
+            {
+                train.OrderTargetPos = null;
+                train.State = UnitState.Idle;
+                return;
+            }
+
+            if (train.Path != null && train.PathIndex < train.Path.Count) return; // 既に回送中
+            DepartTo(state, train, best);
         }
 
         private static void DepartTo(WarState state, UnitInstance train, MilitaryBase station)
@@ -266,7 +304,10 @@ namespace CSWarfront.Core
                     MilitaryBase board = dir == 0 ? pairs[i].A : pairs[i].B;
                     MilitaryBase alight = dir == 0 ? pairs[i].B : pairs[i].A;
                     float toBoard = from.HorizontalDistanceTo(board.Position);
-                    if (toBoard <= StationArriveRadius * 2f) continue; // 既に駅前: 目的地の差し替え不要
+                    // 既に駅の集客範囲内なら目的地の差し替えは不要（そのまま列車に拾われる）。
+                    // Task107: 判定をStationArriveRadius×2ではなくBoardRadiusにした（到着判定半径は
+                    // 列車側の都合で変わるが、ここで意味を持つのは「乗車できる範囲かどうか」のため）。
+                    if (toBoard <= BoardRadius) continue;
                     float via = toBoard + alight.Position.HorizontalDistanceTo(dest);
                     if (via + BoardDetourAdvantage >= direct) continue; // 鉄道経由が十分に得ではない
                     if (via < bestVia)

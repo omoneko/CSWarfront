@@ -199,14 +199,35 @@ namespace CSWarfront.Core
                     WorldPos? objective = ResolveDomainObjective(u);
                     // Task87: 命令が無い（Idle）航空/海上ユニットは最寄りの帰還先へ戻る
                     // （航空: 自軍航空基地/空母、海上: 自軍海軍基地。MovementStepReturnHome.cs）。
-                    if (!objective.HasValue) objective = ResolveHomeObjective(state, u, type);
-                    if (!objective.HasValue) continue;
+                    bool returningHome = false;
+                    if (!objective.HasValue)
+                    {
+                        objective = ResolveHomeObjective(state, u, type);
+                        returningHome = objective.HasValue;
+                    }
+                    if (!objective.HasValue)
+                    {
+                        // Task107（ユーザー報告「目標を失った航空戦力が空中でホバリングし続ける」）:
+                        // 任務も帰還先も無い＝既に帰還先（航空基地/空母）の圏内に居る、または輸送ヘリが
+                        // 母基地で待機中。そのまま滞空させず着陸させる（MovementStepReturnHome.cs）。
+                        if (type.Domain == Domain.Air) AdvanceAirLanding(state, u, stepLen, height);
+                        continue;
+                    }
 
                     if (type.Domain == Domain.Air)
-                        AdvanceAir(u, stepLen, objective.Value, height,
-                            TargetingRules.IsHelicopter(type.Category) ? HeliCruiseAltitude : CruiseAltitude); // Task101
+                    {
+                        float cruise = TargetingRules.IsHelicopter(type.Category)
+                            ? HeliCruiseAltitude : CruiseAltitude; // Task101
+                        // Task107: 帰還中は残り距離に応じて巡航高度から降下していく（着陸進入）。
+                        float altitude = returningHome
+                            ? ApproachAltitude(u.Position.HorizontalDistanceTo(objective.Value), cruise)
+                            : cruise;
+                        AdvanceAir(u, stepLen, objective.Value, height, altitude);
+                    }
                     else // Domain.Sea
+                    {
                         AdvanceSea(u, stepLen, objective.Value, water, dt);
+                    }
                     continue;
                 }
 
@@ -466,7 +487,14 @@ namespace CSWarfront.Core
             float ny = u.Position.Y; // サンプリング失敗時は従来のYを維持（フォールバック）。
             float groundY;
             if (height != null && height.TrySampleHeight(nx, nz, out groundY))
-                ny = groundY + altitude;
+            {
+                float targetY = groundY + altitude;
+                // Task107: 上昇（駐機状態からの離陸）だけは1tickあたりstepLenまでに制限し、地面から
+                // 巡航高度へ瞬間移動しないようにする。降下側は従来どおり即時に目標高度へ合わせる
+                // （巡航高度の維持挙動＝既存仕様を変えないため）。
+                if (targetY - ny > stepLen) targetY = ny + stepLen;
+                ny = targetY;
+            }
 
             u.Position = new WorldPos(nx, ny, nz);
         }

@@ -54,7 +54,7 @@ public class TrainStepTests
     public void Disconnected_or_close_stations_form_no_pair()
     {
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
-        b.Position = new WorldPos(500, 0, 0); // 2km未満
+        b.Position = new WorldPos(200, 0, 0); // MinStationDistance(400)未満
         Assert.Empty(TrainStep.FindStationPairs(s, 0));
 
         b.Position = new WorldPos(Span, 0, 0);
@@ -166,5 +166,60 @@ public class TrainStepTests
         TransportHeliStep.Advance(s, 0.1f); // 道連れ処理（共通機構）
 
         Assert.False(tank.IsAlive);
+    }
+
+    // --- Task107（ユーザー報告「列車がスポーンしても身動きできず文鎮化する」）---
+
+    [Fact]
+    public void Train_stopped_on_the_rail_beside_an_offset_station_counts_as_arrived()
+    {
+        // 駅はレールから最大RailSnapRadius(100m)離れてよい＝列車は駅建物まで届かない。
+        // 到着判定がその距離より小さいと、駅の手前で出発をやり直し続けるデッドロックになる。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        a.Position = new WorldPos(0, 0, 90); // レール(z=0)から90m離れた駅
+        CargoStationRules.RefreshConnectivity(s);
+        f.AddSupply(1000f);
+
+        var train = new UnitInstance(100, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
+            new WorldPos(0, 1, 0)); // レール上、駅の真横
+        s.Units.Add(train);
+
+        TrainStep.Advance(s, 0.1f);
+
+        Assert.Equal(1f, train.SupplyLoad, 3);                 // 駅に着いた扱いで積載できた
+        Assert.Equal(UnitState.Moving, train.State);           // 反対の駅へ出発した
+        Assert.NotNull(train.Path);
+    }
+
+    [Fact]
+    public void Extra_trains_share_the_available_routes_instead_of_freezing()
+    {
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        f.AddSupply(1000f);
+        for (uint id = 100; id < 103; id++) // 路線1本に対して列車3編成
+            s.Units.Add(new UnitInstance(id, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
+                new WorldPos(0, 1, 0)));
+
+        TrainStep.Advance(s, 0.1f);
+
+        foreach (var t in s.Units)
+            Assert.Equal(UnitState.Moving, t.State); // 1編成だけ動いて残りが永久停止、にならない
+    }
+
+    [Fact]
+    public void Train_without_any_route_runs_to_the_nearest_station_instead_of_freezing()
+    {
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        s.Bases.Remove(b); // 駅が1つだけ＝路線が成立しない
+        Assert.Empty(TrainStep.FindStationPairs(s, 0));
+
+        var train = new UnitInstance(100, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
+            new WorldPos(Span, 1, 0)); // 線路の反対端に取り残された列車
+        s.Units.Add(train);
+
+        TrainStep.Advance(s, 0.1f);
+
+        Assert.Equal(UnitState.Moving, train.State);
+        Assert.NotNull(train.Path); // レール上を回送して駅で待機する
     }
 }

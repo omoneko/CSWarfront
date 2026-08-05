@@ -233,6 +233,7 @@ namespace CSWarfront.Game
                         var rebuiltRail = RailGraphBuilder.Build();
                         if (rebuiltRail != null) State.Rails = rebuiltRail;
                         CargoStationRules.RefreshConnectivity(State);
+                        LogRailRoutes(); // Task107: 列車が動かないときの原因切り分け用
                     }
                 }
 

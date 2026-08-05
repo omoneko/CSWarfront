@@ -7,6 +7,21 @@ using Xunit;
 /// </summary>
 public class ReturnHomeTests
 {
+    /// <summary>地表を一定高さ(0)で返すサンプラー（Task107の着陸テスト用）。</summary>
+    private class FlatGroundSampler : IHeightSampler
+    {
+        private readonly float _ground;
+        public FlatGroundSampler(float ground = 0f) { _ground = ground; }
+        public bool TrySampleHeight(float x, float z, out float height) { height = _ground; return true; }
+    }
+
+    /// <summary>全面が水（洋上）のサンプラー（Task107: 空母以外への着水をしないことの検証用）。</summary>
+    private class AllWater : IWaterSampler
+    {
+        public bool IsWater(float x, float z) { return true; }
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return true; }
+    }
+
     private static WarState BaseState()
     {
         var s = new WarState();
@@ -115,6 +130,130 @@ public class ReturnHomeTests
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(0f, tank.Position.X, 3);
+    }
+
+    // --- Task107（ユーザー報告「目標がなくなった航空戦力が空中でホバリングしてしまう」）---
+
+    [Fact]
+    public void Idle_fighter_over_its_home_base_lands_instead_of_hovering()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler();
+        AddBase(s, 200, BaseType.AirForce, 0, 0f); // 真上（＝帰還先へ到着済み）
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.CruiseAltitude, 0));
+        fighter.State = UnitState.Idle;
+        s.Units.Add(fighter);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(fighter.Position.Y < MovementStep.CruiseAltitude,
+            "expected the idle fighter to start descending onto its base");
+        Assert.Equal(0f, fighter.Position.X, 3); // 水平位置は変えない
+    }
+
+    [Fact]
+    public void Landing_fighter_settles_at_parked_altitude_and_stays_there()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler();
+        AddBase(s, 200, BaseType.AirForce, 0, 0f);
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.CruiseAltitude, 0));
+        fighter.State = UnitState.Idle;
+        s.Units.Add(fighter);
+
+        for (int i = 0; i < 20; i++) MovementStep.Advance(s, 1f);
+
+        Assert.Equal(MovementStep.ParkedAltitude, fighter.Position.Y, 2); // 接地して静止（地面貫通なし）
+    }
+
+    [Fact]
+    public void Idle_transport_helicopter_lands_at_its_base()
+    {
+        // 輸送ヘリはTransportHeliStepが移動を管理する（帰還先解決の対象外）が、待機中に空中で
+        // 止まったままにはせず着陸する。
+        var s = BaseState();
+        s.Height = new FlatGroundSampler();
+        AddBase(s, 200, BaseType.Army, 0, 0f);
+        var heli = new UnitInstance(1, "TransportHelicopter_T1", 0, 100f,
+            new WorldPos(0, MovementStep.HeliCruiseAltitude, 0));
+        heli.State = UnitState.Idle;
+        s.Units.Add(heli);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(heli.Position.Y < MovementStep.HeliCruiseAltitude,
+            "expected the waiting transport helicopter to land rather than hover");
+    }
+
+    [Fact]
+    public void Idle_fighter_over_a_carrier_lands_on_the_deck_not_in_the_sea()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler(-30f); // 海底
+        s.Water = new AllWater();
+        var carrier = new UnitInstance(2, "Carrier_T1", 0, 100f, new WorldPos(0, 0, 0));
+        s.Units.Add(carrier);
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.CruiseAltitude, 0));
+        fighter.State = UnitState.Idle;
+        s.Units.Add(fighter);
+
+        for (int i = 0; i < 20; i++) MovementStep.Advance(s, 1f);
+
+        Assert.Equal(MovementStep.CarrierDeckAltitude, fighter.Position.Y, 2);
+    }
+
+    [Fact]
+    public void Idle_fighter_over_open_water_keeps_hovering_rather_than_ditching()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler(-30f);
+        s.Water = new AllWater();
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.CruiseAltitude, 0));
+        fighter.State = UnitState.Idle;
+        s.Units.Add(fighter); // 帰還先も空母も無い＝着陸できる場所が無い
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.Equal(MovementStep.CruiseAltitude, fighter.Position.Y, 3);
+    }
+
+    [Fact]
+    public void Returning_fighter_descends_below_cruise_altitude_on_final_approach()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler();
+        AddBase(s, 200, BaseType.AirForce, 0, 120f); // DescentStartDistance(500)より内側
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.CruiseAltitude, 0));
+        fighter.State = UnitState.Idle;
+        s.Units.Add(fighter);
+
+        MovementStep.Advance(s, 1f);
+
+        Assert.True(fighter.Position.Y < MovementStep.CruiseAltitude,
+            "expected a gliding approach, not a level fly-over at cruise altitude");
+    }
+
+    [Fact]
+    public void Parked_fighter_climbs_gradually_when_ordered_out_again()
+    {
+        var s = BaseState();
+        s.Height = new FlatGroundSampler();
+        var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
+            new WorldPos(0, MovementStep.ParkedAltitude, 0));
+        fighter.State = UnitState.Moving;
+        fighter.OrderTargetPos = new WorldPos(100000f, 0, 0); // 遠方へ出撃（1tickでは着かない）
+        s.Units.Add(fighter);
+
+        MovementStep.Advance(s, 0.1f); // 実機に近い小さなtick（1tickの上昇量はstepLenが上限）
+
+        Assert.True(fighter.Position.Y < MovementStep.CruiseAltitude,
+            "expected a climb, not a teleport to cruise altitude");
+        Assert.True(fighter.Position.Y > MovementStep.ParkedAltitude, "expected the fighter to be climbing");
     }
 
     [Fact]
