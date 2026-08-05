@@ -34,6 +34,14 @@ namespace CSWarfront.Game
                     mode == LoadMode.NewGameFromScenario)
                 {
                     LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音／Task57: 既定モデル
+
+                    // Task109: プレハブが揃ったこの時点で、CS:WARFRONT用の建物アセット（サブスクライブ
+                    // 済み）を名前で検出し、未指定の基地種別の既定値にする（手動指定が常に優先）。
+                    BaseBuildingDesignation.ApplyAutoDetected(BaseBuildingAutoAssign.Detect());
+
+                    // Task109: 移動音（CS自身の車両効果から借用するループ音）の解決。
+                    Audio.EngineSounds.ResolveAll();
+
                     BasePlacementWatcher.Subscribe();
                 }
             }
@@ -50,6 +58,7 @@ namespace CSWarfront.Game
                 MilitaryManager.Reset();
                 UI.MilitaryBuildPanel.Reset(); // Task102: 破棄済みUI参照を持ち越さない
                 UI.TrenchLineTargeting.Reset(); // Task106: ターゲティング状態を持ち越さない
+                Audio.EngineSounds.Reset();     // Task109: 次のセッションでクリップを解決し直す
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelUnloading: " + e); }
         }

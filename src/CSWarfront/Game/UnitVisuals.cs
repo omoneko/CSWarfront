@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CSWarfront.Core;
+using CSWarfront.Game.Audio;
 using UnityEngine;
 namespace CSWarfront.Game
 {
@@ -87,6 +88,12 @@ namespace CSWarfront.Game
 
             /// <summary>先頭が通った軌跡（古い→新しい）。各車両はこの上に配置される。</summary>
             public List<Vector3> Trail;
+
+            /// <summary>Task109: 移動音のループAudioSource（この種別に移動音が無ければnull）。</summary>
+            public AudioSource Engine;
+
+            /// <summary>Task109: 直近のフレームで実際に動いたか（移動音の再生判定に使う）。</summary>
+            public bool MovedThisFrame;
 
             /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
             /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
@@ -212,6 +219,8 @@ namespace CSWarfront.Game
             // 伴いうるため、ユニット数分ではなくフレーム当たり1回に抑える）。見つからない場合はnullのまま
             // 渡し、UpdateFactionIcon側でスケール計算をスキップする（アイコン自体の生成/破棄は継続する）。
             Camera mainCamera = Camera.main;
+            Vector3? cameraPos = mainCamera != null ? (Vector3?)mainCamera.transform.position : null;
+            UnitEngineAudio.BeginFrame(); // Task109: 移動音の同時再生数カウンタをリセット
 
             _seenIds.Clear();
             for (int i = 0; i < snapshot.Count; i++)
@@ -247,6 +256,9 @@ namespace CSWarfront.Game
                     // 追従を両方の経路で一元化する）。fromAssignedProp（割り当て済みアセット）ユニットも
                     // 除外しない＝両方で動作する（要件）。
                     UpdateFactionIcon(entry, s.FactionId, mainCamera);
+
+                    // Task109: 移動音（ループ）。移動している間だけ、可聴距離内で鳴らす。
+                    UnitEngineAudio.Update(entry.Engine, entry.MovedThisFrame, s.Position, cameraPos);
                 }
                 catch (Exception e)
                 {
@@ -413,6 +425,9 @@ namespace CSWarfront.Game
                 if (IsArticulatedType(s.TypeKey))
                     TryBuildTrainCars(go, mesh, out cars, out carBehindHead);
 
+                // Task109: 移動音（この種別に音があれば停止状態のループAudioSourceを付ける）。
+                AudioSource engine = UnitEngineAudio.TryAttach(go, s.TypeKey);
+
                 if (fromAssignedProp || fromBuiltInModel)
                 {
                     // 要件1: プロップ割り当てがある場合は可視性マーカー立方体を出さない。
@@ -439,7 +454,8 @@ namespace CSWarfront.Game
                     IconLocalHeightY = iconLocalHeightY,
                     LevelFlight = IsLevelFlightType(s.TypeKey), // Task108
                     Cars = cars,
-                    CarBehindHead = carBehindHead
+                    CarBehindHead = carBehindHead,
+                    Engine = engine // Task109
                 };
             }
             catch (Exception e)
@@ -530,6 +546,9 @@ namespace CSWarfront.Game
         {
             if (entry == null || entry.GameObject == null) return;
             Vector3 delta = newPosition - entry.LastPosition;
+            // Task109: 移動音の判定は「向き」用の加工（下のLevelFlightによるY成分の除去）より前の
+            // 生の移動量で行う——垂直に降下しているだけのヘリも「移動中」として音を鳴らすため。
+            float moveSqr = delta.sqrMagnitude;
 
             // Task90: 対空ミサイル接近中の回避機動。論理位置はCoreのまま、表示位置にだけ
             // 減衰する横揺れ（バンクを切って逃げるジンク）を加える。
@@ -565,6 +584,9 @@ namespace CSWarfront.Game
             // Task108: 連接車両（軍用貨物列車）を先頭の軌跡上へ並べ直す。
             if (entry.Cars != null)
                 UpdateTrainCars(entry, displayPosition, entry.GameObject.transform.rotation);
+
+            // Task109: 移動音の再生判定に使う（実際に位置が変わったフレームだけ「移動中」とみなす）。
+            entry.MovedThisFrame = moveSqr > MinMoveDeltaForRotation * MinMoveDeltaForRotation;
 
             entry.LastPosition = newPosition;
         }

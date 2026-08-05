@@ -294,9 +294,17 @@ namespace CSWarfront.Game.UI
             if (label == null) return;
 
             string current;
-            label.text = BaseBuildingDesignation.TryGet(RowTypes[rowIndex], out current)
-                ? "Current designation: " + current
-                : "Current designation: (not set. This base type cannot be placed. Please designate a building)";
+            if (!BaseBuildingDesignation.TryGet(RowTypes[rowIndex], out current))
+            {
+                label.text = "Current designation: (not set. This base type cannot be placed. Please designate a building)";
+                return;
+            }
+
+            // Task109: 手動指定が無く、購読済みのCS:WARFRONT用アセットを自動検出して使っている場合は
+            // その旨を出す（このまま使えるが、ドロップダウンでいつでも別アセットへ切り替えられる）。
+            label.text = BaseBuildingDesignation.IsAutoAssigned(RowTypes[rowIndex])
+                ? "Current designation: " + current + "  (auto-detected)"
+                : "Current designation: " + current;
         }
 
         private static void OnCustomOnlyChanged(bool value)

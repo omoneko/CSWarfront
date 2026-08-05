@@ -37,12 +37,34 @@ namespace CSWarfront.Game
         private const string FileName = "base-buildings.txt";
 
         private static readonly Dictionary<BaseType, string> _designations = new Dictionary<BaseType, string>();
+
+        /// <summary>Task109: 自動割り当て（サブスクライブ済みのCS:WARFRONT用建物アセットを名前で検出した
+        /// もの、<see cref="BaseBuildingAutoAssign"/>）。手動指定(_designations)が常に優先され、
+        /// 未指定の種別だけこちらが既定値として使われる。ファイルには保存しない——毎回検出し直すので、
+        /// アセットを購読解除/差し替えしても勝手に古い名前を掴み続けることがない。</summary>
+        private static readonly Dictionary<BaseType, string> _auto = new Dictionary<BaseType, string>();
+
         private static string _filePath;
 
         /// <summary>いずれかの基地種別に指定が1件でもあるか。BasePlacementWatcherが「指定建物が
         /// 1件も無ければ何もできない」早期returnの判定に使う（Task82で電力タブの複製プレハブ機構を
         /// 撤去した現在、基地配置経路はこの指定建物のみ）。</summary>
-        public static bool HasAny { get { return _designations.Count > 0; } }
+        public static bool HasAny { get { return _designations.Count > 0 || _auto.Count > 0; } }
+
+        /// <summary>Task109: 自動検出結果を差し替える（レベルロード時にプレハブが揃ってから1回）。</summary>
+        public static void ApplyAutoDetected(Dictionary<BaseType, string> detected)
+        {
+            _auto.Clear();
+            if (detected == null) return;
+            foreach (KeyValuePair<BaseType, string> kv in detected) _auto[kv.Key] = kv.Value;
+        }
+
+        /// <summary>Task109: この種別の値が自動割り当て由来か（手動指定が無く、自動検出だけがある）。
+        /// Options UIが「自動」と表示するために使う。</summary>
+        public static bool IsAutoAssigned(BaseType type)
+        {
+            return !_designations.ContainsKey(type) && _auto.ContainsKey(type);
+        }
 
         /// <summary>起動時（WarfrontLoadingExtension.LoadModAssets、UnitAssetBindings.Loadと同じ箇所）に
         /// 一度呼ぶ。冪等ではない（毎回ファイルから読み直す）。</summary>
@@ -97,10 +119,13 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>指定<paramref name="type"/>の指定建物アセット名を返す。未指定ならfalse。</summary>
+        /// <summary>指定<paramref name="type"/>の指定建物アセット名を返す。未指定ならfalse。
+        /// Task109: 手動指定が無い種別は、自動検出（サブスクライブ済みのCS:WARFRONT用アセット）の
+        /// 既定値へフォールバックする。</summary>
         public static bool TryGet(BaseType type, out string assetName)
         {
-            return _designations.TryGetValue(type, out assetName);
+            if (_designations.TryGetValue(type, out assetName)) return true;
+            return _auto.TryGetValue(type, out assetName);
         }
 
         /// <summary>指定<paramref name="type"/>へ指定建物アセットを設定し、直ちに保存する。</summary>
@@ -140,19 +165,27 @@ namespace CSWarfront.Game
             {
                 if (kv.Value == assetName) { type = kv.Key; return true; }
             }
+            // Task109: 自動割り当ての建物も配置認識の対象にする（手動指定で上書きされている種別は
+            // 上のループで先に一致するため、優先順位は保たれる）。
+            foreach (KeyValuePair<BaseType, string> kv in _auto)
+            {
+                if (_designations.ContainsKey(kv.Key)) continue;
+                if (kv.Value == assetName) { type = kv.Key; return true; }
+            }
             return false;
         }
 
+        /// <summary>Task109: 従来はArmy/Navy/AirForce/MissileBaseの4種別しか解釈しておらず、築城系
+        /// （Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）の指定はSaveでファイルに書かれても
+        /// 次回のLoadで捨てられていた（＝再起動のたびに指定し直しが必要だった）。BaseTypeのenum名を
+        /// そのまま解釈するようにして全種別を復元できるようにする。</summary>
         private static bool TryParseBaseType(string key, out BaseType type)
         {
-            switch (key)
-            {
-                case "Army": type = BaseType.Army; return true;
-                case "Navy": type = BaseType.Navy; return true;
-                case "AirForce": type = BaseType.AirForce; return true;
-                case "MissileBase": type = BaseType.MissileBase; return true;
-                default: type = default(BaseType); return false;
-            }
+            type = default(BaseType);
+            if (string.IsNullOrEmpty(key)) return false;
+            if (!Enum.IsDefined(typeof(BaseType), key)) return false;
+            type = (BaseType)Enum.Parse(typeof(BaseType), key);
+            return true;
         }
 
         private static void Save()
