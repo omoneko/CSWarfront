@@ -262,6 +262,30 @@ public class TrainStepTests
     }
 
     [Fact]
+    public void Train_beside_a_disconnected_siding_still_departs()
+    {
+        // 実機で満載の列車が駅に停まったまま動かなくなったケース: 駅のすぐ横に本線と分断された
+        // 引き込み線があると、単純な最近傍スナップがそちらのノードを掴み、目的地へ到達できないため
+        // 経路探索が毎回失敗していた。起点は「行き先と同じ連結成分」から選ぶ。
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        f.AddSupply(1000f);
+
+        // 駅A（本線 z=0 上、x=0）のすぐ横に、本線と繋がっていない引き込み線を置く。
+        s.Rails.AddNode(200, new WorldPos(2, 1, 3));
+        s.Rails.AddNode(201, new WorldPos(2, 1, 30));
+        s.Rails.AddEdge(200, 201);
+
+        var train = new UnitInstance(100, LandUnitRoster.TypeKey(UnitCategory.MilitaryTrain, 1), 0, 500f,
+            new WorldPos(1, 1, 2)); // 引き込み線のノード(2,3)の方が本線(0,0)より近い位置
+        s.Units.Add(train);
+
+        ServiceAndDepart(s);
+
+        Assert.Equal(UnitState.Moving, train.State);
+        Assert.NotNull(train.Path);
+    }
+
+    [Fact]
     public void Train_without_any_route_runs_to_the_nearest_station_instead_of_freezing()
     {
         var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);

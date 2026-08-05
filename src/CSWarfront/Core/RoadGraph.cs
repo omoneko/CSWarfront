@@ -14,13 +14,28 @@ namespace CSWarfront.Core
 
         private readonly Dictionary<ushort, Node> _nodes = new Dictionary<ushort, Node>();
 
+        /// <summary>Task110: 連結成分の遅延キャッシュ（グラフは構築後は読み取り専用のため、
+        /// AddNode/AddEdgeで捨てるだけで十分）。到達可能性の判定を何度も行うために使う。</summary>
+        private Dictionary<ushort, int> _components;
+
         public int NodeCount => _nodes.Count;
+
+        /// <summary>ノードid→連結成分番号（初回アクセスで計算してキャッシュ）。</summary>
+        public Dictionary<ushort, int> Components
+        {
+            get
+            {
+                if (_components == null) _components = ComputeComponentIds();
+                return _components;
+            }
+        }
 
         /// <summary>ノードを追加する。同じidが既にあれば無視（idempotent）。</summary>
         public void AddNode(ushort id, WorldPos position)
         {
             if (_nodes.ContainsKey(id)) return;
             _nodes[id] = new Node { Id = id, Position = position };
+            _components = null;
         }
 
         /// <summary>無向辺を追加する。未知のid・自己ループは無視。重複辺は追加しない。</summary>
@@ -31,6 +46,36 @@ namespace CSWarfront.Core
             if (!_nodes.TryGetValue(b, out var nb)) return;
             if (!na.Neighbors.Contains(b)) na.Neighbors.Add(b);
             if (!nb.Neighbors.Contains(a)) nb.Neighbors.Add(a);
+            _components = null;
+        }
+
+        /// <summary>Task110: 指定ノードと同じ連結成分に属するノードだけを候補に、最近傍を探す。
+        /// 「行き先と行き来できるノードから経路を始める」ために使う——単純な最近傍だと、すぐ隣にある
+        /// 別網（引き込み線など）のノードを掴んでしまい、そこからは目的地へ絶対に到達できず経路探索が
+        /// 必ず失敗する（実機で列車が駅に停まったまま動かなくなった原因）。</summary>
+        public bool TryFindNearestNodeInSameComponent(WorldPos p, float maxDistance, ushort referenceNode,
+            out ushort nodeId)
+        {
+            nodeId = 0;
+            int component;
+            if (!Components.TryGetValue(referenceNode, out component)) return false;
+            return TryFindNearestNode(p, maxDistance, Components, component, out nodeId);
+        }
+
+        /// <summary>Task110: ノードidを直接指定した経路探索（スナップを伴わない）。呼び出し側が
+        /// 到達可能なノードを選び終えている場合に、スナップのやり直しで別ノードを掴まないようにする。
+        /// 同一ノードなら空リスト、到達不能ならnull。</summary>
+        public List<WorldPos> FindPathBetweenNodes(ushort startId, ushort goalId)
+        {
+            if (!_nodes.ContainsKey(startId) || !_nodes.ContainsKey(goalId)) return null;
+            if (startId == goalId) return new List<WorldPos>();
+
+            List<ushort> route = AStar(startId, goalId, 0u, 0f);
+            if (route == null) return null;
+
+            var result = new List<WorldPos>(route.Count - 1);
+            for (int i = 1; i < route.Count; i++) result.Add(_nodes[route[i]].Position);
+            return result;
         }
 
         /// <summary>Task108: 位置がほぼ重なっているのに別idになっているノードどうしを辺で繋ぐ

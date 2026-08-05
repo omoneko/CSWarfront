@@ -121,11 +121,37 @@ namespace CSWarfront.Core
 
                     // Task107: 列車1編成＝1ペア固定だと、ペア数より多い列車（手動生産ぶん）が全て
                     // 永久停止していた。ラウンドロビンで必ずどれかの路線を担当させる。
-                    StationPair pair = pairs[trainIndex % pairs.Count];
+                    // Task110: ただし「その列車が居る線路網から行ける路線」を優先する——別網の路線を
+                    // 割り当てられた列車は、どこへも経路を張れず永久に停まってしまうため（実機で発生）。
+                    StationPair pair = ChoosePair(state, pairs, train, trainIndex);
                     trainIndex++;
                     AdvanceTrainCycle(state, f, train, pair, dt);
                 }
             }
+        }
+
+        /// <summary>Task110: 担当路線の選択。ラウンドロビンの位置から順に見て、「この列車が今いる
+        /// 線路網から到達できる」最初の路線を選ぶ（到達できるものが無ければ従来どおりの割り当て）。
+        /// 判定は連結成分の一致のみ（キャッシュ済みなので安価）。</summary>
+        private static StationPair ChoosePair(WarState state, List<StationPair> pairs, UnitInstance train, int trainIndex)
+        {
+            ushort trainNode;
+            int trainComponent;
+            if (state.Rails.TryFindNearestNode(train.Position, CargoStationRules.RailEntryRadius, out trainNode)
+                && state.Rails.Components.TryGetValue(trainNode, out trainComponent))
+            {
+                for (int offset = 0; offset < pairs.Count; offset++)
+                {
+                    StationPair candidate = pairs[(trainIndex + offset) % pairs.Count];
+                    ushort node;
+                    int comp;
+                    if (!state.Rails.TryFindNearestNode(CargoStationRules.RailPointOf(candidate.A),
+                            CargoStationRules.RailSnapRadius * 2f, out node)) continue;
+                    if (!state.Rails.Components.TryGetValue(node, out comp) || comp != trainComponent) continue;
+                    return candidate;
+                }
+            }
+            return pairs[trainIndex % pairs.Count];
         }
 
         private static void AdvanceTrainCycle(WarState state, Faction f, UnitInstance train, StationPair pair, float dt)
@@ -242,8 +268,7 @@ namespace CSWarfront.Core
 
             if (best == null || bestDist <= StationArriveRadius)
             {
-                train.OrderTargetPos = null;
-                train.State = UnitState.Idle;
+                Wait(train); // Task110: 毎tick回さず、少し間を置いて再評価する
                 return;
             }
 
@@ -256,26 +281,42 @@ namespace CSWarfront.Core
 
         private static void DepartTo(WarState state, UnitInstance train, MilitaryBase station)
         {
-            // Task109（ユーザー報告「列車がレールの無いところを走る／宙を飛ぶ」）: 経路は必ずレール上の
-            // ノードから始まる。列車がそこから離れた位置に居ると（駅建物の位置に手動生産された直後、
-            // 担当路線の変更後など）、最初のウェイポイントまで直線＝線路の無い空中を進んでしまう。
-            // 出発前に最寄りのレールノードへ載せ直して、必ず線路の上から走り出すようにする。
-            ushort nodeId;
+            WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: 行き先はレール進入点
+
+            // Task110（ユーザー報告「列車がスタックしている」）: 経路の起点は「行き先と行き来できる
+            // ノード」でなければならない。単純な最近傍スナップだと、駅のすぐ横にある別網（引き込み線）の
+            // ノードを掴んでしまうことがあり、そこからは目的地へ絶対に到達できないため経路探索が毎回
+            // 失敗し、満載の列車が駅に停まったまま動かなくなっていた（実機ログで確認）。
+            // 行き先のノードを先に決め、その連結成分の中から起点ノードを選ぶ。
+            ushort destNode;
+            if (!state.Rails.TryFindNearestNode(dest, CargoStationRules.RailSnapRadius * 2f, out destNode))
+            {
+                Wait(train);
+                return;
+            }
+
+            ushort startNode;
+            if (!state.Rails.TryFindNearestNodeInSameComponent(train.Position,
+                    CargoStationRules.RailEntryRadius, destNode, out startNode))
+            {
+                Wait(train); // その線路網へは物理的に入れない（担当路線の割り当てが次tickで見直される）
+                return;
+            }
+
+            // Task109: 起点ノードから離れているなら線路の上へ載せ直す（線路の無い空中を直線で
+            // 飛んでいくのを防ぐ）。
             WorldPos onRail;
-            if (state.Rails.TryFindNearestNode(train.Position, CargoStationRules.RailEntryRadius, out nodeId)
-                && state.Rails.TryGetNodePosition(nodeId, out onRail)
+            if (state.Rails.TryGetNodePosition(startNode, out onRail)
                 && train.Position.HorizontalDistanceTo(onRail) > RailSnapTolerance)
             {
                 train.Position = onRail;
             }
 
-            WorldPos dest = CargoStationRules.RailPointOf(station); // Task108: 行き先はレール進入点
-            var path = state.Rails.FindPath(train.Position, dest, CargoStationRules.RailSnapRadius * 2f);
+            var path = state.Rails.FindPathBetweenNodes(startNode, destNode);
             if (path == null || path.Count == 0)
             {
-                // レールが分断された／既に同じノード上にいる: 経路が張れない間は動かない（次tickで再試行）。
-                train.OrderTargetPos = null;
-                train.State = UnitState.Idle;
+                // 既に行き先のノード上にいる/経路なし: 動かない（次tickで再評価）。
+                Wait(train);
                 return;
             }
             train.Path = path;
@@ -284,6 +325,15 @@ namespace CSWarfront.Core
             train.OrderTargetPos = dest;
             train.State = UnitState.Moving;
             train.StationServiced = false; // Task110: 次に着いた駅では必ず荷役から始める
+        }
+
+        /// <summary>Task110: 出発できないときの待機。次の評価まで少し間を置く（毎tick経路探索を
+        /// やり直さない）。担当路線の割り当ては毎tick見直されるので、到達できる路線が現れれば動き出す。</summary>
+        private static void Wait(UnitInstance train)
+        {
+            train.OrderTargetPos = null;
+            train.State = UnitState.Idle;
+            train.StationDwell = IdleRecheckHours;
         }
 
         private static void BoardEligibleUnits(WarState state, UnitInstance train, MilitaryBase here, MilitaryBase other)
