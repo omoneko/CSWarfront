@@ -1,38 +1,41 @@
 namespace CSWarfront.Core
 {
-    /// <summary>BallisticMissiles.TryLaunchの結果（Task63、ManualProduction.QueueResultと同じenum-styleのAPI）。</summary>
+    /// <summary>Result of BallisticMissiles.TryLaunch (Task63; the same enum-style API as
+    /// ManualProduction.QueueResult).</summary>
     public enum LaunchResult
     {
         Ok,
         BaseNotFound,
         NotMissileBase,
         NoOwner,
-        /// <summary>StockpiledMissilesが0（発射可能な弾が無い）。</summary>
+        /// <summary>StockpiledMissiles is 0 (nothing to launch).</summary>
         NoStockpile,
-        /// <summary>目標がMissileStep.MaxRangeMetersを超える（基地からの水平距離）。</summary>
+        /// <summary>The target exceeds MissileStep.MaxRangeMeters (horizontal distance from the base).</summary>
         OutOfRange
     }
 
-    /// <summary>飛翔中の弾道ミサイル1発（Task63）。UnityEngine非依存。Game層（MissileVisuals想定）が
-    /// From/To/Progressから見た目の弾道弧を描く。Coreはこの構造体を「From→Toの直線をProgress(0..1)で
-    /// たどる」という抽象化のみで扱い、見た目の弾道（高高度アーチ等）はGame層の演出に委ねる。</summary>
+    /// <summary>One ballistic missile in flight (Task63). No UnityEngine dependency. The Game layer
+    /// (MissileVisuals) draws the visual ballistic arc from From/To/Progress; the core deals only with the
+    /// abstraction "trace the From→To line by Progress (0..1)" and leaves the visual trajectory
+    /// (high-altitude arch etc.) to Game-layer presentation.</summary>
     public class MissileInFlight
     {
         public uint Id;
         public byte FactionId;
         public WorldPos From;
         public WorldPos To;
-        /// <summary>飛行進捗（0..1）。1に達した瞬間に着弾解決される。</summary>
+        /// <summary>Flight progress (0..1). Impact resolves the moment it reaches 1.</summary>
         public float Progress;
-        /// <summary>迎撃成功済みか。Trueになった弾はMissileStep.Advance内で即座にリストから除去されるため、
-        /// 外部から観測されるのはRecentImpacts（MissileImpactEvent.Intercepted=true）経由のみ
-        /// （フィールド自体は将来のデバッグ/テスト向けに残す）。</summary>
+        /// <summary>Whether interception succeeded. A missile set to true is removed from the list
+        /// immediately inside MissileStep.Advance, so externally this is only observable via RecentImpacts
+        /// (MissileImpactEvent.Intercepted=true); the field itself remains for future debugging/tests.</summary>
         public bool Intercepted;
     }
 
-    /// <summary>ミサイルの着弾/迎撃を表す軽量イベント（Task63）。ShotEvent/KillEventと同じ設計思想:
-    /// ダメージ計算そのものには一切影響しない、間引かれた表現専用のトランジェント・イベント。
-    /// Intercepted=falseは着弾（大きな爆発演出）、Intercepted=trueは迎撃（閃光のみ・ダメージ無し）を表す。</summary>
+    /// <summary>Lightweight event describing a missile impact/interception (Task63). Same design as
+    /// ShotEvent/KillEvent: a throttled, presentation-only transient event with zero influence on damage
+    /// computation. Intercepted=false is an impact (big explosion display); Intercepted=true is an
+    /// interception (flash only, no damage).</summary>
     public struct MissileImpactEvent
     {
         public WorldPos Position;
@@ -46,53 +49,58 @@ namespace CSWarfront.Core
     }
 
     /// <summary>
-    /// 弾道ミサイルの発射・飛翔・迎撃・着弾（Task63、塊6 MVP）。ミサイル災害MOD
-    /// （MissileDisaster.Core.InterceptDecision/InterceptorTier）を参考にした「高度帯＋水平射程＋Pk」の
-    /// 迎撃判定を、CSWarfrontの決定的シミュレーション方針（乱数不使用、seedハッシュのみ）へ翻訳したもの。
-    /// MissileDisasterとの違い: 高度帯を持つ複数の迎撃層ではなく、単一のAntiAir兵科×水平射程のみで
-    /// 判定する単純化版（MVPスコープ、conventional弾頭のみ・核/クラスターは対象外）。
-    /// UnityEngine非依存。決定的（乱数不使用、ハッシュのみ）。
+    /// Ballistic missile launch, flight, interception and impact (Task63, block 6 MVP). The
+    /// "altitude band + horizontal range + Pk" interception model of the Missile Disaster mod
+    /// (MissileDisaster.Core.InterceptDecision/InterceptorTier) translated into CSWarfront's deterministic
+    /// simulation policy (no RNG; seed hashes only). Difference from MissileDisaster: a simplified version
+    /// judged only by the single AntiAir category × horizontal range instead of multiple interception
+    /// layers with altitude bands (MVP scope; conventional warheads only — no nuclear/cluster).
+    /// No UnityEngine dependency. Deterministic (no RNG, hashes only).
     /// </summary>
     public static class MissileStep
     {
-        /// <summary>発射から着弾までの飛行時間（ゲーム内時間、固定値）。</summary>
+        /// <summary>Flight time from launch to impact (in-game hours, fixed).</summary>
         public const float FlightHours = 1.5f;
 
-        /// <summary>発射基地から目標までの最大水平距離。これを超える目標へはTryLaunchが失敗する。</summary>
+        /// <summary>Maximum horizontal distance from the launching base to the target; TryLaunch fails
+        /// beyond it.</summary>
         public const float MaxRangeMeters = 4000f;
 
-        /// <summary>迎撃可能な水平距離（AntiAirユニットとミサイルの地上投影位置の間）。</summary>
+        /// <summary>Horizontal distance within which interception is possible (between an AntiAir unit and
+        /// the missile's ground-track position).</summary>
         public const float InterceptRange = 300f;
 
-        /// <summary>迎撃確率（ゲーム内1時間あたり）。1tickあたりの確率はこれにdtを掛けた値
-        /// （AntiAir 1体・1tickにつき最大1回のロール）。</summary>
+        /// <summary>Interception probability per in-game hour. The per-tick probability is this times dt
+        /// (at most one roll per AntiAir unit per tick).</summary>
         public const float InterceptRatePerHour = 0.9f;
 
-        /// <summary>着弾ダメージが及ぶ半径（水平距離）。</summary>
+        /// <summary>Radius (horizontal) of impact damage.</summary>
         public const float ImpactRadius = 90f;
 
-        /// <summary>着弾によるユニットへのダメージ（装甲無視・固定値）。</summary>
+        /// <summary>Impact damage to units (armor-ignoring, fixed).</summary>
         public const float ImpactDamageUnit = 400f;
 
-        /// <summary>着弾による基地HPの減少量（固定値）。占領猶予中の基地は無傷（BaseCombatStepと同じ方針）。</summary>
+        /// <summary>Base HP reduction on impact (fixed). Bases in capture grace are unharmed (the same
+        /// policy as BaseCombatStep).</summary>
         public const float ImpactDamageBase = 300f;
 
-        /// <summary>着弾による外部脅威（KAIJU/Alien）へのダメージ（固定値）。
-        /// Task64: 脅威HPのTier5再調整（Godzilla 20000→65000、Alien 8000→26000、
-        /// Core/ThreatCombatStep.ThreatArmor 20→45）に合わせて600→2000へ引き上げた。
-        /// 5発フル備蓄でも2000*5=10000（Godzillaの約15%、Alienの約38%）に留まり、単発でも連射でも
-        /// ミサイルだけで撃破できない「戦力を補う一撃」の位置づけを保つ（詳細な算出根拠は
-        /// ThreatCombatStep.ThreatArmorのコメントおよびtask-64レポート参照）。</summary>
+        /// <summary>Impact damage to external threats (KAIJU/Alien) (fixed).
+        /// Task64: raised 600→2000 to match the tier-5 rebalance of threat HP (Godzilla 20000→65000,
+        /// Alien 8000→26000, Core/ThreatCombatStep.ThreatArmor 20→45). Even a full stockpile of five is
+        /// 2000*5=10000 (≈15% of Godzilla, ≈38% of Alien), preserving missiles as "a blow that supplements
+        /// your forces" — neither single shots nor volleys can kill a threat alone (derivation details in
+        /// the ThreatCombatStep.ThreatArmor comment and the task-64 report).</summary>
         public const float ImpactDamageThreat = 2000f;
 
         /// <summary>
-        /// baseIdの基地からtargetへ1発発射する。判定順序（先に失敗した方を返す）:
-        ///  1. 基地が存在するか -&gt; BaseNotFound
-        ///  2. b.Type が BaseType.MissileBase か -&gt; NotMissileBase
-        ///  3. 所有勢力がいるか -&gt; NoOwner
-        ///  4. StockpiledMissiles &gt; 0 か -&gt; NoStockpile
-        ///  5. 基地からtargetまでの水平距離が MaxRangeMeters 以下か -&gt; OutOfRange
-        /// 全て通ればStockpiledMissilesを1消費し、WarState.MissilesInFlightへ新しい飛翔体を追加してOkを返す。
+        /// Launches one missile from the base with baseId at target. Check order (the first failure wins):
+        ///  1. does the base exist -&gt; BaseNotFound
+        ///  2. is b.Type BaseType.MissileBase -&gt; NotMissileBase
+        ///  3. does it have an owner -&gt; NoOwner
+        ///  4. StockpiledMissiles &gt; 0 -&gt; NoStockpile
+        ///  5. horizontal distance from base to target within MaxRangeMeters -&gt; OutOfRange
+        /// If all pass, one StockpiledMissiles is consumed, a new flight is added to
+        /// WarState.MissilesInFlight, and Ok is returned.
         /// </summary>
         public static LaunchResult TryLaunch(WarState state, ushort baseId, WorldPos target)
         {
@@ -120,11 +128,12 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// 飛翔中の全ミサイルを1tick進める（simスレッド、MilitaryManager.OnSimTick経由。
-        /// ThreatCombatStepの後・経済tickの前に呼ぶこと）。着弾したもの・迎撃されたものはこの呼び出し内で
-        /// WarState.MissilesInFlightから除去され、対応するMissileImpactEventがWarState.RecentImpactsへ
-        /// 積まれる。呼び出し元はこのAdvanceより前にRecentImpacts.Clear()を行っていること
-        /// （RecentShots/RecentKillsと同じ「呼び出し元が毎tickの先頭でクリアする」契約）。
+        /// Advances every missile in flight by one tick (sim thread, via MilitaryManager.OnSimTick; call
+        /// after ThreatCombatStep and before the economy tick). Missiles that impacted or were intercepted
+        /// are removed from WarState.MissilesInFlight within this call, and the corresponding
+        /// MissileImpactEvents are queued to WarState.RecentImpacts. The caller must have cleared
+        /// RecentImpacts before this Advance (the same "caller clears at the top of every tick" contract
+        /// as RecentShots/RecentKills).
         /// </summary>
         public static void Advance(WarState state, float dt)
         {
@@ -143,8 +152,9 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // 迎撃判定は降下半分（Progress > 0.5）のみ。上昇/中間段は迎撃対象外という単純化
-                // （MissileDisasterの高度帯モデルをAntiAirの水平射程のみへ翻訳した簡略版、Task63仕様）。
+                // Interception applies only to the descending half (Progress > 0.5). Boost/midcourse are
+                // exempt — the simplification that translates MissileDisaster's altitude-band model into
+                // AntiAir horizontal range only (Task63 spec).
                 if (m.Progress > 0.5f && TryIntercept(state, m, dt))
                 {
                     state.AddImpact(new MissileImpactEvent(GroundTrackPos(m), true, m.FactionId));
@@ -153,8 +163,9 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>Fromからm.Progressに応じて線形補間したミサイルの現在位置（地上投影・見た目の弾道弧は
-        /// Game層の演出、Coreは直線補間のみを扱う）。</summary>
+        /// <summary>The missile's current position linearly interpolated from From by m.Progress (ground
+        /// track; the visual arc is Game-layer presentation — the core deals in straight interpolation
+        /// only).</summary>
         private static WorldPos GroundTrackPos(MissileInFlight m)
         {
             float t = m.Progress;
@@ -164,10 +175,11 @@ namespace CSWarfront.Core
                 m.From.Z + (m.To.Z - m.From.Z) * t);
         }
 
-        /// <summary>迎撃者側（発射勢力にとって敵対=Hostile/Nemesis）のAntiAirユニットで、ミサイルの
-        /// 現在の地上投影位置からInterceptRange以内にいるものそれぞれが、決定的ハッシュから導いた
-        /// ロールで迎撃を試みる。いずれか1体でも成功すればtrue（複数のAAが同時に有効射程内にいても
-        /// 迎撃成功は1発で十分＝2回目以降のロールは行わない）。</summary>
+        /// <summary>Each defending AntiAir unit (belonging to a faction hostile to the launcher —
+        /// Hostile/Nemesis) within InterceptRange of the missile's current ground-track position attempts
+        /// an interception with a roll derived from a deterministic hash. Returns true as soon as any one
+        /// succeeds (even with several AA units simultaneously in effective range, one successful
+        /// interception suffices = no further rolls).</summary>
         private static bool TryIntercept(WarState state, MissileInFlight m, float dt)
         {
             WorldPos pos = GroundTrackPos(m);
@@ -187,20 +199,21 @@ namespace CSWarfront.Core
                 if (d > InterceptRange) continue;
 
                 uint seed = HashSeed(m.Id, u.InstanceId, state.TickCounter);
-                float roll = (seed % 1000000u) / 1000000f; // 決定的な0..1の疑似乱数値
+                float roll = (seed % 1000000u) / 1000000f; // deterministic pseudo-random 0..1
                 if (roll < chance) return true;
             }
             return false;
         }
 
-        /// <summary>着弾解決: ImpactRadius以内のユニット/基地/外部脅威にダメージを与える。
-        /// Task64（味方誤爆の除外）: 発射勢力自身、および発射勢力にとってRelation.Alliedな勢力の
-        /// ユニット/基地は無傷にする（RelationMatrixは自己関係を常にAlliedとして持つため、
-        /// 「発射勢力自身」は「Allied判定」の特殊ケースとして自動的にカバーされる＝分岐を分ける必要がない）。
-        /// Neutral勢力は引き続きダメージを受ける（巻き添え被害＝意図的な設計。ミサイルは狙った座標を
-        /// 面で薙ぎ払うだけで、中立勢力まで気を遣ってはくれない）。外部脅威(KAIJU/Alien)は
-        /// 誰の味方でもないため、勢力を問わず常にダメージを受ける（下のThreatsループにAllied判定は無い）。
-        /// 基地は占領猶予中(CaptureGraceHours&gt;0)なら無傷（BaseCombatStepの猶予保護と同じ方針）。</summary>
+        /// <summary>Impact resolution: damages units/bases/external threats within ImpactRadius.
+        /// Task64 (friendly-fire exclusion): the launching faction itself, and factions Relation.Allied to
+        /// it, take no damage to units/bases (RelationMatrix always holds self-relations as Allied, so
+        /// "the launcher itself" is automatically covered as a special case of the Allied test — no
+        /// separate branch needed). Neutral factions still take damage (collateral damage is deliberate:
+        /// the missile just sweeps the aimed area and extends no courtesy to neutrals). External threats
+        /// (KAIJU/Alien) are nobody's ally and always take damage regardless of faction (the Threats loop
+        /// below has no Allied test). Bases in capture grace (CaptureGraceHours&gt;0) are unharmed (the
+        /// same grace protection as BaseCombatStep).</summary>
         private static void ResolveImpact(WarState state, MissileInFlight m)
         {
             WorldPos pos = m.To;
@@ -210,7 +223,7 @@ namespace CSWarfront.Core
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
                 if (pos.HorizontalDistanceTo(u.Position) > ImpactRadius) continue;
-                if (state.Relations.Get(m.FactionId, u.FactionId) == Relation.Allied) continue; // 自軍・同盟軍は無傷（Task64）
+                if (state.Relations.Get(m.FactionId, u.FactionId) == Relation.Allied) continue; // own/allied unharmed (Task64)
 
                 u.CurrentHP -= ImpactDamageUnit;
                 if (u.State != UnitState.Dead && u.CurrentHP <= 0f)
@@ -226,16 +239,16 @@ namespace CSWarfront.Core
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 MilitaryBase b = state.Bases[j];
-                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: 塹壕は攻撃対象外
+                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: trenches cannot be attacked
                 if (b.OwnerFactionId == null) continue;
-                if (b.CaptureGraceHours > 0f) continue; // 猶予中は無敵（BaseCombatStepと同じ方針）
+                if (b.CaptureGraceHours > 0f) continue; // invulnerable during grace (same policy as BaseCombatStep)
                 if (pos.HorizontalDistanceTo(b.Position) > ImpactRadius) continue;
-                if (state.Relations.Get(m.FactionId, b.OwnerFactionId.Value) == Relation.Allied) continue; // 自軍・同盟軍の基地は無傷（Task64）
+                if (state.Relations.Get(m.FactionId, b.OwnerFactionId.Value) == Relation.Allied) continue; // own/allied bases unharmed (Task64)
 
                 b.CurrentHP -= ImpactDamageBase;
-                // Task89（ユーザー要望「弾道ミサイルも航空攻撃と同様にHP1まで削る仕様に」）:
-                // ミサイルでは占領（HP0）まで到達できない。TargetingRules.BaseHpFloorの非陸上床と
-                // 同じ考え方で、最後の1は必ず地上兵力に削らせる。
+                // Task89 (user request "ballistic missiles should also only grind bases down to HP 1, like
+                // air strikes"): missiles cannot reach capture (HP 0). Same idea as TargetingRules.
+                // BaseHpFloor's non-land floor — the final point must be taken by ground forces.
                 if (b.CurrentHP < 1f) b.CurrentHP = 1f;
             }
 
@@ -252,8 +265,9 @@ namespace CSWarfront.Core
             state.AddImpact(new MissileImpactEvent(pos, false, m.FactionId));
         }
 
-        /// <summary>決定的な整数ハッシュ入力の合成（AiProductionPolicy.MakeSeedと同じ手法:
-        /// missileId/unitId/tickの3値を素数近似定数で混ぜてからfinalizerへ渡す）。</summary>
+        /// <summary>Deterministic combination of the integer hash inputs (the same technique as
+        /// AiProductionPolicy.MakeSeed: mix missileId/unitId/tick with a near-prime constant, then run
+        /// through the finalizer).</summary>
         private static uint HashSeed(uint missileId, uint unitId, uint tick)
         {
             unchecked
@@ -265,7 +279,8 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>決定的な整数ハッシュ（MurmurHash3のfinalizer相当、AiProductionPolicy.Hashと同一手法）。</summary>
+        /// <summary>Deterministic integer hash (MurmurHash3 finalizer equivalent; the same technique as
+        /// AiProductionPolicy.Hash).</summary>
         private static uint Hash(uint x)
         {
             unchecked

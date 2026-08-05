@@ -1,74 +1,80 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 自爆ドローン（UnitCategoryFlags.IsKamikaze）専用の交戦ステップ（Task79）。
+    /// Dedicated engagement step for suicide drones (UnitCategoryFlags.IsKamikaze) (Task79).
     ///
-    /// 背景: ユーザー報告「自爆ドローンが機銃で攻撃するようなアニメーションになっています。戦闘では
-    /// モデルがターゲットに突進して自爆するようにしてください」。旧仕様（Task61）は通常のCombatStep
-    /// パイプラインに自爆ドローンを乗せ、射程内でShotEventを発行しながらdtスケールのダメージを与え、
-    /// UnitType.IsOneShot=trueにより「ダメージを与えた瞬間に自壊する」方式だった（つまり見た目は
-    /// 他の航空ユニットと全く同じ射撃アニメーション）。本タスクでは射撃を完全に廃止し、
-    /// 「目標をロック→ダイブで直接突入→体当たりで起爆」というキルチェーンへ置き換える。
+    /// Background: user report "suicide drones animate as if strafing with a machine gun; in combat the
+    /// model should charge into the target and blow itself up". The old design (Task61) ran suicide drones
+    /// through the normal CombatStep pipeline — emitting ShotEvents in range while dealing dt-scaled damage,
+    /// with UnitType.IsOneShot=true self-destructing them "the moment they deal damage" (so visually they
+    /// fired exactly like other aircraft). This task removes shooting entirely and replaces it with the kill
+    /// chain "lock a target → dive straight in → detonate on impact".
     ///
-    /// 設計（Acquire/Dive/Detonate）:
-    ///   - Acquire: 自身のRangeを「検知半径」として扱い、その範囲内で目標をロックする。
-    ///     ユニット目標は既存のTargetSearch.FindNearestHostile（宿敵Nemesis優先を含む通常のルール、
-    ///     CanTargetDomainsによる領域フィルタも適用）をそのまま再利用する。ユニット目標が1体も
-    ///     見つからなければ、外部脅威（ゴジラ/エイリアン、ThreatCombatStepと全く同じ実効射程
-    ///     Range+threat.Radius・ThreatRelations.IsHostile()判定）から最近接の1体をロックする。
-    ///     ユニットも外部脅威も見つからなければ、最後に敵対基地（BaseCombatStepと全く同じ規則:
-    ///     水平距離Range以内・state.Relations.IsHostile()判定・Nemesis優先、ただし
-    ///     CaptureGraceHours>0（占領猶予中）の基地は対象から完全に除外——ロックすらしない）を
-    ///     最近接（Nemesis所有を優先）で1つロックする（Task79ギャップ修正: 旧仕様（Task61以前）は
-    ///     通常のCombatStepパイプライン経由で基地も削れていたが、Task79のキルチェーン化で基地への
-    ///     攻撃手段が完全に失われていた不具合）。
-    ///     優先順位はユニット→外部脅威→基地（この3者を同時に狙う意味が無いため、単一の目標だけを
-    ///     ロックする設計はTask61から変わらない。基地は「動く敵が1体も射程内にいない時の最後の
-    ///     手段」という位置づけ）。
-    ///     ロック結果はUnitInstance.TargetId（ユニット）/TargetThreatId（外部脅威）/TargetBaseId
-    ///     （基地）へ毎tick書き込み直す（「ロックしたら固定」ではなく、CombatStep.TargetSearchと
-    ///     同じく毎tick再探索する。近接するほど「最近接」は自然に安定するため、実質的に同じ相手を
-    ///     ロックし続けることになる——決定的シミュレーションを保ちつつ実装を単純に保つ意図的な選択）。
-    ///     MovementStepはAdvance(前段)がこのステップより先に実行されるため、ここで書いたロックは
-    ///     次tickのダイブ移動から参照される（1tickの遅延は他の意思決定ステップと同じ許容範囲）。
-    ///   - Dive: 実際の移動はMovementStep.AdvanceKamikaze（Domain.Air分岐、CruiseAltitudeを離脱し
-    ///     目標の現在位置へ3D直線で突入、速度=Speed×DiveSpeedMultiplier）が担う。本ステップは
-    ///     ロック状態(TargetId/TargetThreatId/TargetBaseId)を書くだけで、移動そのものには一切関与しない。
-    ///   - Detonate: ロックした目標までの3D距離（WorldPos.DistanceTo、高度差込み——ダイブは水平方向
-    ///     だけでなく降下もするため）がDetonateDistance以下になったら起爆する。Attack値をdt/命中率
-    ///     ロール無しでCombatMath.DamagePerHitに通し1回だけ適用する（自爆弾頭は必中・確定ダメージ
-    ///     として扱う、Task79の設計判断）。装甲は通常通り軽減する（対ユニットはtargetType.Armor、
-    ///     対脅威はThreatCombatStep.ThreatArmorを共用）。CombatMatchup（兵科相性）は適用しない
-    ///     ——自爆弾頭はどんな兵科にも同じ実ダメージを叩き込む「フルの直撃」という単純な仕様にした。
-    ///     起爆の瞬間に自身のPositionを目標の現在位置へスナップしてからCurrentHPを0にする
-    ///     （死亡判定・KillEvent発行そのものはCombatStepの第2パス「死亡はCurrentHP<=0から導出する」
-    ///     という単一の真実源に委ねる、Task61のIsOneShotパターンを踏襲）。KillEvent.Positionは
-    ///     このPositionを使うため、爆発エフェクト(KillFx)・撃破音(CombatFx.SpawnKillSounds)が
-    ///     着弾地点＝目標の位置で鳴る。SuicideDroneはCombatFx.IsVehicleDestructionCategoryで
-    ///     「車両撃破」判定される（Infantry/DroneInfantry以外は全てtrue）ため、Game層は無改造で
-    ///     爆発の見た目・音の両方が自動的に付く。基地への起爆も全く同じ経路（自身のPositionを
-    ///     基地の位置へスナップ→CurrentHP=0→CombatStep第2パスがKillEvent発行）を通るため、
-    ///     Game層側の追加対応は不要（対ユニット/対脅威と同一のFX/音）。基地へのダメージは
-    ///     CombatMath.DamagePerHit(Attack, 0f)（BaseCombatStepと同じ装甲0扱い）を1回だけ適用し
-    ///     0未満にはクランプする。CurrentHPが0になった基地の占領移管そのものはOccupation.Advance
-    ///     が通常通り担う（本ステップは基地のOwnerFactionIdやCaptureGraceHoursを一切書き換えない）。
-    ///   - Target lost（撃破/消滅）: 次tickのAcquireで自動的に新しい目標を探す。ロックが外れている間、
-    ///     MovementStepのダイブ対象解決はnullを返すため、既存のResolveDomainObjective
-    ///     （OrderTargetPos追従・巡航高度復帰のAdvanceAir）へ自然にフォールバックする
-    ///     （専用の「離脱シーケンス」処理は不要——CombatStepが目標を見失った通常ユニットを
-    ///     Idleへ戻すのと全く同じパターン）。
+    /// Design (Acquire/Dive/Detonate):
+    ///   - Acquire: the unit's own Range acts as its detection radius; targets are locked within it.
+    ///     Unit targets reuse the existing TargetSearch.FindNearestHostile as-is (the normal rules including
+    ///     Nemesis priority and the CanTargetDomains domain filter). With no unit target, the nearest
+    ///     external threat (Godzilla/aliens; the exact ThreatCombatStep rules — effective range
+    ///     Range+threat.Radius, ThreatRelations.IsHostile()) is locked. With neither, finally a hostile
+    ///     base (the exact BaseCombatStep rules: horizontal distance within Range,
+    ///     state.Relations.IsHostile(), Nemesis priority — but bases with CaptureGraceHours&gt;0 (capture
+    ///     grace) are excluded outright, not even locked) is locked, nearest first (Nemesis-owned
+    ///     preferred). (Task79 gap fix: before Task79 the normal CombatStep pipeline also chipped bases, but
+    ///     the kill-chain rework had removed every way to attack bases.)
+    ///     Priority is unit → external threat → base (there is no point aiming at all three at once; the
+    ///     single-target lock design is unchanged from Task61. Bases are the "last resort when no moving
+    ///     enemy is in range").
+    ///     The lock is rewritten every tick into UnitInstance.TargetId (unit) / TargetThreatId (external
+    ///     threat) / TargetBaseId (base) — not "lock once and hold" but a per-tick re-search exactly like
+    ///     CombatStep.TargetSearch. As the drone closes in, "nearest" naturally stabilizes, so in practice
+    ///     the same victim stays locked — a deliberate choice keeping the implementation simple while
+    ///     preserving deterministic simulation.
+    ///     MovementStep's Advance runs before this step, so a lock written here is consumed by the dive
+    ///     movement on the NEXT tick (the one-tick latency is within the same tolerance as the other
+    ///     decision steps).
+    ///   - Dive: the actual movement is owned by MovementStep.AdvanceKamikaze (the Domain.Air branch —
+    ///     leaves CruiseAltitude and flies a 3D straight line into the target's current position at
+    ///     Speed×DiveSpeedMultiplier). This step only writes the lock state
+    ///     (TargetId/TargetThreatId/TargetBaseId) and never touches movement.
+    ///   - Detonate: when the 3D distance to the locked target (WorldPos.DistanceTo, altitude included —
+    ///     the dive descends as well as closes) drops to DetonateDistance, detonate. Attack is passed once
+    ///     through CombatMath.DamagePerHit with no dt scaling and no accuracy roll (a suicide warhead is
+    ///     treated as a guaranteed, always-hitting hit — the Task79 design decision). Armor mitigates as
+    ///     usual (targetType.Armor for units; ThreatCombatStep.ThreatArmor shared for threats).
+    ///     CombatMatchup (category matchups) does NOT apply — a suicide warhead lands the same raw damage
+    ///     on any category, a deliberately simple "full direct hit" rule. At the moment of detonation the
+    ///     drone's own Position snaps to the target's current position before CurrentHP is zeroed (death
+    ///     resolution and KillEvent emission are left to CombatStep's second pass — "death derives from
+    ///     CurrentHP&lt;=0" as the single source of truth, following Task61's IsOneShot pattern).
+    ///     KillEvent.Position uses this Position, so the explosion effect (KillFx) and the kill sound
+    ///     (CombatFx.SpawnKillSounds) play at the impact point = the target's location. SuicideDrone counts
+    ///     as a "vehicle destruction" in CombatFx.IsVehicleDestructionCategory (everything except
+    ///     Infantry/DroneInfantry does), so the Game layer needs no changes for the explosion visuals and
+    ///     audio. Base detonations flow through the very same path (snap own Position to the base → set
+    ///     CurrentHP=0 → CombatStep's second pass emits the KillEvent), so no extra Game-side handling is
+    ///     needed (identical FX/audio to the unit/threat cases). Base damage applies
+    ///     CombatMath.DamagePerHit(Attack, 0f) once (the same zero-armor treatment as BaseCombatStep),
+    ///     clamped to not go below zero. The ownership handover of a base whose HP reached 0 is handled by
+    ///     Occupation.Advance as usual (this step never writes a base's OwnerFactionId or
+    ///     CaptureGraceHours).
+    ///   - Target lost (destroyed/despawned): the next tick's Acquire finds a new target automatically.
+    ///     While unlocked, MovementStep's dive-target resolution returns null and behavior falls back
+    ///     naturally to the existing ResolveDomainObjective (following OrderTargetPos and returning to
+    ///     cruise altitude via AdvanceAir) — no dedicated "break-off sequence" needed, the same pattern as
+    ///     CombatStep returning an ordinary unit to Idle when it loses its target.
     /// </summary>
     public static class KamikazeStep
     {
-        /// <summary>起爆と判定する、目標までの3D距離（Task79）。ダイブは高度も含めた直線移動なので、
-        /// 水平距離ではなく実距離（WorldPos.DistanceTo）で判定する。</summary>
+        /// <summary>3D distance to the target that counts as detonation (Task79). The dive moves in a
+        /// straight 3D line including altitude, so the real distance (WorldPos.DistanceTo) is used rather
+        /// than the horizontal one.</summary>
         public const float DetonateDistance = 6f;
 
         public static void Advance(WarState state, float dt)
         {
-            // Task97: CombatStepと同じく空間グリッドで探索する（自爆ドローンが多い編成での
-            // 総当たりO(N²)回避。このstepはMovementStepの後・CombatStepの前に走り、位置は
-            // step内で変わらないため、先頭で一度Buildすれば十分）。
+            // Task97: search via the spatial grid as CombatStep does (avoids the O(N²) sweep with
+            // drone-heavy compositions). This step runs after MovementStep and before CombatStep, and
+            // positions do not change within it, so one Build at the top suffices.
             state.UnitGrid.Build(state.Units);
 
             for (int i = 0; i < state.Units.Count; i++)
@@ -101,15 +107,15 @@ namespace CSWarfront.Core
                 WorldPos targetPos = targetUnit != null ? targetUnit.Position
                     : (targetThreat != null ? targetThreat.Position : targetBase.Position);
                 float dist = self.Position.DistanceTo(targetPos);
-                if (dist > DetonateDistance) continue; // まだダイブ中（移動自体はMovementStepが担当）
+                if (dist > DetonateDistance) continue; // still diving (movement itself is MovementStep's job)
 
                 Detonate(state, self, type, targetUnit, targetThreat, targetBase);
             }
         }
 
-        /// <summary>ThreatCombatStepと全く同じ規則（実効射程=Range+threat.Radius、水平距離、
-        /// ThreatRelations.IsHostile()判定、撃破済み(IsDefeated)は除外）で最近接の1体を返す。
-        /// 該当が無ければnull。</summary>
+        /// <summary>Returns the nearest external threat under exactly the ThreatCombatStep rules
+        /// (effective range = Range+threat.Radius, horizontal distance, ThreatRelations.IsHostile(),
+        /// defeated (IsDefeated) excluded). Null when none qualifies.</summary>
         private static ExternalThreat FindNearestHostileThreat(WarState state, UnitInstance self, UnitType type)
         {
             ExternalThreat best = null;
@@ -129,10 +135,11 @@ namespace CSWarfront.Core
             return best;
         }
 
-        /// <summary>ThreatCombatStepではなくBaseCombatStepと全く同じ規則（水平距離Range以内、
-        /// state.Relations.IsHostile()判定＝Nemesisも敵対、CaptureGraceHours>0の基地は完全除外——
-        /// ダメージ免除だけでなくロック候補からも外す）で、TargetSearch.FindNearestHostileと同じ
-        /// Nemesis優先パターンの最近接1件を返す。該当が無ければnull。</summary>
+        /// <summary>Returns the nearest hostile base under exactly the BaseCombatStep rules (not
+        /// ThreatCombatStep's): horizontal distance within Range, state.Relations.IsHostile() (Nemesis is
+        /// hostile too), bases with CaptureGraceHours&gt;0 excluded outright — not just damage-exempt but
+        /// dropped from lock candidates — with the same Nemesis-priority pattern as
+        /// TargetSearch.FindNearestHostile. Null when none qualifies.</summary>
         private static MilitaryBase FindNearestHostileBase(WarState state, UnitInstance self, UnitType type)
         {
             MilitaryBase bestHostile = null;
@@ -143,14 +150,15 @@ namespace CSWarfront.Core
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 MilitaryBase b = state.Bases[j];
-                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: 塹壕は攻撃対象外
-                if (b.CaptureGraceHours > 0f) continue; // 猶予中は対象から完全除外（ロックすらしない）
+                if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: trenches cannot be attacked
+                if (b.CaptureGraceHours > 0f) continue; // in capture grace: fully excluded (not even locked)
                 if (b.OwnerFactionId == null) continue;
                 if (b.OwnerFactionId.Value == self.FactionId) continue;
                 Relation r = state.Relations.Get(self.FactionId, b.OwnerFactionId.Value);
                 if (!r.IsHostile()) continue;
-                // Task88: 既にHP床（自爆ドローンは航空なので1）に達した拠点へは体当たりしない
-                // （ダメージ0の自爆で機体だけ失うのを防ぐ。BaseCombatStepの攻撃停止と同じ規則）。
+                // Task88: never ram a base already at its HP floor (1 for aircraft, which suicide drones
+                // are) — prevents losing the airframe to a zero-damage detonation (the same stop-firing
+                // rule as BaseCombatStep).
                 if (b.CurrentHP <= TargetingRules.BaseHpFloor(type.Domain)) continue;
 
                 float d = self.Position.HorizontalDistanceTo(b.Position);
@@ -168,9 +176,10 @@ namespace CSWarfront.Core
             return bestNemesis != null ? bestNemesis : bestHostile;
         }
 
-        /// <summary>体当たり起爆: Attackをdt/命中率ロール無しで1回だけ適用し、自身をCurrentHP=0にして
-        /// 死亡確定を次段（CombatStepの死亡判定第2パス）へ委ねる。爆発エフェクト/音が着弾地点で鳴る
-        /// よう、自身のPositionを目標の現在位置へスナップしてから自壊させる。</summary>
+        /// <summary>Ramming detonation: applies Attack exactly once (no dt scaling, no accuracy roll), then
+        /// sets self CurrentHP=0 and leaves the death resolution to the next stage (CombatStep's
+        /// death-check second pass). The drone's own Position snaps to the target's current position first
+        /// so the explosion effect/sound plays at the impact point.</summary>
         private static void Detonate(WarState state, UnitInstance self, UnitType type,
             UnitInstance targetUnit, ExternalThreat targetThreat, MilitaryBase targetBase)
         {
@@ -179,7 +188,7 @@ namespace CSWarfront.Core
                 UnitType targetType = state.Types.Get(targetUnit.TypeKey);
                 float targetArmor = targetType != null ? targetType.Armor : 0f;
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor);
-                dmg *= FortDefenseBonus.Multiplier(state, targetUnit, targetType); // Task101: 塹壕/掩蔽壕上の歩兵
+                dmg *= FortDefenseBonus.Multiplier(state, targetUnit, targetType); // Task101: infantry on trenches/bunkers
 
                 bool wasAlive = targetUnit.CurrentHP > 0f;
                 targetUnit.CurrentHP -= dmg;
@@ -200,12 +209,12 @@ namespace CSWarfront.Core
             }
             else
             {
-                // 基地への体当たり（Task79ギャップ修正）: BaseCombatStepと同じ装甲0扱い・dt/命中率
-                // ロール無しの確定ダメージを1回だけ適用する。CombatMatchup（兵科相性）は他の2ケースと
-                // 同様に適用しない。
+                // Ramming a base (Task79 gap fix): the same zero-armor treatment as BaseCombatStep, one
+                // guaranteed application with no dt scaling or accuracy roll. CombatMatchup is not applied,
+                // same as the other two cases.
                 float dmg = CombatMath.DamagePerHit(type.Attack, 0f);
                 targetBase.CurrentHP -= dmg;
-                // Task85: 自爆ドローンは航空戦力なので、拠点HPは1で頭打ち（占領は地上戦力のみ）。
+                // Task85: suicide drones are air power, so base HP floors at 1 (capturing is ground-only).
                 float floor = TargetingRules.BaseHpFloor(type.Domain);
                 if (targetBase.CurrentHP < floor) targetBase.CurrentHP = floor;
 

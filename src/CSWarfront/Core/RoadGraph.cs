@@ -2,7 +2,8 @@ using System.Collections.Generic;
 
 namespace CSWarfront.Core
 {
-    /// <summary>Game層から供給される道路網の単純な無向グラフ表現＋A*経路探索。UnityEngine非依存。</summary>
+    /// <summary>Simple undirected-graph representation of the road network supplied by the Game layer,
+    /// plus A* pathfinding. No UnityEngine dependency.</summary>
     public class RoadGraph
     {
         private class Node
@@ -14,13 +15,14 @@ namespace CSWarfront.Core
 
         private readonly Dictionary<ushort, Node> _nodes = new Dictionary<ushort, Node>();
 
-        /// <summary>Task110: 連結成分の遅延キャッシュ（グラフは構築後は読み取り専用のため、
-        /// AddNode/AddEdgeで捨てるだけで十分）。到達可能性の判定を何度も行うために使う。</summary>
+        /// <summary>Task110: lazy cache of the connected components (the graph is read-only after
+        /// construction, so discarding it in AddNode/AddEdge suffices). Used for repeated reachability
+        /// checks.</summary>
         private Dictionary<ushort, int> _components;
 
         public int NodeCount => _nodes.Count;
 
-        /// <summary>ノードid→連結成分番号（初回アクセスで計算してキャッシュ）。</summary>
+        /// <summary>Node id → component id (computed and cached on first access).</summary>
         public Dictionary<ushort, int> Components
         {
             get
@@ -30,7 +32,7 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>ノードを追加する。同じidが既にあれば無視（idempotent）。</summary>
+        /// <summary>Adds a node. Ignored if the id already exists (idempotent).</summary>
         public void AddNode(ushort id, WorldPos position)
         {
             if (_nodes.ContainsKey(id)) return;
@@ -38,7 +40,8 @@ namespace CSWarfront.Core
             _components = null;
         }
 
-        /// <summary>無向辺を追加する。未知のid・自己ループは無視。重複辺は追加しない。</summary>
+        /// <summary>Adds an undirected edge. Unknown ids and self-loops are ignored. Duplicate edges are
+        /// not added.</summary>
         public void AddEdge(ushort a, ushort b)
         {
             if (a == b) return;
@@ -49,10 +52,11 @@ namespace CSWarfront.Core
             _components = null;
         }
 
-        /// <summary>Task110: 指定ノードと同じ連結成分に属するノードだけを候補に、最近傍を探す。
-        /// 「行き先と行き来できるノードから経路を始める」ために使う——単純な最近傍だと、すぐ隣にある
-        /// 別網（引き込み線など）のノードを掴んでしまい、そこからは目的地へ絶対に到達できず経路探索が
-        /// 必ず失敗する（実機で列車が駅に停まったまま動かなくなった原因）。</summary>
+        /// <summary>Task110: finds the nearest node considering only nodes in the same connected component
+        /// as the given reference node. Used to "start the path from a node that can reach the goal" — a
+        /// plain nearest-node search may grab a node of a different network right next door (a siding),
+        /// from which the destination can never be reached and pathfinding always fails (the cause of the
+        /// in-game bug where trains sat at the station and never moved).</summary>
         public bool TryFindNearestNodeInSameComponent(WorldPos p, float maxDistance, ushort referenceNode,
             out ushort nodeId)
         {
@@ -62,9 +66,9 @@ namespace CSWarfront.Core
             return TryFindNearestNode(p, maxDistance, Components, component, out nodeId);
         }
 
-        /// <summary>Task110: ノードidを直接指定した経路探索（スナップを伴わない）。呼び出し側が
-        /// 到達可能なノードを選び終えている場合に、スナップのやり直しで別ノードを掴まないようにする。
-        /// 同一ノードなら空リスト、到達不能ならnull。</summary>
+        /// <summary>Task110: pathfinding between explicit node ids (no snapping). For callers that have
+        /// already chosen reachable nodes, so a re-snap cannot grab a different node.
+        /// Same node: empty list. Unreachable: null.</summary>
         public List<WorldPos> FindPathBetweenNodes(ushort startId, ushort goalId)
         {
             if (!_nodes.ContainsKey(startId) || !_nodes.ContainsKey(goalId)) return null;
@@ -78,18 +82,19 @@ namespace CSWarfront.Core
             return result;
         }
 
-        /// <summary>Task108: 位置がほぼ重なっているのに別idになっているノードどうしを辺で繋ぐ
-        /// （「融合」＝互いに行き来できる状態にする。idは消さず、隣接関係だけを足す）。
-        /// CSでは、駅の構内線と本線の接合部などで幾何的には繋がっているのにNetNodeが別々になって
-        /// いることがあり、そのままだと網が別々の連結成分に割れて経路探索が失敗する
-        /// （実機で「駅は全部稼働なのに路線が0本」になった不具合の対策）。
-        /// radiusは水平距離、heightToleranceは高低差の上限——立体交差（桁下）を誤って繋がない
-        /// ためのガード。追加した辺の本数を返す。ノードid昇順で走査するため結果は決定的。</summary>
+        /// <summary>Task108: connects nodes that nearly coincide in position yet carry different ids
+        /// ("welding" = making them mutually traversable; ids are kept, only adjacency is added).
+        /// In CS, junctions such as where a station's yard track meets the main line can be geometrically
+        /// connected while their NetNodes remain distinct, splitting the network into separate components
+        /// and making pathfinding fail (the countermeasure for the in-game bug "all stations operational
+        /// yet zero routes"). radius is horizontal; heightTolerance caps the height difference — the guard
+        /// that keeps grade separations (under a viaduct) from being wrongly joined. Returns the number of
+        /// edges added. Scanning in ascending node-id order keeps the result deterministic.</summary>
         public int WeldCoincidentNodes(float radius, float heightTolerance)
         {
             if (radius <= 0f) return 0;
 
-            // 総当たりを避けるため、radius幅のグリッドへバケット分けしてから近傍9マスだけ比較する。
+            // Avoid the O(N²) sweep: bucket into a radius-sized grid, then compare only the 9 neighboring cells.
             var buckets = new Dictionary<long, List<ushort>>();
             var ordered = new List<ushort>(_nodes.Keys);
             ordered.Sort();
@@ -117,7 +122,7 @@ namespace CSWarfront.Core
                         for (int k = 0; k < bucket.Count; k++)
                         {
                             ushort otherId = bucket[k];
-                            if (otherId <= a.Id) continue; // 各ペアを1回だけ見る（決定的）
+                            if (otherId <= a.Id) continue; // visit each pair once (deterministic)
                             Node b = _nodes[otherId];
                             if (a.Position.HorizontalDistanceTo(b.Position) > radius) continue;
                             float dy = a.Position.Y - b.Position.Y;
@@ -140,10 +145,11 @@ namespace CSWarfront.Core
             return ((long)cx << 32) ^ (uint)cz;
         }
 
-        /// <summary>Task108: 連結成分ごとに0,1,2…の番号を振ったノードid→成分番号の対応を返す
-        /// （番号はノードid昇順の探索順で決まる＝決定的）。「2つの地点が同じ網に載っているか」を
-        /// 経路探索を走らせずに判定・診断するために使う（軍用列車の路線が1本も成立しない不具合の
-        /// 原因切り分け＝レール網が分断されているのか、単に近すぎるのかを区別するため）。</summary>
+        /// <summary>Task108: returns node id → component id, with components numbered 0,1,2… (numbering
+        /// follows the ascending node-id traversal = deterministic). Used to decide/diagnose "are two
+        /// locations on the same network" without running a path search (the triage for the bug where no
+        /// military-train route ever formed — distinguishing a shattered rail network from stations merely
+        /// too close).</summary>
         public Dictionary<ushort, int> ComputeComponentIds()
         {
             var result = new Dictionary<ushort, int>(_nodes.Count);
@@ -176,17 +182,17 @@ namespace CSWarfront.Core
             return result;
         }
 
-        /// <summary>水平距離でmaxDistance以内の最近傍ノードを探す。</summary>
+        /// <summary>Finds the nearest node within maxDistance (horizontal).</summary>
         public bool TryFindNearestNode(WorldPos p, float maxDistance, out ushort nodeId)
         {
             return TryFindNearestNode(p, maxDistance, null, 0, out nodeId);
         }
 
-        /// <summary>Task108: 連結成分を限定できる版。componentsにComputeComponentIdsの結果を、
-        /// requiredComponentにその成分番号を渡すと、その成分に属するノードだけを候補にする
-        /// （components==nullなら全ノードが候補＝上のオーバーロードと同じ）。
-        /// 「駅が自分の引き込み線（本線から分断された小さな成分）にスナップしてしまい、
-        /// 本線上の他の駅へ経路が引けない」ケースを避け、本線側のノードを掴ませるために使う。</summary>
+        /// <summary>Task108: component-restricted variant. Pass ComputeComponentIds' result as components
+        /// and a component number as requiredComponent to consider only that component's nodes
+        /// (components==null considers every node = same as the overload above).
+        /// Used to avoid "the station snapped onto its own siding (a small component split from the main
+        /// line) and no path can be laid to the other stations", grabbing a main-line node instead.</summary>
         public bool TryFindNearestNode(WorldPos p, float maxDistance, Dictionary<ushort, int> components,
             int requiredComponent, out ushort nodeId)
         {
@@ -212,7 +218,7 @@ namespace CSWarfront.Core
             return found;
         }
 
-        /// <summary>Task108: ノードidの座標を返す（駅のレール進入点をキャッシュするために使う）。</summary>
+        /// <summary>Task108: returns a node id's coordinates (used to cache a station's rail entry point).</summary>
         public bool TryGetNodePosition(ushort nodeId, out WorldPos position)
         {
             Node node;
@@ -221,9 +227,10 @@ namespace CSWarfront.Core
             return false;
         }
 
-        /// <summary>Task110: 指定地点からmaxDistance以内にある連結成分ごとの最寄りノードと距離を返す
-        /// （成分番号→(ノードid, 水平距離)）。「どの線路網が駅たちに共有されているか」の投票
-        /// （CargoStationRules.RefreshConnectivity）に使う。同距離はノードid昇順で決定的。</summary>
+        /// <summary>Task110: returns, for each connected component, its nearest node and distance within
+        /// maxDistance of the given point (component id → (node id, horizontal distance)). Used by the
+        /// "which rail network do the stations share" vote (CargoStationRules.RefreshConnectivity). Ties
+        /// resolve to the lower node id — deterministic.</summary>
         public Dictionary<int, KeyValuePair<ushort, float>> FindNearestNodePerComponent(WorldPos p, float maxDistance)
         {
             var result = new Dictionary<int, KeyValuePair<ushort, float>>();
@@ -245,8 +252,9 @@ namespace CSWarfront.Core
             return result;
         }
 
-        /// <summary>Task108: 最も多くのノードを含む連結成分（＝実質的な「本線網」）の番号を返す。
-        /// ノードが無ければfalse。同数の場合は成分番号の小さい方（決定的）。</summary>
+        /// <summary>Task108: returns the component containing the most nodes (= the de-facto "main-line
+        /// network"). False when there are no nodes. Ties resolve to the lower component id
+        /// (deterministic).</summary>
         public bool TryGetLargestComponent(Dictionary<ushort, int> components, out int largestComponent)
         {
             largestComponent = 0;
@@ -273,10 +281,10 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// from/to を snapRadius 以内の最近傍ノードへスナップし、A*で経路を求める。
-        /// 戻り値は開始ノードの「次」から目的ノードまでのWorldPosの並び。
-        /// スナップ失敗・経路なしはnull。開始ノード==目的ノードは空リスト。
-        /// ジッタなし（seed=0, jitter=0）で下のオーバーロードへ委譲する。
+        /// Snaps from/to to their nearest nodes within snapRadius and finds an A* path.
+        /// The return value is the sequence of WorldPos from the node AFTER the start node through the goal
+        /// node. Snap failure / no route: null. Start node == goal node: empty list.
+        /// Delegates to the overload below without jitter (seed=0, jitter=0).
         /// </summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius)
         {
@@ -284,29 +292,30 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// FindPathのジッタ付き版。ユニットごとに異なる「決定的な好みの遠回り」を選ばせ、
-        /// 全ユニットが常に同一の最短経路を通る問題（う回路が選ばれない）を解消する。
-        /// seed==0 または jitter&lt;=0 のときは上の3引数オーバーロードと完全に同じ挙動（最短経路のみ）になる。
-        /// それ以外は各辺のコストを (seed, nodeA, nodeB) から決定的に導いた係数分だけ最大jitter割合まで
-        /// 引き上げる：cost * (1 + jitter * f)、f∈[0,1)。辺コストは常に増加方向のみに動く。
-        /// ヒューリスティックは常に無加重の水平距離のまま（jitterしない）：三角不等式により
-        /// heuristic（直線距離）は増加後の実コストの総和以下であり続けるため、A*のadmissibility
-        /// （ヒューリスティックが真のコストを超えない）は保たれる。同じ理由で、経路そのものの
-        /// 到達可能性はjitterで変化しない（辺の存在／非存在は変えない。コストの相対順序が変わるだけ）。
+        /// Jittered variant of FindPath. Gives each unit its own deterministic "preferred detour", fixing
+        /// the problem of every unit always taking the identical shortest route (parallel roads never
+        /// chosen). With seed==0 or jitter&lt;=0 the behavior is exactly that of the 3-argument overload
+        /// (pure shortest path). Otherwise each edge cost is raised by a factor derived deterministically
+        /// from (seed, nodeA, nodeB), up to the jitter fraction: cost * (1 + jitter * f), f∈[0,1). Edge
+        /// costs only ever increase. The heuristic stays the unweighted horizontal distance (not
+        /// jittered): by the triangle inequality the heuristic (straight-line distance) remains ≤ the sum
+        /// of the increased true costs, so A* admissibility (the heuristic never exceeds the true cost)
+        /// holds. For the same reason, reachability itself is unaffected by jitter (edge existence is
+        /// unchanged; only the relative ordering of costs moves).
         /// </summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius, uint seed, float jitter)
         {
             return FindPath(from, to, snapRadius, seed, jitter, snapRadius);
         }
 
-        /// <summary>Task88（ユーザー要望「宿敵への陸上経路は可能な限り道路上を」）: 目的地側の
-        /// スナップ半径だけを独立に指定できる版。徘徊する脅威（ゴジラ等）は道路から
-        /// snapRadius(200)以上離れていることが多く、従来はスナップ失敗→経路null→全行程が
-        /// 直線移動（オフロード）になっていた。destSnapRadiusにfloat.MaxValueを渡せば
-        /// 「目的地に最も近い道路ノードまでは必ず道路で行き、残りだけ直線」になる
-        /// （経路が尽きた後の直線フォールバックはMovementStepの既存挙動）。
-        /// 出発側のスナップは従来どおりsnapRadiusのまま（ユニット自身が道路から遠い場合は
-        /// 直線移動が正しい）。</summary>
+        /// <summary>Task88 (user request "land routes to the nemesis should stay on roads as much as
+        /// possible"): variant with an independent destination-side snap radius. Roaming threats (Godzilla
+        /// etc.) are often more than snapRadius (200) from any road; previously the snap failed → null path
+        /// → the whole leg became off-road straight-line movement. Passing float.MaxValue as destSnapRadius
+        /// yields "take roads to the node nearest the destination, then go straight for the rest" (the
+        /// straight-line fallback after the path is consumed is MovementStep's existing behavior).
+        /// The origin-side snap keeps using snapRadius (when the unit itself is far from any road,
+        /// straight-line movement is correct).</summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius, uint seed, float jitter,
             float destSnapRadius)
         {
@@ -368,12 +377,13 @@ namespace CSWarfront.Core
                 }
             }
 
-            return null; // 到達不能
+            return null; // unreachable
         }
 
         /// <summary>
-        /// (seed, nodeA, nodeB) から決定的に [0,1) の係数を導く。a/bの小さい方・大きい方で正規化するため、
-        /// 辺をどちら向きに辿っても同じ係数になる（順序無依存）。System.Randomは使わず純粋な整数演算のみ。
+        /// Derives a deterministic [0,1) factor from (seed, nodeA, nodeB). Normalized via the smaller/larger
+        /// of a/b, so traversing the edge in either direction yields the same factor (order-independent).
+        /// No System.Random — pure integer arithmetic only.
         /// </summary>
         private static float EdgeJitterFactor(uint seed, ushort nodeA, ushort nodeB)
         {
@@ -381,12 +391,12 @@ namespace CSWarfront.Core
             uint hi = nodeA < nodeB ? nodeB : nodeA;
             uint h = Mix(seed ^ lo);
             h = Mix(h ^ hi);
-            // 上位24bitを使い [0, 1) に正規化する。
+            // Use the top 24 bits, normalized to [0, 1).
             return (h >> 8) / (float)(1u << 24);
         }
 
-        /// <summary>xorshift風の整数アバランチミックス（32bit）。単純な決定的ハッシュで、
-        /// 同じ入力からは常に同じ出力を返す。System.Random等の非決定的/シード付き乱数は使わない。</summary>
+        /// <summary>xorshift-style 32-bit integer avalanche mix. A simple deterministic hash — the same
+        /// input always yields the same output. No System.Random or other non-deterministic/seeded RNG.</summary>
         private static uint Mix(uint x)
         {
             x ^= x >> 16;
@@ -402,7 +412,8 @@ namespace CSWarfront.Core
             return _nodes[nodeId].Position.HorizontalDistanceTo(goalPos);
         }
 
-        /// <summary>fScore最小のノードを選ぶ。同点は低いidを優先し、決定的な結果にする。</summary>
+        /// <summary>Picks the node with the lowest fScore. Ties prefer the lower id, keeping the result
+        /// deterministic.</summary>
         private static ushort PickLowestFScore(List<ushort> openSet, Dictionary<ushort, float> fScore)
         {
             ushort best = openSet[0];

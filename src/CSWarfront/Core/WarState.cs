@@ -2,164 +2,176 @@ using System.Collections.Generic;
 
 namespace CSWarfront.Core
 {
-    /// <summary>MODの論理状態の集約。Game層はこれを1つ保持し、Coreの各stepに渡す。</summary>
+    /// <summary>Aggregate of the mod's logical state. The Game layer holds exactly one and passes it to
+    /// each core step.</summary>
     public class WarState
     {
         public List<Faction> Factions = new List<Faction>();
         public RelationMatrix Relations = new RelationMatrix(5);
 
-        /// <summary>勢力ごとの外部脅威（KAIJU/Alien、Task59）との関係。既定は全てHostile
-        /// （ゴジラ/エイリアンMOD導入前・v4以前のセーブロード時の後方互換に合わせた既定値）。
-        /// WarStateSerializerがformat v5でこの表を末尾に永続化する。</summary>
+        /// <summary>Per-faction relations toward external threats (KAIJU/Alien, Task59). Defaults to
+        /// all-Hostile (matching the pre-Godzilla/Alien-mod era and loads of v4-or-earlier saves).
+        /// WarStateSerializer persists this table at the tail since format v5.</summary>
         public ThreatRelations ThreatRelations = new ThreatRelations(5);
         public List<UnitInstance> Units = new List<UnitInstance>();
         public List<MilitaryBase> Bases = new List<MilitaryBase>();
         public UnitTypeRegistry Types = new UnitTypeRegistry();
         public uint NextInstanceId = 1;
 
-        /// <summary>Game層から供給される道路網（実行時のみ・非永続化）。未供給ならnull。</summary>
+        /// <summary>Road network supplied by the Game layer (runtime-only, not persisted). Null when not supplied.</summary>
         public RoadGraph Roads;
 
-        /// <summary>Game層（SeaGridBuilder）から供給される海上航行グリッド（実行時のみ・非永続化、
-        /// Task92）。未供給ならnull＝海上ユニットは従来の直線＋壁沿い迂回のみで移動する。</summary>
+        /// <summary>Sea navigation grid supplied by the Game layer (SeaGridBuilder) (runtime-only, not
+        /// persisted; Task92). Null when not supplied = sea units move with the traditional straight line
+        /// plus wall-following only.</summary>
         public SeaGrid SeaNav;
 
-        /// <summary>Task101: Game層（RailGraphBuilder）から供給される線路網（実行時のみ・非永続化）。
-        /// 未供給ならnull＝鉄道輸送（TrainStep）は一切動かない。RoadGraphクラスをレール用に再利用。</summary>
+        /// <summary>Task101: rail network supplied by the Game layer (RailGraphBuilder) (runtime-only, not
+        /// persisted). Null when not supplied = rail transport (TrainStep) does not run at all. Reuses the
+        /// RoadGraph class for rails.</summary>
         public RoadGraph Rails;
 
-        /// <summary>Task109: 勢力ごとの鉄道路線（駅ペア）のキャッシュ（実行時のみ・非永続化）。
-        /// 算出にはペアごとのA*が要るため毎tickやり直すとsimスレッドが経路探索で埋まる
-        /// （実際に「列車が動かない＝全体が詰まる」不具合を起こした）。レール網の再構築時に
-        /// TrainStep.InvalidateRoutesで捨て、必要になった時に1回だけ作り直す。</summary>
+        /// <summary>Task109: per-faction cache of rail routes (station pairs) (runtime-only, not
+        /// persisted). Computing them needs an A* per pair, so re-deriving every tick drowns the sim thread
+        /// in pathfinding (which actually caused the "trains stop = everything stalls" bug). Discarded via
+        /// TrainStep.InvalidateRoutes when the rail network is rebuilt, and rebuilt once on demand.</summary>
         public readonly System.Collections.Generic.Dictionary<byte, System.Collections.Generic.List<TrainStep.StationPair>>
             RailRoutes = new System.Collections.Generic.Dictionary<byte, System.Collections.Generic.List<TrainStep.StationPair>>();
 
-        /// <summary>Task94: 外部襲来イベント（InvasionEvents）の判定タイマー（実行時のみ・非永続化。
-        /// ロードで0に戻っても「次の判定が最大6時間遅れる」だけで実害なし）。</summary>
+        /// <summary>Task94: check timer for external invasion events (InvasionEvents) (runtime-only, not
+        /// persisted; resetting to 0 on load merely delays the next check by up to 6 hours — harmless).</summary>
         public float InvasionCheckAccum;
 
-        /// <summary>Task97: 交戦判定用の空間グリッド（実行時のみ・非永続化、simスレッド専用）。
-        /// CombatStep/KamikazeStepが各Advanceの先頭でBuildして使う（総当たりO(N²)の回避）。</summary>
+        /// <summary>Task97: spatial grid for engagement checks (runtime-only, not persisted; sim-thread
+        /// only). CombatStep/KamikazeStep Build it at the top of each Advance (avoids the O(N²) sweep).</summary>
         public UnitSpatialGrid UnitGrid = new UnitSpatialGrid();
 
-        /// <summary>Game層から供給される遮蔽物（建物/Prop）マップ（実行時のみ・非永続化、Task44）。
-        /// 未供給ならnull＝CoverSeekStepは遮蔽移動を一切行わない（RoadsのRoadGraphと同じパターン）。</summary>
+        /// <summary>Cover map (buildings/props) supplied by the Game layer (runtime-only, not persisted;
+        /// Task44). Null when not supplied = CoverSeekStep performs no cover movement at all (the same
+        /// pattern as Roads' RoadGraph).</summary>
         public CoverMap Cover;
 
-        /// <summary>Game層から供給される地表高さサンプラー（実行時のみ・非永続化、Task53）。
-        /// 未供給ならnull＝MovementStepは従来どおりウェイポイント/目標のYを補間する（既存の挙動・
-        /// テストへの後方互換フォールバック）。供給されていれば、道路/建物建設後の"見た目の"地表
-        /// （TerrainManager.SampleDetailHeight相当）へユニットのYをスナップし、路面へのめり込みを防ぐ。
-        /// RoadGraph/CoverMapと同じパターン: WarStateとライフサイクルを共にする（Stateごと破棄される）ため、
-        /// Reset()で個別にnullへ戻す必要はない。</summary>
+        /// <summary>Surface height sampler supplied by the Game layer (runtime-only, not persisted;
+        /// Task53). Null when not supplied = MovementStep interpolates waypoint/target Y as before (the
+        /// backward-compatible fallback for existing behavior and tests). When supplied, unit Y snaps to
+        /// the "visible" surface after road/building construction (TerrainManager.SampleDetailHeight
+        /// equivalent), preventing sinking into road surfaces. Same pattern as RoadGraph/CoverMap: it
+        /// shares the WarState's lifecycle (discarded with the state), so Reset() need not null it
+        /// individually.</summary>
         public IHeightSampler Height;
 
-        /// <summary>Game層から供給される水面サンプラー（実行時のみ・非永続化、Task61）。未供給ならnull＝
-        /// MovementStepのSea分岐は「常に水上」とみなして自由に移動する（Height/RoadGraphと同じ
-        /// パターン：Game層実装が無いテスト環境でも既存の直線移動テストが素直に書けるようにするための
-        /// 安全側フォールバック）。</summary>
+        /// <summary>Water sampler supplied by the Game layer (runtime-only, not persisted; Task61). Null
+        /// when not supplied = MovementStep's Sea branch treats everywhere as water and moves freely (the
+        /// same pattern as Height/RoadGraph: a safe fallback so existing straight-line movement tests can
+        /// be written plainly in test environments without a Game-layer implementation).</summary>
         public IWaterSampler Water;
 
         /// <summary>
-        /// Task42: 直近1tick分の「見える発砲」イベントのトランジェント・バッファ（非永続化）。
-        /// CombatStep/BaseCombatStepがダメージを実適用したタイミングでAddShotを通じて積む
-        /// （UnitInstance.FireCooldownで間引かれるため、攻撃側1体につき最大1件/tick）。
-        /// Game層のMilitaryManager.OnSimTickは各tickの先頭（戦闘stepより前）で必ずClear()し、
-        /// OnMainVisualUpdateが_stateLock内でコピーしてから消費すること。ここに積みっぱなしにすると
-        /// 際限なく肥大化するため、消費側がクリアする契約になっている。
-        /// WarStateSerializerには一切書き出さない（見た目専用データでセーブ不要）。
+        /// Task42: transient buffer of the last tick's "visible shot" events (not persisted).
+        /// CombatStep/BaseCombatStep push via AddShot at the moment damage is actually applied (throttled
+        /// by UnitInstance.FireCooldown, so at most one entry per attacker per tick).
+        /// The Game layer's MilitaryManager.OnSimTick must Clear() at the top of every tick (before the
+        /// combat steps), and OnMainVisualUpdate must copy inside _stateLock before consuming. Left
+        /// unconsumed it would grow without bound, hence the consumer-clears contract.
+        /// Never written by WarStateSerializer (visual-only data; no need to save).
         /// </summary>
         public List<ShotEvent> RecentShots = new List<ShotEvent>();
 
-        /// <summary>1tickあたりRecentShotsへ追加できる最大件数（Task42）。大規模乱戦が発生しても
-        /// 表現バッファ・後段のGameObject生成が際限なく増えないようにする防御的上限。</summary>
+        /// <summary>Maximum entries addable to RecentShots per tick (Task42). A defensive cap so the
+        /// presentation buffer and the downstream GameObject creation cannot balloon during huge battles.</summary>
         public const int MaxRecentShotsPerTick = 200;
 
         /// <summary>
-        /// Task51: 直近1tick分の「ユニット撃破」イベントのトランジェント・バッファ（非永続化）。
-        /// RecentShotsと全く同じ契約: CombatStepがユニットをUnitState.Deadへ遷移させたタイミングで
-        /// AddKillを通じて積む。Game層のMilitaryManager.OnSimTickは各tickの先頭で必ずClear()し、
-        /// OnMainVisualUpdateが_stateLock内でコピーしてから消費すること。
-        /// WarStateSerializerには一切書き出さない（見た目・音専用データでセーブ不要）。
+        /// Task51: transient buffer of the last tick's "unit killed" events (not persisted).
+        /// Exactly the RecentShots contract: CombatStep pushes via AddKill at the moment it transitions a
+        /// unit to UnitState.Dead. The Game layer's MilitaryManager.OnSimTick must Clear() at the top of
+        /// every tick, and OnMainVisualUpdate must copy inside _stateLock before consuming.
+        /// Never written by WarStateSerializer (visual/audio-only data; no need to save).
         /// </summary>
         public List<KillEvent> RecentKills = new List<KillEvent>();
 
-        /// <summary>1tickあたりRecentKillsへ追加できる最大件数（Task51）。RecentShotsと同じ防御的上限。</summary>
+        /// <summary>Maximum entries addable to RecentKills per tick (Task51). Same defensive cap as RecentShots.</summary>
         public const int MaxRecentKillsPerTick = 200;
 
         /// <summary>
-        /// Task54: 発砲/被弾から追跡する「戦闘域」の集合（実行時のみ・非永続化）。RoadGraph/Coverと違い
-        /// Game層から供給されるのではなく、Core自身がCombatStep/BaseCombatStepからの報告で維持する
-        /// （WarStateSerializerには一切書き出さない＝セーブ/ロードのたびに空へ戻る。ロード直後は
-        /// 一時的にゾーンが消えるが、戦闘が続いていればすぐ報告が再開し数tickで復元される。実害は無い）。
-        /// フィールド初期化子で構築するため、newされたWarStateはnullを心配せず即座に使える。
+        /// Task54: the set of "combat zones" tracked from firing/getting hit (runtime-only, not
+        /// persisted). Unlike RoadGraph/Cover it is not supplied by the Game layer — the core itself
+        /// maintains it from CombatStep/BaseCombatStep reports (never written by WarStateSerializer = it
+        /// resets to empty on save/load; zones vanish briefly after a load, but ongoing fighting resumes
+        /// reporting within a few ticks and restores them — harmless).
+        /// Constructed by a field initializer, so a newly created WarState is immediately usable without
+        /// null concerns.
         /// </summary>
         public CombatZoneTracker CombatZones = new CombatZoneTracker();
 
         /// <summary>
-        /// Task58: 他MOD（ゴジラ災害/エイリアン侵略）由来の「外部脅威」の集合（実行時のみ・非永続化）。
-        /// RoadGraph/Coverと同じパターン: Game層(ExternalThreatBridge)が毎tick、生きている他MODの
-        /// 状態（IsActive/位置）から再同期する（新規出現の追加、既存の位置更新、消えた分の除去）。
-        /// HPはCSWarfrontがここで独自に管理する（相手MODはHP/被弾APIを公開していないため）。
-        /// WarStateSerializerには一切書き出さない＝セーブ/ロードのたびに空へ戻るが、Game層が次tickで
-        /// 相手MODの現在状態から即座に復元するため実害は無い。
+        /// Task58: the set of "external threats" from other mods (Godzilla Disaster / Alien Invasion)
+        /// (runtime-only, not persisted). Same pattern as RoadGraph/Cover: the Game layer
+        /// (ExternalThreatBridge) re-synchronizes every tick from the other mod's live state
+        /// (IsActive/position) — adding new appearances, updating positions, removing the departed.
+        /// HP is managed independently here by CSWarfront (the other mods expose no HP/damage API).
+        /// Never written by WarStateSerializer = resets to empty on save/load, but the Game layer restores
+        /// it from the other mod's current state on the next tick — harmless.
         /// </summary>
         public List<ExternalThreat> Threats = new List<ExternalThreat>();
 
         /// <summary>
-        /// Task63: 飛翔中の弾道ミサイル（実行時のみ・非永続化）。RoadGraph/Threatsと同じ「セーブに含めない」
-        /// 方針だが、こちらはGame層が再同期する対象ではなく、Core自身（BallisticMissiles.TryLaunch/
-        /// MissileStep.Advance）が発射〜着弾/迎撃までの一生を完結して管理する。セーブ/ロードで
-        /// 飛翔中のミサイルは失われる（着弾も迎撃もしないまま消える）— 意図的な既知の制約（MVP）。
+        /// Task63: ballistic missiles in flight (runtime-only, not persisted). The same "not in the save"
+        /// policy as RoadGraph/Threats, but this is not something the Game layer re-synchronizes — the core
+        /// itself (BallisticMissiles.TryLaunch / MissileStep.Advance) manages the whole life cycle from
+        /// launch to impact/interception. Missiles in flight are lost on save/load (they vanish without
+        /// impacting or being intercepted) — a deliberate, known limitation (MVP).
         /// </summary>
         public List<MissileInFlight> MissilesInFlight = new List<MissileInFlight>();
 
-        /// <summary>Task63: 飛翔中ミサイルのID払い出し用カウンタ。UnitInstanceのNextInstanceIdとは別の
-        /// 名前空間（ミサイルはUnitInstanceではないため衝突しても実害は無いが、混同を避けるため分離した）。
-        /// Task92: MissilesInFlightとともにv8で永続化されるようになった（「ロードで飛行中ミサイルが
-        /// 消える」の解消）。</summary>
+        /// <summary>Task63: id counter for missiles in flight. A separate namespace from UnitInstance's
+        /// NextInstanceId (missiles are not UnitInstances, so a collision would be harmless, but they are
+        /// separated to avoid confusion). Task92: persisted since v8 together with MissilesInFlight
+        /// (fixing "missiles in flight vanish on load").</summary>
         public uint NextMissileId = 1;
 
-        /// <summary>Task63: 決定的な迎撃判定（BallisticMissiles.TryIntercept）のハッシュ種に使う、
-        /// simtickごとに単調増加するカウンタ。実行時のみ・非永続化（セーブ/ロードのたびに0へ戻っても
-        /// 「同じ入力には同じ結果」という決定性の性質自体は変わらないため実害は無い）。</summary>
+        /// <summary>Task63: monotonically increasing per-simtick counter used as the hash seed of the
+        /// deterministic interception roll (BallisticMissiles.TryIntercept). Runtime-only, not persisted
+        /// (resetting to 0 on save/load does not change the property "same input, same result", so it is
+        /// harmless).</summary>
         public uint TickCounter;
 
         /// <summary>
-        /// Task63: 直近1tick分の「弾道ミサイルの着弾/迎撃」イベントのトランジェント・バッファ（非永続化）。
-        /// RecentShots/RecentKillsと同じ設計思想: MissileStep.Advanceが着弾/迎撃を解決したタイミングで
-        /// AddImpactを通じて積む。Game層（MissileVisuals想定）が毎フレームロック内でコピーしてから
-        /// 消費すること。WarStateSerializerには一切書き出さない（見た目・音専用データでセーブ不要）。
+        /// Task63: transient buffer of the last tick's "ballistic missile impact/interception" events (not
+        /// persisted). Same design as RecentShots/RecentKills: MissileStep.Advance pushes via AddImpact at
+        /// the moment an impact/interception resolves. The Game layer (MissileVisuals) must copy inside the
+        /// lock every frame before consuming. Never written by WarStateSerializer (visual/audio-only data;
+        /// no need to save).
         /// </summary>
         public List<MissileImpactEvent> RecentImpacts = new List<MissileImpactEvent>();
 
-        /// <summary>1tickあたりRecentImpactsへ追加できる最大件数。RecentShots/RecentKillsと同じ防御的上限。</summary>
+        /// <summary>Maximum entries addable to RecentImpacts per tick. Same defensive cap as
+        /// RecentShots/RecentKills.</summary>
         public const int MaxRecentImpactsPerTick = 200;
 
         public uint AllocInstanceId() { return NextInstanceId++; }
 
-        /// <summary>Task63: 飛翔中ミサイルのIDを1つ払い出す。</summary>
+        /// <summary>Task63: allocates one in-flight missile id.</summary>
         public uint AllocMissileId() { return NextMissileId++; }
 
-        /// <summary>ミサイルの着弾/迎撃イベントを1件積む（Task63）。MaxRecentImpactsPerTickに達していれば
-        /// 黙って捨てる（AddShot/AddKillと同じ防御方針）。</summary>
+        /// <summary>Queues one missile impact/interception event (Task63). Silently dropped once
+        /// MaxRecentImpactsPerTick is reached (the same defensive policy as AddShot/AddKill).</summary>
         public void AddImpact(MissileImpactEvent e)
         {
             if (RecentImpacts.Count >= MaxRecentImpactsPerTick) return;
             RecentImpacts.Add(e);
         }
 
-        /// <summary>発砲イベントを1件積む（Task42）。MaxRecentShotsPerTickに達していれば黙って捨てる
-        /// （例外にしない＝大規模乱戦でシミュレーションを止めないため）。</summary>
+        /// <summary>Queues one shot event (Task42). Silently dropped once MaxRecentShotsPerTick is reached
+        /// (no exception — huge battles must not stop the simulation).</summary>
         public void AddShot(ShotEvent e)
         {
             if (RecentShots.Count >= MaxRecentShotsPerTick) return;
             RecentShots.Add(e);
         }
 
-        /// <summary>撃破イベントを1件積む（Task51）。MaxRecentKillsPerTickに達していれば黙って捨てる
-        /// （AddShotと同じ防御方針）。</summary>
+        /// <summary>Queues one kill event (Task51). Silently dropped once MaxRecentKillsPerTick is reached
+        /// (the same defensive policy as AddShot).</summary>
         public void AddKill(KillEvent e)
         {
             if (RecentKills.Count >= MaxRecentKillsPerTick) return;
