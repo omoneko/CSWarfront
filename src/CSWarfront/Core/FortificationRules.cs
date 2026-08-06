@@ -1,17 +1,19 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task101（Update3）: 野戦築城・貨物駅の集中規則
-    /// （設計: 2026-08-04-fortifications-heli-rail-design.md §1）。
+    /// Task101 (Update 3): the centralized rules for field fortifications and cargo stations
+    /// (design: 2026-08-04-fortifications-heli-rail-design.md §1).
     ///
-    /// 5種の位置づけ:
-    ///  - Bunker（掩蔽壕）: 歩兵3体分の自動射撃（FortCombatStep、建物非貫通）＋歩兵守備+50%。
-    ///    HP0で機能停止（Owner=null化。占領不可・再稼働なし。地形ボーナスだけは残る）。
-    ///  - ArtilleryPost（砲兵陣地）: 砲兵1体分の範囲射撃。HP0の扱いはBunkerと同じ。
-    ///  - SupplyDepot（補給拠点）: 独自備蓄（StoredSupplies）＋200m自動補給＋トラック積出。
-    ///    基地と同じく占領可（備蓄ごと奪取——StoredSuppliesは基地オブジェクトに載ったまま移る）。
-    ///  - Trench（塹壕）: 攻撃対象外の地形効果（歩兵守備+50%、敵味方不問）。
-    ///  - CargoStation（貨物駅）: 鉄道輸送の端点＋備蓄。占領可。レール未接続なら輸送には使われない。
+    /// The five types:
+    ///  - Bunker: automatic fire worth three infantry (FortCombatStep, blocked by buildings) plus a +50%
+    ///    infantry defense bonus. Stops functioning at HP 0 (Owner nulled; not capturable, never
+    ///    reactivates — only the terrain bonus remains).
+    ///  - ArtilleryPost: area fire worth one artillery piece. HP 0 handled like the Bunker.
+    ///  - SupplyDepot: its own stock (StoredSupplies) + 200m auto-resupply + truck pickup. Capturable
+    ///    like a base (stock seized with it — StoredSupplies rides along on the base object).
+    ///  - Trench: an untargetable terrain effect (+50% infantry defense, friend and foe alike).
+    ///  - CargoStation: a rail-transport terminal plus stock. Capturable. Unused for transport while
+    ///    disconnected from the rails.
     /// </summary>
     public static class FortificationRules
     {
@@ -22,21 +24,23 @@ namespace CSWarfront.Core
                 || type == BaseType.CargoStation;
         }
 
-        /// <summary>攻撃対象になるか。Trenchのみfalse（BaseCombatStep/ミサイル着弾/自爆ドローンの
-        /// 対象から除外。AIの進軍目標（ChooseTargetBase）からも除外する）。</summary>
+        /// <summary>Whether it can be attacked. Only the Trench is false (excluded from BaseCombatStep,
+        /// missile impacts and suicide drones — and from the AI's advance objectives
+        /// (ChooseTargetBase)).</summary>
         public static bool IsTargetable(BaseType type)
         {
             return type != BaseType.Trench;
         }
 
-        /// <summary>HP0で占領されるか。Bunker/ArtilleryPostのみfalse＝HP0でOwner=null化（機能停止）。
-        /// Occupation.ResolveCapturesが分岐する。</summary>
+        /// <summary>Whether HP 0 means capture. Only Bunker/ArtilleryPost are false = at HP 0 the owner
+        /// is nulled (function stops). Occupation.ResolveCaptures branches on this.</summary>
         public static bool IsCapturable(BaseType type)
         {
             return type != BaseType.Bunker && type != BaseType.ArtilleryPost;
         }
 
-        /// <summary>配置時の最大HP。Trenchは事実上無敵（攻撃対象外なので通常減らないが防御的に巨大値）。</summary>
+        /// <summary>Maximum HP at placement. The Trench is effectively invulnerable (untargetable, so it
+        /// normally never loses HP — the huge value is defensive).</summary>
         public static float DefaultMaxHP(BaseType type)
         {
             switch (type)
@@ -46,11 +50,11 @@ namespace CSWarfront.Core
                 case BaseType.SupplyDepot: return 400f;
                 case BaseType.CargoStation: return 400f;
                 case BaseType.Trench: return 1000000000f;
-                default: return 500f; // 通常基地の既定（MilitaryBaseのフィールド初期値と同値）
+                default: return 500f; // the normal-base default (same as MilitaryBase's field initializer)
             }
         }
 
-        /// <summary>備蓄（StoredSupplies）の上限。Depot300/Station500、他は備蓄を持たない。</summary>
+        /// <summary>Stock (StoredSupplies) cap. Depot 300 / Station 500; nothing else holds stock.</summary>
         public static float StoredSupplyCap(BaseType type)
         {
             if (type == BaseType.SupplyDepot) return 300f;
@@ -58,17 +62,19 @@ namespace CSWarfront.Core
             return 0f;
         }
 
-        /// <summary>Task103（ユーザー要望）: この基地種別でこの兵科を生産できるか。
-        ///  - 軍用列車（MilitaryTrain）は貨物駅（CargoStation）でのみ生産できる。
-        ///  - 貨物駅は軍用列車以外を生産できない（SpawnableDomains=Landだが列車専用の生産所）。
-        ///  - 他の組み合わせは従来どおりSpawnableDomains（ドメイン一致）が決める。
-        /// ManualProduction.TryEnqueue・生産メニューのロスター構築（BaseInfoPanelProductionRoster）が
-        /// 参照する。AI自動生産（ProductionPlanning）は築城・貨物駅を丸ごとスキップするため、
-        /// 貨物駅での列車生産は手動のみ（AIの列車はTrainStep.MaintainTrainsの自動維持）。</summary>
+        /// <summary>Task103 (user request): whether this base type may produce this category.
+        ///  - Military trains (MilitaryTrain) can be produced only at cargo stations (CargoStation).
+        ///  - Cargo stations can produce nothing but military trains (SpawnableDomains=Land, but they are
+        ///    train-only factories).
+        ///  - Every other combination is decided by SpawnableDomains (domain match) as before.
+        /// Read by ManualProduction.TryEnqueue and the production menu's roster construction
+        /// (BaseInfoPanelProductionRoster). AI auto-production (ProductionPlanning) skips fortifications
+        /// and cargo stations wholesale, so train production at stations is manual-only (the AI's trains
+        /// come from TrainStep.MaintainTrains).</summary>
         public static bool CanProduceUnit(BaseType baseType, UnitCategory category)
         {
             if (category == UnitCategory.MilitaryTrain) return baseType == BaseType.CargoStation;
-            if (baseType == BaseType.CargoStation) return false; // 列車は上で許可済み。他は全て不可
+            if (baseType == BaseType.CargoStation) return false; // trains were allowed above; everything else is barred
             return true;
         }
     }

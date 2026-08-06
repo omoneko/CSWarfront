@@ -2,35 +2,39 @@ using System.Collections.Generic;
 
 namespace CSWarfront.Core
 {
-    /// <summary>Task101: 軍用貨物駅の稼働判定（設計§3）。駅はレール網（WarState.Rails）の
-    /// ノードがRailSnapRadius以内にあるときだけ「接続済み」となり、鉄道輸送（TrainStep）に使われる。
-    /// 未接続でも備蓄（StoredSupplies）・占領は機能する。</summary>
+    /// <summary>Task101: military cargo station operability (design §3). A station counts as "connected"
+    /// only while a rail-network node (WarState.Rails) lies within RailSnapRadius, and only then is it
+    /// used for rail transport (TrainStep). Stock (StoredSupplies) and capture work even unconnected.</summary>
     public static class CargoStationRules
     {
-        /// <summary>駅とみなすレールノードまでの最大距離（m）。</summary>
+        /// <summary>Maximum distance to a rail node for the station to count as on the rails (m).</summary>
         public const float RailSnapRadius = 100f;
 
-        /// <summary>Task108: 本線網（最大の連結成分）上の進入点を探すときの最大距離（m）。
-        /// RailSnapRadiusより広いのは、駅の真横が「その駅の引き込み線＝本線から分断された小さな成分」
-        /// である場合に、少し離れた本線のノードを掴ませるため（実機で路線が1本も成立しなかった
-        /// ケースの対策）。</summary>
+        /// <summary>Task108: maximum distance when looking for an entry point on the main network (m).
+        /// Wider than RailSnapRadius so that when the track right beside the station is "its own siding —
+        /// a small component severed from the main line", the slightly farther main-line node is grabbed
+        /// instead (the countermeasure for the in-game case where no route ever formed).</summary>
         public const float RailEntryRadius = 300f;
 
-        /// <summary>全貨物駅のRailConnected／RailEntry（列車が実際に発着するレール上の地点）を
-        /// 引き直す（レール網の構築/再構築のたびにGame層が呼ぶ）。
+        /// <summary>Re-resolves every cargo station's RailConnected / RailEntry (the point on the rails
+        /// where trains actually call) — called by the Game layer every time the rail network is
+        /// (re)built.
         ///
-        /// Task110（ユーザー報告「列車が線路以外を通って域外まで往復する」）: 進入点の選び方を
-        /// 「最大の連結成分」から「駅たちが共有している連結成分」へ変更した。曲線サンプリングで
-        /// ノード数が線路の長さに比例するようになった結果、マップに元から敷かれている長大な既設線
-        /// （域外接続へ続く縦断本線）が常に最大成分になり、全駅の進入点がそちらへ吸われて、列車が
-        /// 都市の軍用線ではなく既設線を域外方向へ走っていた。
+        /// Task110 (user report "trains run off the rails and shuttle toward the map edge"): the entry
+        /// choice changed from "the largest connected component" to "the component the stations share".
+        /// Once curve sampling made node counts proportional to track length, the long pre-placed
+        /// mainline (running to the outside connections) always won as the largest component, sucking
+        /// every station's entry onto it — so trains ran the pre-placed line toward the outside instead
+        /// of the city's military rail.
         ///
-        /// 選定規則（決定的）:
-        ///  1. 各駅からRailEntryRadius以内にある成分ごとの最寄りノードを集める。
-        ///  2. 「届く駅の数」が最多の成分を選ぶ（＝駅たちを実際に結んでいる網）。
-        ///  3. 同数なら、駅からの距離の合計が最小の成分（＝駅のすぐ横を走っている網）。
-        /// 勝った成分に届かない駅は、従来どおりRailSnapRadius以内の最寄りノードへフォールバックする
-        /// （別勢力が別の網に駅を建てているケースはこちらで機能する）。</summary>
+        /// Selection rules (deterministic):
+        ///  1. Collect, per station, each component's nearest node within RailEntryRadius.
+        ///  2. Pick the component reached by the most stations (= the network actually linking them).
+        ///  3. On a tie, the component with the smallest total distance to the stations (= the one
+        ///     running right beside them).
+        /// Stations that cannot reach the winning component fall back to their plain nearest node within
+        /// RailSnapRadius as before (which is what keeps a faction with stations on a separate network
+        /// working).</summary>
         public static void RefreshConnectivity(WarState state)
         {
             var stations = new List<MilitaryBase>();
@@ -44,7 +48,8 @@ namespace CSWarfront.Core
             }
             if (state.Rails == null || stations.Count == 0) return;
 
-            // 1. 駅ごとの「成分→(最寄りノード, 距離)」と、成分ごとの得票・距離合計を集計する。
+            // 1. Tally, per station, "component → (nearest node, distance)" plus per-component votes and
+            //    distance sums.
             var perStation = new Dictionary<int, KeyValuePair<ushort, float>>[stations.Count];
             var votes = new Dictionary<int, int>();
             var distanceSum = new Dictionary<int, float>();
@@ -62,7 +67,7 @@ namespace CSWarfront.Core
                 }
             }
 
-            // 2-3. 得票最多 → 距離合計最小 → 成分番号最小、の順で決定的に選ぶ。
+            // 2-3. Deterministic pick: most votes → smallest distance sum → smallest component id.
             int winner = -1;
             foreach (var kv in votes)
             {
@@ -86,7 +91,7 @@ namespace CSWarfront.Core
                 }
                 else if (!state.Rails.TryFindNearestNode(b.Position, RailSnapRadius, out nodeId))
                 {
-                    continue; // どの網にも届かない: 未接続のまま
+                    continue; // reaches no network at all: stays unconnected
                 }
 
                 WorldPos entry;
@@ -98,13 +103,14 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>Task108: この駅で列車が発着するレール上の地点（進入点。未解決なら駅そのものの位置）。</summary>
+        /// <summary>Task108: the point on the rails where trains call at this station (the entry point;
+        /// the station's own position while unresolved).</summary>
         public static WorldPos RailPointOf(MilitaryBase b)
         {
             return b.RailEntry.HasValue ? b.RailEntry.Value : b.Position;
         }
 
-        /// <summary>この駅は鉄道輸送に使えるか（所有・レール接続・HP残存）。</summary>
+        /// <summary>Whether this station is usable for rail transport (owned, rail-connected, HP left).</summary>
         public static bool IsOperational(MilitaryBase b)
         {
             return b != null && b.Type == BaseType.CargoStation
