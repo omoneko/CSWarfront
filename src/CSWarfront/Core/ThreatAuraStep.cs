@@ -1,40 +1,42 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 脅威（ゴジラ/エイリアン）の近接オーラダメージ（Task65、ユーザー要望「付近にいるだけで削られる」）。
-    /// MilitaryManager.OnSimTickでThreatCombatStepの直後に実行される。
+    /// Proximity aura damage from threats (Godzilla/aliens) (Task65, user request "units should get worn
+    /// down just by being nearby"). Runs right after ThreatCombatStep in MilitaryManager.OnSimTick.
     ///
-    /// ThreatCombatStepとの違い（意図的な非対称設計）:
-    ///  - ThreatCombatStepは「ユニット→脅威」方向の攻撃で、WarState.ThreatRelationsがHostile/Nemesis
-    ///    の勢力のユニットしかダメージを与えない（Options画面で個別に設定できる）。
-    ///  - このstepは逆方向「脅威→ユニット」で、ThreatRelationsを一切参照しない。暴れ回る巨大な脅威は
-    ///    勢力の立場（同盟/中立/敵対）を判別せず、近くにいる全ユニットを等しく傷つける
-    ///    （Neutral/Alliedに設定した勢力のユニットが脅威の真横に立っても無傷、というのは不自然なため）。
-    ///  - 装甲(UnitType.Armor)を一切参照しない、定額(dt比例)のダメージ。ThreatArmorはユニット→脅威
-    ///    方向にのみ意味を持つ値であり、こちら向きの防御要因ではない（単純さ優先）。
+    /// Differences from ThreatCombatStep (a deliberate asymmetric design):
+    ///  - ThreatCombatStep is the unit → threat direction: only units of factions whose
+    ///    WarState.ThreatRelations is Hostile/Nemesis deal damage (individually configurable in Options).
+    ///  - This step is the reverse, threat → unit, and never consults ThreatRelations. A rampaging giant
+    ///    does not discriminate by standing (allied/neutral/hostile) — it hurts every nearby unit equally
+    ///    (a unit of a Neutral/Allied faction standing unharmed right beside the threat would be absurd).
+    ///  - Flat damage (dt-proportional) that never consults armor (UnitType.Armor). ThreatArmor is only
+    ///    meaningful in the unit → threat direction and is no defense in this one (simplicity first).
     ///
-    /// 死亡判定・KillEvent発行はCombatStep.Advanceの第2パス（死亡判定ループ）と全く同じ形をここでも
-    /// 独立して行う。CombatStep/BaseCombatStep/ThreatCombatStepは既にそれぞれ自分のAdvance内で
-    /// 「自分が削った分の死亡確定」を完結させているため、このstepが同tick内で二重にKillEventを積むことは
-    /// ない（他stepで既にDeadへ遷移済みのユニットはState!=Deadの条件で自然にスキップされる）。
+    /// Death resolution / KillEvent emission runs independently here in exactly the same shape as
+    /// CombatStep.Advance's second pass (the death loop). CombatStep/BaseCombatStep/ThreatCombatStep each
+    /// already finalize the deaths from their own damage inside their own Advance, so this step never
+    /// double-queues a KillEvent within a tick (units already transitioned to Dead by other steps are
+    /// skipped naturally by the State != Dead condition).
     /// </summary>
     public static class ThreatAuraStep
     {
-        /// <summary>ゴジラ(Kaiju)のオーラダメージ（ゲーム内1時間あたり、装甲無視）。
-        /// T1戦車(HP140、LandUnitRoster)は 140/90 ≈ 1.6時間、T5戦車(HP336、TierScaling.Hp(140,5)=140*2.4)
-        /// は 336/90 ≈ 3.7時間でオーラのみで撃破される。ゴジラ攻略に推奨される約50両のT5戦車編成が
-        /// ThreatCombatStepの交戦（数時間〜十数時間規模）と並行してこのオーラにさらされ続けるため、
-        /// 数時間おきに部隊が入れ替わるほどの継続的な消耗＝「高コストな攻略」になるよう意図した値
-        /// （task-65レポートの計算例参照）。</summary>
+        /// <summary>Godzilla's (Kaiju) aura damage (per in-game hour, armor-ignoring).
+        /// A T1 tank (HP 140, LandUnitRoster) dies to the aura alone in 140/90 ≈ 1.6 hours; a T5 tank
+        /// (HP 336, TierScaling.Hp(140,5)=140*2.4) in 336/90 ≈ 3.7 hours. The ~50-strong T5 tank force
+        /// recommended against Godzilla is exposed to this aura throughout the ThreatCombatStep
+        /// engagement (hours to a dozen hours), so the value is tuned for continuous attrition that
+        /// rotates the force every few hours = "an expensive campaign" (see the worked examples in the
+        /// task-65 report).</summary>
         public const float GodzillaAuraDamage = 90f;
 
-        /// <summary>エイリアン(Alien)のオーラダメージ（ゲーム内1時間あたり、装甲無視）。ゴジラより
-        /// 一回り小規模な脅威という位置づけに合わせ、GodzillaAuraDamageよりやや低い値にした。</summary>
+        /// <summary>The alien's (Alien) aura damage (per in-game hour, armor-ignoring). Slightly below
+        /// GodzillaAuraDamage, matching its positioning as the smaller threat.</summary>
         public const float AlienAuraDamage = 50f;
 
-        /// <summary>脅威の当たり半径(ExternalThreat.Radius)に加える、オーラが届く追加距離。
-        /// ThreatCombatStep.Advanceが「射程+Radius」を実効射程とするのと対になる考え方で、
-        /// 巨体の脅威の「近く」を単純な定数マージンで表現する。</summary>
+        /// <summary>Extra reach of the aura added to the threat's hit radius (ExternalThreat.Radius).
+        /// The counterpart of ThreatCombatStep.Advance's "range + Radius" effective range: "near" a giant
+        /// threat expressed as a simple constant margin.</summary>
         public const float AuraMargin = 60f;
 
         public static void Advance(WarState state, float dt)
@@ -42,7 +44,7 @@ namespace CSWarfront.Core
             for (int t = 0; t < state.Threats.Count; t++)
             {
                 var threat = state.Threats[t];
-                if (threat.IsDefeated) continue; // 撃破済みの脅威はもうオーラを発しない
+                if (threat.IsDefeated) continue; // defeated threats no longer emit an aura
 
                 float dmgPerHour = DamagePerHourFor(threat.Kind);
                 if (dmgPerHour <= 0f) continue;
@@ -54,13 +56,14 @@ namespace CSWarfront.Core
                     if (!u.IsAlive) continue;
                     if (u.Position.HorizontalDistanceTo(threat.Position) > effectiveRadius) continue;
 
-                    // 装甲無視・勢力/ThreatRelations無視の定額ダメージ（クラスコメント参照）。
+                    // Flat damage ignoring armor and faction/ThreatRelations (see the class comment).
                     u.CurrentHP -= dmgPerHour * dt;
                 }
             }
 
-            // 死亡判定（CombatStep.Advanceの死亡判定パスと同じパターン）。他stepで既にDeadへ
-            // 遷移済みのユニットはState!=Deadの条件で自然にスキップされ、二重にKillEventを積まない。
+            // Death resolution (the same pattern as CombatStep.Advance's death pass). Units already
+            // transitioned to Dead by other steps are skipped naturally by the State != Dead condition,
+            // so no KillEvent is double-queued.
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];

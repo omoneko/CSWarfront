@@ -1,41 +1,46 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task98（実機フィードバック）: 水際・行き止まり等でスタックして動けなくなったユニットの自動消滅。
+    /// Task98 (playtest feedback): automatic despawn of units stuck and unable to move at shorelines,
+    /// dead ends, etc.
     ///
-    /// 「スタック」の定義: State==Moving（移動したいのに）で、基準位置（StuckAnchor）から
-    /// 「そのユニットの速度なら進めるはずの距離のProgressFraction」未満しか動けない状態が
-    /// DespawnAfterHours続いたユニット（Task98追補: 当初は固定20mだったが、歩兵は約1.0m/ゲーム時
-    /// しか進まないため正常行軍のまま12hで12m＜20mとなり誤消滅した——閾値は速度比例が正しい。
-    /// 上限MinProgressDistanceは高速ユニットの誤検知マージンとして残す）。
-    /// Idle/Engaging/Deadは対象外（止まっているのが正常な状態のため。自拠点で待機している部隊や
-    /// 交戦中に立ち止まっている部隊はStateがMovingでないので、そもそもタイマーが進まない）。
+    /// Definition of "stuck": a unit in State==Moving (it wants to move) that has covered less than
+    /// ProgressFraction of the distance its own speed should allow from its anchor position (StuckAnchor)
+    /// for DespawnAfterHours. (Task98 addendum: this was originally a fixed 20m, but infantry advance
+    /// only ~1.0 m/game-hour, so a normally marching squad covered 12m &lt; 20m in 12h and was despawned
+    /// by mistake — the threshold must be speed-proportional. The MinProgressDistance cap remains as the
+    /// false-positive margin for fast units.)
+    /// Idle/Engaging/Dead are exempt (standing still is their normal condition; troops waiting at their
+    /// own base or standing ground while fighting are not Moving, so the timer never even runs).
     ///
-    /// 例外: 自勢力の基地からOwnBaseExemptRadius以内にいるユニットは消さない（ユーザー要望
-    /// 「自軍の基地で停止している部隊は別」。基地周辺で何らかの理由により足踏みしていても資産は
-    /// 保全する）。タイマーはリセットして再判定を先送りする。
+    /// Exception: units within OwnBaseExemptRadius of a friendly base are never removed (user request:
+    /// "units stopped at my own bases are different" — assets near a base are preserved even if they are
+    /// somehow marking time). The timer resets so re-evaluation starts over.
     ///
-    /// 消滅は無音・無爆発（KillEventを積まずにDead化するだけ）。撃破と紛らわしい演出を避け、
-    /// 「いつの間にか整理されている」挙動にする。Dead化したユニットはMilitaryManagerSimTickの
-    /// 毎tickの死亡ユニット掃除がリストから取り除く。
+    /// The despawn is silent, no explosion (just transition to Dead without queuing a KillEvent) —
+    /// avoiding effects that could be mistaken for combat losses; things simply get "quietly tidied up".
+    /// MilitaryManagerSimTick's per-tick dead-unit sweep removes the Dead unit from the list.
     /// </summary>
     public static class StuckCleanupStep
     {
-        /// <summary>この時間（ゲーム内時間）動けないままだと消滅する。</summary>
+        /// <summary>Despawn after being unable to move for this long (in-game hours).</summary>
         public const float DespawnAfterHours = 12f;
 
-        /// <summary>前進判定閾値の速度比例係数。「本来の速度で進めるはずの距離の25%未満しか
-        /// 進めていない」＝スタック。壁沿い迂回の斜め成分程度は前進とみなす余裕を持たせた値。</summary>
+        /// <summary>Speed-proportional factor of the progress threshold: "covered less than 25% of the
+        /// distance the unit's own speed should allow" = stuck. Enough slack that the diagonal component
+        /// of wall-following detours still counts as progress.</summary>
         public const float ProgressFraction = 0.25f;
 
-        /// <summary>前進判定閾値の上限（水平m）。高速ユニット（戦車・艦艇・航空）で速度比例のまま
-        /// だと数百mになり、壁際の往復でも到達してしまうため、従来の固定値でキャップする。</summary>
+        /// <summary>Cap on the progress threshold (horizontal meters). For fast units (tanks, ships,
+        /// aircraft) the speed-proportional value would reach hundreds of meters and even back-and-forth
+        /// at a wall would satisfy it, so it stays capped at the traditional fixed value.</summary>
         public const float MinProgressDistance = 20f;
 
-        /// <summary>自勢力基地からこの距離以内のユニットは消滅対象外。</summary>
+        /// <summary>Units within this distance of a friendly base are exempt from despawning.</summary>
         public const float OwnBaseExemptRadius = 200f;
 
-        /// <summary>スタック判定を1tickぶん進める。戻り値は消滅させたユニット数（ログ用）。</summary>
+        /// <summary>Advances the stuck check by one tick. Returns the number of despawned units (for
+        /// logging).</summary>
         public static int Advance(WarState state, float dt)
         {
             int despawned = 0;
@@ -43,7 +48,7 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
-                if (u.IsCarried) { u.StuckAnchor = null; u.StuckHours = 0f; continue; } // Task101: 搭乗中は対象外
+                if (u.IsCarried) { u.StuckAnchor = null; u.StuckHours = 0f; continue; } // Task101: carried units are exempt
 
                 if (u.State != UnitState.Moving)
                 {
@@ -65,12 +70,12 @@ namespace CSWarfront.Core
 
                 if (IsNearOwnBase(state, u))
                 {
-                    u.StuckHours = 0f; // 自拠点付近は保全（クラスコメント参照）。再判定は最初からやり直す
+                    u.StuckHours = 0f; // preserved near own bases (see the class comment); re-evaluation starts over
                     continue;
                 }
 
-                // 無音・無爆発の消滅（KillEventは積まない。CombatStepの死亡判定パスは
-                // State==Deadを見て二重処理しない）。
+                // Silent despawn, no explosion (no KillEvent queued; CombatStep's death pass checks
+                // State==Dead and does not double-process).
                 u.State = UnitState.Dead;
                 u.CurrentHP = 0f;
                 despawned++;
@@ -78,9 +83,10 @@ namespace CSWarfront.Core
             return despawned;
         }
 
-        /// <summary>このユニットの前進判定閾値: min(速度×DespawnAfterHours×ProgressFraction,
-        /// MinProgressDistance)。歩兵（約1.0m/ゲーム時）なら約3m、戦車以上ならキャップの20m。
-        /// 型が引けない防御的ケースは0（＝常に前進扱い、消滅させない側に倒す）。</summary>
+        /// <summary>This unit's progress threshold: min(speed × DespawnAfterHours × ProgressFraction,
+        /// MinProgressDistance). About 3m for infantry (~1.0 m/game-hour); the 20m cap for tanks and up.
+        /// The defensive unresolvable-type case returns 0 (= always counts as progressing; errs on the
+        /// side of not despawning).</summary>
         private static float ProgressThresholdFor(WarState state, UnitInstance u)
         {
             UnitType type = state.Types.Get(u.TypeKey);
