@@ -1,38 +1,44 @@
 using System.IO;
 namespace CSWarfront.Core
 {
-    /// <summary>WarStateの論理状態をバイト列へ往復（表現参照は保存しない）。</summary>
+    /// <summary>Round-trips the WarState's logical state to bytes (presentation references are not saved).</summary>
     public static class WarStateSerializer
     {
-        // v1 -> v2: 基地ブロック末尾に CaptureGraceHours (float) を追加（Task24）。
-        // v2 -> v3: 基地ブロックのさらに末尾に AutoProduce (bool) を追加（Task34）。
-        // v3 -> v4: 勢力ブロックの末尾に ResearchPoints (float) / UnlockedTier (byte) を追加（Task35）。
-        // v4 -> v5: ペイロード全体の末尾に ThreatRelations（勢力5×ThreatKind2、int=(int)Relation）を
-        //           追加（Task59）。v4以前を読んだ場合は追記ブロックが存在しないため、ThreatRelationsは
-        //           コンストラクタ既定値の全Hostileのまま（Task58までの「常に無条件敵対」を維持）。
-        // v5 -> v6: 基地ブロックのさらに末尾に StockpiledMissiles (int) / MissileBuildProgress (float) を
-        //           追加（Task63：弾道ミサイル基地の備蓄・建造進捗）。v5以前を読んだ場合はどちらも
-        //           既定値0（備蓄0発・建造中でない）で復元される（MissileBaseはTask63以前は配置可能な
-        //           プレハブが存在しなかったため実害は無い）。
-        // v6 -> v7: 基地ブロックのさらに末尾に AutoLaunchMissiles (bool) を追加（Task90：ミサイル基地の
-        //           自動発射のON/OFF切替）。v6以前を読んだ場合は既定値true（従来の全自動発射挙動）。
-        // v7 -> v8: ペイロード全体の末尾に (a)飛翔中ミサイル（MissilesInFlight + NextMissileId）、
-        //           (b)ユニットの部隊命令（InstanceIdキーのOrder/RallyPoint並列ブロック）を追加
-        //           （Task92：「ロードで飛行中ミサイルが消える／命令がAI制御へ戻る」の解消）。
-        //           v7以前を読んだ場合はどちらも従来どおり（飛翔中なし・全員AiControlled）。
-        // v8 -> v9: ペイロード全体の末尾に (a)勢力の3資源（Manpower/Production/SupplyStock、Idキーの
-        //           並列ブロック）、(b)ユニットの弾薬/積載（Ammo/SupplyLoad、InstanceIdキーの並列
-        //           ブロック）を追加（Task99: 経済・補給システム）。v8以前を読んだ場合は
-        //           資源=初期付与相当（Manpower/Production各200、SupplyStock200）・弾薬満タン・
-        //           積載0で復元される（Invaderは資源0のまま＝使わないので不問）。
-        // v9 -> v10: ペイロード全体の末尾に (a)基地の築城/備蓄状態（BaseIdキー並列:
-        //           StoredSupplies/FortAmmo/RailConnected）、(b)ユニットの搭乗状態
-        //           （InstanceIdキー並列: CarriedByUnitId）を追加（Task101: Update3）。
-        //           v9以前は既定値（備蓄0・築城弾薬満タン・レール未接続・未搭乗）。
-        // バイナリ形式は位置依存のため、既存フィールドの間には挿入せず必ず末尾に追記すること。
+        // v1 -> v2: appended CaptureGraceHours (float) to the tail of the base block (Task24).
+        // v2 -> v3: appended AutoProduce (bool) further at the tail of the base block (Task34).
+        // v3 -> v4: appended ResearchPoints (float) / UnlockedTier (byte) to the tail of the faction block (Task35).
+        // v4 -> v5: appended ThreatRelations (5 factions × 2 ThreatKinds, int=(int)Relation) at the very
+        //           end of the payload (Task59). Reading v4 or older finds no appended block, so
+        //           ThreatRelations stays at the constructor default of all-Hostile (preserving the
+        //           unconditional hostility of Task58 and earlier).
+        // v5 -> v6: appended StockpiledMissiles (int) / MissileBuildProgress (float) further at the tail of
+        //           the base block (Task63: missile-base stockpile and build progress). Reading v5 or older
+        //           restores both at their defaults of 0 (no stockpile, not building) — harmless, since no
+        //           placeable MissileBase prefab existed before Task63.
+        // v6 -> v7: appended AutoLaunchMissiles (bool) further at the tail of the base block (Task90:
+        //           missile-base auto-launch toggle). Reading v6 or older defaults to true (the previous
+        //           fully automatic launching).
+        // v7 -> v8: appended, at the very end of the payload, (a) missiles in flight (MissilesInFlight +
+        //           NextMissileId) and (b) unit commands (a parallel block of Order/RallyPoint keyed by
+        //           InstanceId) (Task92: fixes "missiles in flight vanish on load / orders revert to AI
+        //           control"). Reading v7 or older behaves as before (nothing in flight; everyone
+        //           AiControlled).
+        // v8 -> v9: appended, at the very end of the payload, (a) the factions' three resources
+        //           (Manpower/Production/SupplyStock, a parallel block keyed by Id) and (b) unit
+        //           ammo/cargo (Ammo/SupplyLoad, a parallel block keyed by InstanceId) (Task99: economy
+        //           and supply). Reading v8 or older restores resources at the initial-grant amounts
+        //           (200 Manpower/Production each, 200 SupplyStock), full ammo and zero cargo (Invaders
+        //           stay at 0 resources = unused, so it does not matter).
+        // v9 -> v10: appended, at the very end of the payload, (a) base fortification/stock state
+        //           (parallel by BaseId: StoredSupplies/FortAmmo/RailConnected) and (b) unit carry state
+        //           (parallel by InstanceId: CarriedByUnitId) (Task101: Update 3). v9 and older get the
+        //           defaults (no stock, full fort ammo, rail unconnected, not carried).
+        // The binary format is position-dependent: never insert between existing fields — always append at
+        // the tail.
         private const int Version = 10;
 
-        /// <summary>v8以前のセーブに与える3資源の既定値（新規ゲームの初期付与と同額）。</summary>
+        /// <summary>Default three-resource grant given to v8-or-older saves (same amounts as a new game's
+        /// initial grant).</summary>
         private const float LegacyResourceGrant = 200f;
 
         public static byte[] Serialize(WarState s)
@@ -49,9 +55,9 @@ namespace CSWarfront.Core
                     w.Write(f.Treasury);
                     w.Write(f.HomeBaseId.HasValue); w.Write(f.HomeBaseId.HasValue ? f.HomeBaseId.Value : (ushort)0);
                     w.Write(f.IsPlayer); w.Write(f.Eliminated);
-                    w.Write(f.ResearchPoints); w.Write(f.UnlockedTier); // v4で追加（Task35）。ブロック末尾に追記。
+                    w.Write(f.ResearchPoints); w.Write(f.UnlockedTier); // added in v4 (Task35), appended at the block tail.
                 }
-                // relations（5x5固定）
+                // relations (fixed 5x5)
                 for (int a = 0; a < 5; a++)
                     for (int b = 0; b < 5; b++)
                         w.Write((int)s.Relations.Get(a, b));
@@ -66,10 +72,10 @@ namespace CSWarfront.Core
                     w.Write(b.MaxHP); w.Write(b.CurrentHP);
                     w.Write(b.Queue.Count);
                     foreach (var o in b.Queue) { w.Write(o.TypeKey ?? ""); w.Write(o.Cost); w.Write(o.BuildTime); w.Write(o.Progress); }
-                    w.Write(b.CaptureGraceHours); // v2で追加。位置依存フォーマットのためブロック末尾に追記。
-                    w.Write(b.AutoProduce); // v3で追加（Task34）。同じ理由でさらに末尾に追記。
-                    w.Write(b.StockpiledMissiles); w.Write(b.MissileBuildProgress); // v6で追加（Task63）。
-                    w.Write(b.AutoLaunchMissiles); // v7で追加（Task90）。
+                    w.Write(b.CaptureGraceHours); // added in v2; appended at the block tail (position-dependent format).
+                    w.Write(b.AutoProduce); // added in v3 (Task34); appended further at the tail for the same reason.
+                    w.Write(b.StockpiledMissiles); w.Write(b.MissileBuildProgress); // added in v6 (Task63).
+                    w.Write(b.AutoLaunchMissiles); // added in v7 (Task90).
                 }
                 // units
                 w.Write(s.Units.Count);
@@ -82,12 +88,12 @@ namespace CSWarfront.Core
                     WritePos(w, u.OrderTargetPos.HasValue ? u.OrderTargetPos.Value : new WorldPos(0, 0, 0));
                 }
                 w.Write(s.NextInstanceId);
-                // threat relations（5勢力×ThreatKindCount固定、v5で追加。Task59）。ペイロード末尾に追記。
+                // threat relations (fixed 5 factions × ThreatKindCount; added in v5, Task59). Appended at the payload tail.
                 for (int f = 0; f < 5; f++)
                     for (int k = 0; k < ThreatRelations.ThreatKindCount; k++)
                         w.Write((int)s.ThreatRelations.Get((byte)f, (ThreatKind)k));
 
-                // v8（Task92）: 飛翔中ミサイル。着弾間際でセーブしても続きから飛ぶ。
+                // v8 (Task92): missiles in flight — a save moments before impact resumes mid-flight.
                 w.Write(s.MissilesInFlight.Count);
                 foreach (var m in s.MissilesInFlight)
                 {
@@ -97,8 +103,8 @@ namespace CSWarfront.Core
                 }
                 w.Write(s.NextMissileId);
 
-                // v8（Task92）: 部隊命令（Order/RallyPoint）。ユニットブロック本体は互換のため触らず、
-                // InstanceIdをキーにした並列ブロックとして末尾に追記する。
+                // v8 (Task92): unit commands (Order/RallyPoint). The unit block itself is untouched for
+                // compatibility; appended as a parallel block keyed by InstanceId.
                 w.Write(s.Units.Count);
                 foreach (var u in s.Units)
                 {
@@ -108,7 +114,8 @@ namespace CSWarfront.Core
                     WritePos(w, u.RallyPoint.HasValue ? u.RallyPoint.Value : new WorldPos(0, 0, 0));
                 }
 
-                // v9（Task99）: 勢力の3資源（Idキーの並列ブロック。勢力ブロック本体は互換のため触らない）。
+                // v9 (Task99): the factions' three resources (parallel block keyed by Id; the faction block
+                // itself is untouched for compatibility).
                 w.Write(s.Factions.Count);
                 foreach (var f in s.Factions)
                 {
@@ -116,7 +123,7 @@ namespace CSWarfront.Core
                     w.Write(f.Manpower); w.Write(f.Production); w.Write(f.SupplyStock);
                 }
 
-                // v9（Task99）: ユニットの弾薬/積載（InstanceIdキーの並列ブロック）。
+                // v9 (Task99): unit ammo/cargo (parallel block keyed by InstanceId).
                 w.Write(s.Units.Count);
                 foreach (var u in s.Units)
                 {
@@ -124,7 +131,7 @@ namespace CSWarfront.Core
                     w.Write(u.Ammo); w.Write(u.SupplyLoad);
                 }
 
-                // v10（Task101）: 基地の築城/備蓄状態（BaseIdキーの並列ブロック）。
+                // v10 (Task101): base fortification/stock state (parallel block keyed by BaseId).
                 w.Write(s.Bases.Count);
                 foreach (var b in s.Bases)
                 {
@@ -132,7 +139,7 @@ namespace CSWarfront.Core
                     w.Write(b.StoredSupplies); w.Write(b.FortAmmo); w.Write(b.RailConnected);
                 }
 
-                // v10（Task101）: ユニットの搭乗状態（InstanceIdキーの並列ブロック）。
+                // v10 (Task101): unit carry state (parallel block keyed by InstanceId).
                 w.Write(s.Units.Count);
                 foreach (var u in s.Units)
                 {
@@ -154,7 +161,7 @@ namespace CSWarfront.Core
             using (var ms = new MemoryStream(bytes))
             using (var r = new BinaryReader(ms))
             {
-                int version = r.ReadInt32(); // v2以降の分岐に使用（CaptureGraceHoursの有無）、v3以降（AutoProduceの有無）、v4以降（ResearchPoints/UnlockedTierの有無）、v5以降（ThreatRelationsの有無）、v6以降（StockpiledMissiles/MissileBuildProgressの有無）
+                int version = r.ReadInt32(); // branches on v2+ (CaptureGraceHours), v3+ (AutoProduce), v4+ (ResearchPoints/UnlockedTier), v5+ (ThreatRelations), v6+ (StockpiledMissiles/MissileBuildProgress)
                 int fcount = r.ReadInt32();
                 for (int i = 0; i < fcount; i++)
                 {
@@ -170,15 +177,15 @@ namespace CSWarfront.Core
                     }
                     else
                     {
-                        f.ResearchPoints = 0f; // v3以前は既定値0（研究未着手）
-                        f.UnlockedTier = 1;    // v3以前は既定値1（Tier1のみ解禁の従来挙動）
+                        f.ResearchPoints = 0f; // v3 and older: default 0 (research not started)
+                        f.UnlockedTier = 1;    // v3 and older: default 1 (only tier 1 unlocked — the old behavior)
                     }
                     s.Factions.Add(f);
                 }
-                // Task95: Invader実装以前のセーブ（5勢力）にはInvader勢力が居ないため、ここで補完する
-                // （冪等。Invader実装後のセーブはfcount=6で上のループが既に復元している）。
-                // 関係はRelationMatrix/ThreatRelationsがハードコードで常時Hostileを返すため永続化不要
-                // （下の5x5固定ブロックは従来のまま）。
+                // Task95: saves from before the Invader existed (five factions) have no Invader faction, so
+                // it is filled in here (idempotent; post-Invader saves have fcount=6 and the loop above has
+                // already restored it). Its relations need no persistence — RelationMatrix/ThreatRelations
+                // hard-code permanent hostility (the fixed 5x5 block below is unchanged).
                 InvasionEvents.EnsureInvaderFaction(s);
                 for (int a = 0; a < 5; a++)
                     for (int b = 0; b < 5; b++)
@@ -200,7 +207,7 @@ namespace CSWarfront.Core
                         o.Progress = r.ReadSingle(); b.Queue.Add(o);
                     }
                     b.CaptureGraceHours = version >= 2 ? r.ReadSingle() : 0f;
-                    b.AutoProduce = version >= 3 ? r.ReadBoolean() : true; // v2以前は既定値true（従来の全自動挙動）
+                    b.AutoProduce = version >= 3 ? r.ReadBoolean() : true; // v2 and older: default true (the old fully automatic behavior)
                     if (version >= 6)
                     {
                         b.StockpiledMissiles = r.ReadInt32();
@@ -208,12 +215,12 @@ namespace CSWarfront.Core
                     }
                     else
                     {
-                        b.StockpiledMissiles = 0; // v5以前は既定値0（備蓄0発）
-                        b.MissileBuildProgress = 0f; // v5以前は既定値0（建造中でない）
+                        b.StockpiledMissiles = 0; // v5 and older: default 0 (empty stockpile)
+                        b.MissileBuildProgress = 0f; // v5 and older: default 0 (not building)
                     }
-                    b.AutoLaunchMissiles = version >= 7 ? r.ReadBoolean() : true; // v6以前は既定値true（従来の全自動発射）
-                    // Task101（ユーザー要望）: 塹壕は常に無所属の地形（所有付きで保存された古い
-                    // セーブもロード時に正規化する）。
+                    b.AutoLaunchMissiles = version >= 7 ? r.ReadBoolean() : true; // v6 and older: default true (the old auto-launch)
+                    // Task101 (user request): trenches are always unowned terrain (old saves that stored an
+                    // owner are normalized on load too).
                     if (b.Type == BaseType.Trench) b.OwnerFactionId = null;
                     s.Bases.Add(b);
                 }
@@ -230,9 +237,9 @@ namespace CSWarfront.Core
                 }
                 s.NextInstanceId = r.ReadUInt32();
 
-                // threat relations（v5で追加、Task59）。v4以前の形式にはこのブロックが存在しないため、
-                // その場合は読み取らずs.ThreatRelations（コンストラクタ既定値＝全Hostile）をそのまま使う
-                // （Task58までの「常に無条件敵対」という後方互換の挙動になる）。
+                // threat relations (added in v5, Task59). v4-and-older formats lack this block; in that
+                // case nothing is read and s.ThreatRelations keeps its constructor default of all-Hostile
+                // (the backward-compatible "always unconditionally hostile" behavior of Task58 and earlier).
                 if (version >= 5)
                 {
                     for (int f = 0; f < 5; f++)
@@ -240,8 +247,8 @@ namespace CSWarfront.Core
                             s.ThreatRelations.Set((byte)f, (ThreatKind)k, (Relation)r.ReadInt32());
                 }
 
-                // v8（Task92）: 飛翔中ミサイル＋部隊命令。v7以前にはこのブロックが無いため、
-                // その場合は従来どおり（飛翔中なし・全員AiControlled/RallyPointなし）で復元される。
+                // v8 (Task92): missiles in flight + unit commands. v7 and older lack this block; those
+                // saves restore as before (nothing in flight, everyone AiControlled without a RallyPoint).
                 if (version >= 8)
                 {
                     int mcount = r.ReadInt32();
@@ -268,13 +275,14 @@ namespace CSWarfront.Core
                         bool hasRally = r.ReadBoolean();
                         var rally = ReadPos(r);
                         UnitInstance u = s.FindUnit(iid);
-                        if (u == null) continue; // 整合性が崩れたセーブでも例外にしない（防御的）
+                        if (u == null) continue; // no exception even for an inconsistent save (defensive)
                         u.Order = order;
                         if (hasRally) u.RallyPoint = rally;
                     }
                 }
 
-                // v9（Task99）: 3資源＋弾薬/積載。v8以前は既定値（バージョンコメント参照）。
+                // v9 (Task99): the three resources + ammo/cargo. v8 and older use the defaults (see the
+                // version comments).
                 if (version >= 9)
                 {
                     int frcount = r.ReadInt32();
@@ -283,7 +291,7 @@ namespace CSWarfront.Core
                         byte fid = r.ReadByte();
                         float manpower = r.ReadSingle(), production = r.ReadSingle(), supply = r.ReadSingle();
                         Faction f = s.FindFaction(fid);
-                        if (f == null) continue; // 防御的（部隊命令ブロックと同じ規約）
+                        if (f == null) continue; // defensive (same convention as the unit-command block)
                         f.AddManpower(manpower);
                         f.AddProduction(production);
                         f.AddSupply(supply);
@@ -302,8 +310,9 @@ namespace CSWarfront.Core
                 }
                 else
                 {
-                    // 旧セーブへの初期付与（新規ゲームと同額。既存の軍を経済停止で即枯渇させないため）。
-                    // 弾薬はUnitInstanceの既定値（満タン）のままでよい。
+                    // Initial grant for old saves (the same amounts as a new game — so an existing army is
+                    // not instantly starved by a halted economy). Ammo can stay at the UnitInstance default
+                    // (full).
                     foreach (Faction f in s.Factions)
                     {
                         if (f.Id == Faction.InvaderFactionId) continue;
@@ -313,8 +322,8 @@ namespace CSWarfront.Core
                     }
                 }
 
-                // v10（Task101）: 築城/備蓄＋搭乗。v9以前は既定値
-                // （StoredSupplies0/FortAmmo1/RailConnected false/未搭乗）のままでよい。
+                // v10 (Task101): fortification/stock + carry state. v9 and older keep the defaults
+                // (StoredSupplies 0 / FortAmmo 1 / RailConnected false / not carried).
                 if (version >= 10)
                 {
                     int bscount = r.ReadInt32();
@@ -323,7 +332,7 @@ namespace CSWarfront.Core
                         ushort bid = r.ReadUInt16();
                         float stored = r.ReadSingle(); float fortAmmo = r.ReadSingle(); bool rail = r.ReadBoolean();
                         MilitaryBase b = FindBaseById(s, bid);
-                        if (b == null) continue; // 防御的
+                        if (b == null) continue; // defensive
                         b.StoredSupplies = stored;
                         b.FortAmmo = fortAmmo;
                         b.RailConnected = rail;

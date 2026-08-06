@@ -1,15 +1,17 @@
 namespace CSWarfront.Core
 {
-    /// <summary>交戦tick（純ロジック）。射程内の敵を探し、毎tick DamagePerHit を適用する。</summary>
+    /// <summary>The engagement tick (pure logic). Finds enemies in range and applies DamagePerHit each tick.</summary>
     public static class CombatStep
     {
         public static void Advance(WarState state, float dt)
         {
-            // Task97: ターゲット探索の総当たりO(N²)を避けるため、このtickのユニット配置で
-            // 空間グリッドを組み直す（O(N)。結果は総当たり版と完全に同一、UnitSpatialGrid参照）。
+            // Task97: rebuild the spatial grid from this tick's unit positions to avoid the O(N²)
+            // brute-force target search (O(N); results are exactly identical to the brute-force version —
+            // see UnitSpatialGrid).
             state.UnitGrid.Build(state.Units);
 
-            // 1) ターゲット選定と発火（ダメージは後段で一括適用しないシンプル版：都度適用）
+            // 1) Target selection and firing (the simple per-encounter application — damage is not batched
+            //    at the end)
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var self = state.Units[i];
@@ -17,23 +19,24 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(self.TypeKey);
                 if (type == null) continue;
 
-                // Task79: 自爆ドローン（UnitCategoryFlags.IsKamikaze）は通常の射撃パイプラインに
-                // 一切乗らない（ShotEventも発行しない・dtスケールのダメージも与えない）。
-                // 目標のロック・突進・体当たり起爆はKamikazeStep（MovementStepと連携）が完結して扱う。
-                // このユニットのCurrentHPがKamikazeStepの起爆で0になった場合の死亡判定・KillEvent発行は、
-                // 下の第2パス（死亡はCurrentHP<=0から導出するという単一の真実源）がそのまま拾う。
+                // Task79: suicide drones (UnitCategoryFlags.IsKamikaze) never enter the normal firing
+                // pipeline (no ShotEvents, no dt-scaled damage). Target locking, the dive and the ramming
+                // detonation are handled entirely by KamikazeStep (in concert with MovementStep). If this
+                // unit's CurrentHP hits 0 from KamikazeStep's detonation, the second pass below (death
+                // derives from CurrentHP<=0 as the single source of truth) picks it up as-is.
                 if (type.Category.IsKamikaze()) continue;
 
-                // Task99/101: 非武装ユニット（補給トラック/輸送ヘリ/軍用列車）と搭乗中ユニットは
-                // 射撃パイプラインに乗らない。
+                // Task99/101: unarmed units (supply trucks / transport helicopters / military trains) and
+                // carried units never enter the firing pipeline.
                 if (type.Category == UnitCategory.SupplyTruck
                     || type.Category == UnitCategory.TransportHelicopter
                     || type.Category == UnitCategory.MilitaryTrain) continue;
                 if (self.IsCarried) continue;
 
-                // Task99: 弾切れ（Ammo<=0）は射撃停止のみ——ターゲットを解除して非交戦へ戻す
-                // （移動・占領は可能なまま）。補給（ResupplyStep/SupplyTruckStep）で回復すれば
-                // 次tickから通常どおり交戦に復帰する。Invader・弾薬制対象外はHasAmmoが常にtrue。
+                // Task99: out of ammo (Ammo<=0) only stops firing — drop the target and return to
+                // non-engaged (moving and capturing still work). Once resupplied
+                // (ResupplyStep/SupplyTruckStep) the unit re-enters combat normally from the next tick.
+                // Invaders and non-ammo-bound categories always have HasAmmo true.
                 if (!AmmoRules.HasAmmo(self, type))
                 {
                     if (self.State == UnitState.Engaging) self.State = UnitState.Idle;
@@ -41,10 +44,11 @@ namespace CSWarfront.Core
                     continue;
                 }
 
-                // ターゲット選定は依然として単純な「射程内最近接の敵」（TargetSearch）。
-                // 有利な相性（CombatMatchup）を優先してターゲットを選ぶ賢いAIは将来の拡張課題とする。
-                // Task61: type.CanTargetDomainsで領域フィルタをかける（AntiAir以外の陸上兵科は航空ユニットを
-                // 一切狙わない、艦艇は航空ユニットを狙わない、航空ユニットは全領域を狙える、等）。
+                // Target selection remains the simple "nearest hostile in range" (TargetSearch). A smarter
+                // AI that prefers favorable matchups (CombatMatchup) is future work.
+                // Task61: type.CanTargetDomains applies the domain filter (land categories other than
+                // AntiAir never target aircraft, ships never target aircraft, aircraft can target every
+                // domain, etc.).
                 var target = TargetSearch.FindNearestHostile(self, state.UnitGrid, state.Relations, type.Range,
                     type.CanTargetDomains, state.Types);
                 if (target == null)
@@ -61,50 +65,56 @@ namespace CSWarfront.Core
                     ? CombatMatchup.Multiplier(type.Category, targetType.Category)
                     : 1.0f;
 
-                // Task90（ユーザー要望）: 対空兵科の対航空攻撃は離散的な1発ごとの命中ロールで解決する
-                // （自爆ドローンには機銃、戦闘機・爆撃機には対空ミサイル。Tier別命中率で外れもある）。
-                // 期待値方式の連続ダメージ・FireEffectsの間引きはどちらも使わない（AntiAirCombat参照）。
+                // Task90 (user request): AA fire against aircraft resolves as discrete per-shot hit rolls
+                // (machine gun against suicide drones, SAMs against fighters/bombers; tier-based hit
+                // chances with real misses). Neither the expected-value continuous damage nor the
+                // FireEffects throttling applies (see AntiAirCombat).
                 if (type.Category == UnitCategory.AntiAir && targetType != null && targetType.Domain == Domain.Air)
                 {
                     AdvanceAntiAirShot(state, self, type, target, targetType, targetArmor, matchup, dt);
                     continue;
                 }
-                // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
-                // 兵科相性倍率(CombatMatchup、Task29)、命中率(CombatSynergy.AccuracyFor、Task38)に比例する。
-                // 命中率は乱数抽選ではなく期待値ダメージ倍率として適用する（決定的シミュレーションを保つため）。
+                // Attack is damage per in-game hour. The damage actually applied scales with elapsed
+                // in-game time (dt), the category matchup multiplier (CombatMatchup, Task29) and accuracy
+                // (CombatSynergy.AccuracyFor, Task38). Accuracy applies as an expected-value damage
+                // multiplier rather than a random roll (preserving deterministic simulation).
                 float accuracy = CombatSynergy.AccuracyFor(state, self, type);
-                // Task86: 航空ユニットはパス移動で射程内滞在時間が減るぶん、AirCombat.DamageMultiplierで補正する。
+                // Task86: air units spend less time in range due to pass movement; AirCombat.DamageMultiplier compensates.
                 float dmg = CombatMath.DamagePerHit(type.Attack, targetArmor) * dt * matchup * accuracy
                     * AirCombat.DamageMultiplier(type);
-                dmg *= FortDefenseBonus.Multiplier(state, target, targetType); // Task101: 塹壕/掩蔽壕上の歩兵は被ダメ減
-                // 撃破報酬（Task35）: このダメージでHPが初めて0以下へ落ちた瞬間だけ、攻撃側(self)の勢力へ
-                // Research.KillReward を与える。wasAlive フラグで「このダメージがとどめだったか」を判定し、
-                // 同tick内で同じ的へ複数回ダメージが入っても二重付与しない。
+                dmg *= FortDefenseBonus.Multiplier(state, target, targetType); // Task101: infantry on trenches/bunkers take less
+                // Kill reward (Task35): only at the instant this damage first drops HP to 0 or below does
+                // the attacker's (self's) faction receive Research.KillReward. The wasAlive flag decides
+                // "was this damage the killing blow", so multiple hits on the same victim within one tick
+                // cannot double-award.
                 bool wasAlive = target.CurrentHP > 0f;
                 target.CurrentHP -= dmg;
                 if (wasAlive && target.CurrentHP <= 0f)
                 {
                     AwardKillReward(state, self.FactionId, targetType);
-                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invaderの現地調達（撃破で弾薬回復）
+                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invader scavenging (ammo from kills)
                 }
 
-                // Task54: 被弾地点を「戦闘域」として報告する（民間交通の迂回用）。近傍への報告は
-                // CombatZoneTracker側でマージされるため、ここでは間引き不要。
+                // Task54: report the hit location as a "combat zone" (for civilian traffic avoidance).
+                // Nearby reports are merged inside CombatZoneTracker, so no throttling is needed here.
                 state.CombatZones.ReportCombat(target.Position);
 
-                // 発砲エフェクトの間引き（Task42、Task58でFireEffects.EmitThrottledへ集約）: 実際に
-                // ダメージを与えたこのtickでのみFireCooldownをdt分だけ減算する。0以下になった瞬間だけ
-                // ShotEventを1つ積み、FireIntervalHoursへリセットする（乱数不使用・決定的）。
+                // Muzzle-effect throttling (Task42; consolidated into FireEffects.EmitThrottled in Task58):
+                // FireCooldown is decremented by dt only on ticks that actually dealt damage. Only at the
+                // moment it reaches 0 is a single ShotEvent queued, then it resets to FireIntervalHours
+                // (no RNG, deterministic).
                 FireEffects.EmitThrottled(state, self, type, target.Position, target.InstanceId, dt);
 
-                // Task99: 射撃したtickだけ弾薬を消費する（連続ダメージ方式に合わせた連続消費）。
+                // Task99: ammo is consumed only on firing ticks (continuous consumption matching the
+                // continuous damage model).
                 AmmoRules.ConsumeFire(self, type, dt);
             }
-            // 2) 死亡判定
-            // Task51: ここが「ユニットが実際にDeadへ遷移する、まさにその瞬間」なので、撃破音の
-            // トリガーとしてKillEventを1件だけ積む（State != Deadを条件にしているため二重には積まない）。
-            // Task53: KillEventに被撃破ユニットのUnitCategoryを積む（歩兵系の撃破音オミット判定用）。
-            // UnitTypeが見つからない防御的ケースではdefault(UnitCategory)（Tank=0、撃破音は鳴る側）にする。
+            // 2) Death resolution
+            // Task51: this is the exact moment a unit transitions to Dead, so exactly one KillEvent is
+            // queued as the kill-sound trigger (the State != Dead condition prevents double-queuing).
+            // Task53: the KillEvent carries the victim's UnitCategory (for omitting the kill sound for
+            // infantry). In the defensive case of an unresolvable UnitType, default(UnitCategory) is used
+            // (Tank=0 — the side that does play the sound).
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
@@ -118,12 +128,13 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>Task90: 対空の対航空・離散射撃。FireCooldownをdtで消化し、0以下になった瞬間に
-        /// 1発発射する: AntiAirCombat.RollHit（決定的ハッシュ、Tier別命中率）で命中/外れをロールし、
-        /// 命中時のみ「Attack × FireIntervalHours × 相性」の一括ダメージ（＝連続方式の1発射間隔ぶんの
-        /// ダメージをまとめて適用する形。期待DPS = 命中率×Attack×相性）。外れはノーダメージで、
-        /// Missed=trueのShotEventだけを積む（Game層のフレア/回避演出用）。ShotKindは機銃=Gunfire、
-        /// 対空ミサイル=SamMissile（UnitTypeのShotKindは使わない——目標の種類で撃ち分けるため）。</summary>
+        /// <summary>Task90: AA-vs-air discrete firing. FireCooldown is consumed by dt; the moment it
+        /// reaches 0 one round is fired: AntiAirCombat.RollHit (deterministic hash, tier-based hit chance)
+        /// rolls hit/miss, and only a hit applies the lump damage "Attack × FireIntervalHours × matchup"
+        /// (= one firing interval's worth of the continuous model in one packet; expected DPS = hit chance
+        /// × Attack × matchup). A miss deals no damage and only queues a Missed=true ShotEvent (for the
+        /// Game layer's flare/evasion display). ShotKind is Gunfire for the machine gun and SamMissile for
+        /// the SAM (the UnitType's ShotKind is not used — the weapon is chosen by target kind).</summary>
         private static void AdvanceAntiAirShot(WarState state, UnitInstance self, UnitType type,
             UnitInstance target, UnitType targetType, float targetArmor, float matchup, float dt)
         {
@@ -143,7 +154,7 @@ namespace CSWarfront.Core
                 if (wasAlive && target.CurrentHP <= 0f)
                 {
                     AwardKillReward(state, self.FactionId, targetType);
-                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invaderの現地調達（撃破で弾薬回復）
+                    AmmoRules.RewardInvaderKill(self, type); // Task100: Invader scavenging (ammo from kills)
                 }
                 state.CombatZones.ReportCombat(target.Position);
             }
@@ -152,16 +163,17 @@ namespace CSWarfront.Core
                 usesMissile ? ShotKind.SamMissile : ShotKind.Gunfire,
                 self.FactionId, self.InstanceId, target.InstanceId, type.Category, !hit));
 
-            // Task99: 1発撃つたびに発射間隔ぶんの弾薬を消費（外れても消費する。期待消費速度は
-            // 連続方式のdt消費と一致する——1発/FireIntervalHoursの離散射撃のため）。
+            // Task99: each round consumes one firing interval's worth of ammo (misses consume too; the
+            // expected consumption rate matches the continuous model's dt drain, since firing is discrete
+            // at one round per FireIntervalHours).
             AmmoRules.ConsumeFire(self, type, type.FireIntervalHours);
         }
 
-        /// <summary>撃破報酬（Task35）を killerFactionId の勢力へ加算する。victimType/勢力が見つからなければ
-        /// 何もしない（防御的：整合性が崩れているケースで例外にしないため）。
-        /// internal（Task79）: KamikazeStepの体当たり起爆でも同じ撃破報酬ロジックを再利用するため、
-        /// ロジックを複製せずここを直接呼べるようにアクセス修飾子をprivateから緩めた
-        /// （同一アセンブリ内のみ、公開APIの増加はない）。</summary>
+        /// <summary>Credits the kill reward (Task35) to the killerFactionId faction. Does nothing when the
+        /// victimType/faction cannot be resolved (defensive: never throw on inconsistent state).
+        /// internal (Task79): KamikazeStep's ramming detonation reuses the same kill-reward logic, so the
+        /// access was relaxed from private to let it call in directly instead of duplicating the logic
+        /// (same assembly only; no growth of the public API).</summary>
         internal static void AwardKillReward(WarState state, byte killerFactionId, UnitType victimType)
         {
             if (victimType == null) return;
