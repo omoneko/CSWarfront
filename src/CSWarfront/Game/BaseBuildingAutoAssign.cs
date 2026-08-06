@@ -23,14 +23,18 @@ namespace CSWarfront.Game
         /// <summary>基地種別ごとの候補名（正規化済み）。先に一致したものを採用する。</summary>
         private static readonly KeyValuePair<BaseType, string[]>[] Candidates =
         {
+            // Task112 (Workshop report by StarfleetPups: "auto detect says none"): the published base
+            // assets are actually named MilitaryBase_Army / _Navy / _AirForce / _Missile — none of which
+            // matched the original candidate lists, so all four base types failed to auto-assign while
+            // the fortifications worked. The real names lead each list now.
             new KeyValuePair<BaseType, string[]>(BaseType.Army,
-                new[] { "basearmy", "armybase", "warfrontarmybase", "militarybase" }),
+                new[] { "militarybasearmy", "basearmy", "armybase", "warfrontarmybase", "militarybase" }),
             new KeyValuePair<BaseType, string[]>(BaseType.Navy,
-                new[] { "basenavy", "navybase", "navalbase", "warfrontnavalbase" }),
+                new[] { "militarybasenavy", "basenavy", "navybase", "navalbase", "warfrontnavalbase" }),
             new KeyValuePair<BaseType, string[]>(BaseType.AirForce,
-                new[] { "baseair", "airbase", "airforcebase", "warfrontairbase" }),
+                new[] { "militarybaseairforce", "baseair", "airbase", "airforcebase", "warfrontairbase" }),
             new KeyValuePair<BaseType, string[]>(BaseType.MissileBase,
-                new[] { "basemissile", "missilebase", "warfrontmissilebase" }),
+                new[] { "militarybasemissile", "basemissile", "missilebase", "warfrontmissilebase" }),
             new KeyValuePair<BaseType, string[]>(BaseType.Bunker,
                 new[] { "bunker", "warfrontbunker" }),
             new KeyValuePair<BaseType, string[]>(BaseType.ArtilleryPost,
