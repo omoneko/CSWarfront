@@ -157,16 +157,32 @@ namespace CSWarfront.Core
 
         private static void AdvanceLoadedHeli(WarState state, UnitInstance heli, MilitaryBase home, int passengers)
         {
-            // 目的地: 備蓄に空きのある最寄りDepot → 無ければ交戦中の味方陸上ユニットの最寄り（前線）。
+            // 目的地: 備蓄に空きのある最寄りDepot → 弾薬の減った築城（Task111）→
+            // 交戦中の味方陸上ユニットの最寄り（前線）。
             MilitaryBase depot = FindNearestDepotWithRoom(state, heli);
-            WorldPos? dest = depot != null ? depot.Position : (WorldPos?)null;
+            MilitaryBase fort = depot == null ? FindNearestFortNeedingAmmo(state, heli) : null;
+            WorldPos? dest = depot != null ? depot.Position : (fort != null ? fort.Position : (WorldPos?)null);
             if (!dest.HasValue) dest = FindFrontline(state, heli);
 
             if (!dest.HasValue)
             {
-                // 目的地なし: 歩兵だけ積んでいるなら母基地で降機、物資は持ったまま待機。
-                if (passengers > 0 && heli.Position.HorizontalDistanceTo(home.Position) <= PickupRadius)
-                    Disembark(state, heli);
+                // Task111（Workshop報告「輸送ヘリが全機着陸したまま永久に動かない」）: 従来は
+                // 「物資は持ったままその場で待機」しており、Depotが満杯になった瞬間に空中で目的地を
+                // 失ったヘリが野外に降りたまま二度と動かなくなっていた。配送先が無い物資は母基地へ
+                // 持ち帰り、勢力プールへ戻す（歩兵も母基地で降機）。これでヘリは必ず基地へ帰り、
+                // 需要が生まれれば（Depotに空きが出る/築城の弾が減る）次のサイクルで再出撃する。
+                if (heli.Position.HorizontalDistanceTo(home.Position) > PickupRadius)
+                {
+                    FlyTo(heli, home.Position);
+                    return;
+                }
+                if (passengers > 0) Disembark(state, heli);
+                if (heli.SupplyLoad > 0f)
+                {
+                    Faction f = state.FindFaction(heli.FactionId);
+                    if (f != null) f.AddSupply(heli.SupplyLoad * CargoSupply);
+                    heli.SupplyLoad = 0f;
+                }
                 Wait(heli);
                 return;
             }
@@ -177,7 +193,7 @@ namespace CSWarfront.Core
                 return;
             }
 
-            // 到着: Depotなら物資を荷下ろし。歩兵はどちらの目的地でも降機。
+            // 到着: Depotなら物資を荷下ろし。築城（Task111）なら弾薬へ直接転送。歩兵はどの目的地でも降機。
             if (depot != null && heli.SupplyLoad > 0f)
             {
                 float cap = FortificationRules.StoredSupplyCap(depot.Type);
@@ -188,8 +204,38 @@ namespace CSWarfront.Core
                 heli.SupplyLoad -= transfer / CargoSupply;
                 if (heli.SupplyLoad < 0.001f) heli.SupplyLoad = 0f;
             }
+            else if (fort != null && heli.SupplyLoad > 0f)
+            {
+                float need = 1f - fort.FortAmmo;
+                float carriedReloads = heli.SupplyLoad * CargoSupply / ResupplyStep.SupplyPerFullReload;
+                float refill = need < carriedReloads ? need : carriedReloads;
+                fort.FortAmmo += refill;
+                if (fort.FortAmmo > 1f) fort.FortAmmo = 1f;
+                heli.SupplyLoad -= refill * ResupplyStep.SupplyPerFullReload / CargoSupply;
+                if (heli.SupplyLoad < 0.001f) heli.SupplyLoad = 0f;
+            }
             Disembark(state, heli);
             Wait(heli); // 空になっていれば次tickのAdvanceEmptyHeliが帰投させる
+        }
+
+        /// <summary>Task111: 弾薬がSupplyTruckStep.NeedThreshold未満の自軍築城（掩蔽壕/砲兵陣地、
+        /// 稼働中）のうち最寄り。無ければnull。トラックと違い自動回復圏の除外はしない
+        /// （空輸は速いので、多少の重複配送より応答性を優先する）。</summary>
+        private static MilitaryBase FindNearestFortNeedingAmmo(WarState state, UnitInstance heli)
+        {
+            MilitaryBase best = null;
+            float bestDist = float.MaxValue;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                MilitaryBase fort = state.Bases[b];
+                if (fort.Type != BaseType.Bunker && fort.Type != BaseType.ArtilleryPost) continue;
+                if (fort.OwnerFactionId == null || fort.OwnerFactionId.Value != heli.FactionId) continue;
+                if (fort.CurrentHP <= 0f) continue;
+                if (fort.FortAmmo >= SupplyTruckStep.NeedThreshold) continue;
+                float d = heli.Position.HorizontalDistanceTo(fort.Position);
+                if (d < bestDist) { bestDist = d; best = fort; }
+            }
+            return best;
         }
 
         /// <summary>搭乗中の歩兵を降機させる（周囲へ決定的散開、State=Idle→次のAssignAdvanceが再任務）。</summary>

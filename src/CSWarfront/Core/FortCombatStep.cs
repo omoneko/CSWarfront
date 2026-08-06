@@ -24,12 +24,17 @@ namespace CSWarfront.Core
         public const float BunkerAmmoHours = 12f;     // 歩兵と同じ
         public const float BunkerFireIntervalHours = 0.3f;
 
-        public const float ArtAttack = 55f;           // 砲兵T1
-        public const float ArtRange = 120f;
+        public const float ArtAttack = 55f;           // artillery T1
+        /// <summary>Task111 (Workshop request): 120 -> 250. A static emplacement should outrange the mobile
+        /// artillery it is built from; at 120 it was routinely outranged and never got to fire.</summary>
+        public const float ArtRange = 250f;
         public const float ArtSplash = 30f;
-        public const float ArtAccuracy = 0.35f;       // 砲兵と同じ
-        public const float ArtAmmoHours = 4f;         // 砲兵と同じ
-        public const float ArtFireIntervalHours = 2.5f;
+        public const float ArtAccuracy = 0.35f;       // same as artillery units
+        /// <summary>Task111 (Workshop request "15 shots instead of only 2 before resupply"): 4 -> 24 hours
+        /// of firing per full ammo load. Together with the shorter visual fire interval below this yields
+        /// about 16 visible shots per resupply.</summary>
+        public const float ArtAmmoHours = 24f;
+        public const float ArtFireIntervalHours = 1.5f; // Task111: 2.5 -> 1.5 (more visible firing)
 
         /// <summary>掩蔽壕自身の建物を射線判定から除外する半径（16×16mの対角半径強）。</summary>
         public const float SelfLosIgnoreRadius = 14f;

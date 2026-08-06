@@ -112,4 +112,43 @@ public class TransportHeliStepTests
         Assert.Equal(UnitState.Moving, heli.State);
         Assert.Equal(0f, heli.OrderTargetPos.Value.X, 1); // 母基地(0,0)へ
     }
+
+    // --- Task111 (Workshop報告「輸送ヘリが全機着陸したまま永久に動かない」) ---
+
+    [Fact]
+    public void Loaded_heli_with_nowhere_to_deliver_returns_its_cargo_home()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var depot = new MilitaryBase(2, BaseType.SupplyDepot, new WorldPos(Far, 0, 0));
+        depot.OwnerFactionId = 0;
+        depot.StoredSupplies = FortificationRules.StoredSupplyCap(BaseType.SupplyDepot); // 満杯
+        s.Bases.Add(depot);
+        UnitInstance heli = AddHeli(s, new WorldPos(Far - 100, 0, 0), load: 1f); // 満杯Depotの手前で立ち往生していた状況
+
+        TransportHeliStep.Advance(s, 0.1f); // 配送先なし → 母基地へ向かう
+        Assert.Equal(UnitState.Moving, heli.State);
+        Assert.Equal(0f, heli.OrderTargetPos.Value.X, 1);
+
+        heli.Position = new WorldPos(0, 0, 0); // 母基地に到着
+        TransportHeliStep.Advance(s, 0.1f);
+
+        Assert.Equal(0f, heli.SupplyLoad, 3);                              // 荷は勢力プールへ返した
+        Assert.Equal(TransportHeliStep.CargoSupply, f.SupplyStock, 3);
+    }
+
+    [Fact]
+    public void Loaded_heli_delivers_ammo_directly_to_a_dry_fort()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var artPost = new MilitaryBase(2, BaseType.ArtilleryPost, new WorldPos(Far, 0, 0));
+        artPost.OwnerFactionId = 0;
+        artPost.FortAmmo = 0f;
+        s.Bases.Add(artPost);
+        UnitInstance heli = AddHeli(s, new WorldPos(Far - 10, 0, 0), load: 1f); // 陣地のすぐ側
+
+        TransportHeliStep.Advance(s, 0.1f);
+
+        Assert.Equal(1f, artPost.FortAmmo, 3); // 満載60 = 6リロードぶん → 満タンまで回復
+        Assert.True(heli.SupplyLoad < 1f, "expected the helicopter to have spent part of its load");
+    }
 }

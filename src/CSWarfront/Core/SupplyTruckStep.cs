@@ -173,11 +173,43 @@ namespace CSWarfront.Core
             return best;
         }
 
-        /// <summary>積載あり: 補給対象へ向かい、届いたら転送する。対象が無ければ基地付近で待機。</summary>
+        /// <summary>積載あり: 補給対象へ向かい、届いたら転送する。対象が無ければ基地付近で待機。
+        /// Task111（Workshop報告「砲兵陣地に補給が届かない」）: 補給対象はユニットだけでなく、
+        /// 弾薬の減った築城（掩蔽壕/砲兵陣地）も含む——従来、築城は基地/補給拠点の200m圏内でしか
+        /// 回復せず（ResupplyStep）、前線に単独で建てた砲兵陣地は誰にも補給されなかった。</summary>
         private static void AdvanceLoadedTruck(WarState state, UnitInstance u, UnitType type, MilitaryBase home,
             float dt, ref int pathComputations)
         {
             UnitInstance target = FindNeediestLandUnit(state, u);
+            MilitaryBase fortTarget = FindNeediestFort(state, u);
+
+            // ユニットと築城の両方が対象なら、弾薬割合が低い方を優先する（決定的。同値はユニット優先）。
+            if (target != null && fortTarget != null && fortTarget.FortAmmo < target.Ammo) target = null;
+            if (target == null && fortTarget != null)
+            {
+                if (u.Position.HorizontalDistanceTo(fortTarget.Position) > TransferRadius)
+                {
+                    SetDestination(state, u, fortTarget.Position, ref pathComputations);
+                    return;
+                }
+
+                // 到着: 築城の弾薬へ転送する（ユニットへの転送と同じレート・同じ積載消費）。
+                Wait(u);
+                float fortRefill = TransferPerHour * dt;
+                if (fortRefill > 1f - fortTarget.FortAmmo) fortRefill = 1f - fortTarget.FortAmmo;
+                float fortCost = fortRefill * LoadPerFullReload;
+                if (fortCost > u.SupplyLoad)
+                {
+                    fortCost = u.SupplyLoad;
+                    fortRefill = fortCost / LoadPerFullReload;
+                }
+                fortTarget.FortAmmo += fortRefill;
+                if (fortTarget.FortAmmo > 1f) fortTarget.FortAmmo = 1f;
+                u.SupplyLoad -= fortCost;
+                if (u.SupplyLoad < 0.001f) u.SupplyLoad = 0f;
+                return;
+            }
+
             if (target == null)
             {
                 // Task101: 補給を必要とする味方がいない間は、補給拠点への備蓄輸送を行う
@@ -253,6 +285,42 @@ namespace CSWarfront.Core
                 if (ally.Ammo < bestAmmo) { bestAmmo = ally.Ammo; best = ally; }
             }
             return best;
+        }
+
+        /// <summary>Task111: 弾薬がNeedThreshold未満の自軍築城（掩蔽壕/砲兵陣地、稼働中）のうち
+        /// 最も弾薬が少ないもの。基地/備蓄ありDepotの200m圏内（＝ResupplyStepが自動回復させる範囲）
+        /// のものは対象外。無ければnull。</summary>
+        private static MilitaryBase FindNeediestFort(WarState state, UnitInstance truck)
+        {
+            MilitaryBase best = null;
+            float bestAmmo = float.MaxValue;
+            for (int b = 0; b < state.Bases.Count; b++)
+            {
+                MilitaryBase fort = state.Bases[b];
+                if (fort.Type != BaseType.Bunker && fort.Type != BaseType.ArtilleryPost) continue;
+                if (fort.OwnerFactionId == null || fort.OwnerFactionId.Value != truck.FactionId) continue;
+                if (fort.CurrentHP <= 0f) continue;
+                if (fort.FortAmmo >= NeedThreshold) continue;
+                if (IsFortNearAutoResupply(state, fort)) continue; // 基地圏内はResupplyStepが賄う
+                if (fort.FortAmmo < bestAmmo) { bestAmmo = fort.FortAmmo; best = fort; }
+            }
+            return best;
+        }
+
+        /// <summary>Task111: この築城はResupplyStepの自動回復圏内か（通常基地、または備蓄のある
+        /// SupplyDepotの200m以内）。ResupplyStepの築城回復ループと同じ判定。</summary>
+        private static bool IsFortNearAutoResupply(WarState state, MilitaryBase fort)
+        {
+            for (int k = 0; k < state.Bases.Count; k++)
+            {
+                MilitaryBase mb = state.Bases[k];
+                if (mb.OwnerFactionId == null || mb.OwnerFactionId.Value != fort.OwnerFactionId.Value) continue;
+                if (mb.BaseId == fort.BaseId) continue;
+                if (fort.Position.HorizontalDistanceTo(mb.Position) > ResupplyStep.ResupplyRadius) continue;
+                if (!FortificationRules.IsFortification(mb.Type)) return true;
+                if (mb.Type == BaseType.SupplyDepot && mb.StoredSupplies > 0f) return true;
+            }
+            return false;
         }
 
         /// <summary>トラックの補給対象か: 生存・同勢力・弾薬制の陸上ユニット（トラック自身は除く）で、

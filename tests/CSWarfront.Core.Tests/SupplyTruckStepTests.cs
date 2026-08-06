@@ -217,6 +217,56 @@ public class SupplyTruckStepTests
         Assert.Equal(100f - SupplyTruckStep.SupplyPerTruckLoad, depot.StoredSupplies, 3);
     }
 
+    // --- Task111 (Workshop報告「砲兵陣地に補給が届かない」) ---
+
+    [Fact]
+    public void Loaded_truck_drives_to_a_dry_fort_far_from_any_base()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var artPost = new MilitaryBase(2, BaseType.ArtilleryPost, new WorldPos(Far, 0, 0));
+        artPost.OwnerFactionId = 0;
+        artPost.FortAmmo = 0f; // 弾切れ・基地/拠点の200m圏外
+        s.Bases.Add(artPost);
+        var truck = AddTruck(s, new WorldPos(100, 0, 0), load: 1f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(UnitState.Moving, truck.State);
+        Assert.Equal(Far, truck.OrderTargetPos.Value.X, 1); // 砲兵陣地へ向かう
+    }
+
+    [Fact]
+    public void Truck_transfers_ammo_into_the_fort_on_arrival()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var artPost = new MilitaryBase(2, BaseType.ArtilleryPost, new WorldPos(Far, 0, 0));
+        artPost.OwnerFactionId = 0;
+        artPost.FortAmmo = 0f;
+        s.Bases.Add(artPost);
+        var truck = AddTruck(s, new WorldPos(Far + 10, 0, 0), load: 1f); // 陣地のすぐ側
+
+        SupplyTruckStep.Advance(s, 1f);
+
+        Assert.True(artPost.FortAmmo > 0f, "expected the truck to refill the artillery position's ammo");
+        Assert.True(truck.SupplyLoad < 1f, "expected the truck to have spent some of its load");
+    }
+
+    [Fact]
+    public void Forts_inside_a_base_supply_zone_are_left_to_auto_resupply()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase b);
+        var bunker = new MilitaryBase(2, BaseType.Bunker, new WorldPos(100, 0, 0)); // 基地の200m圏内
+        bunker.OwnerFactionId = 0;
+        bunker.FortAmmo = 0f;
+        s.Bases.Add(bunker);
+        var truck = AddTruck(s, new WorldPos(50, 0, 0), load: 1f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        // 基地圏内の築城はResupplyStepが回復させるため、トラックの配送対象にならない。
+        Assert.NotEqual(UnitState.Moving, truck.State);
+    }
+
     [Fact]
     public void Player_held_trucks_are_left_alone()
     {
