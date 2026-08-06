@@ -1,39 +1,42 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task99: 補給物資の自動生産と基地圏内自動補給（設計: 2026-08-03-economy-supply-design.md §4.1-4.2）。
+    /// Task99: automatic supply production and in-base-zone auto-resupply (design:
+    /// 2026-08-03-economy-supply-design.md §4.1-4.2).
     ///
-    /// 補給物資（Faction.SupplyStock）は勢力共通プール。経済tickごとにProduceSuppliesが生産力
-    /// （不足時は資金代替、UnitCosts.FundsPerProductionと同レート）から自動生産して備蓄する。
+    /// Supplies (Faction.SupplyStock) are a faction-wide pool. Every economy tick, ProduceSupplies
+    /// auto-produces into the stock from Production (with funds substitution when short, at the same rate
+    /// as UnitCosts.FundsPerProduction).
     ///
-    /// Advance（毎tick）は「自勢力基地からResupplyRadius以内」の味方ユニット（弾薬制対象のみ）の
-    /// Ammoを、SupplyStockを消費しながらRefillPerHourで回復させる。空母（生存中）は航空機に
-    /// 対してのみ同条件の補給点になる（艦載機の母艦再武装）。ストックが尽きたら回復は止まる。
-    /// Invader勢力は弾薬無限（AmmoRules）のためAmmoが減らず、ここでも自然に対象外になる。
+    /// Advance (every tick) refills the Ammo of friendly units (ammo-bound ones only) within
+    /// ResupplyRadius of a friendly base at RefillPerHour, consuming SupplyStock. Living carriers act as
+    /// resupply points under the same conditions for aircraft only (rearming the wing at the mothership).
+    /// Refills stop when the stock runs dry. The Invader faction has infinite ammo (AmmoRules), so its
+    /// Ammo never drops and it naturally falls outside this step.
     /// </summary>
     public static class ResupplyStep
     {
-        /// <summary>補給物資ストックの上限。</summary>
+        /// <summary>Supply stock cap.</summary>
         public const float SupplyStockCap = 1000f;
 
-        /// <summary>経済tick1回あたりの補給物資の自動生産量の上限（生産力が続く限り）。</summary>
+        /// <summary>Maximum supplies auto-produced per economy tick (as long as Production lasts).</summary>
         public const float SupplyPerEconomyTick = 50f;
 
-        /// <summary>補給物資1あたりの生産力コスト。</summary>
+        /// <summary>Production cost per unit of supplies.</summary>
         public const float ProductionPerSupply = 1f;
 
-        /// <summary>基地/空母を中心とした自動補給の半径（m）。</summary>
+        /// <summary>Auto-resupply radius around bases/carriers (m).</summary>
         public const float ResupplyRadius = 200f;
 
-        /// <summary>補給圏内でのAmmo回復速度（ゲーム内1時間あたりの割合）。</summary>
+        /// <summary>Ammo refill rate inside a supply zone (fraction per in-game hour).</summary>
         public const float RefillPerHour = 0.25f;
 
-        /// <summary>Ammoを0→1まで満タンにするのに消費する補給物資量。</summary>
+        /// <summary>Supplies consumed to fill Ammo from 0 to 1.</summary>
         public const float SupplyPerFullReload = 10f;
 
-        /// <summary>経済tickごと: 生産力（不足分は資金代替）から補給物資を自動生産する。
-        /// 生産量はSupplyPerEconomyTickと「上限までの空き」の小さい方。原資が尽きたら
-        /// そのぶんだけ生産する（部分生産）。</summary>
+        /// <summary>Per economy tick: auto-produces supplies from Production (funds substitute for the
+        /// shortfall). Production amount is the smaller of SupplyPerEconomyTick and the room left below
+        /// the cap. When the funding runs out, only that much is produced (partial production).</summary>
         public static void ProduceSupplies(Faction f)
         {
             if (f == null || f.Id == Faction.InvaderFactionId) return;
@@ -43,7 +46,8 @@ namespace CSWarfront.Core
             if (room < want) want = room;
             if (want <= 0f) return;
 
-            // 生産力から払えるだけ払い、足りない分は資金で代替する（UnitCosts.TryPayと同じ優先順位）。
+            // Pay from Production as far as it goes; substitute funds for the rest (the same priority as
+            // UnitCosts.TryPay).
             float fromProduction = f.Production < want * ProductionPerSupply ? f.Production : want * ProductionPerSupply;
             float produced = fromProduction / ProductionPerSupply;
             f.TrySpendProduction(fromProduction);
@@ -63,25 +67,28 @@ namespace CSWarfront.Core
             f.AddSupply(produced);
         }
 
-        /// <summary>毎tick: 補給圏内の味方ユニットの弾薬を回復させる（クラスコメント参照）。</summary>
+        /// <summary>Every tick: refills the ammo of friendly units inside supply zones (see the class
+        /// comment).</summary>
         public static void Advance(WarState state, float dt)
         {
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive || u.Ammo >= 1f) continue;
-                if (u.IsCarried) continue; // Task101: 搭乗中は補給対象外（降機後に回復させる）
+                if (u.IsCarried) continue; // Task101: carried units are exempt (refilled after disembarking)
 
                 UnitType type = state.Types.Get(u.TypeKey);
-                if (type == null || type.AmmoCombatHours <= 0f) continue; // 弾薬制の対象外
-                // Task100: Invaderは補給網を一切使えない（現地調達方式＝敵撃破でのみ回復、
-                // AmmoRules.RewardInvaderKill）。占領した基地の圏内でも回復させない。
+                if (type == null || type.AmmoCombatHours <= 0f) continue; // not ammo-bound
+                // Task100: Invaders can never use the supply network (living-off-the-land: they recover
+                // only through kills, AmmoRules.RewardInvaderKill). No refills even inside the zone of a
+                // captured base.
                 if (u.FactionId == Faction.InvaderFactionId) continue;
 
                 Faction f = state.FindFaction(u.FactionId);
                 if (f == null) continue;
 
-                // Task101: 補給源は「通常基地/空母（勢力プール消費）」または「補給拠点（備蓄消費）」。
+                // Task101: the source is either a normal base / carrier (consuming the faction pool) or a
+                // supply depot (consuming its stock).
                 MilitaryBase depot;
                 if (!TryFindResupplySource(state, u, type, out depot)) continue;
                 float available = depot != null ? depot.StoredSupplies : f.SupplyStock;
@@ -90,7 +97,7 @@ namespace CSWarfront.Core
                 float refill = RefillPerHour * dt;
                 if (refill > 1f - u.Ammo) refill = 1f - u.Ammo;
 
-                // 物資が足りなければ払えるぶんだけ回復（部分回復）。
+                // With insufficient supplies, refill only as much as can be paid (partial refill).
                 float supplyCost = refill * SupplyPerFullReload;
                 if (supplyCost > available)
                 {
@@ -103,9 +110,9 @@ namespace CSWarfront.Core
                 if (u.Ammo > 1f) u.Ammo = 1f;
             }
 
-            // Task101: 築城（Bunker/ArtilleryPost）の弾薬回復。稼働中の施設が、自身の位置から
-            // ResupplyRadius以内の補給源（通常基地=勢力プール、または備蓄のあるDepot）から
-            // ユニットと同じレート・同じ消費で回復する。
+            // Task101: fortification (Bunker/ArtilleryPost) ammo recovery. An operational fortification
+            // refills from a supply source within ResupplyRadius of its own position (a normal base = the
+            // faction pool, or a stocked depot) at the same rate and cost as units.
             for (int b = 0; b < state.Bases.Count; b++)
             {
                 MilitaryBase fort = state.Bases[b];
@@ -144,18 +151,20 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>自勢力の補給点からResupplyRadius以内か（消費元は区別しない、トラックの
-        /// 「基地圏内は配送不要」判定用の簡易版）。</summary>
+        /// <summary>Whether the unit is within ResupplyRadius of a friendly supply point (the consumption
+        /// source is not distinguished — the simplified test used by the trucks' "no delivery needed
+        /// inside a base zone" check).</summary>
         public static bool IsNearResupplyPoint(WarState state, UnitInstance u, UnitType type)
         {
             MilitaryBase depot;
             return TryFindResupplySource(state, u, type, out depot);
         }
 
-        /// <summary>Task101: ResupplyRadius以内の補給源を探す。優先順位は
-        /// ①通常基地4種（勢力プール消費、depot=null）②航空ユニット限定で自軍空母（同、depot=null）
-        /// ③稼働中（Owner有り）かつ備蓄のあるSupplyDepot（備蓄消費、depotに返す）。
-        /// 貨物駅・掩蔽壕・塹壕等は自動補給点ではない。見つからなければfalse。</summary>
+        /// <summary>Task101: finds a supply source within ResupplyRadius. Priority:
+        /// ① the four normal base types (faction-pool consumption, depot=null) ② for air units only, a
+        /// friendly carrier (same, depot=null) ③ an operational (owned) SupplyDepot with stock (stock
+        /// consumption, returned via depot). Cargo stations, bunkers, trenches etc. are not auto-resupply
+        /// points. False when none is found.</summary>
         public static bool TryFindResupplySource(WarState state, UnitInstance u, UnitType type, out MilitaryBase depot)
         {
             depot = null;
@@ -169,7 +178,7 @@ namespace CSWarfront.Core
                 float d = u.Position.HorizontalDistanceTo(mb.Position);
                 if (d > ResupplyRadius) continue;
 
-                if (!FortificationRules.IsFortification(mb.Type)) return true; // 通常基地=勢力プール
+                if (!FortificationRules.IsFortification(mb.Type)) return true; // a normal base = the faction pool
                 if (mb.Type == BaseType.SupplyDepot && mb.StoredSupplies > 0f && d < nearestDepotDist)
                 {
                     nearestDepotDist = d;

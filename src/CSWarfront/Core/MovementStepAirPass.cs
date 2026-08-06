@@ -2,37 +2,42 @@ using System;
 
 namespace CSWarfront.Core
 {
-    /// <summary>MovementStepの続き（Task86: 航空ユニットの交戦パス移動）。500行/ファイルの上限に
-    /// 収めるための分離（MovementStepSea/MovementStepKamikazeと同じpartial classパターン）。
+    /// <summary>Continuation of MovementStep (Task86: air units' engagement pass movement). Split out to
+    /// stay within the 500-line-per-file limit (the same partial-class pattern as
+    /// MovementStepSea/MovementStepKamikaze).
     ///
-    /// 「爆撃機は爆弾を落としてヒットアンドアウェイ、戦闘機は停止せずすれ違いながらドッグファイト」
-    /// （ユーザー要望）を、次のレーストラック航過で実現する:
-    ///   1. 交戦アンカー（下記ResolveAirCombatAnchor）が見つかったらそこへ接近する。
-    ///   2. AirCombat.PassTriggerDistanceまで近づいたら、進行方向へAirCombat.PassEgressDistance
-    ///      抜けた先を離脱点(UnitInstance.AirPassEgress)として武装する。
-    ///   3. 離脱点まで飛び切る（この間アンカーは再評価しない＝標的が死んでも/射程外に出ても
-    ///      レグを完走する。射程境界での小刻みな反転を防ぐため）。
-    ///   4. 到達したら離脱点をクリアし、次tickで再びアンカーを評価して再進入する。
-    /// ダメージは従来どおり射程内でのみ入る（CombatStep等）ので、この動きだけで
-    /// 「通過の瞬間に爆弾/機銃が当たり、離脱中は撃てない」が成立する。減った射程内滞在時間は
-    /// AirCombat.DamageMultiplierが補正する。
+    /// Realizes the user request "bombers drop and hit-and-run; fighters dogfight in crossing passes
+    /// without stopping" with the following racetrack pass:
+    ///   1. When an engagement anchor (ResolveAirCombatAnchor below) is found, approach it.
+    ///   2. On closing to AirCombat.PassTriggerDistance, arm an egress point
+    ///      (UnitInstance.AirPassEgress) AirCombat.PassEgressDistance beyond the anchor along the current
+    ///      heading.
+    ///   3. Fly all the way to the egress point (the anchor is not re-evaluated meanwhile = the leg is
+    ///      completed even if the target dies or leaves range, preventing jittery reversals at the range
+    ///      boundary).
+    ///   4. On arrival, clear the egress point; the next tick re-evaluates the anchor and re-enters.
+    /// Damage still applies only while in range (CombatStep etc.), so this movement alone produces
+    /// "bombs/guns land during the fly-over; nothing fires during the egress". The reduced in-range time
+    /// is compensated by AirCombat.DamageMultiplier.
     ///
-    /// 双方が航空機のドッグファイトでは、互いに相手をアンカーに接近→すれ違い→離脱→反転を
-    /// 繰り返すため、自然と交差機動（すれ違いざまの射撃）になる。
+    /// In an all-air dogfight both sides repeat approach-anchor → fly-past → egress → turn-in, which
+    /// naturally becomes crossing passes (firing as they slide past each other).
     /// </summary>
     public static partial class MovementStep
     {
-        /// <summary>航空ユニットの交戦パス移動を1tick進める。パス移動を行った場合はtrue
-        /// （呼び出し元は通常のAdvanceAirをスキップする）。交戦アンカーが無く離脱レグ中でも
-        /// なければfalse（通常の目的地移動へフォールスルー）。非kamikazeのDomain.Air専用。</summary>
+        /// <summary>Advances an air unit's engagement pass by one tick. Returns true when pass movement
+        /// happened (the caller skips the normal AdvanceAir). False when there is no engagement anchor
+        /// and no egress leg in progress (fall through to normal objective movement). Non-kamikaze
+        /// Domain.Air only.</summary>
         private static bool AdvanceAirPass(WarState state, UnitInstance u, UnitType type, float stepLen,
             IHeightSampler height)
         {
-            // Task101: ヘリはホバリング型（レーストラック航過をしない。通常のAdvanceAir巡航＝
-            // 接近して射程内に留まる移動へフォールバックさせる）。
+            // Task101: helicopters hover (no racetrack passes — fall back to the normal AdvanceAir
+            // cruise, i.e. approach and stay in range).
             if (TargetingRules.IsHelicopter(type.Category)) return false;
 
-            // 離脱レグ中: アンカーの生死・射程を問わず離脱点まで飛び切る（クラスコメントの3）。
+            // Egress leg: fly all the way to the egress point regardless of the anchor's life or range
+            // (item 3 of the class comment).
             if (u.AirPassEgress.HasValue)
             {
                 WorldPos egress = u.AirPassEgress.Value;
@@ -48,29 +53,31 @@ namespace CSWarfront.Core
             float dist = u.Position.HorizontalDistanceTo(anchor.Value);
             if (dist <= AirCombat.PassTriggerDistance)
             {
-                // 至近＝「上空を通過中」。進行方向（自機→アンカー）へ抜けた先を離脱点にする。
+                // Point blank = "flying over". The egress point lies beyond the anchor along the current
+                // heading (self → anchor).
                 float dx = anchor.Value.X - u.Position.X;
                 float dz = anchor.Value.Z - u.Position.Z;
                 float len = (float)Math.Sqrt(dx * dx + dz * dz);
-                if (len < 1e-3f) { dx = 1f; dz = 0f; len = 1f; } // 真上に重なった退化ケースは+Xへ（決定的）
+                if (len < 1e-3f) { dx = 1f; dz = 0f; len = 1f; } // degenerate directly-overhead case goes +X (deterministic)
                 float ex = anchor.Value.X + dx / len * AirCombat.PassEgressDistance;
                 float ez = anchor.Value.Z + dz / len * AirCombat.PassEgressDistance;
-                u.AirPassEgress = new WorldPos(ex, 0f, ez); // Yは毎tickのAdvanceAirが巡航高度へ再解決する
+                u.AirPassEgress = new WorldPos(ex, 0f, ez); // Y is re-resolved to cruise altitude by AdvanceAir each tick
                 AdvanceAir(u, stepLen, u.AirPassEgress.Value, height);
                 return true;
             }
 
-            // 接近レグ: アンカーへ直進する。
+            // Approach leg: fly straight at the anchor.
             AdvanceAir(u, stepLen, anchor.Value, height);
             return true;
         }
 
-        /// <summary>この航空ユニットが現在パス航過すべき交戦対象の位置。優先順:
-        ///   1. CombatStepがロック中の敵ユニット（TargetId、生存中のみ）
-        ///   2. 射程(+Radius)内の最近接の敵対脅威（ThreatCombatStepと同じ敵対判定・実効射程）
-        ///   3. 射程内の最近接の敵対拠点（BaseCombatStepと同じ判定。Task85のCanAttackBaseを尊重
-        ///      ＝戦闘機は拠点をアンカーにしない）
-        /// いずれも無ければnull（通常の目的地移動）。</summary>
+        /// <summary>The position this air unit should currently be flying passes against. Priority:
+        ///   1. the enemy unit CombatStep has locked (TargetId, only while alive)
+        ///   2. the nearest hostile threat within range (+Radius) (the same hostility test and effective
+        ///      range as ThreatCombatStep)
+        ///   3. the nearest hostile base in range (the same rules as BaseCombatStep; honoring Task85's
+        ///      CanAttackBase = fighters never anchor on bases)
+        /// Null when none exists (normal objective movement).</summary>
         private static WorldPos? ResolveAirCombatAnchor(WarState state, UnitInstance u, UnitType type)
         {
             if (u.TargetId.HasValue)
@@ -89,7 +96,7 @@ namespace CSWarfront.Core
                     if (threat.IsDefeated) continue;
                     if (!state.ThreatRelations.Get(u.FactionId, threat.Kind).IsHostile()) continue;
                     float d = u.Position.HorizontalDistanceTo(threat.Position);
-                    if (d > type.Range + threat.Radius) continue; // ThreatCombatStepと同じ実効射程
+                    if (d > type.Range + threat.Radius) continue; // the same effective range as ThreatCombatStep
                     if (d < bestDist) { bestDist = d; bestThreat = threat; }
                 }
                 if (bestThreat != null) return bestThreat.Position;
@@ -102,12 +109,13 @@ namespace CSWarfront.Core
                 for (int j = 0; j < state.Bases.Count; j++)
                 {
                     MilitaryBase b = state.Bases[j];
-                    if (b.CaptureGraceHours > 0f) continue; // 猶予中は無敵＝攻撃対象でない（BaseCombatStepと同じ）
+                    if (b.CaptureGraceHours > 0f) continue; // invulnerable during grace = not a target (as in BaseCombatStep)
                     if (b.OwnerFactionId == null) continue;
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
                     if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue;
-                    // Task88: この攻撃側のHP床（航空=1）に達した拠点はもう航過アンカーにしない
-                    // （BaseCombatStepの攻撃停止と対で、爆撃機がHP1の拠点上空を回り続けるのを防ぐ）。
+                    // Task88: bases at this attacker's HP floor (air = 1) are no longer pass anchors
+                    // (paired with BaseCombatStep's stop-firing rule, preventing bombers from circling a
+                    // base stuck at 1 HP).
                     if (b.CurrentHP <= TargetingRules.BaseHpFloor(type.Domain)) continue;
                     float d = u.Position.HorizontalDistanceTo(b.Position);
                     if (d > type.Range) continue;
