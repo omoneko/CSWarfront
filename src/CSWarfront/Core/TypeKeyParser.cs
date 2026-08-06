@@ -4,29 +4,29 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// "&lt;Category&gt;_T&lt;tier&gt;" 形式のTypeKey（LandUnitRoster.TypeKeyが組み立てる形式、例:
-    /// "Tank_T3"）を解析する小さな純ロジックヘルパー（Task50）。
+    /// A small pure-logic helper (Task50) parsing TypeKeys of the "&lt;Category&gt;_T&lt;tier&gt;" format
+    /// (the shape LandUnitRoster.TypeKey assembles, e.g. "Tank_T3").
     ///
-    /// Game層のUnitAssetBindings（アセット割り当ての「同カテゴリ他Tierへのフォールバック」、
-    /// Task50フィードバック1「Tier2になるとモデル設定が反映されない」対応）から使われる。
-    /// UnitAssetBindings自体はGame層（UnityEngineを直接は参照しないが、CSWarfront.Core.Testsの
-    /// コンパイル対象フォルダ外＝Core\**\*.csのみ）に置かれているため、テスト可能な形にするために
-    /// パース処理と探索順序の組み立てだけをこのCoreクラスへ切り出した
-    /// （UnitAssetBindings.TryGetはこの結果を使って辞書検索するだけの薄いGlueに留める）。
+    /// Used by the Game layer's UnitAssetBindings (the "fall back to another tier of the same category"
+    /// rule of the asset assignments — the fix for Task50 feedback 1, "model assignments stop applying at
+    /// tier 2"). UnitAssetBindings itself lives in the Game layer (it does not reference UnityEngine
+    /// directly, but sits outside the folders compiled into CSWarfront.Core.Tests = only Core\**\*.cs),
+    /// so to keep this testable, only the parsing and the fallback-order construction were extracted into
+    /// this core class (UnitAssetBindings.TryGet stays a thin glue doing dictionary lookups with these
+    /// results).
     /// </summary>
     public static class TypeKeyParser
     {
-        /// <summary>ロスターが実際に使うTierの範囲（LandUnitRoster: Tier1〜5）。</summary>
+        /// <summary>The tier range the rosters actually use (LandUnitRoster: tiers 1–5).</summary>
         public const byte MinTier = 1;
         public const byte MaxTier = 5;
 
         /// <summary>
-        /// typeKeyを "&lt;Category&gt;_T&lt;tier&gt;" として解析する。末尾の "_T&lt;digits&gt;" を
-        /// 区切りとして切り出し、前半をUnitCategory名、後半をTier数値として解釈する
-        /// （LandUnitRoster.TypeKeyの組み立て方 category + "_T" + tier の逆変換）。
-        /// UnitCategoryの列挙子名自体に "_T" を含むものは無いため誤分割は起きない。
-        /// 解析できない場合（区切りが無い/Tier部が数値でない/カテゴリ名が不明）はfalseを返す
-        /// （例外は投げない）。
+        /// Parses typeKey as "&lt;Category&gt;_T&lt;tier&gt;". The trailing "_T&lt;digits&gt;" is the
+        /// separator; the front half is read as a UnitCategory name and the tail as the tier number (the
+        /// inverse of LandUnitRoster.TypeKey's category + "_T" + tier). No UnitCategory member name
+        /// contains "_T", so mis-splitting cannot happen. Returns false when unparsable (no separator /
+        /// non-numeric tier / unknown category name) — never throws.
         /// </summary>
         public static bool TryParse(string typeKey, out UnitCategory category, out byte tier)
         {
@@ -46,8 +46,8 @@ namespace CSWarfront.Core
 
         private static bool TryParseCategory(string value, out UnitCategory category)
         {
-            // .NET 3.5(Game層のビルドターゲット)にはEnum.TryParse<T>が無いため、
-            // 既知の値を線形探索する（UnitCategoryは23件のみでコストは無視できる）。
+            // .NET 3.5 (the Game layer's build target) has no Enum.TryParse<T>, so the known values are
+            // scanned linearly (UnitCategory has only 23 members; the cost is negligible).
             foreach (UnitCategory c in (UnitCategory[])Enum.GetValues(typeof(UnitCategory)))
             {
                 if (string.Equals(c.ToString(), value, StringComparison.Ordinal))
@@ -61,14 +61,15 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// 指定Tierに対する「同カテゴリ内の他Tierを探すフォールバック順」を返す（Task50）。
-        /// 直近の下位Tierから順に1まで下り、その後は直近の上位Tierから順に5まで上る:
-        ///   例: tier=4 -&gt; [3, 2, 1, 5]
-        ///   例: tier=1 -&gt; [2, 3, 4, 5]（下位が無いため上位のみ）
-        ///   例: tier=5 -&gt; [4, 3, 2, 1]（上位が無いため下位のみ）
-        /// tier自身は含まない（呼び出し側が先にexact-key一致を試す前提のため）。
-        /// MinTier(1)〜MaxTier(5)の範囲外のtierを渡しても例外にはならない
-        /// （単に一方向の探索のみが行われる、または空配列になる）。
+        /// Returns the fallback order for "searching other tiers of the same category" relative to the
+        /// given tier (Task50). Walks down from the nearest lower tier to 1, then up from the nearest
+        /// higher tier to 5:
+        ///   e.g. tier=4 -&gt; [3, 2, 1, 5]
+        ///   e.g. tier=1 -&gt; [2, 3, 4, 5] (nothing below, so upward only)
+        ///   e.g. tier=5 -&gt; [4, 3, 2, 1] (nothing above, so downward only)
+        /// The tier itself is excluded (callers try the exact-key match first). A tier outside
+        /// MinTier(1)–MaxTier(5) does not throw (the walk simply runs in one direction only, or the array
+        /// comes back empty).
         /// </summary>
         public static byte[] FallbackTierOrder(byte tier)
         {

@@ -1,23 +1,26 @@
 namespace CSWarfront.Core
 {
-    /// <summary>発砲の見た目の種別（Task42）。Game層がこれを見てトレーサー（銃撃）/直射（戦車）/
-    /// 曲射（砲兵の放物線弾道）/対空ミサイル（Task90、迎撃ミサイルモデルの飛翔体）のどれを描くかを選ぶ。</summary>
+    /// <summary>The visual kind of a shot (Task42). The Game layer picks from this whether to draw a
+    /// tracer (gunfire), direct fire (tank), indirect fire (artillery's ballistic arc) or a SAM (Task90,
+    /// the interceptor-missile projectile).</summary>
     public enum ShotKind { Gunfire, DirectFire, IndirectFire, SamMissile }
 
     /// <summary>
-    /// 1回分の「見える発砲」を表す軽量イベント（Task42）。
+    /// A lightweight event representing one "visible shot" (Task42).
     ///
-    /// 設計上の前提: ダメージは毎simtick（実時間で秒間60回程度）、経過ゲーム内時間(dt)に比例する
-    /// 連続的な期待値として適用される（CombatStep/BaseCombatStep参照）。ダメージ適用のたびに1つ
-    /// エフェクトを出すと発砲が洪水のようになってしまうため、ShotEventはダメージ計算そのものとは
-    /// 別に「間引かれた表現専用のイベント」として扱う。ダメージ計算のロジック・数値には一切影響しない。
+    /// Design premise: damage applies every sim tick (roughly 60 per real second) as a continuous
+    /// expected value proportional to elapsed in-game time (dt) — see CombatStep/BaseCombatStep.
+    /// Emitting an effect per damage application would flood the screen with muzzle fire, so ShotEvents
+    /// are treated as throttled, presentation-only events separate from the damage computation itself.
+    /// They have zero influence on the damage logic or numbers.
     ///
-    /// UnitInstance.FireCooldown（攻撃側1体ごとのアキュムレータ、乱数不使用）で間引かれるため、
-    /// 1体の攻撃ユニットにつき、そのUnitType.FireIntervalHoursごとに最大1件しか積まれない
-    /// （決定的シミュレーションの前提を崩さない）。
+    /// Throttled via UnitInstance.FireCooldown (a per-attacker accumulator, no RNG), so at most one
+    /// event is queued per attacking unit per its UnitType.FireIntervalHours (preserving the
+    /// deterministic-simulation premise).
     ///
-    /// WarState.RecentShotsに積まれ、Game層（MilitaryManager.OnMainVisualUpdate）が毎フレーム
-    /// ロック内でコピーして消費する。非永続化（WarStateSerializerには一切書き出さない）。
+    /// Queued into WarState.RecentShots and consumed by the Game layer
+    /// (MilitaryManager.OnMainVisualUpdate), which copies inside the lock every frame. Not persisted
+    /// (never written by WarStateSerializer).
     /// </summary>
     public struct ShotEvent
     {
@@ -26,25 +29,26 @@ namespace CSWarfront.Core
         public ShotKind Kind;
         public byte FactionId;
 
-        /// <summary>発砲したユニットのUnitInstance.InstanceId（Task43）。Game層がFrom側の
-        /// 発射高さ（モデル中央）を求めるために使う。0という値は使われない
-        /// （UnitInstance.InstanceIdはWarState.AllocInstanceIdが1から払い出す）。</summary>
+        /// <summary>UnitInstance.InstanceId of the firing unit (Task43). The Game layer uses it to
+        /// resolve the From-side muzzle height (model center). The value 0 is never used
+        /// (UnitInstance.InstanceId is allocated from 1 by WarState.AllocInstanceId).</summary>
         public uint AttackerId;
 
-        /// <summary>着弾先のUnitInstance.InstanceId（Task43）。ユニット同士の交戦（CombatStep）では
-        /// 標的ユニットのInstanceId、基地攻め（BaseCombatStep）では基地には論理ユニットIDが無いため0。
-        /// Game層はTargetId==0を「基地（または不明な対象）」として扱い、ユニットより大きい既定の
-        /// 着弾高さを使う。</summary>
+        /// <summary>UnitInstance.InstanceId of the impact target (Task43). In unit-vs-unit combat
+        /// (CombatStep) this is the target unit's InstanceId; in base sieges (BaseCombatStep) it is 0,
+        /// since bases have no logical unit id. The Game layer treats TargetId==0 as "a base (or an
+        /// unknown target)" and uses the taller default impact height for buildings.</summary>
         public uint TargetId;
 
-        /// <summary>発砲したユニットの兵科（Task51、兵科別射撃音）。Game層（WarfrontSounds.ShotSoundFor）が
-        /// これを見て銃撃/重機関銃/砲撃/対空ミサイルのどの音を鳴らすかを選ぶ。ダメージ計算・命中判定には
-        /// 一切使わない（ShotKindと同じく見た目・音専用の付随データ）。</summary>
+        /// <summary>The firing unit's category (Task51, per-class firing sounds). The Game layer
+        /// (WarfrontSounds.ShotSoundFor) picks rifle/heavy-MG/cannon/SAM audio from this. Never used for
+        /// damage or hit computation (like ShotKind, purely visual/audio side data).</summary>
         public UnitCategory Category;
 
-        /// <summary>Task90: この1発が外れたか（対空の離散射撃のみ使用、それ以外は常にfalse）。
-        /// Game層が「逸れて自爆する対空ミサイル」「標的のフレア放出・回避機動」の演出トリガーに使う。
-        /// ダメージはCore側で既に確定済み（Missed=trueの発砲はノーダメージ）。</summary>
+        /// <summary>Task90: whether this round missed (used only by the discrete AA fire; always false
+        /// otherwise). The Game layer uses it to trigger the "SAM veering off and self-destructing" and
+        /// the target's flare/evasive-maneuver displays. Damage is already settled on the core side
+        /// (a Missed=true shot dealt none).</summary>
         public bool Missed;
 
         public ShotEvent(WorldPos from, WorldPos to, ShotKind kind, byte factionId, uint attackerId, uint targetId,

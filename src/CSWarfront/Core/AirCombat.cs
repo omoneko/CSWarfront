@@ -1,46 +1,48 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 航空ユニットの交戦パス移動（Task86、ユーザー要望「爆撃機は爆弾を落としてヒットアンドアウェイ、
-    /// 戦闘機は停止せずすれ違いながらドッグファイト」）の定数とダメージ補正。
+    /// Constants and the damage compensation for air units' engagement pass movement (Task86, user
+    /// request "bombers drop and hit-and-run; fighters dogfight in crossing passes without stopping").
     ///
-    /// 旧仕様では航空ユニットは目的地に到着するとホバリングしたまま射程内へ撃ち続ける「浮かぶ砲台」
-    /// だった。新仕様では交戦アンカー（ロック中の敵ユニット→射程内の敵対脅威→射程内の敵対拠点の
-    /// 優先順、MovementStepAirPass.ResolveAirCombatAnchor）がある間、
-    ///   接近 → 至近(PassTriggerDistance)で進行方向へ抜ける離脱点(PassEgressDistance)を設定
-    ///   → 離脱点まで飛び切る → 反転して再進入
-    /// のレーストラック航過を繰り返す。ダメージ判定自体は従来どおり「射程内にいる間だけ」
-    /// （CombatStep/BaseCombatStep/ThreatCombatStep）なので、通過の瞬間だけ爆弾/機銃が当たる＝
-    /// ヒットアンドアウェイ/すれ違いドッグファイトになる。
+    /// Under the old rules an air unit arriving at its objective hovered in place and kept firing into
+    /// range — a "floating gun platform". Under the new rules, while an engagement anchor exists (locked
+    /// enemy unit → hostile threat in range → hostile base in range, in that priority;
+    /// MovementStepAirPass.ResolveAirCombatAnchor), the unit repeats the racetrack pass:
+    ///   approach → at point blank (PassTriggerDistance) arm an egress point (PassEgressDistance) beyond
+    ///   along the heading → fly out to the egress point → turn and re-enter.
+    /// Damage still applies only "while in range" (CombatStep/BaseCombatStep/ThreatCombatStep), so
+    /// bombs/guns land only during the fly-over = hit-and-run / crossing-pass dogfights.
     /// </summary>
     public static class AirCombat
     {
-        /// <summary>接近レグでアンカーへこの距離まで近づいたら離脱点を武装する（＝「上空を通過した」
-        /// とみなす至近距離）。射程（戦闘機90/爆撃機70）より十分小さく、必ず射程内を貫通してから
-        /// 離脱に移る。</summary>
+        /// <summary>On the approach leg, the egress point arms once within this distance of the anchor
+        /// (= the point-blank distance counting as "passed overhead"). Well below the ranges (fighter
+        /// 90 / bomber 70), so the unit always punches through its range before egressing.</summary>
         public const float PassTriggerDistance = 40f;
 
-        /// <summary>離脱点までの距離（アンカーから進行方向へこの距離だけ抜ける）。射程より十分大きく
-        /// 取ることで、離脱レグの大半で射程外＝撃てない時間を作る（ヒットアンドアウェイの
-        /// 「アウェイ」）。</summary>
+        /// <summary>Distance to the egress point (this far past the anchor along the heading). Kept well
+        /// above the ranges so most of the egress leg is out of range = time unable to fire (the "run"
+        /// of hit-and-run).</summary>
         public const float PassEgressDistance = 350f;
 
-        /// <summary>離脱点への到達判定距離。到達したら離脱レグを終え、次tickから再進入する。</summary>
+        /// <summary>Arrival distance at the egress point. On arrival the egress leg ends and re-entry
+        /// starts next tick.</summary>
         public const float PassArrivalDistance = 20f;
 
-        /// <summary>パス移動により射程内滞在時間が概ね1/4程度に減る（在圏窓≈2×射程 vs 周回長≈
-        /// 2×PassEgressDistance）ため、航空ユニット（自爆ドローン除く）のdtスケールダメージに
-        /// この倍率を掛けて補正する。実効DPSは従来の約60〜75%となり、「航空は強力だが単独では
-        /// 決定打にならない」バランスを保つ（実機プレイで要調整の較正値）。</summary>
+        /// <summary>Pass movement cuts in-range time to roughly a quarter (in-range window ≈ 2×range vs
+        /// circuit length ≈ 2×PassEgressDistance), so the dt-scaled damage of air units (suicide drones
+        /// excluded) is multiplied by this to compensate. Effective DPS lands at ~60–75% of the old
+        /// value, preserving the balance "air power is strong but never decisive alone" (a calibration
+        /// value subject to playtest tuning).</summary>
         public const float PassDamageCompensation = 3f;
 
-        /// <summary>この兵科のdtスケールダメージに掛ける補正倍率。パス移動を行う航空ユニット
-        /// （Domain=Air、自爆ドローン除く＝体当たり1回フルダメージのKamikazeStepは対象外）のみ
-        /// PassDamageCompensation、それ以外は1。</summary>
+        /// <summary>The multiplier applied to this class's dt-scaled damage. PassDamageCompensation only
+        /// for pass-flying air units (Domain=Air, excluding suicide drones — KamikazeStep's single
+        /// full-damage ram is exempt); 1 for everything else.</summary>
         public static float DamageMultiplier(UnitType type)
         {
             if (type == null) return 1f;
-            // Task101: ヘリはホバリング型（レーストラック航過をしない＝射程内に留まる）ため補正なし。
+            // Task101: helicopters hover (no racetrack passes = they stay in range), so no compensation.
             if (TargetingRules.IsHelicopter(type.Category)) return 1f;
             return (type.Domain == Domain.Air && !type.Category.IsKamikaze()) ? PassDamageCompensation : 1f;
         }
