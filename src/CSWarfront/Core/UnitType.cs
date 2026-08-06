@@ -1,6 +1,6 @@
 namespace CSWarfront.Core
 {
-    /// <summary>データ駆動のユニット定義（1種別×1Tier）。実行時は不変。</summary>
+    /// <summary>A data-driven unit definition (one class × one tier). Immutable at runtime.</summary>
     public class UnitType
     {
         public string TypeKey { get; private set; }
@@ -17,37 +17,41 @@ namespace CSWarfront.Core
         public float BuildTime { get; private set; }
         public string AssetPrefabName { get; private set; }
 
-        /// <summary>命中率（0..1、Task38）。CombatStep/BaseCombatStepがダメージへ乗じる
-        /// 期待値ベースの乗数であり、ランダムな命中/ミスの抽選ではない（本プロジェクトは決定的シミュレーション
-        /// が前提のため）。「命中率40%」は「1tickごとに0.4倍のダメージが確実に入る」という意味で、
-        /// 十分な時間をかけた場合の統計的な結果は乱数抽選と同じだが、連続ミス/連続命中という不公平な
-        /// 「運」の要素を排除できる。</summary>
+        /// <summary>Accuracy (0..1, Task38). An expected-value multiplier that CombatStep/BaseCombatStep
+        /// apply to damage — NOT a random hit/miss roll (this project assumes deterministic simulation).
+        /// "40% accuracy" means "0.4× damage lands reliably every tick": statistically identical to
+        /// random rolls over enough time, while eliminating the unfair "luck" of hit or miss streaks.</summary>
         public float Accuracy { get; private set; }
 
-        /// <summary>発砲エフェクトの間引き間隔（ゲーム内時間、Task42）。ダメージは毎tick連続的に適用されるが
-        /// 見た目（ShotEvent）はこの間隔ごとに最大1回しか出さない（UnitInstance.FireCooldownで管理）。
-        /// TierScalingの対象外＝Tierを上げても発砲頻度の見た目は変わらない（単純さ優先の意図的な設計）。</summary>
+        /// <summary>Throttling interval of the muzzle effects (in-game hours, Task42). Damage applies
+        /// continuously every tick, but the visuals (ShotEvents) appear at most once per this interval
+        /// (managed via UnitInstance.FireCooldown). Exempt from TierScaling = the visible firing cadence
+        /// does not change with tier (a deliberate simplicity choice).</summary>
         public float FireIntervalHours { get; private set; }
 
-        /// <summary>発砲エフェクトの種別（Task42）。Game層のCombatFxが銃撃/直射/曲射のどれを描くか選ぶ。</summary>
+        /// <summary>Kind of muzzle effect (Task42). The Game layer's CombatFx picks gunfire, direct fire
+        /// or the ballistic arc based on this.</summary>
         public ShotKind ShotKind { get; private set; }
 
-        /// <summary>このユニットが攻撃対象にできる領域（Task61: 海上/航空戦力の追加に伴う対空判定の実質化）。
-        /// TargetSearch/CombatStepが、射程・敵対関係に加えてこのマスクで候補を絞り込む。
-        /// 陸上ユニットは既定でLandのみ（AntiAirだけLand|Air）、海上ユニットはLand|Sea、
-        /// 航空ユニットはAll（Land|Sea|Air）。既定コンストラクタ引数は無く、全ロスターが明示的に指定する。</summary>
+        /// <summary>The domains this unit may attack (Task61: made anti-air meaningful with the arrival
+        /// of sea/air forces). TargetSearch/CombatStep filter candidates by this mask on top of range and
+        /// hostility. Land units default to Land only (AntiAir alone gets Land|Air), sea units to
+        /// Land|Sea, air units to All (Land|Sea|Air). There is no constructor default — every roster
+        /// specifies it explicitly.</summary>
         public DomainMask CanTargetDomains { get; private set; }
 
-        // Task79: 旧IsOneShotフラグ（「1回攻撃した瞬間に自壊する」、自爆ドローン専用）は撤廃した。
-        // 自爆ドローンはもはや「攻撃してから自壊する」のではなく、そもそも通常の射撃パイプライン
-        // （CombatStep/BaseCombatStep/ThreatCombatStep）に一切乗らず、専用のKamikazeStepが
-        // 突進・体当たり起爆を完結して扱う（UnitCategoryFlags.IsKamikaze参照）。射撃系3ステップは
-        // type.Category.IsKamikaze()を見て早期continueするため、このフラグを見る分岐はもう存在しない
-        // （旧: CombatStep.cs/BaseCombatStep.csのif(type.IsOneShot)分岐、Task61）。
+        // Task79: the old IsOneShot flag ("self-destructs the moment it attacks once", suicide-drone
+        // only) was removed. Suicide drones no longer "attack, then self-destruct" — they never enter
+        // the normal firing pipeline (CombatStep/BaseCombatStep/ThreatCombatStep) at all; the dedicated
+        // KamikazeStep owns the dive and ramming detonation (see UnitCategoryFlags.IsKamikaze). The
+        // three firing steps continue early on type.Category.IsKamikaze(), so no branch reading this
+        // flag exists anymore (formerly the if(type.IsOneShot) branches in CombatStep.cs /
+        // BaseCombatStep.cs, Task61).
 
-        /// <summary>Task99: 弾薬ゲージの「連続射撃可能時間」（ゲーム内時間）。射撃している間だけ
-        /// UnitInstance.Ammo が dt/AmmoCombatHours ずつ減る（AmmoRules）。0=弾薬無限（弾薬制の
-        /// 対象外。空母・自爆ドローン等）。既定0のオプション引数のため既存の呼び出し元は不変。</summary>
+        /// <summary>Task99: the ammo gauge's "hours of continuous fire" (in-game). UnitInstance.Ammo
+        /// drains by dt/AmmoCombatHours only while firing (AmmoRules). 0 = infinite ammo (outside the
+        /// ammo system: carriers, suicide drones etc.). An optional parameter defaulting to 0, so
+        /// existing callers are unchanged.</summary>
         public float AmmoCombatHours { get; private set; }
 
         public UnitType(string typeKey, Domain domain, UnitCategory category, byte tier,
@@ -69,11 +73,11 @@ namespace CSWarfront.Core
     }
 
     /// <summary>
-    /// 後方互換の薄いラッパー（Task28）。実体はLandUnitRoster（陸上7兵種×Tier1〜5）に置き換わった。
-    /// Tank_T1/Infantry_T1というキー・呼び出し形は既存のセーブ/テスト/診断ログ（
-    /// Game/SpeedCalibrationDiagnostics.cs）が参照し続けるため残してあるが、値そのものは
-    /// LandUnitRosterのTier1基礎ステータス表が真実源であり、ここでは重複定義しない。
-    /// 新規コードはLandUnitRoster.RegisterAll / LandUnitRoster.Get を直接使うこと。
+    /// A thin backward-compatibility wrapper (Task28). The substance moved to LandUnitRoster (the seven
+    /// land classes × tiers 1–5). The Tank_T1/Infantry_T1 keys and call shapes remain because existing
+    /// saves/tests/diagnostics (Game/SpeedCalibrationDiagnostics.cs) keep referencing them, but the
+    /// values themselves have LandUnitRoster's tier-1 base-stat table as the source of truth and are not
+    /// duplicated here. New code should use LandUnitRoster.RegisterAll / LandUnitRoster.Get directly.
     /// </summary>
     public static class MvpUnitTypes
     {
