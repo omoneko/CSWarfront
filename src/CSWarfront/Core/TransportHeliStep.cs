@@ -1,43 +1,47 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task101: 輸送ヘリの兵站ループ（設計§2）。トラック（SupplyTruckStep）の空路版＋歩兵空輸。
+    /// Task101: the transport helicopter logistics loop (design §2). The airborne counterpart of the
+    /// trucks (SupplyTruckStep), plus infantry airlift.
     ///
-    /// サイクル（毎tickステートレス導出、道路不要の直行）:
-    ///   1. 空荷: 母基地（最寄りの自軍陸軍基地）へ帰投し、圏内で物資を積載（勢力プールから
-    ///      CargoSupplyぶん＝SupplyLoad 1.0）＋圏内のIdle歩兵系を最大MaxPassengers体搭乗させる
-    ///   2. 積載あり: 目的地（備蓄に空きのある最寄り自軍SupplyDepot。無ければ「交戦中の味方
-    ///      陸上ユニット」の最寄り＝前線）へ直行
-    ///   3. 到着（DropRadius）: 物資をDepotのStoredSuppliesへ荷下ろし（前線降下の場合は物資は
-    ///      降ろさず持ち帰る）、歩兵を降機（周囲へ決定的散開・State=Idle→次のAssignAdvanceが
-    ///      再任務）
-    ///   4. 空になったら母基地へ帰投
+    /// The cycle (stateless per-tick derivation; direct flight, no roads needed):
+    ///   1. Empty: return to the home base (nearest friendly army base) and, inside its radius, load
+    ///      supplies (CargoSupply from the faction pool = SupplyLoad 1.0) and board up to MaxPassengers
+    ///      idle infantry-type units in the radius
+    ///   2. Loaded: fly straight to the destination (the nearest friendly SupplyDepot with stock room;
+    ///      otherwise the nearest "engaging friendly land unit" = the front line)
+    ///   3. Arrival (DropRadius): unload supplies into the depot's StoredSupplies (on a front-line drop
+    ///      the supplies stay aboard and return), disembark the infantry (deterministic scatter,
+    ///      State=Idle → the next AssignAdvance re-tasks them)
+    ///   4. When empty, return to the home base
     ///
-    /// 搭乗（CarriedByUnitId）: 搭乗中ユニットは全stepから除外され標的にもならない。位置は毎tick
-    /// このstepが追従させ、ヘリが撃墜されたら道連れ（無音消滅＝積荷・搭乗兵ロスト）。
-    /// 維持はトラックと同型（陸軍基地1機・勢力上限MaxHelisPerFaction、経済tickでMaintainHelis、
-    /// Invader除外）。プレイヤーのHold/RallyHold指示があるヘリには触れない。
+    /// Carrying (CarriedByUnitId): carried units are excluded from every step and cannot be targeted.
+    /// This step synchronizes their position every tick, and a downed helicopter takes them with it
+    /// (silent removal = cargo and passengers lost). Maintenance mirrors the trucks (one per army base,
+    /// faction cap MaxHelisPerFaction, MaintainHelis on the economy tick, Invaders excluded). Helicopters
+    /// under a player's Hold/RallyHold order are never touched.
     /// </summary>
     public static class TransportHeliStep
     {
         public const int MaxHelisPerFaction = 6;
         public const int HelisPerArmyBase = 1;
 
-        /// <summary>満載（SupplyLoad=1）が運ぶ補給物資量（トラック1台=30の2倍）。</summary>
+        /// <summary>Supplies a full load (SupplyLoad=1) carries (twice a truck's 30).</summary>
         public const float CargoSupply = 60f;
 
         public const int MaxPassengers = 3;
 
-        /// <summary>母基地での積載・搭乗判定半径（基地の補給圏と同じ）。</summary>
+        /// <summary>Loading/boarding radius at the home base (same as the base supply zone).</summary>
         public const float PickupRadius = 200f;
 
-        /// <summary>目的地への到着＝荷下ろし/降機判定半径。</summary>
+        /// <summary>Arrival radius at the destination = unload/disembark test.</summary>
         public const float DropRadius = 60f;
 
-        /// <summary>降機時の散開半径。</summary>
+        /// <summary>Scatter radius on disembark.</summary>
         public const float DisembarkScatter = 20f;
 
-        /// <summary>経済tickごと: 陸軍基地が輸送ヘリを自動維持する（SupplyTruckStep.MaintainTrucksと同型）。</summary>
+        /// <summary>Per economy tick: army bases auto-maintain transport helicopters (same shape as
+        /// SupplyTruckStep.MaintainTrucks).</summary>
         public static void MaintainHelis(WarState state)
         {
             UnitType heliType = state.Types.Get(AirUnitRoster.TypeKey(UnitCategory.TransportHelicopter, 1));
@@ -70,8 +74,9 @@ namespace CSWarfront.Core
 
         public static void Advance(WarState state, float dt)
         {
-            // 1) 搭乗中ユニットの位置追従と、運搬役死亡時の道連れ（列車の搭乗もここで一括処理する
-            //    ——CarriedByUnitIdは運搬役の種別を問わない共通機構のため）。
+            // 1) Position sync for carried units, and shared fate when the carrier dies (train passengers
+            //    are handled here in one place too — CarriedByUnitId is a common mechanism regardless of
+            //    carrier kind).
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
@@ -79,7 +84,7 @@ namespace CSWarfront.Core
                 UnitInstance carrier = state.FindUnit(u.CarriedByUnitId.Value);
                 if (carrier == null || !carrier.IsAlive)
                 {
-                    // 道連れ（無音消滅: KillEventを積まない。スタック消滅と同じ方針）。
+                    // Shared fate (silent removal: no KillEvent — the same policy as stuck cleanup).
                     u.CurrentHP = 0f;
                     u.State = UnitState.Dead;
                     u.CarriedByUnitId = null;
@@ -88,7 +93,7 @@ namespace CSWarfront.Core
                 u.Position = carrier.Position;
             }
 
-            // 2) 輸送ヘリ本体のサイクル。
+            // 2) The transport helicopters' own cycle.
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance heli = state.Units[i];
@@ -123,7 +128,7 @@ namespace CSWarfront.Core
 
             Faction f = state.FindFaction(heli.FactionId);
 
-            // 物資の積載（プールが空でも歩兵輸送だけは成立させる）。
+            // Load supplies (infantry transport still works even with an empty pool).
             if (f != null && f.SupplyStock > 0f)
             {
                 float loadable = f.SupplyStock / CargoSupply;
@@ -133,7 +138,7 @@ namespace CSWarfront.Core
                 heli.SupplyLoadFromDepot = false;
             }
 
-            // 歩兵の搭乗（基地圏内のIdle歩兵系、AiControlled/FreeAdvanceのみ）。
+            // Board infantry (idle infantry-types inside the base radius; AiControlled/FreeAdvance only).
             int boarded = passengers;
             for (int i = 0; i < state.Units.Count && boarded < MaxPassengers; i++)
             {
@@ -152,13 +157,13 @@ namespace CSWarfront.Core
                 boarded++;
             }
 
-            Wait(heli); // 積むものが無ければ待機、積めたら次tickのAdvanceLoadedHeliが目的地を決める
+            Wait(heli); // nothing to load = wait; if loaded, next tick's AdvanceLoadedHeli picks a destination
         }
 
         private static void AdvanceLoadedHeli(WarState state, UnitInstance heli, MilitaryBase home, int passengers)
         {
-            // 目的地: 備蓄に空きのある最寄りDepot → 弾薬の減った築城（Task111）→
-            // 交戦中の味方陸上ユニットの最寄り（前線）。
+            // Destination: nearest depot with stock room → a fortification low on ammo (Task111) →
+            // the nearest engaging friendly land unit (the front line).
             MilitaryBase depot = FindNearestDepotWithRoom(state, heli);
             MilitaryBase fort = depot == null ? FindNearestFortNeedingAmmo(state, heli) : null;
             WorldPos? dest = depot != null ? depot.Position : (fort != null ? fort.Position : (WorldPos?)null);
@@ -166,11 +171,13 @@ namespace CSWarfront.Core
 
             if (!dest.HasValue)
             {
-                // Task111（Workshop報告「輸送ヘリが全機着陸したまま永久に動かない」）: 従来は
-                // 「物資は持ったままその場で待機」しており、Depotが満杯になった瞬間に空中で目的地を
-                // 失ったヘリが野外に降りたまま二度と動かなくなっていた。配送先が無い物資は母基地へ
-                // 持ち帰り、勢力プールへ戻す（歩兵も母基地で降機）。これでヘリは必ず基地へ帰り、
-                // 需要が生まれれば（Depotに空きが出る/築城の弾が減る）次のサイクルで再出撃する。
+                // Task111 (Workshop report "every transport helicopter lands and stays there forever"):
+                // previously the helicopter "waited in place with the cargo aboard", so the moment a depot
+                // filled up, helicopters that lost their destination mid-air landed in the field and never
+                // moved again. Cargo with no delivery target is now brought home and returned to the
+                // faction pool (infantry disembark at the home base too). The helicopter thus always comes
+                // home, and re-sorties on the next cycle once demand appears (depot room opens up / a
+                // fortification runs low).
                 if (heli.Position.HorizontalDistanceTo(home.Position) > PickupRadius)
                 {
                     FlyTo(heli, home.Position);
@@ -193,7 +200,8 @@ namespace CSWarfront.Core
                 return;
             }
 
-            // 到着: Depotなら物資を荷下ろし。築城（Task111）なら弾薬へ直接転送。歩兵はどの目的地でも降機。
+            // Arrival: unload supplies at a depot; transfer straight into fort ammo (Task111); infantry
+            // disembark at any destination.
             if (depot != null && heli.SupplyLoad > 0f)
             {
                 float cap = FortificationRules.StoredSupplyCap(depot.Type);
@@ -215,12 +223,13 @@ namespace CSWarfront.Core
                 if (heli.SupplyLoad < 0.001f) heli.SupplyLoad = 0f;
             }
             Disembark(state, heli);
-            Wait(heli); // 空になっていれば次tickのAdvanceEmptyHeliが帰投させる
+            Wait(heli); // if now empty, next tick's AdvanceEmptyHeli sends it home
         }
 
-        /// <summary>Task111: 弾薬がSupplyTruckStep.NeedThreshold未満の自軍築城（掩蔽壕/砲兵陣地、
-        /// 稼働中）のうち最寄り。無ければnull。トラックと違い自動回復圏の除外はしない
-        /// （空輸は速いので、多少の重複配送より応答性を優先する）。</summary>
+        /// <summary>Task111: the nearest of the faction's operational fortifications (bunker/artillery
+        /// position) with ammo below SupplyTruckStep.NeedThreshold. Null when none. Unlike the trucks, no
+        /// auto-resupply-zone exclusion (airlift is fast, so responsiveness beats the occasional
+        /// duplicated delivery).</summary>
         private static MilitaryBase FindNearestFortNeedingAmmo(WarState state, UnitInstance heli)
         {
             MilitaryBase best = null;
@@ -238,7 +247,8 @@ namespace CSWarfront.Core
             return best;
         }
 
-        /// <summary>搭乗中の歩兵を降機させる（周囲へ決定的散開、State=Idle→次のAssignAdvanceが再任務）。</summary>
+        /// <summary>Disembarks the passengers (deterministic scatter around the helicopter, State=Idle →
+        /// the next AssignAdvance re-tasks them).</summary>
         private static void Disembark(WarState state, UnitInstance heli)
         {
             int n = 0;
@@ -246,7 +256,7 @@ namespace CSWarfront.Core
             {
                 UnitInstance u = state.Units[i];
                 if (!u.CarriedByUnitId.HasValue || u.CarriedByUnitId.Value != heli.InstanceId) continue;
-                // 決定的散開: 搭乗順に90度刻みのリング配置。
+                // Deterministic scatter: a ring layout stepped 90 degrees in boarding order.
                 float ox = (n % 2 == 0 ? 1f : -1f) * DisembarkScatter * ((n / 2) + 1) * 0.5f;
                 float oz = (n % 4 < 2 ? 1f : -1f) * DisembarkScatter * 0.5f;
                 u.CarriedByUnitId = null;
