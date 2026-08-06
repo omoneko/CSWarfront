@@ -1,43 +1,46 @@
 namespace CSWarfront.Core
 {
-    /// <summary>MovementStepの続き（Task78: 海上ユニット(Domain.Sea)の移動則）。500行/ファイルの
-    /// 上限に収めるため、AdvanceSea本体と迂回ロジックだけをこのファイルへ分離した
-    /// （MilitaryBase.cs/MilitaryManager*.csと同じpartial classパターン）。
+    /// <summary>Continuation of MovementStep (Task78: the movement model for sea units (Domain.Sea)).
+    /// Only the AdvanceSea body and the detour logic were split into this file to stay within the
+    /// 500-line-per-file limit (the same partial-class pattern as MilitaryBase.cs/MilitaryManager*.cs).
     ///
-    /// 陸地に阻まれて直進できない海上ユニットが、いつまでも波打ち際で足止めされ続ける
-    /// （ユーザー報告「海上ユニットが敵拠点へ移動せず自拠点にこもったまま」）不具合の対策。
-    /// 真の水上経路探索（A*等）はまだ無いMVPの簡易的な「壁沿い歩き」: 直進の着地点が水域でなければ
-    /// SeaDetourAnglesDegの順に決定的な迂回方向を試し、最初に水域へ着地する方向を採用する。
-    /// 岬・半島の付け根程度は回り込めるが、完全に閉じた入り江や内陸の目標までは辿り着けないことが
-    /// ある——その場合はSeaBlockedHoursが育ちSeaBlockedIdleHoursで安全にIdleへ諦める。
-    /// 1tickあたり最大でもSeaDetourAnglesDegの長さ(6)回しか水域判定を行わないため、探索コストは
-    /// 常に一定で頭打ちになる。</summary>
+    /// The countermeasure for sea units blocked by land staying pinned at the shoreline forever (user
+    /// report: "naval units never move on the enemy base and stay holed up at their own"). No true naval
+    /// pathfinding (A* etc.) exists yet — this MVP does a simple "wall follow": when the straight step's
+    /// landing point is not water, deterministic detour directions are tried in SeaDetourAnglesDeg order
+    /// and the first direction landing on water is taken. It can round capes and the necks of peninsulas,
+    /// but may never reach targets inside fully closed bays or inland — in that case SeaBlockedHours
+    /// accumulates and SeaBlockedIdleHours safely gives up into Idle. At most len(SeaDetourAnglesDeg) (6)
+    /// water tests run per tick, so the search cost is bounded and constant.</summary>
     public static partial class MovementStep
     {
         private static readonly float[] SeaDetourAnglesDeg = { 30f, -30f, 60f, -60f, 90f, -90f };
 
-        /// <summary>Task78: 海上ユニットが直進・迂回のいずれの方向にも一歩も進めない状態が
-        /// このゲーム内時間だけ続いたら、そのtickでState=Idleへ遷移し、以後は目的地
-        /// (OrderTargetPos/RallyPoint)が変わるまで移動を一切試みない（毎tick迂回を探索し続けて
-        /// 見た目がスピンし続ける／CPUを浪費し続けるのを防ぐ）。目的地が変われば
-        /// UnitInstance.SeaBlockedHoursは即座に0へリセットされ、また新たにこの時間だけ迂回を試みる。</summary>
+        /// <summary>Task78: once a sea unit has been unable to take a single step in the straight or any
+        /// detour direction for this much in-game time, it transitions to State=Idle that tick and stops
+        /// attempting to move until the objective (OrderTargetPos/RallyPoint) changes (prevents the
+        /// endless per-tick detour searching that looks like spinning in place and wastes CPU). When the
+        /// objective changes, UnitInstance.SeaBlockedHours resets to 0 immediately and detours are
+        /// attempted for this long again.</summary>
         public const float SeaBlockedIdleHours = 6f;
 
-        /// <summary>目的地が実質的に同じとみなす閾値（水平距離）。これ未満の差はSeaBlockedHoursの
-        /// リセット判定において「同じ命令が継続している」として扱う。</summary>
+        /// <summary>Threshold below which the objective counts as effectively unchanged (horizontal
+        /// distance). Smaller differences are treated as "the same order continues" for the
+        /// SeaBlockedHours reset decision.</summary>
         private const float SeaObjectiveChangeEpsilon = 0.5f;
 
-        /// <summary>Task61/Task78: 海上ユニットの移動。RoadGraph/CoverMapを一切使わず目的地へ直線移動を
-        /// 試みる。直進の着地点が水域でなければ（陸地/岬に阻まれれば）、SeaDetourAnglesDegの順に
-        /// 決定的な迂回方向を試し、最初に水域へ着地する方向を採用する（簡易wall-follow）。
-        /// いずれも水域へ着地できなければ、そのtickは一切移動せずSeaBlockedHoursへdtを積算する
-        /// （クラス冒頭のIWaterSamplerコメント参照。海軍専用の経路探索がまだ無いMVPの既知の制約——
-        /// 完全に陸に囲まれた目標へは物理的に到達できないことがある）。Yは水面サンプラーが返す値を
-        /// そのまま採用する（サンプリングに失敗すれば従来のYを維持）。water==nullの場合は「常に水上」
-        /// とみなし自由に移動する（Height同様、Game層未供給時のテスト容易性のための安全側フォールバック、
-        /// この場合迂回/足止めのロジックは一切発生しない＝直進のみで常に成功する）。</summary>
-        /// <summary>Task92: SeaGrid経路のウェイポイントへの到達判定距離。セルサイズ（96m）より
-        /// やや小さく取り、通過しながら次のウェイポイントへ滑らかに切り替える。</summary>
+        /// <summary>Task61/Task78: sea-unit movement. Attempts a straight line toward the objective with
+        /// no RoadGraph/CoverMap at all. If the straight landing point is not water (blocked by land or a
+        /// cape), deterministic detour directions are tried in SeaDetourAnglesDeg order and the first that
+        /// lands on water is taken (simple wall-follow). If none lands on water, no movement happens this
+        /// tick and dt accumulates into SeaBlockedHours (see the IWaterSampler class comment — a known MVP
+        /// limitation while dedicated naval pathfinding does not exist: targets fully enclosed by land may
+        /// be physically unreachable). Y adopts the water-level sampler's value verbatim (keeping the
+        /// previous Y on sampling failure). With water==null, everywhere counts as water and movement is
+        /// free (like Height, a safe fallback for testability without the Game layer — no detour/blocking
+        /// logic ever runs, the straight step always succeeds).</summary>
+        /// <summary>Task92: arrival distance for SeaGrid path waypoints. Slightly under the cell size
+        /// (96m) so the unit rolls smoothly onto the next waypoint while passing through.</summary>
         public const float SeaWaypointArrivalDistance = 60f;
 
         private static void AdvanceSea(UnitInstance u, float stepLen, WorldPos objective, IWaterSampler water, float dt)
@@ -52,16 +55,17 @@ namespace CSWarfront.Core
             }
             else if (u.SeaBlockedHours >= SeaBlockedIdleHours)
             {
-                // Task78: 同じ目的地に対してこれ以上探索しても無駄と分かっている。命令が変わるまで
-                // 一切移動を試みない（次tickからはResolveDomainObjectiveがState!=Movingで弾くため
-                // このメソッド自体呼ばれなくなる）。
+                // Task78: further searching against the same objective is known to be futile. Do not
+                // attempt any movement until the orders change (from the next tick on,
+                // ResolveDomainObjective rejects on State!=Moving, so this method stops being called).
                 u.State = UnitState.Idle;
                 return;
             }
 
-            // Task92: SeaGrid経路（InvasionOrders/ApplyRallyが張る）があればウェイポイントを順に辿る。
-            // 各歩の水域チェック・壁沿い迂回・足止めカウンタは従来どおり機能する（グリッドは粗いため
-            // 最終防衛線として残す）。経路が尽きたら本来の目的地への直線に戻る。
+            // Task92: with a SeaGrid path (laid by InvasionOrders/ApplyRally), follow its waypoints in
+            // order. The per-step water check, wall-follow detours and the blocked counter all keep
+            // working (the grid is coarse, so they remain the last line of defense). Once the path is
+            // exhausted, revert to the straight line toward the true objective.
             WorldPos steer = objective;
             if (u.Path != null)
             {
@@ -73,7 +77,7 @@ namespace CSWarfront.Core
             objective = steer;
 
             float dist = u.Position.HorizontalDistanceTo(objective);
-            if (dist <= 0.01f) { u.SeaBlockedHours = 0f; return; } // 既に到達済み。
+            if (dist <= 0.01f) { u.SeaBlockedHours = 0f; return; } // already there.
 
             bool arriving = dist <= stepLen;
             float nx, nz;
@@ -92,8 +96,8 @@ namespace CSWarfront.Core
                 return;
             }
 
-            // Task78: 直進が陸地に阻まれた。到達直前（arriving）は迂回すると行き過ぎてしまうため
-            // 対象外とし、それ以外の場合のみ決定的な迂回方向を順に試す。
+            // Task78: the straight step is blocked by land. Just before arrival (arriving) a detour would
+            // overshoot, so it is excluded; otherwise try the deterministic detour directions in order.
             if (!arriving && TryFindSeaDetourStep(u, objective, stepLen, water, out nx, out nz))
             {
                 CommitSeaStep(u, nx, nz, water);
@@ -101,16 +105,17 @@ namespace CSWarfront.Core
                 return;
             }
 
-            // 直進・迂回のいずれも水域へ着地できなかった＝このtickは完全に足止め。
+            // Neither the straight step nor any detour landed on water = fully blocked this tick.
             u.SeaBlockedHours += dt;
             if (u.SeaBlockedHours >= SeaBlockedIdleHours)
                 u.State = UnitState.Idle;
         }
 
-        /// <summary>SeaDetourAnglesDegの順に、現在位置から目的地への進行方向をその角度だけ回転させた
-        /// 同じ歩幅(stepLen)の着地点を試し、最初に水域と判定されたものをnx/nzへ返す（true）。
-        /// いずれも水域でなければfalse（nx/nzは未定義のまま）。waterはこの時点で必ず非null
-        /// （呼び出し元のAdvanceSeaがwater==nullの場合は既に直進側で処理を終えている）。</summary>
+        /// <summary>In SeaDetourAnglesDeg order, tries landing points of the same step length (stepLen)
+        /// with the direction to the objective rotated by each angle, returning the first judged to be
+        /// water in nx/nz (true). False when none is water (nx/nz remain undefined). water is guaranteed
+        /// non-null here (the caller AdvanceSea already finished on the straight-step side when
+        /// water==null).</summary>
         private static bool TryFindSeaDetourStep(UnitInstance u, WorldPos objective, float stepLen, IWaterSampler water, out float nx, out float nz)
         {
             nx = 0f; nz = 0f;
@@ -118,7 +123,7 @@ namespace CSWarfront.Core
             float dz = objective.Z - u.Position.Z;
             float mag = (float)System.Math.Sqrt(dx * dx + dz * dz);
             if (mag <= 0.0001f) return false;
-            dx /= mag; dz /= mag; // 単位方向ベクトル
+            dx /= mag; dz /= mag; // unit direction vector
 
             for (int i = 0; i < SeaDetourAnglesDeg.Length; i++)
             {
@@ -138,8 +143,8 @@ namespace CSWarfront.Core
             return false;
         }
 
-        /// <summary>実際に位置を更新する（Yは水面サンプラーが返す値、失敗すれば従来のYを維持）。
-        /// 直進・迂回どちらの着地点でも共通で使う（AdvanceSea参照）。</summary>
+        /// <summary>Actually updates the position (Y is the water-level sampler's value; the previous Y is
+        /// kept on failure). Shared by both straight and detour landings (see AdvanceSea).</summary>
         private static void CommitSeaStep(UnitInstance u, float nx, float nz, IWaterSampler water)
         {
             float ny = u.Position.Y;

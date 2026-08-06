@@ -1,54 +1,60 @@
 namespace CSWarfront.Core
 {
-    /// <summary>MovementStepの続き（Task87: 航空/海上ユニットの帰還移動）。
+    /// <summary>Continuation of MovementStep (Task87: return-home movement for air/sea units).
     ///
-    /// ユーザー要望「航空機がターゲットを失った際に静止してしまう→付近の航空基地または空母に帰還。
-    /// 海上戦力は付近の海軍基地にもどる」。従来はIdle（交戦終了後・命令なし）の航空/海上ユニットは
-    /// その場でホバリング/漂泊し続けていた。この拡張は、Idleの航空/海上ユニットに「最寄りの帰還先」
-    /// を暗黙の目的地として与える:
-    ///   - 航空(Domain.Air): 自軍の航空基地(BaseType.AirForce)と自軍の空母(UnitCategory.Carrier、
-    ///     生存中)のうち最寄りのもの。
-    ///   - 海上(Domain.Sea): 自軍の海軍基地(BaseType.Navy)のうち最寄りのもの。
-    /// HomeArrivalDistance以内に着いたら以後は動かない（基地上空/沖合で待機）。AI/プレイヤーが
-    /// 新しい命令（State=Moving+OrderTargetPos）を与えれば従来どおりそちらへ向かう。
-    /// 状態は一切持たない（毎tick最寄りを再解決する決定的な純関数。空母が移動すれば追従する）。
-    /// 地上ユニットは対象外（Idleで静止する従来挙動を維持）。</summary>
+    /// User request: "aircraft freeze when they lose their target → return to a nearby air base or
+    /// carrier; naval forces return to a nearby navy base". Previously, Idle air/sea units (engagement
+    /// over, no orders) hovered/drifted in place forever. This extension gives Idle air/sea units the
+    /// nearest home as an implicit objective:
+    ///   - Air (Domain.Air): the nearest of the faction's air bases (BaseType.AirForce) and living
+    ///     friendly carriers (UnitCategory.Carrier).
+    ///   - Sea (Domain.Sea): the nearest of the faction's navy bases (BaseType.Navy).
+    /// Once within HomeArrivalDistance the unit stops moving (waiting over the base / offshore). New
+    /// orders from the AI/player (State=Moving + OrderTargetPos) send it there as usual.
+    /// Completely stateless (a deterministic pure function re-resolving the nearest home every tick; if a
+    /// carrier moves, its aircraft follow). Land units are exempt (the traditional behavior of standing
+    /// still while Idle is kept).</summary>
     public static partial class MovementStep
     {
-        /// <summary>帰還先にこの距離まで近づいたら停止する（基地の真上に折り重ならないための余白。
-        /// CoverArrivalDistanceより大きいのは、複数機が同じ基地へ帰るため
-        /// ある程度の「たまり場」の広さが要るから）。</summary>
+        /// <summary>Stop once within this distance of the home (a margin so aircraft do not pile up
+        /// directly over the base; larger than CoverArrivalDistance because multiple aircraft return to
+        /// the same base and need a wider "apron").</summary>
         public const float HomeArrivalDistance = 60f;
 
-        /// <summary>Task107: 帰還進入で降下を開始する残り水平距離。ここからHomeArrivalDistanceまでの
-        /// 間で巡航高度→駐機高度へ線形に降下する（＝基地の手前で滑らかに高度を落とす）。</summary>
+        /// <summary>Task107: remaining horizontal distance at which the return approach starts
+        /// descending. Between here and HomeArrivalDistance the altitude drops linearly from cruise to
+        /// parked (= a smooth descent short of the base).</summary>
         public const float DescentStartDistance = 500f;
 
-        /// <summary>Task107: 駐機（着陸完了）時の地表からの高さ。0だと地面にめり込んで見えるための余白。</summary>
+        /// <summary>Task107: height above the surface when parked (landing complete). A margin so the
+        /// model does not look sunk into the ground at 0.</summary>
         public const float ParkedAltitude = 2f;
 
-        /// <summary>Task107: 空母への着艦高度（空母ユニットの基準Yからの相対＝甲板の高さ）。
-        /// 洋上では地形サンプラーが海底/水面を返すため、空母帰還時はこの値を使う。</summary>
+        /// <summary>Task107: deck landing height on a carrier (relative to the carrier unit's base Y =
+        /// deck height). Over open water the terrain sampler returns the seabed/water level, so carrier
+        /// returns use this value instead.</summary>
         public const float CarrierDeckAltitude = 12f;
 
-        /// <summary>Task107: 着陸降下の1tickあたりの下降量＝stepLen×これ（真下へ落ちるのではなく
-        /// ゆっくり接地させるための係数）。</summary>
+        /// <summary>Task107: descent per tick while landing = stepLen × this (a factor for settling down
+        /// gently rather than dropping straight down).</summary>
         public const float LandingDescentRate = 0.35f;
 
-        /// <summary>Idleの航空/海上ユニットの帰還先を解決する。対象外・帰還先なし・到着済みならnull。</summary>
+        /// <summary>Resolves an Idle air/sea unit's home. Null when exempt, no home exists, or already
+        /// arrived.</summary>
         private static WorldPos? ResolveHomeObjective(WarState state, UnitInstance u, UnitType type)
         {
-            if (u.State != UnitState.Idle) return null; // Moving/Engagingは通常の目的地/パス移動が扱う
+            if (u.State != UnitState.Idle) return null; // Moving/Engaging are handled by normal objective/path movement
 
-            // Task101: 輸送ヘリ・軍用列車は専用step（TransportHeliStep/TrainStep）が全移動を管理する
-            // ——航空基地へ勝手に帰ろうとさせない（輸送ヘリの母基地は陸軍基地）。
+            // Task101: transport helicopters and military trains are fully managed by their dedicated
+            // steps (TransportHeliStep/TrainStep) — they must not head home to an air base on their own
+            // (a transport helicopter's home is an army base).
             if (type.Category == UnitCategory.TransportHelicopter
                 || type.Category == UnitCategory.MilitaryTrain) return null;
 
             BaseType homeBaseType;
             if (type.Domain == Domain.Air) homeBaseType = BaseType.AirForce;
             else if (type.Domain == Domain.Sea) homeBaseType = BaseType.Navy;
-            else return null; // 地上は帰還しない
+            else return null; // land units do not return home
 
             WorldPos? best = null;
             float bestDist = float.MaxValue;
@@ -62,7 +68,7 @@ namespace CSWarfront.Core
                 if (d < bestDist) { bestDist = d; best = b.Position; }
             }
 
-            // 航空は自軍の空母も帰還先になる（発着艦プラットフォーム、Task85）。
+            // For aircraft, friendly carriers are homes too (flight platforms, Task85).
             if (type.Domain == Domain.Air)
             {
                 for (int j = 0; j < state.Units.Count; j++)
@@ -77,12 +83,13 @@ namespace CSWarfront.Core
             }
 
             if (!best.HasValue) return null;
-            if (bestDist <= HomeArrivalDistance) return null; // 到着済み: その場で着陸（AdvanceAirLanding）
+            if (bestDist <= HomeArrivalDistance) return null; // arrived: land in place (AdvanceAirLanding)
             return best;
         }
 
-        /// <summary>Task107: 帰還進入中の目標高度。DescentStartDistance以遠は巡航高度のまま、そこから
-        /// HomeArrivalDistanceまでの間で駐機高度へ線形に落とす（＝基地に近づくほど低く飛ぶ）。</summary>
+        /// <summary>Task107: target altitude during the return approach. At or beyond
+        /// DescentStartDistance stays at cruise; between there and HomeArrivalDistance it drops linearly
+        /// to the parked altitude (= flying lower the closer to the base).</summary>
         private static float ApproachAltitude(float distanceToHome, float cruiseAltitude)
         {
             if (distanceToHome >= DescentStartDistance) return cruiseAltitude;
@@ -92,32 +99,33 @@ namespace CSWarfront.Core
             return ParkedAltitude + (cruiseAltitude - ParkedAltitude) * t;
         }
 
-        /// <summary>Task107（ユーザー報告「目標がなくなった航空戦力が空中でホバリングしてしまう」）:
-        /// 任務も帰還先も無い航空ユニット（＝帰還先の圏内に到着済み、または母基地で待機中の輸送ヘリ）を
-        /// その場で着陸させる。水平位置は変えず、Yだけを駐機高度へ向けてゆっくり下ろす。
-        /// 着陸先の高さは:
-        ///   - 自軍空母のHomeArrivalDistance以内: 空母の基準Y+CarrierDeckAltitude（着艦）
-        ///   - 陸上: 地表+ParkedAltitude
-        ///   - 洋上（空母なし）: 着陸できないので何もしない（従来どおり滞空）
-        /// 新しい命令（State=Moving+OrderTargetPos）が来れば、AdvanceAirが巡航高度へ上昇させる
-        /// （離陸はstepLen/tickの上昇制限つき＝地上から瞬間移動しない）。</summary>
+        /// <summary>Task107 (user report "aircraft that lost their target hover in place forever"):
+        /// lands an air unit that has neither a mission nor a home to fly to (= it has arrived inside the
+        /// home area, or a transport helicopter waiting at its base). The horizontal position is
+        /// untouched; only Y sinks slowly toward the parking altitude.
+        /// The landing height:
+        ///   - Within HomeArrivalDistance of a friendly carrier: the carrier's base Y + CarrierDeckAltitude (deck landing)
+        ///   - Over land: surface + ParkedAltitude
+        ///   - Over open water (no carrier): cannot land, so do nothing (keep hovering as before)
+        /// When new orders arrive (State=Moving + OrderTargetPos), AdvanceAir climbs it back to cruise
+        /// (takeoff is rate-limited to stepLen per tick = no teleporting up from the ground).</summary>
         private static void AdvanceAirLanding(WarState state, UnitInstance u, float stepLen, IHeightSampler height)
         {
             float parkY;
             if (!TryResolveParkAltitude(state, u, height, out parkY)) return;
 
             float dy = parkY - u.Position.Y;
-            if (dy > -0.01f && dy < 0.01f) return; // 接地済み
+            if (dy > -0.01f && dy < 0.01f) return; // already on the ground
             float maxStep = stepLen * LandingDescentRate;
             if (dy < -maxStep) dy = -maxStep;
             else if (dy > maxStep) dy = maxStep;
             u.Position = new WorldPos(u.Position.X, u.Position.Y + dy, u.Position.Z);
         }
 
-        /// <summary>着陸/駐機時に取るべきYを解決する（解決できなければfalse＝着陸しない）。</summary>
+        /// <summary>Resolves the Y to adopt when landing/parking (false = cannot resolve, do not land).</summary>
         private static bool TryResolveParkAltitude(WarState state, UnitInstance u, IHeightSampler height, out float parkY)
         {
-            // 直下（HomeArrivalDistance以内）に自軍の空母が居れば着艦する。
+            // A friendly carrier directly below (within HomeArrivalDistance) means a deck landing.
             for (int j = 0; j < state.Units.Count; j++)
             {
                 UnitInstance other = state.Units[j];
@@ -129,7 +137,7 @@ namespace CSWarfront.Core
                 return true;
             }
 
-            // 洋上（空母なし）は着水させない＝そのまま滞空。
+            // Over open water (no carrier): never ditch = keep hovering.
             if (state.Water != null && state.Water.IsWater(u.Position.X, u.Position.Z))
             {
                 parkY = 0f;
@@ -144,7 +152,7 @@ namespace CSWarfront.Core
             }
 
             parkY = 0f;
-            return false; // 地表が分からない: 従来どおり動かさない（安全側フォールバック）
+            return false; // surface unknown: leave the unit alone as before (safe fallback)
         }
     }
 }

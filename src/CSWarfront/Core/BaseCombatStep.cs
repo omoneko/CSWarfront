@@ -2,29 +2,31 @@ using System;
 
 namespace CSWarfront.Core
 {
-    /// <summary>ユニットが敵対基地を射程内で攻撃する（純ロジック）。</summary>
+    /// <summary>Units attacking hostile bases in range (pure logic).</summary>
     public static class BaseCombatStep
     {
-        /// <summary>基地攻めにおける命中率の下限（Task38）。静止した建物は動くユニットより狙いやすいため、
-        /// 素の命中率がこれより低い兵科（例: 命中率0.35のArtillery）でも、基地相手にはこの値まで
-        /// 底上げする。これにより砲兵は「対ユニットでは当てにくいが、対基地では依然強力」という
-        /// 攻城兵器としての立ち位置を保つ。</summary>
+        /// <summary>Accuracy floor for sieging bases (Task38). A stationary building is easier to hit
+        /// than a moving unit, so categories whose raw accuracy is lower (e.g. Artillery at 0.35) are
+        /// raised to this value against bases. This preserves artillery's role as a siege weapon:
+        /// "hard to land on units, still devastating against bases".</summary>
         public const float SiegeAccuracyFloor = 0.8f;
 
-        /// <summary>Task89（ユーザー要望「各基地HPは徐々に回復する仕様に」）: 基地HPの自然回復量
-        /// （ゲーム内1時間あたり）。攻撃が止めば拠点は時間とともに全快へ向かい、航空・海上・ミサイルが
-        /// 床(1)まで削った拠点も放置すれば回復する。占領を成立させるには、この回復速度を上回る
-        /// 継続的な地上攻撃が必要（Tank_T1の攻城DPS 32/h &gt; 20/h なので戦車1両でも正味では削れるが、
-        /// 歩兵1体（16/h）では回復に負ける、という調整。TargetingRulesTests参照）。</summary>
+        /// <summary>Task89 (user request "base HP should regenerate gradually"): natural base HP
+        /// regeneration per in-game hour. Once attacks stop, a base heads back to full over time, and
+        /// bases ground down to the floor (1) by air/sea/missiles recover if left alone. Establishing a
+        /// capture requires sustained ground attack exceeding this regen rate (a Tank_T1's siege DPS of
+        /// 32/h &gt; 20/h, so even a single tank nets damage, while a single infantry (16/h) loses to the
+        /// regen — see TargetingRulesTests).</summary>
         public const float BaseRegenPerHour = 20f;
 
         public static void Advance(WarState state, float dt)
         {
-            // 新設基地の占領猶予を先に消化する。猶予中の基地はこのtickのダメージループから完全に除外する
-            // （プレイヤーが両陣営を配置し終える前に一方的に占領されるのを防ぐ）。
-            // Task89: あわせて自然回復もここで先に適用する（回復→攻撃の順。同tick内では
-            // 「攻撃DPS − 回復」が正味の削り量になる）。HP0（占領処理待ち）の基地は回復させない
-            // ——回復させると占領が二度と成立しなくなる。
+            // Consume the capture grace of new bases first. Bases in grace are excluded entirely from this
+            // tick's damage loop (prevents one side being captured before the player finishes placing both
+            // sides).
+            // Task89: natural regen is also applied here first (regen → attack order; within a tick the
+            // net grind is "attack DPS − regen"). Bases at HP 0 (awaiting capture processing) do not
+            // regenerate — if they did, captures could never complete.
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 var b = state.Bases[j];
@@ -47,66 +49,73 @@ namespace CSWarfront.Core
                 var type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
 
-                // Task79: 自爆ドローンは基地への継続的な射程内砲撃（旧: ダメージ1回でIsOneShot自壊）を
-                // 一切行わない（ShotEventを出さないというTask79の契約を対基地でも一貫させる）。
-                // 対拠点への攻撃自体は失っていない——KamikazeStepが「ユニット/外部脅威が1体も射程内に
-                // いない時に限り、最後の手段として敵対基地へ突進・体当たり起爆する」形で別途担う
-                // （このリワーク当初は対基地攻撃を丸ごと見送っていたが、それにより自爆ドローンが基地を
-                // 一切攻撃できなくなる回帰が生じたため、KamikazeStep側で拾い直した。詳細はKamikazeStep
-                // のクラス冒頭コメント参照）。
+                // Task79: suicide drones never do the continuous in-range bombardment of bases (formerly:
+                // one damage application then IsOneShot self-destruct) — keeping Task79's "no ShotEvents"
+                // contract consistent against bases too. The ability to attack bases is not lost:
+                // KamikazeStep covers it separately as "only when no unit or external threat is in range,
+                // as a last resort, dive into a hostile base and detonate". (The rework initially dropped
+                // base attacks entirely, which regressed suicide drones into never attacking bases at all;
+                // KamikazeStep picked it back up — see its class comment.)
                 if (type.Category.IsKamikaze()) continue;
 
-                // Task85: 戦闘機（対空専任）・空母（プラットフォーム専任）は拠点を一切攻撃しない。
+                // Task85: fighters (air-superiority specialists) and carriers (platform specialists) never
+                // attack bases.
                 if (!TargetingRules.CanAttackBase(type.Category)) continue;
 
-                // Task99: 弾切れは拠点攻撃も停止（CombatStepの対ユニット射撃と同じ規約）。
+                // Task99: out of ammo also stops base attacks (same convention as CombatStep's
+                // anti-unit fire).
                 if (!AmmoRules.HasAmmo(u, type)) continue;
 
                 bool firedAtAnyBase = false;
                 for (int j = 0; j < state.Bases.Count; j++)
                 {
                     var b = state.Bases[j];
-                    if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: 塹壕は攻撃対象外
-                    if (b.CaptureGraceHours > 0f) continue; // 猶予中は無敵
+                    if (!FortificationRules.IsTargetable(b.Type)) continue; // Task101: trenches cannot be attacked
+                    if (b.CaptureGraceHours > 0f) continue; // invulnerable during grace
                     if (b.OwnerFactionId == null) continue;
                     if (b.OwnerFactionId.Value == u.FactionId) continue;
-                    if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue; // Task59: Nemesisも敵対として扱う
+                    if (!state.Relations.Get(u.FactionId, b.OwnerFactionId.Value).IsHostile()) continue; // Task59: Nemesis counts as hostile
                     if (u.Position.HorizontalDistanceTo(b.Position) > type.Range) continue;
 
-                    // Task88: 既にこの攻撃側のHP床（航空/海上=1）に達している拠点へは攻撃しない
-                    // （ダメージ0の爆撃を延々と続け、発砲エフェクトだけが出続けるのを防ぐ。
-                    // 実機報告「爆撃機が敵拠点HPが1になっても攻撃をやめない」の修正）。
+                    // Task88: never attack a base already at this attacker's HP floor (air/sea = 1)
+                    // (prevents endless zero-damage bombing that only spews muzzle effects — the fix for
+                    // the playtest report "bombers keep attacking even when the base is at 1 HP").
                     float hpFloor = TargetingRules.BaseHpFloor(type.Domain);
                     if (b.CurrentHP <= hpFloor) continue;
-                    // Attack はゲーム内1時間あたりのダメージ量。実際に適用するダメージは経過ゲーム内時間(dt)と
-                    // 命中率(Task38)に比例する。ただし静止した建物は動くユニットより狙いやすい格好の的なので、
-                    // 命中率にはSiegeAccuracyFloor(0.8)の下限を設ける（例: 命中率0.35の砲兵でも基地攻めでは
-                    // 0.8として扱う＝素の命中率が低くても砲兵は依然として有効な攻城兵器のままにする）。
+                    // Attack is damage per in-game hour. The applied damage scales with elapsed in-game
+                    // time (dt) and accuracy (Task38). A stationary building is a sitting target compared
+                    // with a moving unit, so accuracy gets the SiegeAccuracyFloor (0.8) lower bound (e.g.
+                    // 0.35-accuracy artillery is treated as 0.8 in sieges = artillery stays an effective
+                    // siege weapon despite its low raw accuracy).
                     float accuracy = CombatSynergy.AccuracyFor(state, u, type);
                     float siegeAccuracy = Math.Max(accuracy, SiegeAccuracyFloor);
-                    // Task86: 航空（爆撃機）はパス移動で射程内滞在時間が減るぶんAirCombat側の倍率で補正する。
+                    // Task86: air (bombers) spend less time in range due to pass movement; compensated by
+                    // the AirCombat multiplier.
                     b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy
                         * AirCombat.DamageMultiplier(type);
-                    // Task85: 拠点をHP0（＝占領）まで削れるのは地上戦力のみ。航空・海上の攻撃は
-                    // HP1で頭打ちにする（最後の1は必ず陸上部隊が削る）。
+                    // Task85: only ground forces can grind a base to HP 0 (= capture). Air and sea attacks
+                    // stop at HP 1 (the final point must always be taken by land troops).
                     float floor = TargetingRules.BaseHpFloor(type.Domain);
                     if (b.CurrentHP < floor) b.CurrentHP = floor;
 
-                    // Task54: 被弾地点（基地攻め）も戦闘域として報告する（CombatStepと同じ理由）。
+                    // Task54: base-siege hit locations are reported as combat zones too (same reason as
+                    // CombatStep).
                     state.CombatZones.ReportCombat(b.Position);
 
-                    // 発砲エフェクトの間引き（Task42、Task58でFireEffects.EmitThrottledへ集約）。
-                    // CombatStepと同じFireCooldownアキュムレータを共有するため、同tick内で既に
-                    // ユニット攻撃側で発砲済みなら、ここでは重ねて出さない（攻撃側1体につき見た目は
-                    // 最大1発/FireIntervalHoursという契約を、対象がユニットか基地かによらず一貫させる
-                    // ため）。TargetId=0: 基地には論理ユニットIDが無い（Task43。Game層はTargetId==0を
-                    // 「ユニットでない対象」として扱い、基地用の既定の着弾高さを使う）。
+                    // Muzzle-effect throttling (Task42; consolidated into FireEffects.EmitThrottled in
+                    // Task58). The same FireCooldown accumulator is shared with CombatStep, so if this
+                    // attacker already fired at a unit this tick, nothing extra is emitted here (keeping
+                    // the contract "visually at most one shot per FireIntervalHours per attacker"
+                    // consistent whether the target is a unit or a base). TargetId=0: bases have no
+                    // logical unit id (Task43; the Game layer treats TargetId==0 as "not a unit" and uses
+                    // the default base impact height).
                     FireEffects.EmitThrottled(state, u, type, b.Position, 0, dt);
                     firedAtAnyBase = true;
                 }
 
-                // Task99: このtickに1つでも拠点を攻撃していれば弾薬を消費する（複数拠点へ同時に
-                // 撃っていても消費は1tickぶん＝対ユニット射撃と同じ消費速度に揃える）。
+                // Task99: if at least one base was attacked this tick, consume ammo (attacking several
+                // bases at once still consumes one tick's worth = matching the anti-unit consumption
+                // rate).
                 if (firedAtAnyBase) AmmoRules.ConsumeFire(u, type, dt);
             }
         }
