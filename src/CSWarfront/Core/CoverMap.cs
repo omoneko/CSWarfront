@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CSWarfront.Core
 {
-    /// <summary>1件の遮蔽物（建物/Prop）。Radiusはその遮蔽物のおおよその半径（footprint基準）。</summary>
+    /// <summary>One piece of cover (building/prop). Radius is its approximate footprint radius.</summary>
     public struct CoverPoint
     {
         public readonly WorldPos Position;
@@ -16,25 +16,26 @@ namespace CSWarfront.Core
     }
 
     /// <summary>
-    /// Game層（CoverMapBuilder）から供給される遮蔽物（建物/Prop）の集合＋「遮蔽を求める」ロジック
-    /// （Task44）。UnityEngine非依存・決定的。RoadGraphと同じ供給パターン：Game層がsimスレッドで
-    /// CS建物/Propバッファを読み取り、この単純なPOCOへ詰め替えてWarState.Coverへ渡す。
+    /// The set of cover objects (buildings/props) supplied by the Game layer (CoverMapBuilder), plus the
+    /// "seek cover" logic (Task44). UnityEngine-free, deterministic. The same supply pattern as
+    /// RoadGraph: the Game layer reads the CS building/prop buffers on the sim thread, repacks them into
+    /// this simple POCO and hands it to WarState.Cover.
     /// </summary>
     public class CoverMap
     {
-        /// <summary>遮蔽物の縁から実際に立つ位置までの余白（メートル相当のマップ単位）。
-        /// 0だと壁に張り付いてしまい見た目が不自然になるため、少し離す。</summary>
+        /// <summary>Margin between the cover's edge and where the unit actually stands (map units ≈
+        /// meters). At 0 the unit would hug the wall, which looks unnatural, so it stands off a little.</summary>
         public const float StandoffMargin = 4f;
 
-        // スコアリングの重み（チューニング値）。低いスコアほど良い候補。
-        //  - DistanceWeight: ユニットからの近さを優先する度合い。
-        //  - ExposureWeight: 「脅威とユニットの間」に来ているかを優先する度合い
-        //    （ExposureScoreの方がDistanceより荒れやすいレンジのため、やや強めに重み付けする）。
-        //  - JitterMagnitude: 複数ユニットが同一の最良点へ密集するのを防ぐための小さな決定的な
-        //    好み（同点/僅差の候補間でのみ順位を左右する程度に小さく保つ）。
-        //  - OutOfSegmentPenalty: 「ユニット→脅威」の線分の外側（＝そもそも遮蔽として機能しない位置、
-        //    例えばユニットの背後）にある候補を強く減点する係数。近さだけで「背後の遮蔽物」が
-        //    「間にある遮蔽物」に勝ってしまわないよう、距離の重みより十分大きくしてある。
+        // Scoring weights (tuning values). Lower scores are better candidates.
+        //  - DistanceWeight: how much closeness to the unit is favored.
+        //  - ExposureWeight: how much "sitting between the threat and the unit" is favored
+        //    (ExposureScore spans a rougher range than distance, hence the slightly heavier weight).
+        //  - JitterMagnitude: a small deterministic preference preventing several units from packing onto
+        //    the identical best spot (kept small enough to only decide between tied/near-tied candidates).
+        //  - OutOfSegmentPenalty: heavily penalizes candidates outside the unit→threat segment (positions
+        //    that do not function as cover at all, e.g. behind the unit). Kept well above the distance
+        //    weight so mere closeness can never let "cover behind us" beat "cover in between".
         private const float DistanceWeight = 1f;
         private const float ExposureWeight = 1.5f;
         private const float OutOfSegmentPenalty = 120f;
@@ -49,10 +50,11 @@ namespace CSWarfront.Core
             _points.Add(new CoverPoint(position, radius));
         }
 
-        /// <summary>Task101: fromからtoへの射線（水平線分）が遮蔽物（建物円）に遮られるか。
-        /// 掩蔽壕の「建物非貫通」射撃判定用。fromの近傍ignoreNearFromRadius以内の遮蔽物は
-        /// 発射側自身の建物とみなして無視する。目標側の遮蔽は正当に射線を遮る
-        /// （建物に張り付いた敵は撃てない＝遮蔽の意味を保つ）。</summary>
+        /// <summary>Task101: whether the line of fire from from to to (a horizontal segment) is blocked
+        /// by cover (building circles). Used for the bunker's "no shooting through buildings" test.
+        /// Cover within ignoreNearFromRadius of from counts as the shooter's own building and is ignored.
+        /// Cover on the target side legitimately blocks the line (an enemy pressed against a building
+        /// cannot be shot = cover keeps its meaning).</summary>
         public bool BlocksLine(WorldPos from, WorldPos to, float ignoreNearFromRadius)
         {
             float abx = to.X - from.X, abz = to.Z - from.Z;
@@ -65,9 +67,9 @@ namespace CSWarfront.Core
                 float fx = cp.Position.X - from.X, fz = cp.Position.Z - from.Z;
                 float distFromSq = fx * fx + fz * fz;
                 float ignore = ignoreNearFromRadius + cp.Radius;
-                if (distFromSq <= ignore * ignore) continue; // 発射側自身の建物
+                if (distFromSq <= ignore * ignore) continue; // the shooter's own building
 
-                // 点と線分の最短距離（2D）。
+                // Shortest distance from a point to a segment (2D).
                 float t = lenSq > 0f ? (fx * abx + fz * abz) / lenSq : 0f;
                 if (t < 0f) t = 0f;
                 if (t > 1f) t = 1f;
@@ -79,10 +81,11 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// unitPosからsearchRadius以内の遮蔽物の中で、threatPosから最もよく身を隠せる位置を探す。
-        /// 見つかった場合、戻り値のWorldPosはその遮蔽物の「脅威から見て奥側」の立ち位置
-        /// （coverCentre + normalize(coverCentre - threatPos) * (radius + StandoffMargin)）。
-        /// 見つからなければfalse（呼び出し側は既存の移動ロジックへフォールバックすること）。
+        /// Among the cover within searchRadius of unitPos, finds the position that best hides from
+        /// threatPos. On success the returned WorldPos is the standing spot on the cover's far side as
+        /// seen from the threat (coverCentre + normalize(coverCentre - threatPos) * (radius +
+        /// StandoffMargin)). False when nothing is found (the caller must fall back to its existing
+        /// movement logic).
         /// </summary>
         public bool TryFindBestCover(WorldPos unitPos, WorldPos threatPos, float searchRadius, uint seed, out WorldPos coverPos)
         {
@@ -96,7 +99,8 @@ namespace CSWarfront.Core
             {
                 CoverPoint cp = _points[i];
 
-                // 空間的なショートカット: 水平距離の全計算(sqrt)前に軸ごとのバウンディングボックスで弾く。
+                // Spatial shortcut: reject with per-axis bounding boxes before the full horizontal
+                // distance (sqrt).
                 float dx = unitPos.X - cp.Position.X;
                 if (dx > searchRadius || dx < -searchRadius) continue;
                 float dz = unitPos.Z - cp.Position.Z;
@@ -109,8 +113,8 @@ namespace CSWarfront.Core
                 float jitter = JitterFactor(seed, i) * JitterMagnitude;
                 float score = distToUnit * DistanceWeight + exposureScore * ExposureWeight + jitter;
 
-                // 厳密な"<"のみで更新するため、完全な同点は先に見つかった（=より低いindexの）候補が
-                // 自動的に勝つ。これが決定的なタイブレークになる。
+                // Updating only on a strict "<" means exact ties are automatically won by the candidate
+                // found first (= the lower index). That is the deterministic tie-break.
                 if (score < bestScore)
                 {
                     bestScore = score;
@@ -125,9 +129,10 @@ namespace CSWarfront.Core
             return true;
         }
 
-        /// <summary>ユニット→脅威の線分上にどれだけ乗っているか（=どれだけ間に割り込めているか）を
-        /// スコア化する。0に近いほど良い。線分から外れた垂直距離＋線分の外側(t&lt;0 or t&gt;1)へ出た分の
-        /// ペナルティの合計。ユニットと脅威が同じ位置にある退化ケースは全候補を同等（0）として扱う。</summary>
+        /// <summary>Scores how well the cover sits on the unit→threat segment (= how well it interposes).
+        /// Closer to 0 is better: the perpendicular distance off the segment plus a penalty for lying
+        /// outside it (t&lt;0 or t&gt;1). The degenerate case of the unit and threat sharing a position
+        /// treats all candidates as equal (0).</summary>
         private static float ExposureScore(WorldPos coverPos, WorldPos unitPos, WorldPos threatPos)
         {
             float ux = threatPos.X - unitPos.X;
@@ -152,8 +157,9 @@ namespace CSWarfront.Core
             return perpDist + outOfSegment;
         }
 
-        /// <summary>脅威から見て遮蔽物の奥側にあたる、実際にユニットが立つ位置を求める。
-        /// coverCentreとthreatPosがほぼ同一（退化ケース）の場合は決定的な既定方向(+Z)へ逃がす。</summary>
+        /// <summary>Computes the spot where the unit actually stands — the cover's far side as seen from
+        /// the threat. When coverCentre and threatPos nearly coincide (degenerate case), escapes in the
+        /// deterministic default direction (+Z).</summary>
         private static WorldPos StandingPosition(CoverPoint cover, WorldPos threatPos)
         {
             float ax = cover.Position.X - threatPos.X;
@@ -177,8 +183,8 @@ namespace CSWarfront.Core
                 cover.Position.Z + nz * standoff);
         }
 
-        /// <summary>(seed, candidateIndex)から決定的に[0,1)の係数を導く。RoadGraph.EdgeJitterFactorと
-        /// 同じ技法（純整数演算のアバランチミックス、System.Random不使用）。</summary>
+        /// <summary>Derives a deterministic [0,1) factor from (seed, candidateIndex). The same technique
+        /// as RoadGraph.EdgeJitterFactor (pure-integer avalanche mix, no System.Random).</summary>
         private static float JitterFactor(uint seed, int candidateIndex)
         {
             uint h = Mix(seed ^ (uint)candidateIndex);

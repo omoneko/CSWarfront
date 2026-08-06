@@ -1,32 +1,34 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 兵科ごとの「何を攻撃できるか」の集中規則（Task85、ユーザー要望）:
-    ///  - 敵拠点を占領（HP0まで削る）できるのは地上戦力のみ。航空・海上戦力は拠点HPを1までしか
-    ///    減らせない（最後の1は必ず陸上部隊が削る＝地上部隊なしでは占領が成立しない）。
-    ///  - 戦闘機(AirSuperiority)は戦闘機・爆撃機（＝航空ユニット）とKAIJU（外部脅威）のみ攻撃可能。
-    ///    拠点は攻撃不可。
-    ///  - 爆撃機(TacticalBomber)は地上目標（地上ユニット・拠点）とKAIJUのみ攻撃可能。
-    ///  - ミサイル駆逐艦(Destroyer)は地上目標・KAIJU・海上戦力を攻撃可能だが拠点占領は不可（上記の
-    ///    HP下限1の対象）。
-    ///  - 空母(Carrier)は戦闘機・爆撃機の発着艦プラットフォーム専任（CarrierAirWing）で、
-    ///    一切攻撃しない。
+    /// The centralized per-category "what may it attack" rules (Task85, user request):
+    ///  - Only ground forces can capture enemy bases (grind them to HP 0). Air and naval forces can only
+    ///    reduce base HP to 1 (the last point must be taken by land troops = no capture without a ground
+    ///    force).
+    ///  - Fighters (AirSuperiority) may attack only fighters/bombers (= air units) and KAIJU (external
+    ///    threats). Bases are off-limits.
+    ///  - Bombers (TacticalBomber) may attack only ground targets (ground units and bases) and KAIJU.
+    ///  - Missile destroyers (Destroyer) may attack ground targets, KAIJU and naval forces, but cannot
+    ///    capture bases (subject to the HP floor of 1 above).
+    ///  - Carriers (Carrier) are dedicated flight platforms (CarrierAirWing) and never attack anything.
     ///
-    /// ユニット間の標的可否はUnitType.CanTargetDomains（ロスター定義、TargetSearchが適用）が担い、
-    /// このクラスは「拠点」「外部脅威」という非ユニット標的への可否と、拠点HPの下限を担う。
-    /// 適用箇所: BaseCombatStep（CanAttackBase/BaseHpFloor）、KamikazeStep（BaseHpFloor）、
-    /// ThreatCombatStep（CanAttackThreat）。
+    /// Unit-vs-unit targetability is handled by UnitType.CanTargetDomains (roster-defined, applied by
+    /// TargetSearch); this class covers the non-unit targets ("bases", "external threats") and the base
+    /// HP floor. Applied in: BaseCombatStep (CanAttackBase/BaseHpFloor), KamikazeStep (BaseHpFloor),
+    /// ThreatCombatStep (CanAttackThreat).
     ///
-    /// 注記: 「KAIJUのみ」のKAIJUは外部脅威全般（ゴジラ=Kaiju/トライポッド=Alien）を指すものとして
-    /// 実装する（ThreatKindでの区別はしない——戦闘機がゴジラは撃てるのにトライポッドは撃てない、
-    /// という非対称にする理由が無いため）。
+    /// Note: "KAIJU only" is implemented as external threats in general (Godzilla=Kaiju /
+    /// tripods=Alien) — no ThreatKind distinction (there is no reason for the asymmetry of a fighter
+    /// that can shoot Godzilla but not a tripod).
     /// </summary>
     public static class TargetingRules
     {
-        /// <summary>この兵科は拠点（MilitaryBase）を攻撃できるか。戦闘機（対空専任）・空母
-        /// （プラットフォーム専任）・補給トラック（Task99: 非武装。Attack0でもCombatMath.DamagePerHitの
-        /// 最低保証1が通ってしまうため、ここで明示的に除外する）・ヘリ2種と軍用列車（Task101:
-        /// 攻撃ヘリは地上ユニット専任、輸送ヘリ/列車は非武装）はfalse。</summary>
+        /// <summary>Whether this category may attack bases (MilitaryBase). False for fighters
+        /// (air-superiority specialists), carriers (platform specialists), supply trucks (Task99:
+        /// unarmed — even with Attack 0, CombatMath.DamagePerHit's guaranteed minimum of 1 would get
+        /// through, so they are excluded explicitly here), both helicopters and the military train
+        /// (Task101: attack helicopters are ground-unit specialists; transport helicopters/trains are
+        /// unarmed).</summary>
         public static bool CanAttackBase(UnitCategory category)
         {
             return category != UnitCategory.AirSuperiority && category != UnitCategory.Carrier
@@ -35,30 +37,30 @@ namespace CSWarfront.Core
                 && category != UnitCategory.MilitaryTrain;
         }
 
-        /// <summary>Task101: この兵科はヘリコプターか（対ヘリ規則の対象）。</summary>
+        /// <summary>Task101: whether this category is a helicopter (subject to the anti-helicopter rules).</summary>
         public static bool IsHelicopter(UnitCategory category)
         {
             return category == UnitCategory.AttackHelicopter || category == UnitCategory.TransportHelicopter;
         }
 
-        /// <summary>Task101: ヘリコプターを攻撃できるのは戦車・対空・戦闘機のみ
-        /// （ユーザー仕様。TargetSearch/UnitSpatialGridがヘリ標的の候補判定に使う。
-        /// 戦車はCanTargetDomains=Landのままだが、対ヘリに限りこの例外で標的にできる）。</summary>
+        /// <summary>Task101: only tanks, anti-air and fighters may attack helicopters (user spec; used by
+        /// TargetSearch/UnitSpatialGrid when judging helicopter-target candidates. Tanks keep
+        /// CanTargetDomains=Land, but this exception lets them target helicopters specifically).</summary>
         public static bool CanTargetHelicopter(UnitCategory attacker)
         {
             return attacker == UnitCategory.Tank || attacker == UnitCategory.AntiAir
                 || attacker == UnitCategory.AirSuperiority;
         }
 
-        /// <summary>攻撃側ドメインに応じた拠点HPの下限。地上のみ0まで削れる（＝占領できる）。
-        /// 航空・海上は1で頭打ち。</summary>
+        /// <summary>Base HP floor by attacker domain. Only land can grind to 0 (= capture); air and sea
+        /// stop at 1.</summary>
         public static float BaseHpFloor(Domain attackerDomain)
         {
             return attackerDomain == Domain.Land ? 0f : 1f;
         }
 
-        /// <summary>この兵科は外部脅威（KAIJU/Alien）を攻撃できるか。空母・補給トラック
-        /// （Task99: 非武装）・ヘリ2種と軍用列車（Task101）はfalse。</summary>
+        /// <summary>Whether this category may attack external threats (KAIJU/Alien). False for carriers,
+        /// supply trucks (Task99: unarmed), both helicopters and the military train (Task101).</summary>
         public static bool CanAttackThreat(UnitCategory category)
         {
             return category != UnitCategory.Carrier && category != UnitCategory.SupplyTruck

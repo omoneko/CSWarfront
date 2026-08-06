@@ -3,44 +3,48 @@ using System;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 脅威のビーム攻撃（ゴジラ光線/トライポッドレーザー）によるユニットへの一撃ダメージ（Task83、
-    /// ユーザー要望「ゴジラ光線とトライポッドのレーザーにユニットに対するダメージ判定をつけて」）。
+    /// One-shot damage to units from threat beam attacks (Godzilla's ray / the tripods' laser) (Task83,
+    /// user request "give the Godzilla ray and the tripod laser damage against units").
     ///
-    /// 他MOD（GodzillaDisaster/AlienInvasion）はビーム発射を「一回性のイベント」として発射記録API
-    /// （CurrentId+Snapshot、Game/ExternalThreatBridge参照）に公開し、CSWarfront側が新着の発射記録
-    /// 1件につきこのApplyStrikeを1回呼ぶ。継続DPSではなく一撃ダメージなのは、両MODのビームが
-    /// 実際に一瞬の発射（ゴジラ: Rampaging中に1回の紫熱線、トライポッド: 一定間隔の単発レーザー）
-    /// だから。
+    /// The other mods (GodzillaDisaster/AlienInvasion) expose each beam firing as a one-off event via
+    /// their firing-record API (CurrentId+Snapshot; see Game/ExternalThreatBridge), and CSWarfront calls
+    /// ApplyStrike exactly once per new firing record. It is a single hit rather than sustained DPS
+    /// because both mods' beams really are momentary discharges (Godzilla: one purple heat ray while
+    /// Rampaging; tripods: single lasers at intervals).
     ///
-    /// ダメージ方針はThreatAuraStepと同じ非対称設計:
-    ///  - ThreatRelationsを一切参照しない（ビームの経路上にいれば同盟/中立設定の勢力でも等しく当たる）。
-    ///  - 装甲(UnitType.Armor)を参照しない定額ダメージ。
-    ///  - 死亡判定・KillEvent発行はThreatAuraStep/CombatStepの死亡判定パスと同じパターン。
+    /// The damage policy is the same asymmetric design as ThreatAuraStep:
+    ///  - ThreatRelations is never consulted (anyone in the beam's path is hit equally, even factions set
+    ///    to allied/neutral).
+    ///  - Flat damage ignoring armor (UnitType.Armor).
+    ///  - Death resolution / KillEvent emission follows the same pattern as the
+    ///    ThreatAuraStep/CombatStep death passes.
     ///
-    /// 判定は2D（X/Z平面）の「線分から幅W以内」（端点は丸いキャップ）。ゴジラ光線は口元の高さを
-    /// 水平に飛ぶがGodzillaRampage側の建物破壊も経路の地表に適用しているため、地上ユニットへの
-    /// 判定も2Dで一貫させる。
+    /// The test is 2D (X/Z plane): "within width W of the segment" (round caps at the endpoints).
+    /// Godzilla's ray flies horizontally at mouth height, but GodzillaRampage applies its building
+    /// destruction to the ground along the path too, so the ground-unit test stays consistently 2D.
     /// </summary>
     public static class ThreatBeamStep
     {
-        /// <summary>ゴジラ光線（紫熱線）の有効半幅。ゴジラの当たり半径(45)と同程度の太い熱線。</summary>
+        /// <summary>Effective half-width of Godzilla's ray (the purple heat ray). A beam as thick as
+        /// Godzilla's own hit radius (45).</summary>
         public const float KaijuBeamWidth = 40f;
 
-        /// <summary>ゴジラ光線のダメージ（装甲無視・一撃）。5kt核相当の熱線であり、経路上のユニットは
-        /// Tier5(HP300超)でも確実に消滅する「回避すべき即死攻撃」として設計（弾道ミサイルの
-        /// ImpactDamageThreat=2000と同格）。</summary>
+        /// <summary>Godzilla-ray damage (armor-ignoring, one shot). A heat ray equivalent to a 5kt nuke:
+        /// designed as an instant-death attack to be avoided — units in the path die outright even at
+        /// tier 5 (HP 300+) (on par with the ballistic missiles' ImpactDamageThreat=2000).</summary>
         public const float KaijuBeamDamage = 2000f;
 
-        /// <summary>トライポッドレーザーの有効半幅。単発の細いレーザーなのでゴジラより狭い。</summary>
+        /// <summary>Effective half-width of the tripod laser. A thin single-shot laser, narrower than
+        /// Godzilla's.</summary>
         public const float AlienBeamWidth = 15f;
 
-        /// <summary>トライポッドレーザーのダメージ（装甲無視・一撃）。Tier1-3級(HP100-250前後)は
-        /// 一撃で撃破、Tier5級は大破して生き残る「痛いが即死ではない」規模（Alien=小型脅威の
-        /// 位置づけ、ExternalThreatBridgeのHP比と整合）。</summary>
+        /// <summary>Tripod-laser damage (armor-ignoring, one shot). One-shots tier 1–3 (HP ~100–250);
+        /// tier 5 survives crippled — "painful but not instant death" (the Alien is the smaller threat,
+        /// consistent with ExternalThreatBridge's HP ratios).</summary>
         public const float AlienBeamDamage = 400f;
 
-        /// <summary>ビーム線分(x1,z1)-(x2,z2)から幅以内の全ユニットへ一撃ダメージを与える。
-        /// 戻り値はダメージを与えたユニット数（Game層のログ用）。</summary>
+        /// <summary>Deals the one-shot damage to every unit within the width of the beam segment
+        /// (x1,z1)-(x2,z2). Returns the number of units damaged (for the Game layer's log).</summary>
         public static int ApplyStrike(WarState state, ThreatKind kind, float x1, float z1, float x2, float z2)
         {
             float width, damage;
@@ -62,8 +66,9 @@ namespace CSWarfront.Core
                 hitCount++;
             }
 
-            // 死亡判定（ThreatAuraStep/CombatStepの死亡判定パスと同じパターン）。他stepで既にDeadへ
-            // 遷移済みのユニットはState!=Deadの条件で自然にスキップされ、二重にKillEventを積まない。
+            // Death resolution (the same pattern as the ThreatAuraStep/CombatStep death passes). Units
+            // already transitioned to Dead by other steps are skipped naturally by the State != Dead
+            // condition, so no KillEvent is double-queued.
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];
@@ -79,8 +84,8 @@ namespace CSWarfront.Core
             return hitCount;
         }
 
-        /// <summary>2D（X/Z平面）の点(px,pz)から線分(x1,z1)-(x2,z2)までの距離。
-        /// 始点=終点の退化ケースは点までの距離。</summary>
+        /// <summary>2D (X/Z plane) distance from the point (px,pz) to the segment (x1,z1)-(x2,z2).
+        /// The degenerate start==end case is the distance to the point.</summary>
         private static float DistanceToSegment(float px, float pz, float x1, float z1, float x2, float z2)
         {
             float dx = x2 - x1, dz = z2 - z1;
@@ -88,7 +93,7 @@ namespace CSWarfront.Core
             float t;
             if (lenSq < 1e-6f)
             {
-                t = 0f; // 退化: 始点までの距離
+                t = 0f; // degenerate: distance to the start point
             }
             else
             {
