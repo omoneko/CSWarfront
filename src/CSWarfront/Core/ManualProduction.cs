@@ -1,8 +1,9 @@
 namespace CSWarfront.Core
 {
-    /// <summary>プレイヤーが基地の生産キューへ手動で発注/取消した際の結果（Task34）。
-    /// TryEnqueue と TryCancelLast で同じ列挙を共用する（両者とも「発注/取消できるか」を表す判定という
-    /// 点で意味が近いため）。各メンバーの意味はメソッド側のXMLコメントに定義する。</summary>
+    /// <summary>Result of the player's manual order/cancel against a base's production queue (Task34).
+    /// TryEnqueue and TryCancelLast share the same enum (both express "can this order/cancel proceed",
+    /// which is close enough in meaning). Each member's semantics are defined in the methods' XML
+    /// comments.</summary>
     public enum QueueResult
     {
         Ok,
@@ -11,31 +12,32 @@ namespace CSWarfront.Core
         QueueFull,
         NotAffordable,
         NoOwner,
-        /// <summary>発注しようとしたUnitType.TierがFaction.UnlockedTierを超えている（Task35：研究未解禁）。</summary>
+        /// <summary>The ordered UnitType.Tier exceeds Faction.UnlockedTier (Task35: research not unlocked).</summary>
         TierLocked,
-        /// <summary>発注しようとしたUnitType.Domainが、その基地のMilitaryBase.SpawnableDomainsに
-        /// 含まれていない（Task61：陸軍基地で艦艇/航空機を発注しようとした等）。</summary>
+        /// <summary>The ordered UnitType.Domain is not contained in the base's
+        /// MilitaryBase.SpawnableDomains (Task61: ordering ships/aircraft at an army base, etc.).</summary>
         WrongDomain
     }
 
     /// <summary>
-    /// プレイヤー操作による手動生産（発注・取消）を扱う（Task34）。AIの自動生産（ProductionPlanning）とは
-    /// 別クラスに分離し、両者ともUnityEngine非依存・決定的・RNG不使用を保つ。
+    /// Handles the player's manual production (ordering and cancelling) (Task34). Kept in a separate
+    /// class from the AI's automatic production (ProductionPlanning); both remain UnityEngine-free,
+    /// deterministic and RNG-free.
     /// </summary>
     public static class ManualProduction
     {
         /// <summary>
-        /// 基地の生産キューへ1件発注する。判定順序（先に失敗した方を返す）:
-        ///  1. baseId の基地が存在するか -> BaseNotFound
-        ///  2. その基地に所有勢力がいるか -> NoOwner
-        ///  3. typeKey が state.Types に登録されているか -> UnknownType
-        ///  4. 所有勢力の Faction が見つかるか -> NoOwner（整合性が崩れている場合の防御）
-        ///  5. type.Tier が owner.UnlockedTier 以下か（Task35） -> TierLocked
-        ///  6. type.Domain が b.SpawnableDomains に含まれるか（Task61） -> WrongDomain
-        ///  7. Queue.Count が MilitaryBase.ManualQueueCap 未満か -> QueueFull
-        ///  8. 所有勢力が type.Cost を払えるか（Faction.TrySpend。成功した場合のみ実際に控除する） -> NotAffordable
-        /// 全て通れば ProductionOrder(typeKey, type.Cost, type.BuildTime) をQueue末尾に追加し Ok を返す。
-        /// 決定的・RNG不使用。
+        /// Enqueues one order into a base's production queue. Check order (the first failure wins):
+        ///  1. does the base with baseId exist -> BaseNotFound
+        ///  2. does it have an owning faction -> NoOwner
+        ///  3. is typeKey registered in state.Types -> UnknownType
+        ///  4. can the owning Faction be found -> NoOwner (defense against inconsistent state)
+        ///  5. is type.Tier at or below owner.UnlockedTier (Task35) -> TierLocked
+        ///  6. is type.Domain contained in b.SpawnableDomains (Task61) -> WrongDomain
+        ///  7. is Queue.Count below MilitaryBase.ManualQueueCap -> QueueFull
+        ///  8. can the owner pay type.Cost (Faction.TrySpend; deducted only on success) -> NotAffordable
+        /// If all pass, ProductionOrder(typeKey, type.Cost, type.BuildTime) is appended to the queue and
+        /// Ok is returned. Deterministic, RNG-free.
         /// </summary>
         public static QueueResult TryEnqueue(WarState state, ushort baseId, string typeKey)
         {
@@ -47,21 +49,23 @@ namespace CSWarfront.Core
             if (type == null) return QueueResult.UnknownType;
 
             Faction owner = state.FindFaction(b.OwnerFactionId.Value);
-            if (owner == null) return QueueResult.NoOwner; // 整合性が崩れている場合の防御（通常は起きない）
+            if (owner == null) return QueueResult.NoOwner; // defense against inconsistent state (should not happen)
 
-            if (type.Tier > owner.UnlockedTier) return QueueResult.TierLocked; // Task35: 未解禁Tier
+            if (type.Tier > owner.UnlockedTier) return QueueResult.TierLocked; // Task35: tier not yet unlocked
 
-            // Task61: 基地のSpawnableDomains（Army->Land, Navy->Sea, AirForce->Air）に含まれない
-            // 領域のユニットは発注できない（例: 陸軍基地から駆逐艦や戦闘機を発注することはできない）。
+            // Task61: units of a domain outside the base's SpawnableDomains (Army->Land, Navy->Sea,
+            // AirForce->Air) cannot be ordered (e.g. no destroyers or fighters from an army base).
             if (!DomainMaskUtil.Contains(b.SpawnableDomains, type.Domain)) return QueueResult.WrongDomain;
 
-            // Task103: 兵科単位の生産可否（軍用列車は貨物駅のみ・貨物駅は列車のみ）。
+            // Task103: per-category production rules (military trains only at cargo stations; cargo
+            // stations produce only trains).
             if (!FortificationRules.CanProduceUnit(b.Type, type.Category)) return QueueResult.WrongDomain;
 
             if (b.Queue.Count >= MilitaryBase.ManualQueueCap) return QueueResult.QueueFull;
 
-            // Task99: 3資源支払い（人的資源＋生産力、不足分は資金代替）。手動生産はプレイヤーの
-            // 明示操作なので研究準備金の温存はせず、資金全額を代替上限にする。
+            // Task99: three-resource payment (manpower + production, shortfall substituted by funds).
+            // Manual production is the player's explicit action, so no research reserve is held back —
+            // the full treasury is the substitution cap.
             if (!UnitCosts.TryPay(owner, type, owner.Treasury)) return QueueResult.NotAffordable;
 
             b.Queue.Add(new ProductionOrder(type.TypeKey, type.Cost, type.BuildTime));
@@ -69,17 +73,19 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// キューの末尾（最後に積まれた注文）を取り消す（Task35で仕様変更：進行中＝index0の注文も、
-        /// それが唯一の注文であっても常に取消可能にした。旧仕様「唯一の注文でProgress&gt;0なら取消不可」は
-        /// プレイヤーから見て「取消ボタンが理由なく効かないバグ」だったため撤廃）。
+        /// Cancels the tail of the queue (the most recently placed order). (Spec changed in Task35: the
+        /// in-progress order (index 0) is now always cancellable, even when it is the only one. The old
+        /// rule "the sole order cannot be cancelled once Progress&gt;0" looked to the player like "the
+        /// cancel button silently does nothing" — a bug — and was removed.)
         ///
-        /// 払い戻しは全額ではなく Cost * (1f - Progress) の部分返金にする（Task35）。ほとんど進んでいない
-        /// 注文はほぼ全額、完成間際の注文はほぼ0しか返ってこない。結果を [0, order.Cost] へクランプする
-        /// （Progressが理論上の範囲0..1を外れていても払い戻しが負値や超過にならないための防御）。
+        /// The refund is partial, Cost * (1f - Progress), not the full amount (Task35): a barely started
+        /// order refunds nearly everything; one moments from completion refunds almost nothing. The
+        /// result is clamped to [0, order.Cost] (defense so the refund can never go negative or exceed
+        /// the cost even if Progress strays outside its theoretical 0..1 range).
         ///
-        /// 判定順序: 基地存在(BaseNotFound) -> 所有者あり(NoOwner) -> キューが空でないか(QueueFull、
-        /// 「取消可能な注文が無い」の意味でTryEnqueueの「満杯で入らない」と同じ値を再利用) -> Ok。
-        /// 決定的・RNG不使用。
+        /// Check order: base exists (BaseNotFound) -> has an owner (NoOwner) -> queue not empty
+        /// (QueueFull — reusing TryEnqueue's "won't fit because full" value to mean "nothing cancellable")
+        /// -> Ok. Deterministic, RNG-free.
         /// </summary>
         public static QueueResult TryCancelLast(WarState state, ushort baseId)
         {
@@ -90,7 +96,7 @@ namespace CSWarfront.Core
             if (b.Queue.Count == 0) return QueueResult.QueueFull;
 
             Faction owner = state.FindFaction(b.OwnerFactionId.Value);
-            if (owner == null) return QueueResult.NoOwner; // 整合性が崩れている場合の防御（通常は起きない）
+            if (owner == null) return QueueResult.NoOwner; // defense against inconsistent state (should not happen)
 
             int idx = b.Queue.Count - 1;
             ProductionOrder order = b.Queue[idx];
