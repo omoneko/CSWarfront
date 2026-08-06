@@ -3,44 +3,48 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 外部からの襲来イベント（Task94、Workshopコメント要望「敵ユニットがランダムなタイミングで
-    /// 都市の外からスポーンして攻めてくるオプション。敵基地を手で建てる代わりに、自分の基地を建てて
-    /// 都市を防衛する」）。
+    /// External invasion events (Task94; Workshop comment request: "an option where enemy units spawn from
+    /// outside the city at random times and attack — instead of hand-building enemy bases, you build your
+    /// own bases and defend the city").
     ///
-    /// Optionsのトグル（Game層WarfrontSettings.InvasionEventsEnabled）がONの間、CheckIntervalHoursごとに
-    /// 決定的ハッシュで襲来判定を行い、当選したらマップ端のランダムな地点（陸地）へ襲撃部隊を
-    /// スポーンする。
+    /// While the Options toggle (Game-layer WarfrontSettings.InvasionEventsEnabled) is on, an invasion roll
+    /// (deterministic hash) runs every CheckIntervalHours; on a win, a raiding force spawns at a random
+    /// point (on land) at the map edge.
     ///
-    /// Task95（実機フィードバック）: 部隊の所属は専用勢力「Invader」（Faction.InvaderFactionId、
-    /// モスグリーン）に固定。当初は「基地を最も持っていない既存勢力を侵略者役に使い回す」設計だったが、
-    /// (1)プレイヤーの勢力（Blue等）が勝手に侵略者になり紛らわしい、(2)基地0の勢力は
-    /// FactionStatus.Refreshが毎tickEliminated化する→AI進軍対象外→スポーン地点で固まる、という
-    /// 2つの実害があった。Invaderは関係表にハードコードで常時Hostile（RelationMatrix/ThreatRelations）、
-    /// Eliminated判定対象外（FactionStatus）なので、スポーン後は通常のAI
-    /// （InvasionOrders.AssignAdvance）がそのまま最寄りの基地（都市に建設されている軍事基地）へ
-    /// 進軍させる。専用の攻撃ロジックは不要。
+    /// Task95 (playtest feedback): the force belongs to the dedicated "Invader" faction
+    /// (Faction.InvaderFactionId, moss green). The original design reused "the existing faction owning the
+    /// fewest bases" as the invader, which had two real problems: (1) the player's faction (Blue etc.)
+    /// could suddenly become the invader, which was confusing, and (2) a faction with zero bases gets
+    /// Eliminated by FactionStatus.Refresh every tick → excluded from AI advances → frozen at the spawn
+    /// point. The Invader is hard-coded permanently Hostile in the relation tables
+    /// (RelationMatrix/ThreatRelations) and exempt from the Eliminated check (FactionStatus), so after
+    /// spawning, the ordinary AI (InvasionOrders.AssignAdvance) marches it against the nearest base (the
+    /// military bases built in the city) as-is. No dedicated attack logic is needed.
     ///
-    /// 部隊規模・Tierは防衛側の最高解禁Tierに追従する（ゲームが進むほど強い襲撃が来る）。
-    /// 乱数不使用（TickCounterと通し番号からの決定的ハッシュ、AntiAirCombat.RollHitと同じfmix32）。
+    /// Wave size and tier track the defenders' highest unlocked tier (raids grow stronger as the game
+    /// progresses). No RNG (deterministic hashes of TickCounter and a serial number — the same fmix32 as
+    /// AntiAirCombat.RollHit).
     /// </summary>
     public static class InvasionEvents
     {
-        /// <summary>襲来判定の間隔（ゲーム内時間）。</summary>
+        /// <summary>Interval between invasion rolls (in-game hours).</summary>
         public const float CheckIntervalHours = 6f;
 
-        /// <summary>頻度設定（Options: Low/Medium/High）ごとの、1判定あたりの当選確率。
-        /// 期待値: Low≈5日に1回、Medium≈2.5日に1回、High≈1.2日に1回。</summary>
+        /// <summary>Win probability per roll for each frequency setting (Options: Low/Medium/High).
+        /// Expectation: Low ≈ once per 5 days, Medium ≈ once per 2.5 days, High ≈ once per 1.2 days.</summary>
         public static readonly float[] ChancePerCheck = { 0.05f, 0.10f, 0.21f };
 
-        /// <summary>スポーン地点のマップ中心からの距離（辺上）。SeaGrid/プレイアブル境界の内側。</summary>
+        /// <summary>Distance of the spawn point from the map center (along an edge). Inside the
+        /// SeaGrid/playable bounds.</summary>
         public const float SpawnEdgeDistance = 4300f;
 
-        /// <summary>スポーン候補が水域だった場合に内側へずらして再試行する回数と1回あたりの距離。</summary>
+        /// <summary>Retry count and per-step distance for nudging a spawn candidate inland when it lands
+        /// in water.</summary>
         private const int LandSearchSteps = 8;
         private const float LandSearchStepDistance = 300f;
 
-        /// <summary>襲来判定を1tickぶん進める。スポーンが発生した場合はスポーンしたユニット数を返す
-        /// （Game層が通知トーストに使う）。0=何も起きていない。</summary>
+        /// <summary>Advances the invasion roll by one tick. When a spawn happens, returns the number of
+        /// spawned units (used by the Game layer for the notification toast). 0 = nothing happened.</summary>
         public static int Advance(WarState state, float dt, bool enabled, int frequencyIndex)
         {
             if (!enabled) return 0;
@@ -58,9 +62,10 @@ namespace CSWarfront.Core
             return SpawnWave(state);
         }
 
-        /// <summary>State.FactionsにInvader勢力（Faction.InvaderFactionId）が居なければ追加する。
-        /// 新規State作成時（Game層MilitaryManager）とセーブロード時（WarStateSerializer.Deserialize、
-        /// Invader実装以前のセーブは5勢力しか持たない）の両方から呼ばれる冪等ヘルパー。</summary>
+        /// <summary>Adds the Invader faction (Faction.InvaderFactionId) to State.Factions if absent. An
+        /// idempotent helper called both when a new state is created (Game-layer MilitaryManager) and on
+        /// save load (WarStateSerializer.Deserialize — saves predating the Invader hold only five
+        /// factions).</summary>
         public static Faction EnsureInvaderFaction(WarState state)
         {
             Faction invader = state.FindFaction(Faction.InvaderFactionId);
@@ -72,11 +77,12 @@ namespace CSWarfront.Core
             return invader;
         }
 
-        /// <summary>襲撃部隊を1回スポーンする（テストからも直接呼べる）。戻り値はスポーンしたユニット数。
-        /// 防衛側（基地所有勢力）が1つも無い、または陸地のスポーン地点が見つからない場合は0。</summary>
+        /// <summary>Spawns one raiding force (also callable directly from tests). Returns the number of
+        /// spawned units. 0 when no defender (base-owning faction) exists or no land spawn point can be
+        /// found.</summary>
         public static int SpawnWave(WarState state)
         {
-            // 防衛側 = 基地を1つ以上所有する勢力。いなければ攻める意味が無い。
+            // Defenders = factions owning at least one base. With none, there is nothing to attack.
             var defenders = new List<byte>();
             int[] baseCounts = new int[Faction.InvaderFactionId];
             for (int i = 0; i < state.Bases.Count; i++)
@@ -93,26 +99,27 @@ namespace CSWarfront.Core
             }
             if (defenders.Count == 0) return 0;
 
-            // 侵略者役 = 専用のInvader勢力（Task95）。関係はRelationMatrix/ThreatRelationsが
-            // ハードコードで常時Hostileを返すため、ここでの関係設定は不要（かつ不可能）。
+            // The attacker = the dedicated Invader faction (Task95). Its relations need no setup here (and
+            // cannot be set) — RelationMatrix/ThreatRelations return hard-coded permanent hostility.
             Faction attacker = EnsureInvaderFaction(state);
 
-            // スポーン地点: マップ端の1辺上の決定的ランダム点。水域なら内側へずらして陸地を探す。
+            // Spawn point: a deterministic random point on one map edge; nudged inland to find land when in
+            // water.
             WorldPos? spawn = FindLandSpawnPoint(state);
             if (!spawn.HasValue) return 0;
 
-            // 部隊Tier = 防衛側の最高解禁Tier（ゲーム進行に追従）。
+            // Wave tier = the defenders' highest unlocked tier (tracks game progression).
             byte tier = 1;
             for (int d = 0; d < defenders.Count; d++)
             {
                 Faction df = state.FindFaction(defenders[d]);
                 if (df != null && df.UnlockedTier > tier) tier = df.UnlockedTier;
             }
-            // Invader勢力の解禁Tierも波のTierへ追従させておく（AiThreatAssessment等が参照しても
-            // 実際にスポーンしている部隊と矛盾しないように）。
+            // Keep the Invader faction's unlocked tier in step with the wave tier (so anything reading it,
+            // e.g. AiThreatAssessment, stays consistent with the troops actually spawning).
             if (attacker.UnlockedTier < tier) attacker.UnlockedTier = tier;
 
-            // 編成: 諸兵科連合の襲撃部隊（Tierが上がると戦車が増える）。
+            // Composition: a combined-arms raiding force (more tanks at higher tiers).
             var composition = new List<UnitCategory>
             {
                 UnitCategory.Tank, UnitCategory.Tank,
@@ -128,32 +135,33 @@ namespace CSWarfront.Core
                 UnitType type = state.Types.Get(key);
                 if (type == null) continue;
 
-                // 密集し過ぎないよう決定的な小オフセットで散らす。
+                // Scatter with small deterministic offsets so they do not stack.
                 float ox = (Hash01(state.TickCounter, (uint)(i * 2 + 1)) - 0.5f) * 60f;
                 float oz = (Hash01(state.TickCounter, (uint)(i * 2 + 2)) - 0.5f) * 60f;
                 var u = new UnitInstance(state.AllocInstanceId(), key, attacker.Id, type.MaxHP,
                     new WorldPos(spawn.Value.X + ox, spawn.Value.Y, spawn.Value.Z + oz));
-                u.State = UnitState.Moving; // 次のAssignAdvanceが目標基地と経路を与える
+                u.State = UnitState.Moving; // the next AssignAdvance assigns a target base and a route
                 state.Units.Add(u);
                 spawned++;
             }
             return spawned;
         }
 
-        /// <summary>マップ端の決定的ランダム点から、必要なら内側へずらして陸地を探す。
-        /// water==null（テスト等）は常に陸地扱い。見つからなければnull（このtickの襲来は不成立）。</summary>
+        /// <summary>From a deterministic random point on a map edge, searches inland for land as needed.
+        /// water==null (tests etc.) counts everything as land. Null when nothing is found (this tick's
+        /// invasion fails to materialize).</summary>
         private static WorldPos? FindLandSpawnPoint(WarState state)
         {
             int side = (int)(Hash01(state.TickCounter, 0xED6Eu) * 4f) & 3;
             float t = (Hash01(state.TickCounter, 0x5EEDu) * 2f - 1f) * SpawnEdgeDistance;
 
-            float x, z, ix, iz; // 辺上の位置と「マップ内側へ向かう」単位方向
+            float x, z, ix, iz; // position on the edge, and the unit direction pointing into the map
             switch (side)
             {
-                case 0: x = t; z = SpawnEdgeDistance; ix = 0f; iz = -1f; break;   // 北端
-                case 1: x = t; z = -SpawnEdgeDistance; ix = 0f; iz = 1f; break;   // 南端
-                case 2: x = SpawnEdgeDistance; z = t; ix = -1f; iz = 0f; break;   // 東端
-                default: x = -SpawnEdgeDistance; z = t; ix = 1f; iz = 0f; break;  // 西端
+                case 0: x = t; z = SpawnEdgeDistance; ix = 0f; iz = -1f; break;   // north edge
+                case 1: x = t; z = -SpawnEdgeDistance; ix = 0f; iz = 1f; break;   // south edge
+                case 2: x = SpawnEdgeDistance; z = t; ix = -1f; iz = 0f; break;   // east edge
+                default: x = -SpawnEdgeDistance; z = t; ix = 1f; iz = 0f; break;  // west edge
             }
 
             IWaterSampler water = state.Water;
@@ -162,7 +170,7 @@ namespace CSWarfront.Core
             {
                 float cx = x + ix * step * LandSearchStepDistance;
                 float cz = z + iz * step * LandSearchStepDistance;
-                if (water != null && water.IsWater(cx, cz)) continue; // 海上には陸上部隊を降ろさない
+                if (water != null && water.IsWater(cx, cz)) continue; // never drop land forces on the sea
 
                 float y = 0f;
                 float h;
@@ -172,7 +180,8 @@ namespace CSWarfront.Core
             return null;
         }
 
-        /// <summary>fmix32ベースの決定的[0,1)ハッシュ（AntiAirCombat.RollHitと同じ手法）。</summary>
+        /// <summary>Deterministic [0,1) hash based on fmix32 (the same technique as
+        /// AntiAirCombat.RollHit).</summary>
         private static float Hash01(uint a, uint b)
         {
             unchecked

@@ -3,15 +3,17 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 陸上7兵種（Tank/Apc/MechInfantry/Artillery/DroneInfantry/Infantry/AntiAir）× Tier1〜5、
-    /// 計35種のUnitType定義（Task28）。Sea/Airロスターは移動方式が異なるため別途用意する（本タスク対象外）。
+    /// The seven land unit classes (Tank/Apc/MechInfantry/Artillery/DroneInfantry/Infantry/AntiAir) ×
+    /// tiers 1–5 — 35 UnitType definitions in total (Task28). Sea/Air rosters move differently and are
+    /// defined separately (out of scope for this task).
     ///
-    /// 各カテゴリのTier1基礎ステータスのみをここで保持し、Tier2以降はTierScalingで機械的に導出する
-    /// （Tierごとに個別の値を書き並べると将来の調整でズレる／矛盾する恐れがあるため、単一の真実源＝
-    /// このテーブル＋TierScaling、という構成にしている）。
+    /// Only each category's tier-1 base stats are kept here; tier 2 and above derive mechanically via
+    /// TierScaling (writing out per-tier values invites drift/contradiction during future tuning, so the
+    /// single source of truth is this table + TierScaling).
     ///
-    /// キー形式は "&lt;Category&gt;_T&lt;tier&gt;"（例: "Tank_T3"）で固定する。既存セーブ/テストが
-    /// 参照する "Tank_T1" と衝突しないよう、UnitCategory.ToString() の綴りを直接使う。
+    /// The key format is fixed as "&lt;Category&gt;_T&lt;tier&gt;" (e.g. "Tank_T3"), using
+    /// UnitCategory.ToString()'s spelling directly so as not to collide with the "Tank_T1" referenced by
+    /// existing saves/tests.
     /// </summary>
     public static class LandUnitRoster
     {
@@ -33,22 +35,23 @@ namespace CSWarfront.Core
             }
         }
 
-        // Tier1基礎ステータス（design table, task-28指定値、Task38で命中率(Accuracy)列を追加、
-        // Task42で発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)列を追加）。
-        // SplashはTierScalingの対象外（Tierで伸びない）。FireIntervalHoursも同様にTierScalingの対象外
-        // （Tierが上がっても発砲頻度の見た目は変えない、単純さ優先の意図的な設計。Task42仕様）。
+        // Tier-1 base stats (design table, task-28 values; Accuracy column added in Task38; muzzle-effect
+        // interval (FireIntervalHours) and kind (ShotKind) columns added in Task42).
+        // Splash is exempt from TierScaling (does not grow with tier). FireIntervalHours likewise
+        // (firing cadence does not visibly change with tier — a deliberate simplicity choice, Task42 spec).
         //
-        // Task38: Artilleryは射程160→120、攻撃55→50に弱体化し、命中率0.35という低さで
-        //   「当たれば強いが、当たらない」砲兵にした（DroneInfantryの観測支援を受けるまでは
-        //   実効ダメージが他兵科より低く抑えられる）。
+        // Task38: Artillery nerfed from range 160→120 and attack 55→50, with a low 0.35 accuracy —
+        //   "devastating when it hits, but it usually doesn't" artillery (its effective damage stays below
+        //   the other classes until DroneInfantry observation support kicks in).
         //
-        // Task42: 発砲エフェクトの間隔テーブル（design指定値）。
-        //   Infantry/MechInfantry/Apc/DroneInfantry/AntiAir = Gunfire（銃撃トレーサー）
-        //   Tank                                            = DirectFire（直射・戦車砲）
-        //   Artillery                                       = IndirectFire（曲射・放物線弾道）
+        // Task42: muzzle-effect interval table (design values).
+        //   Infantry/MechInfantry/Apc/DroneInfantry/AntiAir = Gunfire (rifle tracers)
+        //   Tank                                            = DirectFire (direct tank gun)
+        //   Artillery                                       = IndirectFire (lobbed ballistic arc)
         //
-        // Task43: ユーザーフィードバックにより発砲間隔を全面的に延長した（Gunfireは3点バーストの
-        //   バースト間隔、DirectFire/IndirectFireは単発の発射間隔として扱う。Game/CombatFxがバースト展開）。
+        // Task43: intervals lengthened across the board per user feedback (Gunfire intervals are the gap
+        //   between 3-round bursts; DirectFire/IndirectFire are single-shot intervals. Game/CombatFx
+        //   expands the bursts).
         //   Infantry     0.08 -> 0.40
         //   MechInfantry 0.08 -> 0.40
         //   Apc          0.10 -> 0.45
@@ -56,21 +59,21 @@ namespace CSWarfront.Core
         //   AntiAir      0.10 -> 0.45
         //   Tank         0.25 -> 0.90
         //   Artillery    0.60 -> 2.00
-        // Task43: Infantryの移動速度を1.5倍（5km/h -> 7.5km/h、市民の徒歩速度基準を離れ「駆け足」寄りに）。
-        //   他カテゴリの速度はこのタスクの対象外のため据え置き。
-        // Task91（ユーザー要望「攻撃力と攻撃頻度の相対レートを現実寄りに」）: 発射間隔と攻撃力を
-        // 「小火器=高頻度・低威力 ⇔ 砲・ミサイル=低頻度・高威力」の現実的な相対関係へ再較正した。
-        // 1発あたりのダメージ感（Attack×FireIntervalHours）: 歩兵5.4 < APC 9.8 < ドローン18 <
-        // 戦車50 < 砲兵137（最重・最低頻度）。DPS（Attack）自体の変動は±20%以内に抑え、
-        // 既存バランス（脅威HP等）を大きく崩さない。
-        //   Infantry     20/0.40 -> 18/0.30（小銃の連射、威力最小）
+        // Task43: Infantry movement speed ×1.5 (5 km/h -> 7.5 km/h; off the citizen walking-speed baseline
+        //   toward a jog). Other categories' speeds were out of scope and stay put.
+        // Task91 (user request "make the attack-power-to-rate-of-fire ratios realistic"): intervals and
+        // attack recalibrated to the realistic relation "small arms = fast and weak ⇔ guns/missiles = slow
+        // and heavy". Per-shot damage feel (Attack×FireIntervalHours): infantry 5.4 < APC 9.8 < drone 18 <
+        // tank 50 < artillery 137 (heaviest, slowest). DPS (Attack) itself moved within ±20% so the
+        // existing balance (threat HP etc.) is not upended.
+        //   Infantry     20/0.40 -> 18/0.30 (rifle bursts, lightest hit)
         //   MechInfantry 26/0.40 -> 24/0.30
-        //   Apc          22/0.45 -> 28/0.35（機関砲、小銃より重い）
-        //   Tank         40/0.90 -> 42/1.20（主砲、重い一撃・遅い装填）
-        //   Artillery    50/2.00 -> 55/2.50（榴弾斉射、最重・最遅）
+        //   Apc          22/0.45 -> 28/0.35 (autocannon, heavier than rifles)
+        //   Tank         40/0.90 -> 42/1.20 (main gun: heavy blow, slow reload)
+        //   Artillery    50/2.00 -> 55/2.50 (howitzer salvos: heaviest, slowest)
         //   DroneInfantry 30/0.50 -> 30/0.60
-        //   AntiAir      15/0.45 -> 20/0.60（SAM1発を重く・発射は離散的に。対航空の離散射撃
-        //                （AntiAirCombat）の1発ダメージ=Attack×Interval×相性が実質を決める）
+        //   AntiAir      15/0.45 -> 20/0.60 (one SAM hits hard, fired discretely; the per-shot damage of
+        //                the discrete AA model (AntiAirCombat) = Attack×Interval×matchup is what matters)
         private static readonly BaseStats[] Bases =
         {
             new BaseStats(UnitCategory.Infantry,      60f, 18f,  40f,  1f,  7.5f,0f, 20f, 4f, 0.75f, 0.30f, ShotKind.Gunfire),
@@ -80,20 +83,22 @@ namespace CSWarfront.Core
             new BaseStats(UnitCategory.Artillery,      70f, 55f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f, 2.50f, ShotKind.IndirectFire),
             new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f, 0.60f, ShotKind.Gunfire),
             new BaseStats(UnitCategory.AntiAir,        80f, 20f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f, 0.60f, ShotKind.Gunfire),
-            // Task99: 補給トラック（非武装・低HP・道路速度。Attack/Range/Accuracy=0、射撃パイプラインには
-            // 乗らない——CanTargetDomains=None＋TargetingRules除外。SupplyTruckStepが積載/配送/転送を扱う）。
+            // Task99: supply truck (unarmed, low HP, road speed. Attack/Range/Accuracy=0; never enters the
+            // firing pipeline — CanTargetDomains=None plus the TargetingRules exclusions. SupplyTruckStep
+            // handles loading/delivery/transfer).
             new BaseStats(UnitCategory.SupplyTruck,    40f,  0f,   0f,  1f, 45f,  0f, 30f, 3f, 0f,    1f,    ShotKind.Gunfire),
-            // Task101: 軍用貨物列車（非武装・高HP・レール専用移動。TrainStepが運用、生産キューには乗らない）。
+            // Task101: military freight train (unarmed, high HP, rail-only movement. Operated by TrainStep;
+            // never enters the production queue).
             new BaseStats(UnitCategory.MilitaryTrain, 500f,  0f,   0f,  5f, 160f, 0f, 150f, 6f, 0f,   1f,    ShotKind.Gunfire),
         };
 
-        /// <summary>"&lt;Category&gt;_T&lt;tier&gt;" 形式のキーを組み立てる（例: Tank, 3 -&gt; "Tank_T3"）。</summary>
+        /// <summary>Assembles a "&lt;Category&gt;_T&lt;tier&gt;"-format key (e.g. Tank, 3 -&gt; "Tank_T3").</summary>
         public static string TypeKey(UnitCategory category, byte tier)
         {
             return category + "_T" + tier;
         }
 
-        /// <summary>7カテゴリ×Tier1〜5、計35件のUnitTypeを生成する。</summary>
+        /// <summary>Yields the 35 UnitTypes: 7 categories × tiers 1–5.</summary>
         public static IEnumerable<UnitType> All()
         {
             for (int i = 0; i < Bases.Length; i++)
@@ -103,8 +108,8 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>指定カテゴリ・Tierの1件を生成する。カテゴリがロスターに無い場合はnull。
-        /// MvpUnitTypesの後方互換ラッパーからも使われる。</summary>
+        /// <summary>Builds a single entry for the given category and tier. Null when the category is not
+        /// in the roster. Also used by MvpUnitTypes' backward-compatibility wrapper.</summary>
         public static UnitType Get(UnitCategory category, byte tier)
         {
             for (int i = 0; i < Bases.Length; i++)
@@ -112,7 +117,7 @@ namespace CSWarfront.Core
             return null;
         }
 
-        /// <summary>All()の35件を丸ごと登録する。</summary>
+        /// <summary>Registers all 35 entries from All().</summary>
         public static void RegisterAll(UnitTypeRegistry registry)
         {
             foreach (var t in All()) registry.Register(t);
@@ -120,18 +125,19 @@ namespace CSWarfront.Core
 
         private static UnitType Build(BaseStats b, byte tier)
         {
-            // Task61: 陸上ユニットは原則として対地(Land)のみを狙える。唯一の例外はAntiAirで、
-            // これが「対空戦の本領」を持つ唯一の陸上兵科になる（Land|Air）。他の陸上兵科は
-            // TargetSearch/CombatStepの領域フィルタにより航空ユニットを一切狙わない
-            // （CombatMatchup側の数値相性だけでなく、そもそも交戦候補にすら挙がらない）。
+            // Task61: land units can, as a rule, target only Land. The one exception is AntiAir — the only
+            // land class whose specialty is the air war (Land|Air). Every other land class never targets
+            // aircraft thanks to the TargetSearch/CombatStep domain filter (they are not merely at a
+            // numeric matchup disadvantage — they never even become engagement candidates).
             DomainMask canTarget = b.Category == UnitCategory.AntiAir
                 ? DomainMask.Land | DomainMask.Air
                 : DomainMask.Land;
             if (b.Category == UnitCategory.SupplyTruck ||
-                b.Category == UnitCategory.MilitaryTrain) canTarget = DomainMask.None; // Task99/101: 非武装
+                b.Category == UnitCategory.MilitaryTrain) canTarget = DomainMask.None; // Task99/101: unarmed
 
-            // Task92: 基礎値はUnitStatOverrides（Game層がunit-stats.xmlから供給）で上書きできる。
-            // 上書きが無ければロスターのハードコード値のまま。TierScalingは上書き後の値へ通常どおりかかる。
+            // Task92: base values can be overridden via UnitStatOverrides (supplied by the Game layer from
+            // unit-stats.xml). Without an override the roster's hard-coded value stands. TierScaling
+            // applies to the post-override value as usual.
             return new UnitType(
                 TypeKey(b.Category, tier), Domain.Land, b.Category, tier,
                 TierScaling.Hp(UnitStatOverrides.Hp(b.Category, b.Hp), tier),

@@ -1,19 +1,23 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// AI生産方針のゲーム理論的強化（Task80）の「payoff（利得）」「hedge（混合戦略）」フェーズ。
-    /// AiThreatAssessment.Observeが数えた敵編成(EnemyMix)に対して各兵科の期待効果を採点し、
-    /// 上位の候補からseedハッシュで確率的に選ぶ（=毎回argmaxだけを選ぶ「読み切られる」戦略を避ける
-    /// 混合戦略のヘッジ）。AiProductionPolicy.Decideからのみ呼ばれる純ロジック・決定的・
-    /// UnityEngine非依存（System.Randomは一切使わない）。
+    /// The "payoff" and "hedge" (mixed-strategy) phases of the game-theoretic AI production rework
+    /// (Task80). Scores each candidate category's expected effectiveness against the enemy mix counted by
+    /// AiThreatAssessment.Observe, then picks probabilistically among the top candidates via a seed hash
+    /// (= a mixed-strategy hedge avoiding the "always pick the argmax" strategy an opponent can read).
+    /// Pure logic called only from AiProductionPolicy.Decide; deterministic; no UnityEngine dependency
+    /// (System.Random is never used).
     /// </summary>
     public static class AiCombatScoring
     {
-        /// <summary>敵編成に対して兵科cを生産した場合の期待効果 E[c]（設計要件の式そのもの）:
+        /// <summary>Expected effectiveness E[c] of producing category c against the enemy mix (the design
+        /// requirement's formula verbatim):
         ///   E[c] = Σ_target share[target] × Multiplier(c, target) × survivability(c, enemyMix)
-        /// 第1項（Σ）はCombatMatchup上の「攻撃側=c」視点の期待火力（相手の構成比で重み付けした
-        /// 相性倍率の期待値）。survivability項は下記Survivability()参照——「相手の構成に対してcが
-        /// どれだけ狙われ弱いか」を1つの係数に潰した安い近似（counter-counterの見積り）。</summary>
+        /// The first term (Σ) is the expected firepower from the "attacker = c" view of CombatMatchup (the
+        /// expectation of the matchup multiplier weighted by the opponent's composition). The
+        /// survivability factor is described at Survivability() below — a cheap approximation collapsing
+        /// "how vulnerable c is to being hunted given the opponent's composition" into one coefficient
+        /// (a counter-counter estimate).</summary>
         public static float ExpectedEffectiveness(UnitCategory c, float[] enemyShares)
         {
             float expectedAttack = 0f;
@@ -26,13 +30,14 @@ namespace CSWarfront.Core
             return expectedAttack * Survivability(c, enemyShares);
         }
 
-        /// <summary>survivability(c, mix) = 1 / (1 + Σ share[t] × Multiplier(t, c) / 2)。
-        /// Σ項は「敵の構成比で重み付けした、敵からcへの期待被弾倍率」——cを狙い撃ちできる相性を
-        /// 敵が多く持っているほど大きくなる。/2は「相性差の影響を弱める」安全弁（相性1.0のときの
-        /// 分母への影響を抑え、極端な相性(2.0倍等)だけでスコアが吹き飛ばないようにする）。
-        /// 1/(1+x)の形にすることで、値は常に(0,1]に収まり、相性が悪いほど滑らかに0へ近づく
-        /// （counter-counter項: 「相手がこの兵科を狩れる兵科を多く持っているなら、この兵科は
-        /// 選びにくくする」という2次的な読み合いの安価な近似）。</summary>
+        /// <summary>survivability(c, mix) = 1 / (1 + Σ share[t] × Multiplier(t, c) / 2).
+        /// The Σ term is "the expected incoming-damage multiplier from the enemy against c, weighted by
+        /// their composition" — larger the more of the enemy's mix counters c. The /2 is a damper that
+        /// weakens the influence of matchup differences (limits the denominator's movement at a 1.0
+        /// matchup so an extreme matchup (2.0× etc.) alone cannot blow the score up). The 1/(1+x) shape
+        /// keeps the value in (0,1] and smoothly approaches 0 as matchups worsen (the counter-counter
+        /// term: a cheap approximation of the second-order read "if the opponent fields many hunters of
+        /// this category, make it less attractive").</summary>
         public static float Survivability(UnitCategory c, float[] enemyShares)
         {
             float expectedIncomingMultiplier = 0f;
@@ -45,25 +50,25 @@ namespace CSWarfront.Core
             return 1f / (1f + expectedIncomingMultiplier / 2f);
         }
 
-        /// <summary>Tierの「質vs量」評価: value(tier) = sqrt(HP × Attack) / Cost。
-        /// sqrt(HP×Attack)は「継続的に与えられるダメージ量×耐えられる時間」の粗い近似
-        /// （Lanchesterの二次法則が示す「戦力は質×量の二乗で効く」を、1体あたりの実効戦力指標として
-        /// crudeに落とし込んだもの。HPとAttackを対称に扱うため、片方だけ極端に高い/低いユニットを
-        /// 過大/過小評価しにくい）。それをCostで割ることで「1コストあたりの実効戦力」＝
-        /// コスト効率を表す。TierScalingはHP+35%/Attack+40%/Cost+60%（1Tierあたり）なので、
-        /// sqrt(HP×Attack)の成長(約+37.5%/Tier)はCostの成長(+60%/Tier)に追いつかず、この指標だけを
-        /// 見ると常にTier1が最もコスト効率が良い（＝物量で押す方が「素の効率」は高いという、
-        /// このゲームの意図的なTierコストカーブそのものを表す）。AiProductionPolicyはこの値を
-        /// 候補Tier群の中でHedgePickにかけることで、常にTier1へ張り付くのではなく、時には
-        /// 効率で劣る高Tierへの投資（層の厚み・生存性・研究先行への布石）も選べるようにする。</summary>
+        /// <summary>The tier "quality vs quantity" valuation: value(tier) = sqrt(HP × Attack) / Cost.
+        /// sqrt(HP×Attack) crudely approximates "sustained damage output × time it can survive"
+        /// (Lanchester's square law — "combat power scales as quality × quantity squared" — reduced to a
+        /// per-unit effective-strength index; treating HP and Attack symmetrically avoids over/under-rating
+        /// units extreme in only one of the two). Dividing by Cost yields "effective strength per unit
+        /// cost" = cost efficiency. TierScaling is HP+35% / Attack+40% / Cost+60% per tier, so
+        /// sqrt(HP×Attack)'s growth (≈+37.5%/tier) never catches Cost's (+60%/tier): by this index alone,
+        /// tier 1 is always the most cost-efficient (i.e. massing is the better "raw efficiency" — which
+        /// is precisely this game's intended tier cost curve). AiProductionPolicy feeds this value through
+        /// HedgePick over the candidate tiers, so instead of pinning to tier 1 it sometimes invests in the
+        /// less-efficient higher tiers (deeper roster, survivability, groundwork for research leads).</summary>
         public static float TierValue(UnitType t)
         {
             return (float)System.Math.Sqrt((double)t.MaxHP * t.Attack) / t.Cost;
         }
 
-        /// <summary>決定的な整数ハッシュ（MurmurHash3のfinalizer相当）。AiProductionPolicy.Hashと同じ
-        /// 手法（System.Random不使用、同じ入力には常に同じ出力）。HedgePick系の確率的抽選の
-        /// 乱数源として使う。</summary>
+        /// <summary>Deterministic integer hash (MurmurHash3 finalizer equivalent). Same technique as
+        /// AiProductionPolicy.Hash (no System.Random; same input, same output always). Serves as the
+        /// randomness source for the HedgePick draws.</summary>
         public static uint Hash(uint x)
         {
             unchecked
@@ -77,8 +82,8 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>scores[0..length)を降順に安定ソートした添字配列を返す（同点はscores配列の
-        /// 元の並び順を保つ）。HedgeOrder/HedgePickIndexの下請け。</summary>
+        /// <summary>Returns the index array of scores[0..length) stably sorted descending (ties keep the
+        /// scores array's original order). Shared by HedgeOrder/HedgePickIndex.</summary>
         private static int[] SortDescendingIndices(float[] scores, int length)
         {
             int[] order = new int[length];
@@ -99,14 +104,16 @@ namespace CSWarfront.Core
             return order;
         }
 
-        /// <summary>降順にソート済みのorder配列の先頭topCount件から、score²に比例した重みで
-        /// seedハッシュにより1件を選び、order配列中での位置（0..topCount-1）を返す。
-        /// これが設計要件の「ヘッジ（混合戦略）」の核: 常にargmax(位置0)だけを選ぶと相手から
-        /// 完全に読み切られる（＝旧来の「単調な生産」そのもの）ため、2位・3位にも常に一定の
-        /// 出現確率を残す。score²（線形より鋭い重み）にする理由: 最有力候補への偏りは残しつつ、
-        /// 僅差の2位・3位にも十分な出現頻度を与え、「大抵はbest-response、時々2番手/3番手」という
-        /// 狙った分布に近づける。上位の合計スコアが0以下（全滅・相性データ皆無等の縮退ケース）
-        /// なら常に最有力候補(位置0)を返す。</summary>
+        /// <summary>From the first topCount entries of the descending-sorted order array, draws one via
+        /// the seed hash with weights proportional to score², returning its position (0..topCount-1)
+        /// within the order array. This is the heart of the design requirement's "hedge (mixed strategy)":
+        /// always taking the argmax (position 0) is completely readable by the opponent (= the old
+        /// "monotonous production" itself), so the runner-up and third place always retain some
+        /// probability. Why score² (sharper than linear weights): it keeps the bias toward the front
+        /// runner while giving a closely-scored 2nd/3rd enough frequency, approximating the target
+        /// distribution "usually the best response, occasionally the runner-up or third". When the top
+        /// scores sum to 0 or less (degenerate cases: wiped out, no matchup data), the front runner
+        /// (position 0) is always returned.</summary>
         private static int PickHedgedPosition(float[] scores, int[] order, int topCount, uint seed)
         {
             if (topCount <= 1) return 0;
@@ -134,11 +141,12 @@ namespace CSWarfront.Core
             return topCount - 1;
         }
 
-        /// <summary>candidates[i]のスコアがscores[i]であるとき、上位min(3,length)件の中からヘッジ抽選で
-        /// 1件を選び、それを先頭に置いた「優先順位」配列を返す（残りはスコア降順のまま続く）。
-        /// AiProductionPolicy.Decideの兵科選択で使う: 先頭（ヘッジ抽選の結果）から順に「実際に
-        /// このTierで買えるか」を試し、買えなければ次点へフォールバックする（旧来のcross-category
-        /// fallbackと同じ安全網を、ヘッジされた優先順位の上でも維持する）。</summary>
+        /// <summary>Given candidates[i] scored by scores[i], hedge-draws one entry from the top
+        /// min(3,length) and returns a "preference order" array with it in front (the rest follow in
+        /// descending score order). Used by AiProductionPolicy.Decide's category selection: starting from
+        /// the front (the hedge draw), each is tried for "can a tier of this actually be bought right
+        /// now", falling back to the next on failure (the same safety net as the old cross-category
+        /// fallback, preserved on top of the hedged ordering).</summary>
         public static UnitCategory[] HedgeOrder(UnitCategory[] candidates, float[] scores, uint seed)
         {
             int n = candidates.Length;
@@ -157,8 +165,9 @@ namespace CSWarfront.Core
             return result;
         }
 
-        /// <summary>scores[0..length)の上位min(3,length)件からヘッジ抽選で1件選び、そのscores配列上の
-        /// 添字を返す。AiProductionPolicy.ChooseTierHedgedのTier選択（質vs量のヘッジ）で使う。</summary>
+        /// <summary>Hedge-draws one entry from the top min(3,length) of scores[0..length) and returns its
+        /// index within the scores array. Used by AiProductionPolicy.ChooseTierHedged's tier selection
+        /// (the quality-vs-quantity hedge).</summary>
         public static int HedgePickIndex(float[] scores, int length, uint seed)
         {
             int[] order = SortDescendingIndices(scores, length);
