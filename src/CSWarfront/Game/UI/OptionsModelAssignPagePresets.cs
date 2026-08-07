@@ -42,12 +42,12 @@ namespace CSWarfront.Game.UI
         /// assignment group).</summary>
         internal static void BuildPresetsSection(UIHelperBase group)
         {
-            _clearAllButton = group.AddButton("Reset All", OnClearAllClick) as UIButton;
+            _clearAllButton = group.AddButton(WarfrontStrings.OptionsModel_ClearAllButton, OnClearAllClick) as UIButton;
 
             string[] presetLabels = BuildPresetSlotLabels();
-            _presetSlotDropdown = group.AddDropdown("Preset", presetLabels, 0, OnPresetSlotChanged) as UIDropDown;
-            _presetSaveButton = group.AddButton("Save", OnSaveSlotClick) as UIButton;
-            object loadButtonObj = group.AddButton("Load", OnLoadSlotClick);
+            _presetSlotDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_PresetDropdown, presetLabels, 0, OnPresetSlotChanged) as UIDropDown;
+            _presetSaveButton = group.AddButton(WarfrontStrings.OptionsModel_PresetSaveButton, OnSaveSlotClick) as UIButton;
+            object loadButtonObj = group.AddButton(WarfrontStrings.OptionsModel_PresetLoadButton, OnLoadSlotClick);
             _presetLoadButton = loadButtonObj as UIButton;
 
             _presetMessageLabel = CreateNoteLabel(loadButtonObj);
@@ -62,7 +62,7 @@ namespace CSWarfront.Game.UI
             for (int i = 0; i < 3; i++)
             {
                 int slot = i + 1;
-                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : slot + " (empty)";
+                labels[i] = UnitAssetBindings.SlotExists(slot) ? slot.ToString() : string.Format(WarfrontStrings.OptionsModel_PresetSlotEmptyFormat, slot);
             }
             return labels;
         }
@@ -109,8 +109,8 @@ namespace CSWarfront.Game.UI
             {
                 int removed = UnitAssetBindings.ClearAll();
                 SetPresetMessage(removed > 0
-                    ? "Reset all bindings (" + removed + " entries)"
-                    : "Nothing to reset (already at default)");
+                    ? string.Format(WarfrontStrings.OptionsModel_ClearAllDoneFormat, removed)
+                    : WarfrontStrings.OptionsModel_ClearAllNothing);
 
                 if (removed > 0) RefreshAfterBulkChange();
             }
@@ -126,7 +126,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.SaveToSlot(slot);
-                SetPresetMessage(ok ? "Saved to preset " + slot : "Failed to save to preset " + slot);
+                SetPresetMessage(ok ? string.Format(WarfrontStrings.OptionsModel_PresetSavedFormat, slot) : string.Format(WarfrontStrings.OptionsModel_PresetSaveFailedFormat, slot));
                 if (ok) RefreshPresetSlotLabels();
             }
             catch (Exception e)
@@ -144,7 +144,7 @@ namespace CSWarfront.Game.UI
             {
                 int slot = SelectedPresetSlot;
                 bool ok = UnitAssetBindings.LoadFromSlot(slot);
-                SetPresetMessage(ok ? "Loaded preset " + slot + " (replaced the existing bindings)" : "Preset " + slot + " is empty");
+                SetPresetMessage(ok ? string.Format(WarfrontStrings.OptionsModel_PresetLoadedFormat, slot) : string.Format(WarfrontStrings.OptionsModel_PresetEmptyFormat, slot));
 
                 if (ok)
                 {

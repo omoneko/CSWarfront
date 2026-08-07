@@ -91,8 +91,8 @@ namespace CSWarfront.Game.UI
                 // menu).
                 if (!FortificationRules.CanProduceUnit(baseType, t.Category)) continue;
 
-                string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
-                if (t.Tier > unlockedTier) label += " [Locked]";
+                string label = string.Format(WarfrontStrings.BaseInfo_UnitItemFormat, t.TypeKey, t.Cost.ToString("0"));
+                if (t.Tier > unlockedTier) label += WarfrontStrings.BaseInfo_UnitLockedSuffix;
                 items.Add(label);
                 keys.Add(t.TypeKey);
             }
@@ -118,18 +118,18 @@ namespace CSWarfront.Game.UI
         /// QueueDisplayMax are elided with "…".</summary>
         private static string BuildQueueDisplayText(string[] queuedTypeKeys)
         {
-            if (queuedTypeKeys == null || queuedTypeKeys.Length == 0) return "Queue: none";
+            if (queuedTypeKeys == null || queuedTypeKeys.Length == 0) return WarfrontStrings.BaseInfo_QueueNone;
 
             StringBuilder sb = _queueBuilder;
             sb.Length = 0;
-            sb.Append("Queue: ");
+            sb.Append(WarfrontStrings.BaseInfo_QueuePrefix);
 
             int shown = Math.Min(queuedTypeKeys.Length, QueueDisplayMax);
             for (int i = 0; i < shown; i++)
             {
                 if (i > 0) sb.Append(" -> ");
                 sb.Append(queuedTypeKeys[i]);
-                if (i == 0) sb.Append("(producing)");
+                if (i == 0) sb.Append(WarfrontStrings.BaseInfo_QueueProducingSuffix);
             }
             if (queuedTypeKeys.Length > shown) sb.Append(" → …");
 

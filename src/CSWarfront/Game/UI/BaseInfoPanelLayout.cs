@@ -17,10 +17,10 @@ namespace CSWarfront.Game.UI
         {
             switch (type)
             {
-                case BaseType.Army: return "Army Base";
-                case BaseType.Navy: return "Naval Base";
-                case BaseType.AirForce: return "Air Base";
-                case BaseType.MissileBase: return "Missile Base";
+                case BaseType.Army: return WarfrontStrings.BaseInfo_TypeArmyBase;
+                case BaseType.Navy: return WarfrontStrings.BaseInfo_TypeNavalBase;
+                case BaseType.AirForce: return WarfrontStrings.BaseInfo_TypeAirBase;
+                case BaseType.MissileBase: return WarfrontStrings.BaseInfo_TypeMissileBase;
                 default: return type.ToString();
             }
         }
@@ -29,10 +29,10 @@ namespace CSWarfront.Game.UI
         private static string SpawnableDomainsLabel(DomainMask mask)
         {
             var parts = new System.Collections.Generic.List<string>(3);
-            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add("Land");
-            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add("Sea");
-            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add("Air");
-            return parts.Count > 0 ? string.Join("/", parts.ToArray()) : "None";
+            if (DomainMaskUtil.Contains(mask, Domain.Land)) parts.Add(WarfrontStrings.BaseInfo_DomainLand);
+            if (DomainMaskUtil.Contains(mask, Domain.Sea)) parts.Add(WarfrontStrings.BaseInfo_DomainSea);
+            if (DomainMaskUtil.Contains(mask, Domain.Air)) parts.Add(WarfrontStrings.BaseInfo_DomainAir);
+            return parts.Count > 0 ? string.Join("/", parts.ToArray()) : WarfrontStrings.Common_None;
         }
 
         /// <summary>

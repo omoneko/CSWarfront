@@ -43,7 +43,7 @@ namespace CSWarfront.Game.UI
             _hasStart = false;
             _rightMouseDownPending = false;
             ModConfig.Log("TrenchLineTargeting: armed - right-click start point (Esc cancels)");
-            CommandToast.Show("Trench line: right-click the START point (Esc to cancel)");
+            CommandToast.Show(WarfrontStrings.Trench_StartPrompt);
         }
 
         public static void Reset()
@@ -65,7 +65,7 @@ namespace CSWarfront.Game.UI
 
                 if (Input.GetKeyDown(KeyCode.Escape))
                 {
-                    CommandToast.Show("Cancelled trench line");
+                    CommandToast.Show(WarfrontStrings.Trench_CancelledToast);
                     Reset();
                     return;
                 }
@@ -101,12 +101,12 @@ namespace CSWarfront.Game.UI
                 {
                     _start = clicked;
                     _hasStart = true;
-                    CommandToast.Show("Trench line: right-click the END point");
+                    CommandToast.Show(WarfrontStrings.Trench_EndPrompt);
                     return;
                 }
 
                 MilitaryManager.RequestTrenchLine(_start, clicked);
-                CommandToast.Show("Digging trench line...");
+                CommandToast.Show(WarfrontStrings.Trench_DiggingToast);
                 Reset();
             }
             catch (Exception e)

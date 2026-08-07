@@ -65,8 +65,8 @@ namespace CSWarfront.Game.UI
             if (_countLabel != null)
             {
                 _countLabel.text = truncated
-                    ? "* Showing " + AssetAssignPanel.MaxListItems + " of " + names.Count + " (narrow your search)"
-                    : names.Count + " item(s)";
+                    ? string.Format(WarfrontStrings.OptionsModel_ListTruncatedFormat, AssetAssignPanel.MaxListItems, names.Count)
+                    : string.Format(WarfrontStrings.OptionsModel_ListCountFormat, names.Count);
             }
         }
 
@@ -85,7 +85,7 @@ namespace CSWarfront.Game.UI
             AssetKind kind;
             string name;
             bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
-            _currentBindingLabel.text = "Current binding: " + (bound ? AssetKindUtil.Describe(kind, name) : "(default model)");
+            _currentBindingLabel.text = string.Format(WarfrontStrings.OptionsModel_CurrentBindingFormat, bound ? AssetKindUtil.Describe(kind, name) : WarfrontStrings.OptionsModel_DefaultModel);
             RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
 

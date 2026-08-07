@@ -60,8 +60,8 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static class OptionsBaseBuildingPage
     {
-        private const string GroupTitle = "Base Buildings";
-        private const string NoSelectionLabel = "(none selected)";
+        private static readonly string GroupTitle = WarfrontStrings.OptionsBaseBuilding_GroupTitle;
+        private static readonly string NoSelectionLabel = WarfrontStrings.OptionsBaseBuilding_NoSelection;
 
         // Row order. Reuses the display-label constants of UnitAssetBindingsBaseTypes as-is (single source for UI wording).
         // Task101: added designation rows for the 5 field-fortification types (Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation).
@@ -76,7 +76,7 @@ namespace CSWarfront.Game.UI
             UnitAssetBindings.NavyBaseDisplayName,
             UnitAssetBindings.AirBaseDisplayName,
             UnitAssetBindings.MissileBaseDisplayName,
-            "Bunker", "Artillery Position", "Supply Depot", "Trench", "Cargo Station"
+            WarfrontStrings.OptionsBaseBuilding_BunkerRow, WarfrontStrings.OptionsBaseBuilding_ArtilleryPostRow, WarfrontStrings.OptionsBaseBuilding_SupplyDepotRow, WarfrontStrings.OptionsBaseBuilding_TrenchRow, WarfrontStrings.OptionsBaseBuilding_CargoStationRow
         };
 
         private static UICheckBox _customOnlyCheckbox;
@@ -100,8 +100,8 @@ namespace CSWarfront.Game.UI
                 UIHelperBase group = helper.AddGroup(GroupTitle);
                 UIComponent groupPanel = (group as UIHelper) != null ? ((UIHelper)group).self as UIComponent : null;
 
-                _customOnlyCheckbox = group.AddCheckbox("Subscribed only", _customOnly, OnCustomOnlyChanged) as UICheckBox;
-                _searchField = group.AddTextfield("Search (partial match)", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
+                _customOnlyCheckbox = group.AddCheckbox(WarfrontStrings.OptionsBaseBuilding_SubscribedOnlyCheckbox, _customOnly, OnCustomOnlyChanged) as UICheckBox;
+                _searchField = group.AddTextfield(WarfrontStrings.OptionsBaseBuilding_SearchField, "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
 
                 if (groupPanel != null)
                 {
@@ -154,7 +154,7 @@ namespace CSWarfront.Game.UI
                 _rowLabels[index] = label;
             }
 
-            object resetObj = group.AddButton("Reset to Default", () => OnResetClick(rowIndex));
+            object resetObj = group.AddButton(WarfrontStrings.OptionsBaseBuilding_ResetButton, () => OnResetClick(rowIndex));
             _rowResetButtons[index] = resetObj as UIButton;
 
             return resetObj;
@@ -237,7 +237,7 @@ namespace CSWarfront.Game.UI
 
             _hintLabel.text = stateReady
                 ? ""
-                : "No building assets are currently available (e.g. opened from the main menu). Open this again after loading a city to see subscribed buildings in the list.";
+                : WarfrontStrings.OptionsBaseBuilding_NoAssetsHint;
         }
 
         private static void RefreshFilteredNames()
@@ -253,8 +253,8 @@ namespace CSWarfront.Game.UI
             if (_countLabel != null)
             {
                 _countLabel.text = truncated
-                    ? "* Showing " + AssetAssignPanel.MaxListItems + " of " + names.Count + " (narrow your search)"
-                    : names.Count + " item(s)";
+                    ? string.Format(WarfrontStrings.OptionsBaseBuilding_ListTruncatedFormat, AssetAssignPanel.MaxListItems, names.Count)
+                    : string.Format(WarfrontStrings.OptionsBaseBuilding_ListCountFormat, names.Count);
             }
         }
 
@@ -310,7 +310,7 @@ namespace CSWarfront.Game.UI
             string current;
             if (!BaseBuildingDesignation.TryGet(RowTypes[rowIndex], out current))
             {
-                label.text = "Current designation: (not set. This base type cannot be placed. Please designate a building)";
+                label.text = WarfrontStrings.OptionsBaseBuilding_NotSetLabel;
                 return;
             }
 
@@ -318,8 +318,8 @@ namespace CSWarfront.Game.UI
             // auto-detected and is in use, say so (it works as-is, but the dropdown can switch to a
             // different asset at any time).
             label.text = BaseBuildingDesignation.IsAutoAssigned(RowTypes[rowIndex])
-                ? "Current designation: " + current + "  (auto-detected)"
-                : "Current designation: " + current;
+                ? string.Format(WarfrontStrings.OptionsBaseBuilding_CurrentAutoFormat, current)
+                : string.Format(WarfrontStrings.OptionsBaseBuilding_CurrentFormat, current);
         }
 
         private static void OnCustomOnlyChanged(bool value)

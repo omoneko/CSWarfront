@@ -68,8 +68,8 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
-        private const string GroupTitle = "Model Assignment";
-        private const string NoSelectionLabel = "(none selected)";
+        private static readonly string GroupTitle = WarfrontStrings.OptionsModel_GroupTitle;
+        private static readonly string NoSelectionLabel = WarfrontStrings.OptionsModel_NoSelection;
 
         private static UIDropDown _factionDropdown;
         private static UIDropDown _typeKeyDropdown;
@@ -113,24 +113,24 @@ namespace CSWarfront.Game.UI
                     ModConfig.LogError("OptionsModelAssignPage.Build: failed to get group panel, omitting current binding display/thumbnail.");
                 }
 
-                _factionDropdown = group.AddDropdown("Faction", WarfrontSettings.FactionNames, 0, OnFactionChanged) as UIDropDown;
+                _factionDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_FactionDropdown, WarfrontSettings.FactionNames, 0, OnFactionChanged) as UIDropDown;
 
                 BuildTypeKeys();
-                _typeKeyDropdown = group.AddDropdown("Unit Type", BuildTypeKeyLabels(), 0, OnTypeKeyChanged) as UIDropDown;
+                _typeKeyDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_UnitTypeDropdown, BuildTypeKeyLabels(), 0, OnTypeKeyChanged) as UIDropDown;
 
                 if (groupPanel != null) BuildBindingPreview(groupPanel);
 
                 string[] kindLabels = new string[AssetKindUtil.All.Length];
                 for (int i = 0; i < AssetKindUtil.All.Length; i++) kindLabels[i] = AssetKindUtil.DisplayNameJa(AssetKindUtil.All[i]);
-                _assetKindDropdown = group.AddDropdown("Asset Type", kindLabels, 0, OnAssetKindChanged) as UIDropDown;
+                _assetKindDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_AssetKindDropdown, kindLabels, 0, OnAssetKindChanged) as UIDropDown;
 
-                _customOnlyCheckbox = group.AddCheckbox("Subscribed only", _customOnly, OnCustomOnlyChanged) as UICheckBox;
+                _customOnlyCheckbox = group.AddCheckbox(WarfrontStrings.OptionsModel_SubscribedOnlyCheckbox, _customOnly, OnCustomOnlyChanged) as UICheckBox;
                 // Task47: AddTextfield's OnTextSubmitted is unused (OnTextChanged alone is enough), but it is
                 // unverified whether the UIHelper implementation null-guards the callback, so pass a no-op
                 // instead of null (in the IL the eventTextSubmitted subscription looked unconditional, so err
                 // on the safe side).
-                _searchField = group.AddTextfield("Search (partial match)", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
-                _assetDropdown = group.AddDropdown("Asset", new[] { NoSelectionLabel }, 0, OnAssetSelected) as UIDropDown;
+                _searchField = group.AddTextfield(WarfrontStrings.OptionsModel_SearchField, "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
+                _assetDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_AssetDropdown, new[] { NoSelectionLabel }, 0, OnAssetSelected) as UIDropDown;
 
                 if (groupPanel != null)
                 {
@@ -144,11 +144,11 @@ namespace CSWarfront.Game.UI
                 for (int i = 0; i < CopyScopeUtil.All.Length; i++) copyLabels[i] = CopyScopeUtil.DisplayNameJa(CopyScopeUtil.All[i]);
                 // Only the selectedIndex is read at the moment OnCopyApplyClick is pressed, so no change
                 // notification is needed, but for the same reason as above pass a no-op callback rather than null.
-                _copyScopeDropdown = group.AddDropdown("Apply to Multiple - Scope", copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
+                _copyScopeDropdown = group.AddDropdown(WarfrontStrings.OptionsModel_CopyScopeDropdown, copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
 
-                _applyButton = group.AddButton("Apply", OnApplyClick) as UIButton;
-                _resetButton = group.AddButton("Reset to Default", OnResetClick) as UIButton;
-                object copyButtonObj = group.AddButton("Apply to Multiple", OnCopyApplyClick);
+                _applyButton = group.AddButton(WarfrontStrings.OptionsModel_ApplyButton, OnApplyClick) as UIButton;
+                _resetButton = group.AddButton(WarfrontStrings.OptionsModel_ResetButton, OnResetClick) as UIButton;
+                object copyButtonObj = group.AddButton(WarfrontStrings.OptionsModel_CopyApplyButton, OnCopyApplyClick);
                 _copyApplyButton = copyButtonObj as UIButton;
 
                 _hintLabel = CreateNoteLabel(copyButtonObj);
@@ -237,9 +237,9 @@ namespace CSWarfront.Game.UI
                 string name;
                 string suffix = UnitAssetBindings.TryGetEffective(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
-                    : "(default)";
+                    : WarfrontStrings.OptionsModel_DefaultSuffix;
                 string displayKey = UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[i]);
-                labels[i] = displayKey + " -> " + suffix;
+                labels[i] = string.Format(WarfrontStrings.OptionsModel_TypeKeyLabelFormat, displayKey, suffix);
             }
             return labels;
         }
@@ -272,7 +272,7 @@ namespace CSWarfront.Game.UI
             if (_hintLabel == null) return;
             _hintLabel.text = stateReady
                 ? ""
-                : "No assets are currently available (props/buildings/vehicles/trees), e.g. opened from the main menu. Open this again after loading a city to see subscribed assets in the list.";
+                : WarfrontStrings.OptionsModel_NoAssetsHint;
         }
 
         /// <summary>eventVisibilityChanged handler for the group panel (Task52 bug fix).
@@ -441,8 +441,7 @@ namespace CSWarfront.Game.UI
             if (!UnitAssetBindings.TryGetBaseTypeForKey(_typeKeys[typeIdx], out baseType)) return;
             if (MilitaryManager.HasOwnedBaseOfType(SelectedFactionId, baseType)) return;
 
-            string note = "(This faction currently owns no " + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
-                ". It will take effect once a base is built or changes ownership)";
+            string note = string.Format(WarfrontStrings.OptionsModel_NoOwnedBaseNoteFormat, UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]));
             ModConfig.Log("OptionsModelAssignPage: " + note);
             if (_currentBindingLabel != null) _currentBindingLabel.text += "\n" + note;
         }

@@ -63,7 +63,7 @@ namespace CSWarfront.Game.UI
             float halfWidth = (width - MissileRowGap) / 2f;
 
             _buildMissileButton = _panel.AddUIComponent<UIButton>();
-            _buildMissileButton.text = "Build Missile (¥" + MissileStockpile.MissileCost.ToString("0") + ")";
+            _buildMissileButton.text = string.Format(WarfrontStrings.BaseInfo_BuildMissileButton, MissileStockpile.MissileCost.ToString("0"));
             _buildMissileButton.textScale = 0.75f;
             _buildMissileButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _buildMissileButton.normalBgSprite = "ButtonMenu";
@@ -73,7 +73,7 @@ namespace CSWarfront.Game.UI
             _buildMissileButton.eventClick += OnBuildMissileClick;
 
             _launchMissileButton = _panel.AddUIComponent<UIButton>();
-            _launchMissileButton.text = "Set Launch Target";
+            _launchMissileButton.text = WarfrontStrings.BaseInfo_SetLaunchTargetButton;
             _launchMissileButton.textScale = 0.75f;
             _launchMissileButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _launchMissileButton.normalBgSprite = "ButtonMenu";
@@ -86,7 +86,7 @@ namespace CSWarfront.Game.UI
             // MilitaryBase.AutoProduce; auto-launch is the newly added AutoLaunchMissiles. Both are
             // toggle buttons).
             _missileAutoProduceButton = _panel.AddUIComponent<UIButton>();
-            _missileAutoProduceButton.text = "Auto-build: ON";
+            _missileAutoProduceButton.text = WarfrontStrings.BaseInfo_AutoBuildOn;
             _missileAutoProduceButton.textScale = 0.75f;
             _missileAutoProduceButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _missileAutoProduceButton.normalBgSprite = "ButtonMenu";
@@ -96,7 +96,7 @@ namespace CSWarfront.Game.UI
             _missileAutoProduceButton.eventClick += OnMissileAutoProduceClick;
 
             _missileAutoLaunchButton = _panel.AddUIComponent<UIButton>();
-            _missileAutoLaunchButton.text = "Auto-launch: ON";
+            _missileAutoLaunchButton.text = WarfrontStrings.BaseInfo_AutoLaunchOn;
             _missileAutoLaunchButton.textScale = 0.75f;
             _missileAutoLaunchButton.size = new Vector2(halfWidth, MissileButtonHeight);
             _missileAutoLaunchButton.normalBgSprite = "ButtonMenu";
@@ -132,17 +132,17 @@ namespace CSWarfront.Game.UI
 
             if (_missileStatusLabel != null)
             {
-                string statusText = "Stockpile: " + snapshot.StockpiledMissiles + " / " + MissileStockpile.MaxStockpile;
+                string statusText = string.Format(WarfrontStrings.BaseInfo_MissileStockpileFormat, snapshot.StockpiledMissiles, MissileStockpile.MaxStockpile);
                 if (snapshot.IsBuildingMissile)
                 {
                     float pct = Mathf.Clamp01(snapshot.MissileBuildProgress) * 100f;
                     float remainHours = (1f - Mathf.Clamp01(snapshot.MissileBuildProgress)) * MissileStockpile.MissileBuildHours;
                     if (remainHours < 0f) remainHours = 0f;
-                    statusText += "\nBuilding: " + pct.ToString("0") + "%  (" + remainHours.ToString("0.0") + "h left)";
+                    statusText += string.Format(WarfrontStrings.BaseInfo_MissileBuildingFormat, pct.ToString("0"), remainHours.ToString("0.0"));
                 }
                 else
                 {
-                    statusText += "\nBuilding: none";
+                    statusText += WarfrontStrings.BaseInfo_MissileBuildingNone;
                 }
                 _missileStatusLabel.text = statusText;
                 _missileStatusLabel.relativePosition = new Vector3(Pad, y);
@@ -162,12 +162,12 @@ namespace CSWarfront.Game.UI
             _lastMissileAutoLaunch = snapshot.AutoLaunchMissiles;
             if (_missileAutoProduceButton != null)
             {
-                _missileAutoProduceButton.text = snapshot.AutoProduce ? "Auto-build: ON" : "Auto-build: OFF";
+                _missileAutoProduceButton.text = snapshot.AutoProduce ? WarfrontStrings.BaseInfo_AutoBuildOn : WarfrontStrings.BaseInfo_AutoBuildOff;
                 _missileAutoProduceButton.relativePosition = new Vector3(Pad, y);
             }
             if (_missileAutoLaunchButton != null)
             {
-                _missileAutoLaunchButton.text = snapshot.AutoLaunchMissiles ? "Auto-launch: ON" : "Auto-launch: OFF";
+                _missileAutoLaunchButton.text = snapshot.AutoLaunchMissiles ? WarfrontStrings.BaseInfo_AutoLaunchOn : WarfrontStrings.BaseInfo_AutoLaunchOff;
                 _missileAutoLaunchButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, y);
             }
             y += MissileButtonHeight + MissileRowGap;
@@ -198,7 +198,7 @@ namespace CSWarfront.Game.UI
                 {
                     _lastMissileAutoProduce = newValue;
                     if (_missileAutoProduceButton != null)
-                        _missileAutoProduceButton.text = newValue ? "Auto-build: ON" : "Auto-build: OFF";
+                        _missileAutoProduceButton.text = newValue ? WarfrontStrings.BaseInfo_AutoBuildOn : WarfrontStrings.BaseInfo_AutoBuildOff;
                 }
             }
             catch (Exception e)
@@ -217,7 +217,7 @@ namespace CSWarfront.Game.UI
                 {
                     _lastMissileAutoLaunch = newValue;
                     if (_missileAutoLaunchButton != null)
-                        _missileAutoLaunchButton.text = newValue ? "Auto-launch: ON" : "Auto-launch: OFF";
+                        _missileAutoLaunchButton.text = newValue ? WarfrontStrings.BaseInfo_AutoLaunchOn : WarfrontStrings.BaseInfo_AutoLaunchOff;
                 }
             }
             catch (Exception e)
@@ -262,12 +262,12 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case MissileBuildResult.BaseNotFound: return "Base not found";
-                case MissileBuildResult.NotMissileBase: return "Not a missile base";
-                case MissileBuildResult.NoOwner: return "No owner";
-                case MissileBuildResult.AlreadyBuilding: return "Already building";
-                case MissileBuildResult.StockpileFull: return "Stockpile full";
-                case MissileBuildResult.NotAffordable: return "Insufficient funds";
+                case MissileBuildResult.BaseNotFound: return WarfrontStrings.BaseInfo_MsgBaseNotFound;
+                case MissileBuildResult.NotMissileBase: return WarfrontStrings.BaseInfo_MsgNotMissileBase;
+                case MissileBuildResult.NoOwner: return WarfrontStrings.BaseInfo_MsgNoOwner;
+                case MissileBuildResult.AlreadyBuilding: return WarfrontStrings.BaseInfo_MsgAlreadyBuilding;
+                case MissileBuildResult.StockpileFull: return WarfrontStrings.BaseInfo_MsgStockpileFull;
+                case MissileBuildResult.NotAffordable: return WarfrontStrings.BaseInfo_MsgInsufficientFunds;
                 default: return "";
             }
         }

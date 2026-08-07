@@ -23,7 +23,7 @@ namespace CSWarfront.Game.UI
             if (_panel == null) return y;
 
             _modelButton = _panel.AddUIComponent<UIButton>();
-            _modelButton.text = "Model Settings";
+            _modelButton.text = WarfrontStrings.BaseInfo_ModelSettingsButton;
             _modelButton.textScale = 0.8f;
             _modelButton.size = new Vector2(width, ModelButtonHeight);
             _modelButton.relativePosition = new Vector3(x, y);

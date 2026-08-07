@@ -122,9 +122,9 @@ namespace CSWarfront.Game.UI
                 string name;
                 string suffix = UnitAssetBindings.TryGetEffective(factionId, _typeKeys[i], out kind, out name)
                     ? AssetKindUtil.Describe(kind, name)
-                    : "(default)";
+                    : WarfrontStrings.AssetPanel_DefaultBinding;
                 string displayKey = UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[i]);
-                labels[i] = displayKey + " → " + suffix;
+                labels[i] = string.Format(WarfrontStrings.AssetPanel_TypeKeyLabelFormat, displayKey, suffix);
             }
             return labels;
         }
@@ -162,7 +162,7 @@ namespace CSWarfront.Game.UI
             AssetKind kind;
             string name;
             bool bound = UnitAssetBindings.TryGetEffective(SelectedFactionId, _typeKeys[idx], out kind, out name);
-            _currentBindingLabel.text = "Current binding: " + (bound ? AssetKindUtil.Describe(kind, name) : "(default model)");
+            _currentBindingLabel.text = string.Format(WarfrontStrings.AssetPanel_CurrentBindingFormat, bound ? AssetKindUtil.Describe(kind, name) : WarfrontStrings.AssetPanel_DefaultModel);
             RefreshThumbnail(bound ? kind : AssetKind.Prop, bound ? name : null);
         }
 
@@ -242,8 +242,7 @@ namespace CSWarfront.Game.UI
             if (!UnitAssetBindings.TryGetBaseTypeForKey(_typeKeys[typeIdx], out baseType)) return;
             if (MilitaryManager.HasOwnedBaseOfType(SelectedFactionId, baseType)) return;
 
-            string note = "(This faction currently owns no " + UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]) +
-                ". It will take effect once a base is built or changes ownership)";
+            string note = string.Format(WarfrontStrings.AssetPanel_NoOwnedBaseWarningFormat, UnitAssetBindings.DisplayNameForBaseKey(_typeKeys[typeIdx]));
             ModConfig.Log("AssetAssignPanel: " + note);
             if (_currentBindingLabel != null) _currentBindingLabel.text += "\n" + note;
         }

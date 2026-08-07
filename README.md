@@ -52,7 +52,20 @@ dotnet test tests/CSWarfront.Core.Tests/CSWarfront.Core.Tests.csproj
 
 ## Contributing & localization
 
-Contributions are welcome. The codebase was originally documented in Japanese and the inline comments are being translated to English progressively. In-game UI text is English; a community localization framework for the mod's UI strings is planned — if you would like to help translate, please open an issue.
+Contributions are welcome. All source code and inline documentation are in English.
+
+The mod's UI text is fully localizable. Every player-facing string lives in
+[`Locales/en.txt`](Locales/en.txt) (auto-generated from the defaults in
+`src/CSWarfront/Game/Localization/WarfrontStrings*.cs`). To add a language:
+
+1. Copy `Locales/en.txt` to `Locales/<code>.txt`, where `<code>` is the language code the
+   game reports (e.g. `de`, `fr`, `es`, `zh`, `ja`). The game's current language is picked
+   up automatically at startup.
+2. Translate the values (right-hand side only). Keep the `{0}`/`{1}` placeholders and the
+   `\n` line-break escapes. Any key you leave out simply falls back to English, so partial
+   translations are fine.
+3. Test locally by dropping the file into the mod folder's `Locales/` directory, then open
+   a pull request adding it here.
 
 ## License
 

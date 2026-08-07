@@ -32,4 +32,15 @@ if (Test-Path $modelsSrc) {
     Write-Host "Models deployed: $modelsDst"
 }
 
+# Deploy UI locale files (Task113). LocaleLoader reads Locales\<lang>.txt at runtime;
+# en.txt is the translation template (regenerated at runtime if missing, but shipping it
+# keeps the Workshop copy in sync with the repo).
+$localesSrc = "Locales"
+if (Test-Path $localesSrc) {
+    $localesDst = Join-Path $modDir "Locales"
+    New-Item -ItemType Directory -Force -Path $localesDst | Out-Null
+    Copy-Item (Join-Path $localesSrc "*") $localesDst -Include *.txt -Force
+    Write-Host "Locales deployed: $localesDst"
+}
+
 Write-Host "Deployment complete: $modDir"

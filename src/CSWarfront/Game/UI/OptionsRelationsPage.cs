@@ -58,9 +58,9 @@ namespace CSWarfront.Game.UI
     /// </summary>
     internal static class OptionsRelationsPage
     {
-        private const string GroupTitle = "Faction Relations";
+        private static readonly string GroupTitle = WarfrontStrings.OptionsRelations_GroupTitle;
         // Task59: appended Nemesis at the end. Kept consistent with the declaration order of the Relation enum (Hostile, Neutral, Allied, Nemesis).
-        private static readonly string[] RelationLabels = { "Hostile", "Neutral", "Allied", "Nemesis" };
+        private static readonly string[] RelationLabels = { WarfrontStrings.OptionsRelations_Hostile, WarfrontStrings.OptionsRelations_Neutral, WarfrontStrings.OptionsRelations_Allied, WarfrontStrings.OptionsRelations_Nemesis };
         private static readonly Relation[] RelationValues = { Relation.Hostile, Relation.Neutral, Relation.Allied, Relation.Nemesis };
 
         // The 10 rows of dropdowns created during Build() and their corresponding (a,b) pairs.
@@ -110,7 +110,7 @@ namespace CSWarfront.Game.UI
                         Relation current;
                         if (!MilitaryManager.TryGetRelation(pairA, pairB, out current)) current = Relation.Hostile;
 
-                        string label = names[pairA] + " ↔ " + names[pairB]; // "Red ↔ Blue"
+                        string label = string.Format(WarfrontStrings.OptionsRelations_PairLabelFormat, names[pairA], names[pairB]); // "Red ↔ Blue"
                         UIDropDown dd = group.AddDropdown(label, RelationLabels, IndexOfRelation(current),
                             i => OnRelationChanged(pairA, pairB, i)) as UIDropDown;
 
@@ -128,10 +128,10 @@ namespace CSWarfront.Game.UI
                 bool godzillaPresent = ExternalThreatBridge.IsGodzillaModPresent;
                 bool alienPresent = ExternalThreatBridge.IsAlienModPresent;
 
-                if (godzillaPresent) BuildThreatRows(group, names, ThreatKind.Kaiju, "KAIJU", stateReady);
-                if (alienPresent) BuildThreatRows(group, names, ThreatKind.Alien, "Alien", stateReady);
+                if (godzillaPresent) BuildThreatRows(group, names, ThreatKind.Kaiju, WarfrontStrings.OptionsRelations_KaijuName, stateReady);
+                if (alienPresent) BuildThreatRows(group, names, ThreatKind.Alien, WarfrontStrings.OptionsRelations_AlienName, stateReady);
 
-                object resetButtonObj = group.AddButton("Reset All to Hostile", OnResetAllClick);
+                object resetButtonObj = group.AddButton(WarfrontStrings.OptionsRelations_ResetAllButton, OnResetAllClick);
 
                 if (groupPanel != null)
                 {
@@ -143,7 +143,7 @@ namespace CSWarfront.Game.UI
                     _noteLabel.width = 500f;
                     _noteLabel.text = stateReady
                         ? ""
-                        : "No city is loaded, so faction relations cannot be edited. Please open this again after loading a city.";
+                        : WarfrontStrings.OptionsRelations_NoCityNote;
 
                     // Task52 bug fix: CS does not re-run this whole mod's OnSettingsUI every time the
                     // Options screen is opened (see the class-header comment). Instead, subscribe to
@@ -175,7 +175,7 @@ namespace CSWarfront.Game.UI
                 Relation current;
                 if (!MilitaryManager.TryGetThreatRelation(factionId, capturedKind, out current)) current = Relation.Hostile;
 
-                string label = names[factionId] + " ↔ " + displayName;
+                string label = string.Format(WarfrontStrings.OptionsRelations_PairLabelFormat, names[factionId], displayName);
                 UIDropDown dd = group.AddDropdown(label, RelationLabels, IndexOfRelation(current),
                     i => OnThreatRelationChanged(factionId, capturedKind, i)) as UIDropDown;
 
@@ -278,7 +278,7 @@ namespace CSWarfront.Game.UI
                 {
                     _noteLabel.text = stateReady
                         ? ""
-                        : "No city is loaded, so faction relations cannot be edited. Please open this again after loading a city.";
+                        : WarfrontStrings.OptionsRelations_NoCityNote;
                 }
             }
             catch (Exception e)

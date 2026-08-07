@@ -319,35 +319,35 @@ namespace CSWarfront.Game.UI
         {
             if (_titleLabel != null)
             {
-                _titleLabel.text = snapshot.TypeKey + "  (Tier " + snapshot.Tier + ")";
+                _titleLabel.text = string.Format(WarfrontStrings.UnitInfo_TitleFormat, snapshot.TypeKey, snapshot.Tier);
             }
 
             if (_statusLabel != null)
             {
                 string[] names = WarfrontSettings.FactionNames;
-                string factionName = snapshot.FactionId < names.Length ? names[snapshot.FactionId] : "?";
+                string factionName = snapshot.FactionId < names.Length ? names[snapshot.FactionId] : WarfrontStrings.UnitInfo_UnknownFaction;
 
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
-                sb.Append("Faction: ").Append(factionName);
-                sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\nAttack: ").Append(snapshot.Attack.ToString("0")).Append("/h  Range: ").Append(snapshot.Range.ToString("0"));
-                sb.Append("\nArmor: ").Append(snapshot.Armor.ToString("0")).Append("    Speed: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
-                sb.Append("\nAccuracy: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
-                if (snapshot.AccuracyBoosted) sb.Append(" (Spotted)");
+                sb.Append(WarfrontStrings.UnitInfo_FactionLabel).Append(factionName);
+                sb.Append(WarfrontStrings.UnitInfo_HpLabel).Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
+                sb.Append(WarfrontStrings.UnitInfo_AttackLabel).Append(snapshot.Attack.ToString("0")).Append(WarfrontStrings.UnitInfo_AttackPerHourRangeLabel).Append(snapshot.Range.ToString("0"));
+                sb.Append(WarfrontStrings.UnitInfo_ArmorLabel).Append(snapshot.Armor.ToString("0")).Append(WarfrontStrings.UnitInfo_SpeedLabel).Append(snapshot.SpeedKmh.ToString("0")).Append(WarfrontStrings.UnitInfo_SpeedUnit);
+                sb.Append(WarfrontStrings.UnitInfo_AccuracyLabel).Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
+                if (snapshot.AccuracyBoosted) sb.Append(WarfrontStrings.UnitInfo_SpottedSuffix);
                 // Task99: ammo gauge (hidden for branches with infinite ammo and for the Invader). Running out of ammo is warned about explicitly.
                 if (snapshot.HasAmmoGauge)
                 {
-                    sb.Append("\nAmmo: ").Append((snapshot.Ammo * 100f).ToString("0")).Append("%");
-                    if (snapshot.Ammo <= 0f) sb.Append("  [OUT OF AMMO]");
+                    sb.Append(WarfrontStrings.UnitInfo_AmmoLabel).Append((snapshot.Ammo * 100f).ToString("0")).Append("%");
+                    if (snapshot.Ammo <= 0f) sb.Append(WarfrontStrings.UnitInfo_OutOfAmmoSuffix);
                 }
                 if (snapshot.IsSupplyTruck)
-                    sb.Append("\nSupplies: ").Append((snapshot.SupplyLoad * 100f).ToString("0")).Append("%");
-                sb.Append("\nStatus: ").Append(StateLabel(snapshot.State));
-                sb.Append("\nTarget: ").Append(snapshot.TargetId.HasValue ? "Unit#" + snapshot.TargetId.Value : "none");
-                sb.Append("\nPath: ").Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : "Direct");
-                sb.Append("\nOrder: ").Append(OrderLabel(snapshot.Order)); // Task48
+                    sb.Append(WarfrontStrings.UnitInfo_SuppliesLabel).Append((snapshot.SupplyLoad * 100f).ToString("0")).Append("%");
+                sb.Append(WarfrontStrings.UnitInfo_StatusLabel).Append(StateLabel(snapshot.State));
+                sb.Append(WarfrontStrings.UnitInfo_TargetLabel).Append(snapshot.TargetId.HasValue ? WarfrontStrings.UnitInfo_TargetUnitPrefix + snapshot.TargetId.Value : WarfrontStrings.UnitInfo_TargetNone);
+                sb.Append(WarfrontStrings.UnitInfo_PathLabel).Append(snapshot.PathCount > 0 ? snapshot.PathIndex + "/" + snapshot.PathCount : WarfrontStrings.UnitInfo_PathDirect);
+                sb.Append(WarfrontStrings.UnitInfo_OrderLabel).Append(OrderLabel(snapshot.Order)); // Task48
 
                 _statusLabel.text = sb.ToString();
                 RecomputePanelHeight();
@@ -383,10 +383,10 @@ namespace CSWarfront.Game.UI
         {
             switch (state)
             {
-                case UnitState.Idle: return "Idle";
-                case UnitState.Moving: return "Moving";
-                case UnitState.Engaging: return "Engaging";
-                case UnitState.Dead: return "Dead";
+                case UnitState.Idle: return WarfrontStrings.UnitInfo_StateIdle;
+                case UnitState.Moving: return WarfrontStrings.UnitInfo_StateMoving;
+                case UnitState.Engaging: return WarfrontStrings.UnitInfo_StateEngaging;
+                case UnitState.Dead: return WarfrontStrings.UnitInfo_StateDead;
                 default: return state.ToString();
             }
         }
@@ -396,10 +396,10 @@ namespace CSWarfront.Game.UI
         {
             switch (order)
             {
-                case UnitOrder.FreeAdvance: return "Advance";
-                case UnitOrder.Hold: return "Hold";
-                case UnitOrder.RallyHold: return "Rally & Hold";
-                case UnitOrder.AiControlled: default: return "AI";
+                case UnitOrder.FreeAdvance: return WarfrontStrings.UnitInfo_OrderAdvance;
+                case UnitOrder.Hold: return WarfrontStrings.UnitInfo_OrderHold;
+                case UnitOrder.RallyHold: return WarfrontStrings.UnitInfo_OrderRallyHold;
+                case UnitOrder.AiControlled: default: return WarfrontStrings.UnitInfo_OrderAi;
             }
         }
 

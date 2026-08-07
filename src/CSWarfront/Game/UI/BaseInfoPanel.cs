@@ -252,12 +252,12 @@ namespace CSWarfront.Game.UI
             _collapseButton = _chrome.CollapseButton;
 
             _titleLabel = _panel.AddUIComponent<UILabel>();
-            _titleLabel.text = TitleText;
+            _titleLabel.text = WarfrontStrings.BaseInfo_Title;
             _titleLabel.textScale = 0.9f;
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += TitleRowHeight;
 
-            y = AddSectionLabel("Faction", Pad, y, out _factionSectionLabel);
+            y = AddSectionLabel(WarfrontStrings.BaseInfo_SectionFaction, Pad, y, out _factionSectionLabel);
             _factionDropdown = BuildFactionDropdown(Pad, y, w);
             y += DropdownHeight + 8f;
 
@@ -428,76 +428,76 @@ namespace CSWarfront.Game.UI
                 string[] names = WarfrontSettings.FactionNames;
                 string ownerName = (snapshot.OwnerFactionId.HasValue && snapshot.OwnerFactionId.Value < names.Length)
                     ? names[snapshot.OwnerFactionId.Value]
-                    : "Unaffiliated";
+                    : WarfrontStrings.BaseInfo_Unaffiliated;
 
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
                 // Task61: show the base type and producible domains first (with the addition of naval/air
                 // bases, let the player see at a glance what this base can produce).
-                sb.Append("Type: ").Append(BaseTypeLabel(snapshot.Type));
-                sb.Append("  Can produce: ").Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
+                sb.Append(WarfrontStrings.BaseInfo_StatusTypePrefix).Append(BaseTypeLabel(snapshot.Type));
+                sb.Append(WarfrontStrings.BaseInfo_StatusCanProducePrefix).Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
 
-                sb.Append("\nFaction: ").Append(ownerName);
-                if (snapshot.IsHeadquarters) sb.Append(" (HQ)");
+                sb.Append(WarfrontStrings.BaseInfo_StatusFactionPrefix).Append(ownerName);
+                if (snapshot.IsHeadquarters) sb.Append(WarfrontStrings.BaseInfo_StatusHqSuffix);
 
-                sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
-                sb.Append("\nTreasury: ").Append(snapshot.OwnerTreasury.ToString("0"));
+                sb.Append(WarfrontStrings.BaseInfo_StatusHpPrefix).Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
+                sb.Append(WarfrontStrings.BaseInfo_StatusTreasuryPrefix).Append(snapshot.OwnerTreasury.ToString("0"));
                 // Task99: three-resource economy + supplies (residential -> Manpower, commercial/office -> Treasury, industrial -> Production).
-                sb.Append("\nManpower: ").Append(snapshot.OwnerManpower.ToString("0"))
-                  .Append("  Production: ").Append(snapshot.OwnerProduction.ToString("0"))
-                  .Append("  Supplies: ").Append(snapshot.OwnerSupplyStock.ToString("0"));
+                sb.Append(WarfrontStrings.BaseInfo_StatusManpowerPrefix).Append(snapshot.OwnerManpower.ToString("0"))
+                  .Append(WarfrontStrings.BaseInfo_StatusProductionPrefix).Append(snapshot.OwnerProduction.ToString("0"))
+                  .Append(WarfrontStrings.BaseInfo_StatusSuppliesPrefix).Append(snapshot.OwnerSupplyStock.ToString("0"));
 
                 // Task101: field-fortification status display (only for the relevant types).
                 if (snapshot.Type == BaseType.SupplyDepot || snapshot.Type == BaseType.CargoStation)
                 {
-                    sb.Append("\nStored supplies: ").Append(snapshot.StoredSupplies.ToString("0"))
+                    sb.Append(WarfrontStrings.BaseInfo_StatusStoredSuppliesPrefix).Append(snapshot.StoredSupplies.ToString("0"))
                       .Append(" / ").Append(FortificationRules.StoredSupplyCap(snapshot.Type).ToString("0"));
                     if (snapshot.Type == BaseType.CargoStation)
-                        sb.Append(snapshot.RailConnected ? "  [Rail: connected]" : "  [Rail: NOT CONNECTED]");
+                        sb.Append(snapshot.RailConnected ? WarfrontStrings.BaseInfo_StatusRailConnected : WarfrontStrings.BaseInfo_StatusRailNotConnected);
                 }
                 else if (snapshot.Type == BaseType.Bunker || snapshot.Type == BaseType.ArtilleryPost)
                 {
-                    sb.Append("\nFort ammo: ").Append((snapshot.FortAmmo * 100f).ToString("0")).Append("%");
-                    if (snapshot.FortAmmo <= 0f) sb.Append("  [OUT OF AMMO]");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusFortAmmoPrefix).Append((snapshot.FortAmmo * 100f).ToString("0")).Append("%");
+                    if (snapshot.FortAmmo <= 0f) sb.Append(WarfrontStrings.BaseInfo_StatusOutOfAmmo);
                 }
 
                 // Task35: income from the development of occupied territory was already implemented, but
                 // its magnitude was small and it never appeared in the UI at all, so it looked
                 // "unimplemented". Displaying it even when 0 communicates that fact.
-                sb.Append("\nIncome: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");
+                sb.Append(WarfrontStrings.BaseInfo_StatusIncomePrefix).Append(snapshot.LastIncome.ToString("0.0")).Append(WarfrontStrings.BaseInfo_StatusIncomeSuffix);
 
-                sb.Append("\nTech: Tier ").Append(snapshot.OwnerUnlockedTier);
+                sb.Append(WarfrontStrings.BaseInfo_StatusTechTierPrefix).Append(snapshot.OwnerUnlockedTier);
                 if (snapshot.OwnerUnlockedTier >= 5)
                 {
-                    sb.Append("  (max)");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusTierMaxSuffix);
                 }
                 else
                 {
-                    sb.Append("  (research ").Append(snapshot.OwnerResearchPoints.ToString("0"))
-                      .Append(" / next ").Append(snapshot.OwnerNextTierCost.ToString("0")).Append(")");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusResearchPrefix).Append(snapshot.OwnerResearchPoints.ToString("0"))
+                      .Append(WarfrontStrings.BaseInfo_StatusResearchNextSeparator).Append(snapshot.OwnerNextTierCost.ToString("0")).Append(")");
                 }
 
-                sb.Append("\nUnits: ").Append(snapshot.OwnerUnitCount);
+                sb.Append(WarfrontStrings.BaseInfo_StatusUnitsPrefix).Append(snapshot.OwnerUnitCount);
 
                 if (string.IsNullOrEmpty(snapshot.ProducingTypeKey))
                 {
-                    sb.Append("\nProducing: none");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusProducingNone);
                 }
                 else
                 {
                     float pct = Mathf.Clamp01(snapshot.ProducingProgress) * 100f;
                     float remainHours = (1f - Mathf.Clamp01(snapshot.ProducingProgress)) * snapshot.ProducingBuildTime;
                     if (remainHours < 0f) remainHours = 0f;
-                    sb.Append("\nProducing: ").Append(snapshot.ProducingTypeKey).Append("  ").Append(pct.ToString("0")).Append("%")
-                      .Append("  (").Append(remainHours.ToString("0.0")).Append("h left)");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusProducingPrefix).Append(snapshot.ProducingTypeKey).Append("  ").Append(pct.ToString("0")).Append("%")
+                      .Append("  (").Append(remainHours.ToString("0.0")).Append(WarfrontStrings.BaseInfo_StatusHoursLeftSuffix);
                 }
 
                 int waiting = snapshot.QueueCount - (string.IsNullOrEmpty(snapshot.ProducingTypeKey) ? 0 : 1);
-                if (waiting > 0) sb.Append("\nQueued: ").Append(waiting);
+                if (waiting > 0) sb.Append(WarfrontStrings.BaseInfo_StatusQueuedPrefix).Append(waiting);
 
                 if (snapshot.CaptureGraceHours > 0f)
-                    sb.Append("\nCapture grace: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
+                    sb.Append(WarfrontStrings.BaseInfo_StatusCaptureGracePrefix).Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
 
                 _statusLabel.text = sb.ToString();
                 RefreshProductionSection(snapshot); // Task34: re-place the production section below the status lines

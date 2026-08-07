@@ -155,7 +155,7 @@ namespace CSWarfront.Game.UI
         {
             if (_customOnlyToggle != null)
             {
-                _customOnlyToggle.text = "Subscribed only: " + (_customOnly ? "ON" : "OFF");
+                _customOnlyToggle.text = string.Format(WarfrontStrings.AssetPanel_SubscribedOnlyFormat, _customOnly ? WarfrontStrings.AssetPanel_ToggleOn : WarfrontStrings.AssetPanel_ToggleOff);
             }
         }
 
@@ -214,8 +214,8 @@ namespace CSWarfront.Game.UI
             if (_truncatedLabel != null)
             {
                 _truncatedLabel.text = truncated
-                    ? "* Showing " + MaxListItems + " of " + names.Count + " (narrow your search)"
-                    : names.Count + " item(s)";
+                    ? string.Format(WarfrontStrings.AssetPanel_ListTruncatedFormat, MaxListItems, names.Count)
+                    : string.Format(WarfrontStrings.AssetPanel_ListCountFormat, names.Count);
             }
         }
     }

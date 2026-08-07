@@ -40,7 +40,7 @@ namespace CSWarfront.Game.UI
             _armedBaseId = baseId;
             _rightMouseDownPending = false;
             ModConfig.Log("MissileLaunchTargeting: armed for base " + baseId + " - right-click a target (Esc cancels)");
-            CommandToast.Show("Please set a missile launch target");
+            CommandToast.Show(WarfrontStrings.Missile_ArmedPrompt);
         }
 
         /// <summary>Called on level unload (via MilitaryManager.Reset). Leaves no targeting state behind.</summary>
@@ -64,7 +64,7 @@ namespace CSWarfront.Game.UI
                 if (Input.GetKeyDown(KeyCode.Escape))
                 {
                     ModConfig.Log("MissileLaunchTargeting: cancelled");
-                    CommandToast.Show("Cancelled launch targeting");
+                    CommandToast.Show(WarfrontStrings.Missile_CancelledToast);
                     Reset();
                     return;
                 }
@@ -110,7 +110,7 @@ namespace CSWarfront.Game.UI
                 {
                     ModConfig.Log("MissileLaunchTargeting: launched from base " + _armedBaseId + " at " +
                         clicked.x.ToString("0") + "," + clicked.z.ToString("0"));
-                    CommandToast.Show("Launched");
+                    CommandToast.Show(WarfrontStrings.Missile_LaunchedToast);
                     Reset();
                 }
                 else
@@ -133,11 +133,11 @@ namespace CSWarfront.Game.UI
         {
             switch (r)
             {
-                case LaunchResult.NoStockpile: return "No missiles in stockpile";
-                case LaunchResult.OutOfRange: return "Out of range";
-                case LaunchResult.NoOwner: return "No owner";
-                case LaunchResult.NotMissileBase: return "Not a missile base";
-                case LaunchResult.BaseNotFound: return "Base not found";
+                case LaunchResult.NoStockpile: return WarfrontStrings.Missile_FailNoStockpile;
+                case LaunchResult.OutOfRange: return WarfrontStrings.Missile_FailOutOfRange;
+                case LaunchResult.NoOwner: return WarfrontStrings.Missile_FailNoOwner;
+                case LaunchResult.NotMissileBase: return WarfrontStrings.Missile_FailNotMissileBase;
+                case LaunchResult.BaseNotFound: return WarfrontStrings.Missile_FailBaseNotFound;
                 default: return "";
             }
         }

@@ -32,8 +32,11 @@ namespace CSWarfront.Game.UI
         };
         private static readonly string[] RowDisplayNames =
         {
-            "Army Base", "Naval Base", "Air Base", "Missile Base",
-            "Bunker", "Artillery Position", "Supply Depot", "Trench", "Cargo Station"
+            WarfrontStrings.BuildPanel_RowArmyBase, WarfrontStrings.BuildPanel_RowNavalBase,
+            WarfrontStrings.BuildPanel_RowAirBase, WarfrontStrings.BuildPanel_RowMissileBase,
+            WarfrontStrings.BuildPanel_RowBunker, WarfrontStrings.BuildPanel_RowArtilleryPosition,
+            WarfrontStrings.BuildPanel_RowSupplyDepot, WarfrontStrings.BuildPanel_RowTrench,
+            WarfrontStrings.BuildPanel_RowCargoStation
         };
 
         private const float PanelWidth = 240f;
@@ -109,8 +112,8 @@ namespace CSWarfront.Game.UI
             {
                 _toggleButton = view.AddUIComponent(typeof(UIButton)) as UIButton;
                 _toggleButton.name = "WarfrontBuildToggle";
-                _toggleButton.text = "WF";
-                _toggleButton.tooltip = "CS:WARFRONT military construction (Numpad 4)";
+                _toggleButton.text = WarfrontStrings.BuildPanel_ToggleButtonText;
+                _toggleButton.tooltip = WarfrontStrings.BuildPanel_ToggleTooltip;
                 _toggleButton.textScale = 0.8f;
                 _toggleButton.size = new Vector2(36f, 36f);
                 _toggleButton.normalBgSprite = "ButtonMenu";
@@ -143,7 +146,7 @@ namespace CSWarfront.Game.UI
                 drag.relativePosition = Vector3.zero;
 
                 UILabel title = _panel.AddUIComponent<UILabel>();
-                title.text = "Military Construction";
+                title.text = WarfrontStrings.BuildPanel_Title;
                 title.textScale = 0.9f;
                 title.relativePosition = new Vector3(Pad, 8f);
 
@@ -200,8 +203,8 @@ namespace CSWarfront.Game.UI
                 else
                 {
                     // Undesignated (no building chosen in Options) / designated asset not loaded.
-                    b.text = RowDisplayNames[i] + (designated ? " (asset missing)" : " (not set)");
-                    b.tooltip = "Assign a building in Options > Base Buildings";
+                    b.text = RowDisplayNames[i] + (designated ? WarfrontStrings.BuildPanel_RowSuffixAssetMissing : WarfrontStrings.BuildPanel_RowSuffixNotSet);
+                    b.tooltip = WarfrontStrings.BuildPanel_RowTooltipNotSet;
                     b.isEnabled = false;
                 }
             }
@@ -217,7 +220,7 @@ namespace CSWarfront.Game.UI
                 BuildingInfo info = PrefabCollection<BuildingInfo>.FindLoaded(assetName);
                 if (info == null)
                 {
-                    CommandToast.Show("Asset not loaded: " + assetName);
+                    CommandToast.Show(string.Format(WarfrontStrings.BuildPanel_ToastAssetNotLoaded, assetName));
                     return;
                 }
 
@@ -244,7 +247,7 @@ namespace CSWarfront.Game.UI
                 tool.m_prefab = info;
                 tool.m_relocate = 0;
                 _placementActive = true; // make it subject to the Esc-cancel handling (Update)
-                CommandToast.Show("Placing: " + RowDisplayNames[rowIndex] + "  (Esc to cancel)");
+                CommandToast.Show(string.Format(WarfrontStrings.BuildPanel_ToastPlacing, RowDisplayNames[rowIndex]));
             }
             catch (Exception e)
             {

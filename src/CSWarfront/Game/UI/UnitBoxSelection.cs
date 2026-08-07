@@ -309,7 +309,7 @@ namespace CSWarfront.Game.UI
             _selectionModeActive = active;
             if (!active) CancelDrag(); // Switching OFF mid-drag discards the drag immediately (also hides the rectangle)
             ModConfig.Log("UnitBoxSelection: selection mode " + (active ? "ON" : "OFF"));
-            CommandToast.Show(active ? "Unit selection mode ON (drag to box-select)" : "Unit selection mode OFF");
+            CommandToast.Show(active ? WarfrontStrings.Toast_SelectionModeOn : WarfrontStrings.Toast_SelectionModeOff);
         }
 
         /// <summary>Converts real screen-pixel coordinates (same space as Input.mousePosition, bottom-left

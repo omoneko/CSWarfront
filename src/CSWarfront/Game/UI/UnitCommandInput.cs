@@ -157,14 +157,14 @@ namespace CSWarfront.Game.UI
         {
             if (UnitBoxSelection.SelectedIds.Count == 0) return;
             int n = MilitaryManager.CommandFreeAdvance(UnitBoxSelection.SelectedIds);
-            CommandToast.Show("Advance x" + n);
+            CommandToast.Show(string.Format(WarfrontStrings.Toast_AdvanceFormat, n));
         }
 
         private static void IssueHold()
         {
             if (UnitBoxSelection.SelectedIds.Count == 0) return;
             int n = MilitaryManager.CommandHold(UnitBoxSelection.SelectedIds);
-            CommandToast.Show("Hold x" + n);
+            CommandToast.Show(string.Format(WarfrontStrings.Toast_HoldFormat, n));
         }
 
         private static void BeginRallyTargeting()
@@ -174,7 +174,7 @@ namespace CSWarfront.Game.UI
             _rightMouseDownPending = false;
             ModConfig.Log("UnitCommandInput: rally targeting armed for " + UnitBoxSelection.SelectedIds.Count +
                 " unit(s) - right-click a destination (Esc cancels)");
-            CommandToast.Show("Rally & Hold (right-click to set a destination)");
+            CommandToast.Show(WarfrontStrings.Toast_RallyArmed);
         }
 
         private static void HandleRallyTargeting()
@@ -184,7 +184,7 @@ namespace CSWarfront.Game.UI
                 _awaitingRallyClick = false;
                 _rightMouseDownPending = false;
                 ModConfig.Log("UnitCommandInput: rally targeting cancelled");
-                CommandToast.Show("Cancelled rally targeting");
+                CommandToast.Show(WarfrontStrings.Toast_RallyCancelled);
                 return;
             }
 
@@ -237,7 +237,7 @@ namespace CSWarfront.Game.UI
             int n = MilitaryManager.CommandRally(UnitBoxSelection.SelectedIds, point);
             ModConfig.Log("UnitCommandInput: rally point set at " + point.X.ToString("0") + "," +
                 point.Z.ToString("0") + " for " + n + " unit(s)");
-            CommandToast.Show("Rally point set x" + n);
+            CommandToast.Show(string.Format(WarfrontStrings.Toast_RallyPointSetFormat, n));
             _awaitingRallyClick = false;
         }
     }

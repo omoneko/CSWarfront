@@ -42,7 +42,6 @@ namespace CSWarfront.Game.UI
     internal static partial class AssetAssignPanel
     {
         private const string PanelName = "CSWarfrontAssetAssignPanel";
-        private const string TitleText = "Model Settings";
 
         internal const int MaxListItems = 300; // Upper bound on item count. Unrelated to panel dimensions, so not scaled.
 
@@ -288,16 +287,16 @@ namespace CSWarfront.Game.UI
             _collapseButton = _chrome.CollapseButton;
 
             _titleLabel = _panel.AddUIComponent<UILabel>();
-            _titleLabel.text = TitleText;
+            _titleLabel.text = WarfrontStrings.AssetPanel_Title;
             _titleLabel.textScale = 0.9f;   // unified with the other panels (only dimensions are 1.5x; text stays 1x)
             _titleLabel.relativePosition = new Vector3(Pad, y);
             y += RowHeight;
 
-            y = AddSectionLabel("Faction", y, out _factionSectionLabel); // field is declared in AssetAssignPanelFaction.cs
+            y = AddSectionLabel(WarfrontStrings.AssetPanel_SectionFaction, y, out _factionSectionLabel); // field is declared in AssetAssignPanelFaction.cs
             BuildFactionDropdown(Pad, y, w); // AssetAssignPanelFaction.cs
             y += DropdownHeight + SectionGap;
 
-            y = AddSectionLabel("Unit Type", y, out _typeKeySectionLabel);
+            y = AddSectionLabel(WarfrontStrings.AssetPanel_SectionUnitType, y, out _typeKeySectionLabel);
             BuildTypeKeys();
             _typeKeyDropdown = BuildTypeKeyDropdown(Pad, y, w);
             y += DropdownHeight + SectionGap;
@@ -318,7 +317,7 @@ namespace CSWarfront.Game.UI
             BuildThumbnailSprite(Pad + bindingLabelWidth + SectionGap, y); // AssetAssignPanelFaction.cs
             y += ThumbnailSize + SectionGap;
 
-            y = AddSectionLabel("Search (partial match) / Asset Type", y, out _searchSectionLabel);
+            y = AddSectionLabel(WarfrontStrings.AssetPanel_SectionSearch, y, out _searchSectionLabel);
 
             // Task41: Place the search field (left) and the asset-kind dropdown (right, prop/building/vehicle/tree) on the same row.
             float searchWidth = w - AssetKindDropdownWidth - SectionGap;
@@ -368,25 +367,25 @@ namespace CSWarfront.Game.UI
             // assignment to other (faction, type) pairs in one operation. The scope-selection dropdown
             // (left) and the button (right) share the same row
             // (see AssetAssignPanelCopy.cs).
-            y = AddSectionLabel("Apply to Multiple", y, out _copyScopeSectionLabel);
+            y = AddSectionLabel(WarfrontStrings.AssetPanel_SectionCopy, y, out _copyScopeSectionLabel);
             float copyButtonWidth = w * 0.35f;
             float copyDropdownWidth = w - copyButtonWidth - SectionGap;
             _copyScopeDropdown = BuildCopyScopeDropdown(Pad, y, copyDropdownWidth);
-            _copyApplyButton = BuildButton("Apply to Multiple", Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
+            _copyApplyButton = BuildButton(WarfrontStrings.AssetPanel_CopyApplyButton, Pad + copyDropdownWidth + SectionGap, y, copyButtonWidth, OnCopyApplyClick);
             y += DropdownHeight + SectionGap;
 
             // Task70: Added "Clear All" as a 4th button on the same row as the existing 3 buttons
             // (requirement: "next to the existing buttons"). To divide the row evenly into 4, the width
             // calculation of the existing 3 buttons is changed as well.
             float buttonWidth = (w - SectionGap * 3f) / 4f;
-            _applyButton = BuildButton("Apply", Pad, y, buttonWidth, OnApplyClick);
-            _resetButton = BuildButton("Reset to Default", Pad + (buttonWidth + SectionGap), y, buttonWidth, OnResetClick);
+            _applyButton = BuildButton(WarfrontStrings.AssetPanel_ApplyButton, Pad, y, buttonWidth, OnApplyClick);
+            _resetButton = BuildButton(WarfrontStrings.AssetPanel_ResetButton, Pad + (buttonWidth + SectionGap), y, buttonWidth, OnResetClick);
             _clearAllButton = BuildClearAllButton(Pad + (buttonWidth + SectionGap) * 2f, y, buttonWidth);
-            _closeButton = BuildButton("Close", Pad + (buttonWidth + SectionGap) * 3f, y, buttonWidth, OnCloseClick);
+            _closeButton = BuildButton(WarfrontStrings.AssetPanel_CloseButton, Pad + (buttonWidth + SectionGap) * 3f, y, buttonWidth, OnCloseClick);
             y += ButtonRowHeight + SectionGap;
 
             // Task70: The "preset" row (save/load for slots 1-3, see AssetAssignPanelPresets.cs).
-            y = AddSectionLabel("Preset", y, out _presetSectionLabel);
+            y = AddSectionLabel(WarfrontStrings.AssetPanel_SectionPreset, y, out _presetSectionLabel);
             BuildPresetRow(Pad, y, w);
             y += DropdownHeight + SectionGap;
 

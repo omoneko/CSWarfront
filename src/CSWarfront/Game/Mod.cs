@@ -12,8 +12,15 @@ namespace CSWarfront.Game
     public class Mod : IUserMod
     {
         public string Name => "CS:WARFRONT"; // Task93: user-specified mod title (unified with the Workshop title)
-        public string Description =>
-            "A tier-based military simulation with 5 factions (land/sea/air, bases, territory, occupation). Building the building designated in Options turns it into a military base.";
+
+        public string Description
+        {
+            get
+            {
+                LocaleLoader.EnsureLoaded(); // Task113: earliest UI string the game requests
+                return WarfrontStrings.Mod_Description;
+            }
+        }
 
         /// <summary>The Mod Options screen (build-target faction selection, plus the model-assignment
         /// UI that Task47 turned into an Options subpage). Auto-detected and called by the game.
@@ -25,9 +32,11 @@ namespace CSWarfront.Game
         {
             try
             {
-                UIHelperBase group = helper.AddGroup("Base placement");
+                LocaleLoader.EnsureLoaded(); // Task113: apply the locale before any label is built
+
+                UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_BasePlacementGroup);
                 group.AddDropdown(
-                    "Faction to build for (designated base building)",
+                    WarfrontStrings.Options_BuildFactionDropdown,
                     WarfrontSettings.FactionNames,
                     WarfrontSettings.BuildFactionId,
                     i => WarfrontSettings.SetBuildFactionId(i));
@@ -58,11 +67,11 @@ namespace CSWarfront.Game
         /// playstyle of building your own bases and defending them.</summary>
         private static void AddInvasionEventsUI(UIHelperBase helper)
         {
-            UIHelperBase group = helper.AddGroup("Invasion events (waves attack from outside the city)");
-            group.AddCheckbox("Enable invasion events", WarfrontSettings.InvasionEventsEnabled,
+            UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_InvasionGroup);
+            group.AddCheckbox(WarfrontStrings.Options_InvasionEnable, WarfrontSettings.InvasionEventsEnabled,
                 v => WarfrontSettings.InvasionEventsEnabled = v);
-            group.AddDropdown("Invasion frequency",
-                new[] { "Low (about every 5 days)", "Medium (about every 2-3 days)", "High (about every day)" },
+            group.AddDropdown(WarfrontStrings.Options_InvasionFrequency,
+                new[] { WarfrontStrings.Options_InvasionFreqLow, WarfrontStrings.Options_InvasionFreqMedium, WarfrontStrings.Options_InvasionFreqHigh },
                 WarfrontSettings.InvasionFrequencyIndex,
                 i => { if (i >= 0 && i <= 2) WarfrontSettings.InvasionFrequencyIndex = i; });
         }
@@ -75,7 +84,7 @@ namespace CSWarfront.Game
         /// property.</summary>
         private static void AddUnitCommandHotkeyUI(UIHelperBase helper)
         {
-            UIHelperBase group = helper.AddGroup("Unit commands (select units with a box drag, then press)");
+            UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_UnitCommandsGroup);
 
             string[] keyNames = new string[WarfrontSettings.KeyOptions.Length];
             for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
@@ -83,24 +92,24 @@ namespace CSWarfront.Game
 
             // Task76: ON/OFF toggle key for unit selection mode. Drag-based box selection only works
             // while it is ON (single-click selection is always active; see Game/UI/UnitBoxSelection).
-            group.AddDropdown("Toggle unit selection mode (drag-box select; single click always works)",
+            group.AddDropdown(WarfrontStrings.Options_SelectionModeKey,
                 keyNames, IndexOf(WarfrontSettings.SelectionModeKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.SelectionModeKey = WarfrontSettings.KeyOptions[i]; });
 
             // Task102: open/close key for the military build panel (one-click placement of the 9 military building kinds).
-            group.AddDropdown("Toggle military construction panel",
+            group.AddDropdown(WarfrontStrings.Options_BuildPanelKey,
                 keyNames, IndexOf(WarfrontSettings.BuildPanelKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.BuildPanelKey = WarfrontSettings.KeyOptions[i]; });
 
-            group.AddDropdown("Free advance (march at full speed toward the nearest hostile base)",
+            group.AddDropdown(WarfrontStrings.Options_FreeAdvanceKey,
                 keyNames, IndexOf(WarfrontSettings.FreeAdvanceKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.FreeAdvanceKey = WarfrontSettings.KeyOptions[i]; });
 
-            group.AddDropdown("Hold (stop in place, still fires at anything in range)",
+            group.AddDropdown(WarfrontStrings.Options_HoldKey,
                 keyNames, IndexOf(WarfrontSettings.HoldKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.HoldKey = WarfrontSettings.KeyOptions[i]; });
 
-            group.AddDropdown("Rally (then right-click a destination; units move there, stop, and fight defensively only)",
+            group.AddDropdown(WarfrontStrings.Options_RallyKey,
                 keyNames, IndexOf(WarfrontSettings.RallyKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.RallyKey = WarfrontSettings.KeyOptions[i]; });
         }
@@ -119,9 +128,9 @@ namespace CSWarfront.Game
         /// destroys them individually).</summary>
         private static void AddFactionIconUI(UIHelperBase helper)
         {
-            UIHelperBase group = helper.AddGroup("Faction icons");
+            UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_FactionIconsGroup);
             group.AddCheckbox(
-                "Show a small faction-colored marker above each unit",
+                WarfrontStrings.Options_FactionIconsToggle,
                 WarfrontSettings.ShowFactionIcons,
                 v => WarfrontSettings.ShowFactionIcons = v);
         }
@@ -131,13 +140,13 @@ namespace CSWarfront.Game
         /// sessions is acceptable, MVP).</summary>
         private static void AddSoundUI(UIHelperBase helper)
         {
-            UIHelperBase group = helper.AddGroup("Firing sounds");
+            UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_SoundGroup);
             group.AddSlider(
-                "Sound volume",
+                WarfrontStrings.Options_SoundVolume,
                 0f, 100f, 1f, WarfrontSettings.SoundVolume,
                 v => WarfrontSettings.SoundVolume = (int)v);
             group.AddCheckbox(
-                "Mute all firing/kill sounds",
+                WarfrontStrings.Options_SoundMute,
                 WarfrontSettings.SoundMuted,
                 v => WarfrontSettings.SoundMuted = v);
         }
