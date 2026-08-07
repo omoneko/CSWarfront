@@ -3,32 +3,33 @@ using System;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// カメラレイと地形（IHeightSampler）の交点を求める純粋計算（Task77）。
+    /// Pure computation intersecting a camera ray with the terrain (IHeightSampler) (Task77).
     ///
-    /// 背景: CS1の地形はUnityの物理コライダーを持たないため、開けた地面に向けた
-    /// Physics.Raycastは常に「何もヒットしない」で失敗する（実機output_log.txtで
-    /// 「rally click rejected - raycast hit nothing」が多数記録されたのが根本原因の証拠。
-    /// ユニット/建物はMOD自前のコライダーがあるためヒットする）。右クリックの地点指定
-    /// （集結地点・ミサイル目標）はPhysics.Raycastが外れた後、この地形交差へ
-    /// フォールバックする。
+    /// Background: CS1's terrain has no Unity physics collider, so a Physics.Raycast aimed at open
+    /// ground always fails with "hit nothing" (the in-game output_log.txt recording many
+    /// "rally click rejected - raycast hit nothing" lines is the root-cause evidence; units/buildings
+    /// do hit because the mod gives them its own colliders). Right-click point designation (rally
+    /// points, missile targets) falls back to this terrain intersection after Physics.Raycast misses.
     ///
-    /// アルゴリズム: 粗いレイマーチ（CoarseStep間隔）で「レイ高さが地形高さを下回る」
-    /// 最初の区間を見つけ、その区間を二分法で細分して交点を確定する。単純な
-    /// 平面交差1回だと丘の斜面や段差を突き抜けて遥か遠方にヒットしてしまうため、
-    /// マーチが必要（浅い角度のカメラで特に顕著）。浮動小数のみの決定的計算。
+    /// Algorithm: a coarse ray-march (CoarseStep spacing) finds the first interval where the ray height
+    /// drops below the terrain height, then bisection refines that interval to pin the intersection.
+    /// A single flat-plane intersection would punch through hillsides and ledges and hit far beyond
+    /// (especially pronounced with shallow camera angles), hence the march. Deterministic, floats only.
     /// </summary>
     public static class TerrainRaycast
     {
-        /// <summary>粗いマーチの刻み幅（メートル）。CSのdetail heightmapは約4m/セルなので
-        /// 16mで丘を跨ぎ越すことは実用上ない（跨いでも二分法の対象区間が1つ後ろにずれるだけ）。</summary>
+        /// <summary>Coarse march step (meters). CS's detail heightmap is ~4m/cell, so 16m practically
+        /// never steps clean over a hill (and if it did, the bisection interval just shifts one step
+        /// later).</summary>
         private const float CoarseStep = 16f;
 
-        private const int BisectIterations = 24; // 16m / 2^24 ≒ 1μm、十分に収束する
+        private const int BisectIterations = 24; // 16m / 2^24 ≈ 1μm — converges plenty
 
-        /// <summary>レイ原点(origin)から方向(dirX,dirY,dirZ)（正規化不要）へ最大maxDistanceまで
-        /// 地形との交点を探す。見つかればtrueを返しhitに交点を格納する。
-        /// 原点が既に地形より下（地下カメラ等の異常系）・上向きレイ・sampler失敗・
-        /// maxDistance内に交点なし、の場合はfalse。</summary>
+        /// <summary>Searches for the terrain intersection from origin along (dirX,dirY,dirZ)
+        /// (normalization not required) out to maxDistance. Returns true and stores the point in hit if
+        /// found. False when the origin is already below the terrain (underground camera and similar
+        /// anomalies), the ray points up, the sampler fails, or no intersection lies within
+        /// maxDistance.</summary>
         public static bool TryFind(
             WorldPos origin, float dirX, float dirY, float dirZ,
             IHeightSampler sampler, float maxDistance,
@@ -41,12 +42,12 @@ namespace CSWarfront.Core
             if (len < 1e-6f) return false;
             float nx = dirX / len, ny = dirY / len, nz = dirZ / len;
 
-            // 原点が地形より上にあることを確認（下なら後退ヒットになるため不成立とする）
+            // Confirm the origin is above the terrain (below would mean a backwards hit — treat as a miss)
             float h0;
             if (!sampler.TrySampleHeight(origin.X, origin.Z, out h0)) return false;
             if (origin.Y < h0) return false;
 
-            // 粗いマーチ: 「地形より上」から「地形以下」へ転じる最初の区間 [tPrev, t] を探す
+            // Coarse march: find the first interval [tPrev, t] flipping from "above terrain" to "at or below"
             float tPrev = 0f;
             bool found = false;
             float tLow = 0f, tHigh = 0f;
@@ -68,8 +69,8 @@ namespace CSWarfront.Core
             }
             if (!found) return false;
 
-            // 二分法で区間を細分（区間内の地形は単調でなくてもよい: 常に
-            // 「lowは地形より上/highは地形以下」の不変条件を保って縮める）
+            // Refine the interval by bisection (the terrain inside the interval need not be monotonic:
+            // the invariant "low is above the terrain / high is at or below" holds while shrinking)
             for (int i = 0; i < BisectIterations; i++)
             {
                 float tMid = (tLow + tHigh) * 0.5f;

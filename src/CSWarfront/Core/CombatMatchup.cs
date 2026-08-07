@@ -3,20 +3,21 @@ using System;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 兵科の相性（じゃんけん相性）テーブル。CombatStepが「攻撃側→目標」のダメージ倍率として参照する。
-    /// 表に無い組み合わせ（未定義ペア）は 1.0（相性なし）を返す。
+    /// The category matchup (rock-paper-scissors) table. CombatStep reads it as the attacker→target
+    /// damage multiplier. Combinations absent from the table (undefined pairs) return 1.0 (no matchup).
     ///
-    /// 非対称: 例えば Tank→Infantry は 1.1（戦車は歩兵に強い）だが、Infantry→Tank は 0.4
-    /// （歩兵は素で戦車に弱い。対戦車ドローン(DroneInfantry)が対戦車の主役という設計意図）。
+    /// Asymmetric: e.g. Tank→Infantry is 1.1 (tanks beat infantry) but Infantry→Tank is 0.4
+    /// (bare infantry is weak against tanks; by design, anti-tank drones (DroneInfantry) are the
+    /// intended tank counter).
     ///
-    /// 実装: UnitCategory の要素数×要素数の2次元配列を静的コンストラクタで1.0埋めしたうえで
-    /// 表にある値だけ上書きする。配列インデックスなのでO(1)・決定的（乱数不使用）。
+    /// Implementation: a UnitCategory-count × count 2D array filled with 1.0 in the static constructor,
+    /// then only the tabled values are overwritten. Array indexing, so O(1) and deterministic (no RNG).
     ///
-    /// 将来の拡張ポイント: Sea/Air ユニット実装時は、ここに
-    /// vs Carrier/Cruiser/Destroyer/... や vs AirSuperiority/GroundAttack/... の倍率を追加すること。
-    /// 特に AntiAir は現状すべての対地カテゴリに対して0.5（対地戦には弱い）としているが、
-    /// 対空ユニットの本領は対空戦であり、航空ユニット実装時には vs Air系カテゴリへ
-    /// 高倍率（例: 2.0以上）を追加するのを忘れないこと。
+    /// Future extension point: when adding Sea/Air units, append multipliers here for
+    /// vs Carrier/Cruiser/Destroyer/... and vs AirSuperiority/GroundAttack/... In particular AntiAir is
+    /// currently 0.5 against every ground category (weak in ground fights), but anti-air units live for
+    /// air combat — when air units land, do not forget to add high multipliers (e.g. 2.0+) against the
+    /// Air categories.
     /// </summary>
     public static class CombatMatchup
     {
@@ -64,13 +65,13 @@ namespace CSWarfront.Core
             Set(UnitCategory.Artillery, UnitCategory.Tank, 0.7f);
             Set(UnitCategory.Artillery, UnitCategory.Artillery, 1.2f);
 
-            // DroneInfantry（対戦車ドローン）
+            // DroneInfantry (anti-tank drones)
             Set(UnitCategory.DroneInfantry, UnitCategory.Tank, 2.0f);
             Set(UnitCategory.DroneInfantry, UnitCategory.Apc, 1.7f);
             Set(UnitCategory.DroneInfantry, UnitCategory.MechInfantry, 1.2f);
             Set(UnitCategory.DroneInfantry, UnitCategory.Infantry, 0.6f);
 
-            // AntiAir（対地には弱い。vs Air系カテゴリは下のTask61ブロックで追加）
+            // AntiAir (weak on the ground; the vs-Air multipliers are added in the Task61 block below)
             Set(UnitCategory.AntiAir, UnitCategory.Infantry, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.MechInfantry, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.Apc, 0.5f);
@@ -78,8 +79,9 @@ namespace CSWarfront.Core
             Set(UnitCategory.AntiAir, UnitCategory.Artillery, 0.5f);
             Set(UnitCategory.AntiAir, UnitCategory.DroneInfantry, 0.5f);
 
-            // --- Task61: 海上/航空戦力の相性 ---
-            // 対象の「対地カテゴリ」まとめ（AirSuperiority/AntiAirのvs地上倍率をループで一括設定するため）。
+            // --- Task61: naval/air matchups ---
+            // The "ground category" roll-up (so AirSuperiority/AntiAir vs-ground multipliers can be set
+            // in one loop).
             UnitCategory[] groundCategories =
             {
                 UnitCategory.Tank, UnitCategory.Apc, UnitCategory.MechInfantry, UnitCategory.Artillery,
@@ -90,17 +92,18 @@ namespace CSWarfront.Core
                 UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, UnitCategory.SuicideDrone
             };
 
-            // AirSuperiority（戦闘機）: 対空に強く(2.0)、対地に弱い(0.3)。制空権の専任機という設計。
+            // AirSuperiority (fighters): strong vs air (2.0), weak vs ground (0.3). Designed as a
+            // dedicated air-superiority platform.
             for (int i = 0; i < airCategories.Length; i++)
                 Set(UnitCategory.AirSuperiority, airCategories[i], 2.0f);
             for (int i = 0; i < groundCategories.Length; i++)
                 Set(UnitCategory.AirSuperiority, groundCategories[i], 0.3f);
 
-            // AntiAir: 対空でついに本領を発揮する(2.5)。対地は既存の0.5のまま。
+            // AntiAir: finally in its element against aircraft (2.5). Vs ground stays at the existing 0.5.
             for (int i = 0; i < airCategories.Length; i++)
                 Set(UnitCategory.AntiAir, airCategories[i], 2.5f);
 
-            // TacticalBomber（爆撃機）: 対地に強く（装甲車両1.6/歩兵1.2）、対空にはほぼ無力(0.2)。
+            // TacticalBomber: strong vs ground (armor 1.6 / infantry 1.2), near-helpless vs air (0.2).
             Set(UnitCategory.TacticalBomber, UnitCategory.Tank, 1.6f);
             Set(UnitCategory.TacticalBomber, UnitCategory.Apc, 1.6f);
             Set(UnitCategory.TacticalBomber, UnitCategory.MechInfantry, 1.6f);
@@ -108,23 +111,25 @@ namespace CSWarfront.Core
             for (int i = 0; i < airCategories.Length; i++)
                 Set(UnitCategory.TacticalBomber, airCategories[i], 0.2f);
 
-            // Destroyer（ミサイル駆逐艦）: 対艦・対戦車（沿岸砲撃）に強い(1.4)。それ以外は既定の1.0のまま。
+            // Destroyer (missile destroyer): strong vs ships and tanks (coastal bombardment) at 1.4.
+            // Everything else stays at the default 1.0.
             Set(UnitCategory.Destroyer, UnitCategory.Carrier, 1.4f);
             Set(UnitCategory.Destroyer, UnitCategory.Destroyer, 1.4f);
             Set(UnitCategory.Destroyer, UnitCategory.Tank, 1.4f);
 
-            // Carrier（空母）: 打撃力より生存性のプラットフォーム。全カテゴリに対し弱い(0.6)。
+            // Carrier: a platform of survivability over striking power. Weak (0.6) against every category.
             for (int t = 0; t < CategoryCount; t++)
                 Table[(int)UnitCategory.Carrier, t] = 0.6f;
 
-            // --- Task101: ヘリコプター ---
-            // AttackHelicopter: 対機甲に強く（1.6）、歩兵1.2、補給トラック狩り1.5。
+            // --- Task101: helicopters ---
+            // AttackHelicopter: strong vs armor (1.6), infantry 1.2, supply-truck hunting 1.5.
             Set(UnitCategory.AttackHelicopter, UnitCategory.Tank, 1.6f);
             Set(UnitCategory.AttackHelicopter, UnitCategory.Apc, 1.6f);
             Set(UnitCategory.AttackHelicopter, UnitCategory.MechInfantry, 1.2f);
             Set(UnitCategory.AttackHelicopter, UnitCategory.Infantry, 1.2f);
             Set(UnitCategory.AttackHelicopter, UnitCategory.SupplyTruck, 1.5f);
-            // 対ヘリ: 対空2.5（SAM本領）/戦闘機2.0/戦車0.6（機銃での応射、有効打にはなりにくい）。
+            // Vs helicopters: AntiAir 2.5 (the SAM's specialty) / fighters 2.0 / tanks 0.6 (return fire
+            // from the coax MG — rarely a telling blow).
             Set(UnitCategory.AntiAir, UnitCategory.AttackHelicopter, 2.5f);
             Set(UnitCategory.AntiAir, UnitCategory.TransportHelicopter, 2.5f);
             Set(UnitCategory.AirSuperiority, UnitCategory.AttackHelicopter, 2.0f);
@@ -138,7 +143,7 @@ namespace CSWarfront.Core
             Table[(int)attacker, (int)target] = multiplier;
         }
 
-        /// <summary>attacker が target を攻撃するときのダメージ倍率。未定義の組み合わせは1.0。</summary>
+        /// <summary>The damage multiplier when attacker attacks target. Undefined pairs are 1.0.</summary>
         public static float Multiplier(UnitCategory attacker, UnitCategory target)
         {
             return Table[(int)attacker, (int)target];

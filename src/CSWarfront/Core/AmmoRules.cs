@@ -1,26 +1,28 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task99: 弾薬ゲージ（設計: 2026-08-03-economy-supply-design.md §3）。
+    /// Task99: the ammunition gauge (design: 2026-08-03-economy-supply-design.md §3).
     ///
-    /// 全戦闘ユニットが Ammo（0..1）を持ち、射撃しているtickだけ dt/AmmoCombatHours ずつ減る。
-    /// 弾切れ（Ammo<=0）は射撃停止のみ（移動・占領は可能）。回復は基地圏内自動補給（ResupplyStep）
-    /// と補給トラック（SupplyTruckStep）。
+    /// Every combat unit carries Ammo (0..1), which drains by dt/AmmoCombatHours only on ticks it fires.
+    /// Running dry (Ammo&lt;=0) merely stops firing (movement and capture still work). Recovery comes
+    /// from in-zone base auto-resupply (ResupplyStep) and supply trucks (SupplyTruckStep).
     ///
-    /// 例外（HasAmmoが常にtrue）: AmmoCombatHours<=0 の兵科（空母=プラットフォーム、
-    /// 自爆ドローン=体当たりが本体、補給トラック）。
+    /// Exceptions (HasAmmo always true): categories with AmmoCombatHours&lt;=0 (the carrier = a platform,
+    /// suicide drones = the ram is the weapon, supply trucks).
     ///
-    /// Invader勢力（外部襲来）: 当初は弾薬無限としていたが、実機で「侵攻部隊側が有利すぎる」
-    /// （ユーザーフィードバック2026-08-03）ため現地調達方式へ変更——スポーン時の初期弾薬（満タン）
-    /// だけを持ち、以後は敵ユニットを撃破するたびにInvaderAmmoPerKillだけ回復する
-    /// （RewardInvaderKill、CombatStepの撃破判定から呼ばれる）。基地圏内補給・補給トラックは
-    /// 一切受けられない（ResupplyStep/SupplyTruckStepがInvaderを除外）。撃破し続けられない波は
-    /// 弾切れで射撃不能になり、防衛側が掃討できる。
+    /// The Invader faction (outside incursions): originally had infinite ammo, but playtesting showed
+    /// "the invading force is too favored" (user feedback 2026-08-03), so it switched to living off the
+    /// land — they get only their spawn-time load (full), and afterwards recover InvaderAmmoPerKill each
+    /// time they destroy an enemy unit (RewardInvaderKill, called from CombatStep's kill resolution).
+    /// They receive no in-zone resupply and no supply trucks (ResupplyStep/SupplyTruckStep exclude
+    /// Invaders). A wave that cannot keep killing goes dry, stops shooting, and the defenders can mop it
+    /// up.
     /// </summary>
     public static class AmmoRules
     {
-        /// <summary>兵科ごとの既定の連続射撃可能時間（ゲーム内時間、Tier不問）。0=弾薬無限。
-        /// unit-stats.xmlのammoCombatHoursで上書き可能（UnitStatOverrides.AmmoHours）。</summary>
+        /// <summary>Default sustained-fire duration per category (in-game hours, tier-independent).
+        /// 0 = infinite ammo. Overridable via ammoCombatHours in unit-stats.xml
+        /// (UnitStatOverrides.AmmoHours).</summary>
         public static float DefaultCombatHours(UnitCategory category)
         {
             switch (category)
@@ -39,25 +41,26 @@ namespace CSWarfront.Core
                     return 4f;
                 case UnitCategory.AirSuperiority:
                 case UnitCategory.TacticalBomber:
-                case UnitCategory.AttackHelicopter: // Task101: ヘリも同じ再武装ループ
-                    return 3f; // 2〜3ソーティ相当（弾切れ→基地/空母で再武装→再出撃のループを作る）
+                case UnitCategory.AttackHelicopter: // Task101: helicopters share the rearm loop
+                    return 3f; // ~2-3 sorties (creates the dry → rearm at base/carrier → resortie loop)
                 default:
-                    return 0f; // Carrier / SuicideDrone / SupplyTruck / 未実装カテゴリ = 弾薬無限
+                    return 0f; // Carrier / SuicideDrone / SupplyTruck / unimplemented categories = infinite
             }
         }
 
-        /// <summary>Invaderユニットが敵を1体撃破するたびに回復する弾薬量（現地調達。
-        /// 0.25=戦車換算で2時間ぶんの射撃）。クラスコメント参照。</summary>
+        /// <summary>Ammo an Invader unit recovers per enemy kill (living off the land; 0.25 = two hours
+        /// of fire in tank terms). See the class comment.</summary>
         public const float InvaderAmmoPerKill = 0.25f;
 
-        /// <summary>射撃できるか。弾薬制の対象外（AmmoCombatHours<=0）は常にtrue。</summary>
+        /// <summary>Whether the unit can fire. Always true outside the ammo system
+        /// (AmmoCombatHours&lt;=0).</summary>
         public static bool HasAmmo(UnitInstance u, UnitType t)
         {
             if (t == null || t.AmmoCombatHours <= 0f) return true;
             return u.Ammo > 0f;
         }
 
-        /// <summary>射撃したtickの弾薬消費。弾薬制の対象外は何もしない。</summary>
+        /// <summary>Ammo drain for a tick the unit fired on. No-op outside the ammo system.</summary>
         public static void ConsumeFire(UnitInstance u, UnitType t, float dt)
         {
             if (t == null || t.AmmoCombatHours <= 0f) return;
@@ -65,9 +68,10 @@ namespace CSWarfront.Core
             if (u.Ammo < 0f) u.Ammo = 0f;
         }
 
-        /// <summary>撃破報酬（Invaderのみ）: 敵ユニットを倒した瞬間にInvaderAmmoPerKillだけ弾薬を
-        /// 回復する（上限1）。CombatStepの「このダメージがとどめだったか」判定
-        /// （AwardKillRewardと同じ箇所）から呼ばれる。通常勢力は対象外（補給網で賄う）。</summary>
+        /// <summary>The kill reward (Invaders only): recovers InvaderAmmoPerKill of ammo the moment an
+        /// enemy unit dies (capped at 1). Called from CombatStep's "was this damage the killing blow"
+        /// check (the same spot as AwardKillReward). Regular factions are excluded (their supply net
+        /// provides).</summary>
         public static void RewardInvaderKill(UnitInstance killer, UnitType killerType)
         {
             if (killer == null || killer.FactionId != Faction.InvaderFactionId) return;

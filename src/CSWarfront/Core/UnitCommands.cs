@@ -3,20 +3,21 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// プレイヤーが範囲選択した部隊へ与える指揮コマンド（自由進撃・停止・集結待機・AI委任）を
-    /// UnitInstance.Order/RallyPoint へ適用する（純ロジック、Task48）。Game層（UnitCommandInput/
-    /// MilitaryManager）は選択中の InstanceId 一覧をここへ渡すだけでよい。
+    /// Applies the command orders the player gives a box-selected force (free advance / hold / rally &amp;
+    /// hold / delegate to AI) onto UnitInstance.Order/RallyPoint (pure logic, Task48). The Game layer
+    /// (UnitCommandInput/MilitaryManager) only has to pass the selected InstanceId list in here.
     ///
-    /// 各Applyは「古い注文由来の実行時状態」（Path/PathIndex/PathTarget/OrderTargetPos/CoverDestination/
-    /// CoverHold）を新しい注文にふさわしい形へ揃えてから Order を書き換える。取り残した状態が
-    /// 次tickのMovementStep/CoverSeekStepへ誤って伝わらないようにするための契約。
-    /// 存在しない/死亡済みのIDは黙ってスキップする（返り値のカウントにも含めない、例外も投げない）。
+    /// Each Apply first squares away the "runtime state left over from the old order" (Path/PathIndex/
+    /// PathTarget/OrderTargetPos/CoverDestination/CoverHold) into the shape fitting the new order, then
+    /// rewrites Order. That contract keeps stale state from leaking into the next tick's
+    /// MovementStep/CoverSeekStep. Nonexistent/dead IDs are silently skipped (excluded from the returned
+    /// count; nothing throws).
     /// </summary>
     public static class UnitCommands
     {
-        /// <summary>自由進撃（FreeAdvance）。各自の最高速度で最寄りの敵拠点へ進み通常通り交戦する。
-        /// 目標基地/経路は次回のInvasionOrders.AssignAdvanceが張り直すため、ここでは古い目標/経路/
-        /// 遮蔽状態を捨てるだけでよい。</summary>
+        /// <summary>Free advance (FreeAdvance): move at each unit's own top speed toward the nearest
+        /// hostile base and engage as normal. The next InvasionOrders.AssignAdvance re-lays target base
+        /// and path, so here it suffices to drop the old target/path/cover state.</summary>
         public static int ApplyFreeAdvance(WarState state, IList<uint> instanceIds)
         {
             return ForEachLiving(state, instanceIds, u =>
@@ -31,8 +32,9 @@ namespace CSWarfront.Core
             });
         }
 
-        /// <summary>停止（Hold）。その場から一切動かない（MovementStepがOrder==Holdを見て常にskipする）が、
-        /// 射程内の敵には引き続き応戦する（CombatStepは変更しないため自動的に受動防御になる）。</summary>
+        /// <summary>Hold: never move from the spot (MovementStep sees Order==Hold and always skips), but
+        /// keep returning fire at enemies in range (CombatStep is untouched, so this is automatically
+        /// passive defense).</summary>
         public static int ApplyHold(WarState state, IList<uint> instanceIds)
         {
             return ForEachLiving(state, instanceIds, u =>
@@ -47,11 +49,12 @@ namespace CSWarfront.Core
             });
         }
 
-        /// <summary>集結待機（RallyHold）。rallyPointへ移動し到着後は停止、移動中・停止後を問わず
-        /// 射程内の敵にしか応戦しない（CoverSeekStepがOrder==RallyHoldを遮蔽移動の対象外にするため、
-        /// 追撃・拠点進撃は発生しない）。state.Roadsが供給されていれば、InvasionOrders.AssignAdvanceと
-        /// 同じ道路経路探索(A*)をrallyPoint宛に1回だけ計算しPath/PathIndex/PathTargetへ格納する
-        /// （毎tick再計算はしない。MovementStep.AdvanceTowardRallyがそれを消化する）。</summary>
+        /// <summary>Rally &amp; hold (RallyHold): move to rallyPoint and stop on arrival; whether moving
+        /// or stopped, fire only at enemies in range (CoverSeekStep excludes Order==RallyHold from cover
+        /// moves, so no pursuit or base advances happen). If state.Roads is supplied, the same road
+        /// pathfinding (A*) as InvasionOrders.AssignAdvance is computed once toward rallyPoint and
+        /// stored in Path/PathIndex/PathTarget (no per-tick recompute; MovementStep.AdvanceTowardRally
+        /// consumes it).</summary>
         public static int ApplyRally(WarState state, IList<uint> instanceIds, WorldPos rallyPoint)
         {
             return ForEachLiving(state, instanceIds, u =>
@@ -62,9 +65,9 @@ namespace CSWarfront.Core
                 u.CoverHold = false;
                 u.ClearPath();
 
-                // Task92: 経路はドメインで使い分ける（陸=道路A*、海=SeaGrid、空=経路なしの直線）。
-                // 従来は海上ユニットにも道路経路を張っていたが、海はPathを無視していたため無害だった。
-                // AdvanceSeaがPathを消化するようになったので、誤った道路経路を渡さないようにする。
+                // Task92: pathing is picked by domain (land = road A*, sea = SeaGrid, air = pathless
+                // straight line). Sea units used to get road paths too, harmlessly, because the sea code
+                // ignored Path. Now that AdvanceSea consumes Path, avoid handing over a bogus road path.
                 UnitType rallyType = state.Types.Get(u.TypeKey);
                 Domain rallyDomain = rallyType != null ? rallyType.Domain : Domain.Land;
                 if (rallyDomain == Domain.Land && state.Roads != null)
@@ -93,8 +96,8 @@ namespace CSWarfront.Core
             });
         }
 
-        /// <summary>AI委任（AiControlled）へ戻す。次回のInvasionOrders.AssignAdvanceが目標/経路を
-        /// 通常通り張り直すため、ここでは古い状態を全て捨てるだけでよい。</summary>
+        /// <summary>Return to AI control (AiControlled). The next InvasionOrders.AssignAdvance re-lays
+        /// target/path as usual, so here it suffices to drop all the old state.</summary>
         public static int ClearOrders(WarState state, IList<uint> instanceIds)
         {
             return ForEachLiving(state, instanceIds, u =>
