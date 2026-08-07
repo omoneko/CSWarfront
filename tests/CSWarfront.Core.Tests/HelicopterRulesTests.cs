@@ -1,8 +1,8 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task101: ヘリコプターの兵科規則（対ヘリ=戦車/対空/戦闘機のみ、攻撃ヘリ=地上専任、
-/// ホバリング型=パス補正なし、搭乗中ユニットは非標的）。</summary>
+/// <summary>Task101: helicopter branch rules (anti-helicopter = tanks/anti-air/fighters only, attack helicopters = ground-only,
+/// hovering type = no pass compensation, units being carried are non-targetable).</summary>
 public class HelicopterRulesTests
 {
     private static WarState TwoFactions()
@@ -46,9 +46,9 @@ public class HelicopterRulesTests
         UnitType tankType = s.Types.Get("Tank_T1");
         UnitType infType = s.Types.Get("Infantry_T1");
         Assert.NotNull(TargetSearch.FindNearestHostile(tank, s.UnitGrid, s.Relations, 60f,
-            tankType.CanTargetDomains, s.Types)); // 戦車は対ヘリ例外で標的にできる
+            tankType.CanTargetDomains, s.Types)); // Tanks can target it via the anti-helicopter exception
         Assert.Null(TargetSearch.FindNearestHostile(infantry, s.UnitGrid, s.Relations, 60f,
-            infType.CanTargetDomains, s.Types));  // 歩兵はヘリを狙えない
+            infType.CanTargetDomains, s.Types));  // Infantry cannot aim at helicopters
     }
 
     [Fact]
@@ -62,12 +62,12 @@ public class HelicopterRulesTests
 
         UnitType heliType = s.Types.Get("AttackHelicopter_T1");
         Assert.Null(TargetSearch.FindNearestHostile(heli, s.UnitGrid, s.Relations, 100f,
-            heliType.CanTargetDomains, s.Types)); // 空中目標は一切狙えない
+            heliType.CanTargetDomains, s.Types)); // Cannot aim at any airborne target
 
         UnitInstance enemyTank = Add(s, "Tank_T1", 1, 50, 0);
         s.UnitGrid.Build(s.Units);
         Assert.Same(enemyTank, TargetSearch.FindNearestHostile(heli, s.UnitGrid, s.Relations, 100f,
-            heliType.CanTargetDomains, s.Types)); // 地上は狙える
+            heliType.CanTargetDomains, s.Types)); // Can aim at ground targets
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public class HelicopterRulesTests
         UnitType bomber = s.Types.Get("TacticalBomber_T1");
         Assert.Equal(1f, AirCombat.DamageMultiplier(heli), 3);
         Assert.Equal(AirCombat.PassDamageCompensation, AirCombat.DamageMultiplier(bomber), 3);
-        Assert.Equal(3f, heli.AmmoCombatHours, 3); // 弾薬制の対象（再武装ループ）
+        Assert.Equal(3f, heli.AmmoCombatHours, 3); // Subject to the ammo system (rearm loop)
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class HelicopterRulesTests
         var s = TwoFactions();
         UnitInstance tank = Add(s, "Tank_T1", 0, 0, 0);
         UnitInstance enemy = Add(s, "Infantry_T1", 1, 30, 0);
-        enemy.CarriedByUnitId = 999; // 輸送ヘリ搭乗中
+        enemy.CarriedByUnitId = 999; // Riding in a transport helicopter
         s.UnitGrid.Build(s.Units);
 
         UnitType tankType = s.Types.Get("Tank_T1");
@@ -101,9 +101,9 @@ public class HelicopterRulesTests
         var s = TwoFactions();
         UnitInstance aa = Add(s, "AntiAir_T1", 0, 0, 0);
         UnitInstance heli = Add(s, "AttackHelicopter_T1", 1, 50, 0);
-        heli.Ammo = 0f; // ヘリの反撃を止め、AAの射撃だけを観測する
+        heli.Ammo = 0f; // Stop the helicopter's counterattack so only the AA's fire is observed
 
-        Assert.True(AntiAirCombat.UsesMissileAgainst(UnitCategory.AttackHelicopter)); // SAM（機銃ではない）
+        Assert.True(AntiAirCombat.UsesMissileAgainst(UnitCategory.AttackHelicopter)); // SAM (not the autocannon)
 
         float before = heli.CurrentHP;
         for (int i = 0; i < 50; i++) { s.TickCounter++; CombatStep.Advance(s, 0.6f); }

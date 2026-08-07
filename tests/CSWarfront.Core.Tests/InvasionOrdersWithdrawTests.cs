@@ -1,12 +1,15 @@
 using CSWarfront.Core;
 using Xunit;
 
-// Task78: 「進撃先(KAIJU等の外部脅威/敵拠点)が消えたら、ユニットは自拠点へ撤収する」不具合の修正。
-// 従来のInvasionOrders.AssignAdvanceは、脅威(FindNearbyThreatToOwnTerritory)も敵基地
-// (AiTargeting.ChooseTargetBase)もどちらもnullを返すケースで単に continue しており、
-// OrderTargetPos/State/Pathが前回呼び出し時の値のまま取り残されていた（脅威が自然消滅した後も
-// 消えた地点へ進み続ける、敵拠点を陥落させた後もその場所へ進み続ける、として報告された不具合）。
-// 本テストは「対象なし」の際に自勢力の最寄り所有基地へ撤収する新しいルールを検証する。
+// Task78: fix for the bug "when the advance objective (an external threat such as a KAIJU, or an
+// enemy base) disappears, units should withdraw to their own base".
+// Previously, InvasionOrders.AssignAdvance simply continued when both the threat
+// (FindNearbyThreatToOwnTerritory) and the enemy base (AiTargeting.ChooseTargetBase) returned null,
+// leaving OrderTargetPos/State/Path stuck at the values from the previous call (the reported bugs:
+// units kept marching to the point where a threat had despawned, and kept marching to an enemy base
+// even after it had already fallen).
+// These tests verify the new rule: when there is no target, units withdraw to the nearest base
+// owned by their own faction.
 public class InvasionOrdersWithdrawTests
 {
     [Fact]
@@ -17,15 +20,15 @@ public class InvasionOrdersWithdrawTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
         s.Bases.Add(ownBase);
-        // Threatsは空＝KAIJU等が自然消滅した後の状態。敵勢力/敵基地も存在しない。
+        // Threats is empty = the state after a KAIJU or similar has despawned. No enemy factions/bases exist either.
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(500f, 0f, 500f));
         u.State = UnitState.Moving;
-        u.OrderTargetPos = new WorldPos(9999f, 0f, 9999f); // 消滅した脅威を追い続けていた古い目的地
+        u.OrderTargetPos = new WorldPos(9999f, 0f, 9999f); // stale destination from chasing the now-gone threat
         s.Units.Add(u);
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
 
-        Assert.Equal(UnitState.Moving, u.State); // まだ自拠点から遠いので撤収移動中
+        Assert.Equal(UnitState.Moving, u.State); // still far from its own base, so it is moving in withdrawal
         Assert.True(u.OrderTargetPos.HasValue);
         Assert.Equal(0f, u.OrderTargetPos.Value.X, 3);
         Assert.Equal(0f, u.OrderTargetPos.Value.Z, 3);
@@ -45,7 +48,7 @@ public class InvasionOrdersWithdrawTests
         u.Path = new System.Collections.Generic.List<WorldPos> { new WorldPos(9000f, 0f, 9000f) };
         u.PathTarget = new WorldPos(9999f, 0f, 9999f);
         s.Units.Add(u);
-        // Roadsを供給しない: このテストは「古い経路が捨てられるか」だけを見る（新しい経路計算の成否は問わない）。
+        // No Roads supplied: this test only checks that the stale path is discarded (whether a new path can be computed is out of scope).
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
 
@@ -64,22 +67,24 @@ public class InvasionOrdersWithdrawTests
         var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
         var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(300, 0, 0)) { OwnerFactionId = 1 };
         s.Bases.Add(ownBase); s.Bases.Add(enemyBase);
-        // 意図的にownBase寄りに置く: 陥落前の目的地(300, 敵基地)と陥落後の撤収先(0, 自拠点)が
-        // 異なる値になるようにし、「単に古い値が残っているだけ」では通らないテストにする。
+        // Deliberately placed closer to ownBase: this makes the pre-fall destination (300, the enemy
+        // base) and the post-fall withdrawal destination (0, own base) different values, so the test
+        // cannot pass merely because "the old value is still there".
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(50f, 0f, 0f));
         s.Units.Add(u);
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
         Assert.Equal(300f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // marching on the enemy base, as before
 
-        // 陥落: 基地が占領されて自勢力の所有になった（Occupation相当の状態変化を直接シミュレート）。
+        // The fall: the base was captured and is now owned by our faction (directly simulates the
+        // state change equivalent to Occupation).
         enemyBase.OwnerFactionId = 0;
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
 
         var after = s.FindUnit(1);
         Assert.Equal(UnitState.Moving, after.State);
-        // 敵はもういない。最寄りの自拠点(=ownBase、距離50 < capturedBaseの距離250)へ撤収する。
+        // No enemies remain. Withdraw to the nearest own base (= ownBase, distance 50 < the captured base's distance 250).
         Assert.Equal(0f, after.OrderTargetPos.Value.X, 3);
     }
 
@@ -98,14 +103,14 @@ public class InvasionOrdersWithdrawTests
         InvasionOrders.AssignAdvance(s, 0, 0f);
         Assert.Equal(0f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // withdrawing home, no target yet
 
-        // 新たな敵が出現する。
+        // A new enemy appears.
         s.Relations.Set(0, 1, Relation.Hostile);
         var enemyBase = new MilitaryBase(2, BaseType.Army, new WorldPos(700, 0, 0)) { OwnerFactionId = 1 };
         s.Bases.Add(enemyBase);
 
         InvasionOrders.AssignAdvance(s, 0, 0f);
 
-        Assert.Equal(700f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // 撤収をやめ、新しい敵基地へ向き直す
+        Assert.Equal(700f, s.FindUnit(1).OrderTargetPos.Value.X, 3); // stops withdrawing and turns toward the new enemy base
         Assert.Equal(UnitState.Moving, s.FindUnit(1).State);
     }
 
@@ -117,7 +122,7 @@ public class InvasionOrdersWithdrawTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var farBase = new MilitaryBase(1, BaseType.Army, new WorldPos(1000, 0, 0)) { OwnerFactionId = 0 };
         var nearBase = new MilitaryBase(2, BaseType.Army, new WorldPos(50, 0, 0)) { OwnerFactionId = 0 };
-        s.Bases.Add(farBase); s.Bases.Add(nearBase); // 登録順は「近い方が後」＝先頭バイアスでは通らない
+        s.Bases.Add(farBase); s.Bases.Add(nearBase); // registered with the nearer base LAST = a first-entry bias would fail this
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0f, 0f, 0f));
         s.Units.Add(u);
 
@@ -134,7 +139,7 @@ public class InvasionOrdersWithdrawTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var plainBase = new MilitaryBase(1, BaseType.Army, new WorldPos(100, 0, 0)) { OwnerFactionId = 0 };
         var hqBase = new MilitaryBase(2, BaseType.Army, new WorldPos(-100, 0, 0)) { OwnerFactionId = 0, IsHeadquarters = true };
-        s.Bases.Add(plainBase); s.Bases.Add(hqBase); // 両方とも原点からちょうど100離れている
+        s.Bases.Add(plainBase); s.Bases.Add(hqBase); // both are exactly 100 away from the origin
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0f, 0f, 0f));
         s.Units.Add(u);
 
@@ -149,7 +154,7 @@ public class InvasionOrdersWithdrawTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Types.Register(MvpUnitTypes.Tank_T1());
-        // 基地を1つも登録しない: 撤収先が存在しない勢力。
+        // Register no bases at all: a faction with no withdrawal destination.
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(500f, 0f, 0f));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(9999f, 0f, 0f);
@@ -172,7 +177,7 @@ public class InvasionOrdersWithdrawTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var ownBase = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)) { OwnerFactionId = 0 };
         s.Bases.Add(ownBase);
-        // 既にMovementStep.CoverArrivalDistance(3f)以内まで撤収し終えている。
+        // Has already finished withdrawing to within MovementStep.CoverArrivalDistance (3f).
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(1f, 0f, 0f));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(0f, 0f, 0f);

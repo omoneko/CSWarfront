@@ -1,7 +1,7 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task101: 野戦築城の基本規則（種別・占領/機能停止・標的除外・HP既定値）。</summary>
+/// <summary>Task101: basic field fortification rules (classification, capture/neutralization, target exclusion, default HP).</summary>
 public class FortificationRulesTests
 {
     [Fact]
@@ -32,21 +32,21 @@ public class FortificationRulesTests
         Assert.Equal(DomainMask.None, new MilitaryBase(1, BaseType.Bunker, new WorldPos(0, 0, 0)).SpawnableDomains);
         Assert.Equal(DomainMask.None, new MilitaryBase(1, BaseType.Trench, new WorldPos(0, 0, 0)).SpawnableDomains);
         Assert.Equal(DomainMask.Land, new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0)).SpawnableDomains);
-        // Task103: 貨物駅はLand（列車=Domain.Landを生産するため。兵科の絞り込みはCanProduceUnit）。
+        // Task103: the cargo station is Land (because trains = Domain.Land are produced there; category filtering is done by CanProduceUnit).
         Assert.Equal(DomainMask.Land, new MilitaryBase(1, BaseType.CargoStation, new WorldPos(0, 0, 0)).SpawnableDomains);
     }
 
     [Fact]
     public void Trains_are_produced_only_at_cargo_stations()
     {
-        // Task103: 軍用列車⇔貨物駅の相互専属。
+        // Task103: military trains and cargo stations are mutually exclusive to each other.
         Assert.True(FortificationRules.CanProduceUnit(BaseType.CargoStation, UnitCategory.MilitaryTrain));
         Assert.False(FortificationRules.CanProduceUnit(BaseType.Army, UnitCategory.MilitaryTrain));
         Assert.False(FortificationRules.CanProduceUnit(BaseType.CargoStation, UnitCategory.Tank));
         Assert.False(FortificationRules.CanProduceUnit(BaseType.CargoStation, UnitCategory.SupplyTruck));
-        Assert.True(FortificationRules.CanProduceUnit(BaseType.Army, UnitCategory.Tank)); // 従来どおり
+        Assert.True(FortificationRules.CanProduceUnit(BaseType.Army, UnitCategory.Tank)); // Unchanged from before
 
-        // 手動生産の実挙動: 陸軍基地で列車は拒否、貨物駅で列車はOK、貨物駅で戦車は拒否。
+        // Actual manual-production behavior: trains rejected at an army base, trains OK at a cargo station, tanks rejected at a cargo station.
         var s = new WarState();
         var f = new Faction(0, "Red");
         f.AddTreasury(10000f); f.AddManpower(10000f); f.AddProduction(10000f);
@@ -63,7 +63,7 @@ public class FortificationRulesTests
         Assert.Equal(QueueResult.Ok, ManualProduction.TryEnqueue(s, 2, "MilitaryTrain_T1"));
         Assert.Equal(QueueResult.WrongDomain, ManualProduction.TryEnqueue(s, 2, "Tank_T1"));
 
-        // AI自動生産は築城・貨物駅を対象にしない（補給拠点も一切生産しない）。
+        // AI auto-production does not target fortifications or cargo stations (and produces nothing at supply depots either).
         var depot = new MilitaryBase(3, BaseType.SupplyDepot, new WorldPos(200, 0, 0));
         depot.OwnerFactionId = 0;
         s.Bases.Add(depot);
@@ -71,7 +71,7 @@ public class FortificationRulesTests
         ProductionPlanning.Advance(s);
         Assert.Empty(station.Queue);
         Assert.Empty(depot.Queue);
-        Assert.NotEmpty(army.Queue); // 通常基地は従来どおりAIが生産する
+        Assert.NotEmpty(army.Queue); // Regular bases keep being produced at by the AI as before
     }
 
     [Fact]
@@ -85,11 +85,11 @@ public class FortificationRulesTests
         bunker.OwnerFactionId = 0;
         bunker.CurrentHP = 0f;
         s.Bases.Add(bunker);
-        s.Units.Add(new UnitInstance(1, "Tank_T1", 1, 100f, new WorldPos(10, 0, 0))); // 敵が圏内にいても
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 1, 100f, new WorldPos(10, 0, 0))); // Even with an enemy inside the radius
 
         Occupation.ResolveCaptures(s);
 
-        Assert.Null(bunker.OwnerFactionId); // 占領ではなく機能停止（中立化）
+        Assert.Null(bunker.OwnerFactionId); // Neutralized (put out of action) instead of captured
     }
 
     [Fact]
@@ -108,8 +108,8 @@ public class FortificationRulesTests
 
         Occupation.ResolveCaptures(s);
 
-        Assert.Equal((byte)1, depot.OwnerFactionId); // 通常の占領
-        Assert.Equal(250f, depot.StoredSupplies, 3); // 備蓄ごと奪取
+        Assert.Equal((byte)1, depot.OwnerFactionId); // Regular capture
+        Assert.Equal(250f, depot.StoredSupplies, 3); // Seized together with its stockpile
     }
 
     [Fact]
@@ -127,9 +127,9 @@ public class FortificationRulesTests
         s.Units.Add(tank);
 
         BaseCombatStep.Advance(s, 1f);
-        Assert.Equal(trench.MaxHP, trench.CurrentHP, 0); // 無傷
+        Assert.Equal(trench.MaxHP, trench.CurrentHP, 0); // Undamaged
 
-        // AIの進軍目標にもならない（他に敵対基地が無ければ目標なし）。
+        // Also never becomes an AI advance target (no target when there is no other hostile base).
         Assert.Null(AiTargeting.ChooseTargetBase(s, 0, tank.Position));
     }
 }

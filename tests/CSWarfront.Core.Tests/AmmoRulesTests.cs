@@ -1,7 +1,7 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task99: 弾薬ゲージ（消費・弾切れで射撃停止・Invader無限・帰還再武装の目標解除）。</summary>
+/// <summary>Task99: ammo gauge (consumption, ceasing fire when dry, unlimited ammo for Invaders, target release for return-and-rearm).</summary>
 public class AmmoRulesTests
 {
     private static WarState TwoHostileTanks(out UnitInstance red, out UnitInstance blue)
@@ -21,9 +21,9 @@ public class AmmoRulesTests
     {
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
         UnitType tank = s.Types.Get("Tank_T1");
-        Assert.Equal(8f, tank.AmmoCombatHours, 3); // 戦車の既定=8h
+        Assert.Equal(8f, tank.AmmoCombatHours, 3); // tank default = 8h
 
-        CombatStep.Advance(s, 2f); // 双方が2時間ぶん射撃
+        CombatStep.Advance(s, 2f); // both sides fire for 2 hours
 
         Assert.Equal(1f - 2f / 8f, red.Ammo, 3);
         Assert.Equal(1f - 2f / 8f, blue.Ammo, 3);
@@ -39,7 +39,7 @@ public class AmmoRulesTests
 
         CombatStep.Advance(s, 1f);
 
-        Assert.Equal(hpBefore, blue.CurrentHP, 3); // 弾切れはダメージを与えない
+        Assert.Equal(hpBefore, blue.CurrentHP, 3); // out of ammo deals no damage
         Assert.Equal(UnitState.Idle, red.State);
         Assert.Null(red.TargetId);
     }
@@ -48,7 +48,7 @@ public class AmmoRulesTests
     public void Idle_units_do_not_consume_ammo()
     {
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
-        blue.Position = new WorldPos(5000, 0, 5000); // 射程外＝射撃しない
+        blue.Position = new WorldPos(5000, 0, 5000); // out of range = no firing
 
         CombatStep.Advance(s, 5f);
 
@@ -58,17 +58,17 @@ public class AmmoRulesTests
     [Fact]
     public void Invader_units_consume_ammo_and_stop_when_dry()
     {
-        // Task100（実機フィードバック「侵攻部隊側が有利すぎる」）: Invaderも弾薬制。
+        // Task100 (playtest feedback "the invading force is too strong"): Invaders are ammo-limited too.
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
         InvasionEvents.EnsureInvaderFaction(s);
         var invader = new UnitInstance(3, "Tank_T1", Faction.InvaderFactionId, 1000f, new WorldPos(-30, 0, 0));
         s.Units.Add(invader);
 
         CombatStep.Advance(s, 2f);
-        Assert.Equal(1f - 2f / 8f, invader.Ammo, 3); // 通常勢力と同じく消費する
+        Assert.Equal(1f - 2f / 8f, invader.Ammo, 3); // consumes ammo just like regular factions
 
-        // 弾切れにすると射撃が完全に止まる（redへのダメージ源はinvaderとblueだが、blueも
-        // 弾切れにして「invaderが撃てない」ことをredのHP不変で観測する）。
+        // With no ammo, firing must stop completely (red takes damage from both invader and blue,
+        // so drain blue's ammo too and observe "the invader cannot fire" via red's unchanged HP).
         invader.Ammo = 0f;
         blue.Ammo = 0f;
         float redHp = red.CurrentHP;
@@ -79,20 +79,21 @@ public class AmmoRulesTests
     [Fact]
     public void Invader_kills_scavenge_ammo()
     {
-        // Task100: Invaderの補給は「守備部隊の撃破」のみ（現地調達、+25%/killで上限1）。
+        // Task100: the Invaders' only resupply source is "destroying defending units"
+        // (living off the land, +25% per kill capped at 1).
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
         InvasionEvents.EnsureInvaderFaction(s);
         var invader = new UnitInstance(3, "Tank_T1", Faction.InvaderFactionId, 1000f, new WorldPos(60, 0, 0));
         invader.Ammo = 0.1f;
         s.Units.Add(invader);
-        blue.Position = new WorldPos(90, 0, 0); // invaderの射程内・redの射程外
-        blue.CurrentHP = 1f;                    // 次の一撃で撃破される
-        red.Position = new WorldPos(5000, 0, 5000); // 巻き込まれないよう退避
+        blue.Position = new WorldPos(90, 0, 0); // within the invader's range, outside red's range
+        blue.CurrentHP = 1f;                    // destroyed by the next hit
+        red.Position = new WorldPos(5000, 0, 5000); // moved away so it is not caught in the fight
 
         CombatStep.Advance(s, 0.05f);
 
         Assert.False(blue.IsAlive);
-        // 消費(0.05/8)より撃破報酬(+0.25)が大きい＝正味で増えている。
+        // The kill reward (+0.25) exceeds the consumption (0.05/8) = a net increase.
         Assert.True(invader.Ammo > 0.1f, "expected the invader to scavenge ammo from the kill");
         Assert.True(invader.Ammo <= 1f);
     }
@@ -102,7 +103,7 @@ public class AmmoRulesTests
     {
         var s = TwoHostileTanks(out UnitInstance red, out UnitInstance blue);
         blue.CurrentHP = 1f;
-        blue.Ammo = 0f; // 反撃で赤の弾薬が変わらないように
+        blue.Ammo = 0f; // so return fire does not change red's ammo
         red.Ammo = 0.5f;
 
         CombatStep.Advance(s, 0.05f);
@@ -114,15 +115,15 @@ public class AmmoRulesTests
     [Fact]
     public void Invaders_never_refill_from_base_zones()
     {
-        // Task100: 占領基地の圏内でもInvaderは回復しない（撃破のみが補給源）。
+        // Task100: Invaders do not replenish even inside a captured base's zone (kills are the only supply source).
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         InvasionEvents.EnsureInvaderFaction(s);
         LandUnitRoster.RegisterAll(s.Types);
         Faction invaderFaction = s.FindFaction(Faction.InvaderFactionId);
-        invaderFaction.AddSupply(100f); // 仮にストックがあっても
+        invaderFaction.AddSupply(100f); // even if it hypothetically has stock
         var b = new MilitaryBase(1, BaseType.Army, new WorldPos(0, 0, 0));
-        b.OwnerFactionId = Faction.InvaderFactionId; // 占領済みの基地
+        b.OwnerFactionId = Faction.InvaderFactionId; // captured base
         s.Bases.Add(b);
         var invader = new UnitInstance(1, "Tank_T1", Faction.InvaderFactionId, 100f, new WorldPos(50, 0, 0));
         invader.Ammo = 0f;
@@ -152,7 +153,7 @@ public class AmmoRulesTests
 
         tank.Ammo = 0f;
         float hp = b.CurrentHP;
-        BaseCombatStep.Advance(s, 0.001f); // 回復があるので極小dtで攻撃停止だけを確認
+        BaseCombatStep.Advance(s, 0.001f); // regen exists, so use a tiny dt to check only that the attack stopped
         Assert.True(b.CurrentHP >= hp, "expected no siege damage when out of ammo (only regen applies)");
     }
 
@@ -173,10 +174,10 @@ public class AmmoRulesTests
         fighter.Ammo = 0f;
         InvasionOrders.AssignAdvance(s, 0, 0.1f);
 
-        Assert.Equal(UnitState.Idle, fighter.State); // 進軍目標を与えられずIdle→帰還ロジックへ
+        Assert.Equal(UnitState.Idle, fighter.State); // given no advance objective, so Idle -> return-home logic
         Assert.False(fighter.OrderTargetPos.HasValue);
 
-        fighter.Ammo = 1f; // 再武装完了→次の呼び出しで再出撃
+        fighter.Ammo = 1f; // rearming complete -> sorties again on the next call
         InvasionOrders.AssignAdvance(s, 0, 0.1f);
         Assert.Equal(UnitState.Moving, fighter.State);
         Assert.True(fighter.OrderTargetPos.HasValue);

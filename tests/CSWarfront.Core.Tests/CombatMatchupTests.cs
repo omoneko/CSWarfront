@@ -33,7 +33,7 @@ public class CombatMatchupTests
     [InlineData(UnitCategory.Artillery, UnitCategory.Apc, 1.1f)]
     [InlineData(UnitCategory.Artillery, UnitCategory.Tank, 0.7f)]
     [InlineData(UnitCategory.Artillery, UnitCategory.Artillery, 1.2f)]
-    // DroneInfantry (対戦車ドローン)
+    // DroneInfantry (anti-tank drones)
     [InlineData(UnitCategory.DroneInfantry, UnitCategory.Tank, 2.0f)]
     [InlineData(UnitCategory.DroneInfantry, UnitCategory.Apc, 1.7f)]
     [InlineData(UnitCategory.DroneInfantry, UnitCategory.MechInfantry, 1.2f)]
@@ -53,31 +53,31 @@ public class CombatMatchupTests
     [Theory]
     [InlineData(UnitCategory.Tank, UnitCategory.Tank)]
     [InlineData(UnitCategory.Infantry, UnitCategory.Infantry)]
-    [InlineData(UnitCategory.MechInfantry, UnitCategory.DroneInfantry)] // 表に無い組み合わせ
+    [InlineData(UnitCategory.MechInfantry, UnitCategory.DroneInfantry)] // Combination not in the table
     [InlineData(UnitCategory.AntiAir, UnitCategory.AntiAir)]
-    // Task61: Carrier/AirSuperiority/TacticalBomber/AntiAirはこのテストの時点で実装済み(明示的に
-    // 上書きされる)のため、undefined-pairの例には未実装のまま残るカテゴリ(Cruiser等)を使う。
-    [InlineData(UnitCategory.Cruiser, UnitCategory.Tank)] // 未実装カテゴリとの組み合わせ
-    [InlineData(UnitCategory.Destroyer, UnitCategory.Infantry)] // Destroyerは一部のみ上書き、この組は表に無い
+    // Task61: Carrier/AirSuperiority/TacticalBomber/AntiAir are already implemented at the time of this test
+    // (explicitly overridden), so the undefined-pair examples use categories that remain unimplemented (Cruiser etc.).
+    [InlineData(UnitCategory.Cruiser, UnitCategory.Tank)] // Combination with an unimplemented category
+    [InlineData(UnitCategory.Destroyer, UnitCategory.Infantry)] // Destroyer is only partially overridden; this pair is not in the table
     public void Undefined_pairs_default_to_one(UnitCategory attacker, UnitCategory target)
     {
         Assert.Equal(1.0f, CombatMatchup.Multiplier(attacker, target), 3);
     }
 
-    // --- Task61: 海上/航空戦力の相性 ---
+    // --- Task61: naval/air force matchups ---
     [Theory]
-    // AirSuperiority（戦闘機）: 対空に強く、対地に弱い。
+    // AirSuperiority (fighters): strong against air, weak against ground.
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.AirSuperiority, 2.0f)]
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.TacticalBomber, 2.0f)]
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.SuicideDrone, 2.0f)]
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.Tank, 0.3f)]
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.Infantry, 0.3f)]
     [InlineData(UnitCategory.AirSuperiority, UnitCategory.AntiAir, 0.3f)]
-    // AntiAir: 対空でついに本領を発揮する。
+    // AntiAir: finally comes into its own against aircraft.
     [InlineData(UnitCategory.AntiAir, UnitCategory.AirSuperiority, 2.5f)]
     [InlineData(UnitCategory.AntiAir, UnitCategory.TacticalBomber, 2.5f)]
     [InlineData(UnitCategory.AntiAir, UnitCategory.SuicideDrone, 2.5f)]
-    // TacticalBomber（爆撃機）: 対地に強く、対空に無力。
+    // TacticalBomber (bombers): strong against ground, helpless against air.
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.Tank, 1.6f)]
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.Apc, 1.6f)]
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.MechInfantry, 1.6f)]
@@ -85,11 +85,11 @@ public class CombatMatchupTests
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.AirSuperiority, 0.2f)]
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.TacticalBomber, 0.2f)]
     [InlineData(UnitCategory.TacticalBomber, UnitCategory.SuicideDrone, 0.2f)]
-    // Destroyer（ミサイル駆逐艦）: 対艦・対戦車に強い。
+    // Destroyer (missile destroyers): strong against ships and tanks.
     [InlineData(UnitCategory.Destroyer, UnitCategory.Carrier, 1.4f)]
     [InlineData(UnitCategory.Destroyer, UnitCategory.Destroyer, 1.4f)]
     [InlineData(UnitCategory.Destroyer, UnitCategory.Tank, 1.4f)]
-    // Carrier（空母）: 打撃力より生存性のプラットフォーム、全カテゴリに弱い。
+    // Carrier (aircraft carriers): a platform built for survivability rather than striking power, weak against all categories.
     [InlineData(UnitCategory.Carrier, UnitCategory.Tank, 0.6f)]
     [InlineData(UnitCategory.Carrier, UnitCategory.Infantry, 0.6f)]
     [InlineData(UnitCategory.Carrier, UnitCategory.Destroyer, 0.6f)]
@@ -103,7 +103,7 @@ public class CombatMatchupTests
     [Fact]
     public void Matchups_are_not_assumed_symmetric()
     {
-        // Tank -> Infantry: 戦車は歩兵に強い (1.1)。Infantry -> Tank: 歩兵は素で戦車に弱い (0.4)。
+        // Tank -> Infantry: tanks are strong against infantry (1.1). Infantry -> Tank: infantry is inherently weak against tanks (0.4).
         Assert.Equal(1.1f, CombatMatchup.Multiplier(UnitCategory.Tank, UnitCategory.Infantry), 3);
         Assert.Equal(0.4f, CombatMatchup.Multiplier(UnitCategory.Infantry, UnitCategory.Tank), 3);
         Assert.NotEqual(

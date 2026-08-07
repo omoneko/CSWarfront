@@ -2,7 +2,7 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// StuckCleanupStep（Task98: 水際等でスタックしたユニットの自動消滅）のテスト。
+/// Tests for StuckCleanupStep (Task98: automatic despawning of units stuck at the water's edge and similar spots).
 /// </summary>
 public class StuckCleanupStepTests
 {
@@ -17,7 +17,7 @@ public class StuckCleanupStepTests
         return s;
     }
 
-    /// <summary>DespawnAfterHoursぶんの時間をdt=1hで刻んで進める（位置は動かさない＝スタック）。</summary>
+    /// <summary>Advances the given number of hours in dt=1h steps (position stays fixed = stuck).</summary>
     private static int AdvanceStuckHours(WarState s, float hours)
     {
         int despawned = 0;
@@ -30,12 +30,12 @@ public class StuckCleanupStepTests
     {
         var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));
 
-        // 初回Advanceでアンカー設定→そこからDespawnAfterHours経過。
+        // The first Advance sets the anchor -> then DespawnAfterHours elapse from there.
         int despawned = AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours + 2f);
 
         Assert.Equal(1, despawned);
         Assert.Equal(UnitState.Dead, s.Units[0].State);
-        Assert.Empty(s.RecentKills); // 無音・無爆発（KillEventを積まない）
+        Assert.Empty(s.RecentKills); // silent, no explosion (no KillEvent is queued)
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class StuckCleanupStepTests
 
         for (int i = 0; i < 40; i++)
         {
-            // 毎時間MinProgressDistance以上前進している（正常な行軍）。
+            // Advances at least MinProgressDistance every hour (a normal march).
             var u = s.Units[0];
             u.Position = new WorldPos(u.Position.X + StuckCleanupStep.MinProgressDistance + 1f, 0, 0);
             StuckCleanupStep.Advance(s, 1f);
@@ -57,9 +57,9 @@ public class StuckCleanupStepTests
     [Fact]
     public void Slow_infantry_marching_at_its_own_speed_never_despawns()
     {
-        // Task98追補（実機バグ）: 歩兵(7.5km/h)は約1.0m/ゲーム時しか進まないため、固定20m閾値だと
-        // 正常行軍のまま「12hで12m＜20m」でスタック扱いになり消滅していた。閾値は速度比例で
-        // なければならない。
+        // Task98 addendum (in-game bug): infantry (7.5km/h) covers only about 1.0m per game hour,
+        // so with a fixed 20m threshold a perfectly normal march was flagged as stuck
+        // ("12m in 12h < 20m") and despawned. The threshold must scale with speed.
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         LandUnitRoster.RegisterAll(s.Types);
@@ -68,7 +68,7 @@ public class StuckCleanupStepTests
         u.State = UnitState.Moving;
         s.Units.Add(u);
 
-        // 本来の速度どおり毎時間 Speed×1h だけ前進し続ける（正常な行軍）。
+        // Keeps advancing by Speed x 1h every hour, exactly as its true speed allows (a normal march).
         for (int i = 0; i < 48; i++)
         {
             u.Position = new WorldPos(u.Position.X + infantry.Speed * 1f, 0, 0);
@@ -81,7 +81,7 @@ public class StuckCleanupStepTests
     [Fact]
     public void Fully_stuck_infantry_still_despawns()
     {
-        // 速度比例閾値でも「本当に動けていない」歩兵はきちんと消える。
+        // Even with the speed-proportional threshold, infantry that truly cannot move is still removed.
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         LandUnitRoster.RegisterAll(s.Types);
@@ -100,7 +100,7 @@ public class StuckCleanupStepTests
     public void Stuck_unit_near_its_own_base_is_preserved()
     {
         var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));
-        var b = new MilitaryBase(1, BaseType.Army, new WorldPos(1050, 0, 1000)); // 50m先＝除外半径内
+        var b = new MilitaryBase(1, BaseType.Army, new WorldPos(1050, 0, 1000)); // 50m away = within the exclusion radius
         b.OwnerFactionId = 0;
         s.Bases.Add(b);
 
@@ -113,7 +113,7 @@ public class StuckCleanupStepTests
     [Fact]
     public void Stuck_unit_near_an_enemy_base_still_despawns()
     {
-        // 近くの基地が敵（他勢力）所有なら除外されない。
+        // A nearby base owned by an enemy (another faction) grants no exclusion.
         var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));
         s.Factions.Add(new Faction(1, "Blue"));
         var b = new MilitaryBase(1, BaseType.Army, new WorldPos(1050, 0, 1000));
@@ -142,11 +142,12 @@ public class StuckCleanupStepTests
     {
         var s = StateWithUnit(UnitState.Moving, new WorldPos(0, 0, 0));
 
-        // 閾値ぎりぎりまでスタック→一度前進→再びスタック。合計時間は閾値超だが連続ではないので生存。
+        // Stuck until just short of the threshold -> advance once -> stuck again. The total time
+        // exceeds the threshold but is not continuous, so the unit survives.
         AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours - 2f);
         var u = s.Units[0];
         u.Position = new WorldPos(StuckCleanupStep.MinProgressDistance + 1f, 0, 0);
-        StuckCleanupStep.Advance(s, 1f); // ここでアンカー・タイマーがリセットされる
+        StuckCleanupStep.Advance(s, 1f); // the anchor and timer are reset here
         int despawned = AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours - 2f);
 
         Assert.Equal(0, despawned);
@@ -159,9 +160,9 @@ public class StuckCleanupStepTests
         var s = StateWithUnit(UnitState.Moving, new WorldPos(0, 0, 0));
 
         AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours - 2f);
-        s.Units[0].State = UnitState.Engaging; // 交戦に入った（立ち止まりは正常）
+        s.Units[0].State = UnitState.Engaging; // entered combat (standing still is normal)
         StuckCleanupStep.Advance(s, 1f);
-        s.Units[0].State = UnitState.Moving;   // 交戦終了、移動再開
+        s.Units[0].State = UnitState.Moving;   // combat over, movement resumes
         int despawned = AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours - 2f);
 
         Assert.Equal(0, despawned);

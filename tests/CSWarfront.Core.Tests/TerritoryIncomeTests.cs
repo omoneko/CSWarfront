@@ -12,9 +12,9 @@ public class TerritoryIncomeTests
         b.InfluenceRadius = 100f;
         var samples = new List<DevelopmentSample>
         {
-            new DevelopmentSample { Position = new WorldPos(50, 0, 0), Development = 10f },  // 圏内
-            new DevelopmentSample { Position = new WorldPos(80, 0, 0), Development = 5f },   // 圏内
-            new DevelopmentSample { Position = new WorldPos(200, 0, 0), Development = 100f },// 圏外
+            new DevelopmentSample { Position = new WorldPos(50, 0, 0), Development = 10f },  // in range
+            new DevelopmentSample { Position = new WorldPos(80, 0, 0), Development = 5f },   // in range
+            new DevelopmentSample { Position = new WorldPos(200, 0, 0), Development = 100f },// out of range
         };
         Assert.Equal(1.5f, TerritoryIncome.ForBase(b, samples, 0.1f), 3); // (10+5)*0.1
     }
@@ -29,7 +29,7 @@ public class TerritoryIncomeTests
         Assert.Equal(0f, TerritoryIncome.ForBase(b, samples, 1f), 3);
     }
 
-    // --- Task99: 3資源経済（住宅→人的資源、商業/オフィス→資金、工業→生産力） ---
+    // --- Task99: 3-resource economy (residential -> manpower, commercial/office -> funds, industrial -> production) ---
 
     private static MilitaryBase OwnedBase()
     {
@@ -46,7 +46,7 @@ public class TerritoryIncomeTests
             new DevelopmentSample { Position = new WorldPos(100, 0, 0), Development = 10f, Zone = ZoneKind.Residential },
             new DevelopmentSample { Position = new WorldPos(200, 0, 0), Development = 20f, Zone = ZoneKind.CommercialOffice },
             new DevelopmentSample { Position = new WorldPos(300, 0, 0), Development = 30f, Zone = ZoneKind.Industrial },
-            new DevelopmentSample { Position = new WorldPos(400, 0, 0), Development = 99f, Zone = ZoneKind.Other }, // 対象外ゾーン
+            new DevelopmentSample { Position = new WorldPos(400, 0, 0), Development = 99f, Zone = ZoneKind.Other }, // zone not counted
         };
 
         ZonedIncome inc = TerritoryIncome.ZonedForBase(OwnedBase(), samples, 0.1f);
@@ -62,8 +62,8 @@ public class TerritoryIncomeTests
         Assert.Equal(1000f, TerritoryIncome.EconomyRadius, 3);
         var samples = new List<DevelopmentSample>
         {
-            new DevelopmentSample { Position = new WorldPos(999, 0, 0), Development = 10f, Zone = ZoneKind.Residential },  // 圏内
-            new DevelopmentSample { Position = new WorldPos(1001, 0, 0), Development = 10f, Zone = ZoneKind.Residential }, // 圏外
+            new DevelopmentSample { Position = new WorldPos(999, 0, 0), Development = 10f, Zone = ZoneKind.Residential },  // in range
+            new DevelopmentSample { Position = new WorldPos(1001, 0, 0), Development = 10f, Zone = ZoneKind.Residential }, // out of range
         };
 
         ZonedIncome inc = TerritoryIncome.ZonedForBase(OwnedBase(), samples, 1f);

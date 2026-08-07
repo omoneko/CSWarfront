@@ -1,9 +1,9 @@
 using CSWarfront.Core;
 using Xunit;
 
-// Task50: UnitAssetBindings（Game層）のTierフォールバックが使う純ロジック部分のテスト。
-// UnitAssetBindings自体はCore.Testsのコンパイル対象（Core\**\*.cs）に含まれないため、
-// ここではパース/探索順序の組み立てのみを検証する（UnitAssetBindings側は目視確認+ビルド確認）。
+// Task50: tests for the pure-logic part used by the tier fallback in UnitAssetBindings (Game layer).
+// UnitAssetBindings itself is not part of the Core.Tests compilation set (Core\**\*.cs), so
+// only the parsing / search-order construction is verified here (the UnitAssetBindings side is covered by visual inspection + build check).
 public class TypeKeyParserTests
 {
     [Theory]
@@ -71,9 +71,9 @@ public class TypeKeyParserTests
         }
     }
 
-    // 「worked example」: Tank_T4の割り当てを解決する際に使われるフォールバックキーの並びを
-    // LandUnitRoster.TypeKeyで組み立て直すと、UnitAssetBindings.TryGetが実際に試す順序と一致する
-    // （Tank_T1にだけ割り当てがある場合、T4/T3/T2は全て素通りしてT1で見つかる、という報告書の例）。
+    // "Worked example": rebuilding, via LandUnitRoster.TypeKey, the sequence of fallback keys used
+    // when resolving the binding for Tank_T4 matches the order UnitAssetBindings.TryGet actually tries
+    // (the report's example: with a binding only for Tank_T1, T4/T3/T2 all fall through and it is found at T1).
     [Fact]
     public void FallbackTierOrder_worked_example_for_Tank_T4_reaches_Tank_T1_before_Tank_T5()
     {

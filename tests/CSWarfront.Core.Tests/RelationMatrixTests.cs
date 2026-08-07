@@ -16,7 +16,7 @@ public class RelationMatrixTests
         var m = new RelationMatrix(5);
         m.Set(0, 3, Relation.Hostile);
         Assert.Equal(Relation.Hostile, m.Get(0, 3));
-        Assert.Equal(Relation.Hostile, m.Get(3, 0)); // 鏡側も更新
+        Assert.Equal(Relation.Hostile, m.Get(3, 0)); // the mirrored side is updated too
     }
 
     [Fact]

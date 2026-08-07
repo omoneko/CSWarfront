@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
-// Task57: MissileDisaster.Core.MtlParser を CSWarfront.Core へポートしたものの検証。
-// テスト内容は移植元 MissileDisaster.Core.Tests.MtlParserTests と同一（挙動は変更していない）。
+// Task57: verifies the port of MissileDisaster.Core.MtlParser into CSWarfront.Core.
+// The test content is identical to the source MissileDisaster.Core.Tests.MtlParserTests (behavior unchanged).
 public class MtlParserTests
 {
     [Fact]
@@ -40,16 +40,16 @@ public class MtlParserTests
     public void NonAscii_material_names_are_kept()
     {
         string mtl =
-            "newmtl マテリアル\n" +
+            "newmtl Matériau\n" +
             "Kd 0.035 0.035 0.035\n" +
-            "newmtl マテリアル.001\n" +
+            "newmtl Matériau.001\n" +
             "Kd 0.536 0.536 0.536\n";
 
         Dictionary<string, MtlColor> map = MtlParser.Parse(mtl);
 
         Assert.Equal(2, map.Count);
-        Assert.Equal(0.035f, map["マテリアル"].R, 3);
-        Assert.Equal(0.536f, map["マテリアル.001"].R, 3);
+        Assert.Equal(0.035f, map["Matériau"].R, 3);
+        Assert.Equal(0.536f, map["Matériau.001"].R, 3);
     }
 
     [Fact]

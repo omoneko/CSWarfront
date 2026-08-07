@@ -1,7 +1,7 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task99: 補給物資の自動生産と基地圏内自動補給。</summary>
+/// <summary>Task99: automatic production of supplies and automatic resupply within base zones.</summary>
 public class ResupplyStepTests
 {
     private static WarState StateWithBaseAndTank(out Faction f, out UnitInstance tank, float tankDistance)
@@ -31,7 +31,7 @@ public class ResupplyStepTests
         Assert.Equal(ResupplyStep.SupplyPerEconomyTick, f.SupplyStock, 3);
         Assert.Equal(1000f - ResupplyStep.SupplyPerEconomyTick * ResupplyStep.ProductionPerSupply, f.Production, 3);
 
-        // 上限までしか作らない。
+        // Never produces beyond the cap.
         for (int i = 0; i < 100; i++) ResupplyStep.ProduceSupplies(f);
         Assert.True(f.SupplyStock <= ResupplyStep.SupplyStockCap + 0.001f);
     }
@@ -40,14 +40,14 @@ public class ResupplyStepTests
     public void Supply_production_falls_back_to_funds_when_production_is_short()
     {
         var f = new Faction(0, "Red");
-        f.AddProduction(20f);  // 50欲しいが20しか無い
+        f.AddProduction(20f);  // wants 50 but only has 20
         f.AddTreasury(1000f);
 
         ResupplyStep.ProduceSupplies(f);
 
         Assert.Equal(50f, f.SupplyStock, 3);
         Assert.Equal(0f, f.Production, 3);
-        // 不足30×レート2=60を資金から。
+        // The shortfall of 30 x rate 2 = 60 comes out of funds.
         Assert.Equal(1000f - 30f * UnitCosts.FundsPerProduction, f.Treasury, 3);
     }
 
@@ -56,16 +56,16 @@ public class ResupplyStepTests
     {
         var f = new Faction(0, "Red");
         f.AddProduction(10f);
-        f.AddTreasury(20f); // 資金20→生産力10ぶんの代替
+        f.AddTreasury(20f); // funds of 20 -> substitutes for 10 production
 
         ResupplyStep.ProduceSupplies(f);
 
-        Assert.Equal(20f, f.SupplyStock, 3); // 10(生産力) + 10(資金代替)
+        Assert.Equal(20f, f.SupplyStock, 3); // 10 (production) + 10 (funds substitute)
         Assert.Equal(0f, f.Production, 3);
         Assert.Equal(0f, f.Treasury, 3);
     }
 
-    // --- Advance（基地圏内自動補給） ---
+    // --- Advance (automatic resupply within base zones) ---
 
     [Fact]
     public void Units_near_their_own_base_refill_and_consume_supplies()
@@ -97,26 +97,26 @@ public class ResupplyStepTests
     public void Refill_stops_when_the_supply_stock_runs_dry()
     {
         var s = StateWithBaseAndTank(out Faction f, out UnitInstance tank, tankDistance: 100f);
-        f.AddSupply(1f); // 満タン回復には10必要→0.1ぶんしか回復できない
+        f.AddSupply(1f); // a full reload needs 10 -> can only restore 0.1
         tank.Ammo = 0f;
 
-        ResupplyStep.Advance(s, 10f); // 十分な時間
+        ResupplyStep.Advance(s, 10f); // ample time
 
         Assert.Equal(0.1f, tank.Ammo, 3);
         Assert.Equal(0f, f.SupplyStock, 3);
 
-        ResupplyStep.Advance(s, 10f); // ストック0では回復しない
+        ResupplyStep.Advance(s, 10f); // no refill with a stock of 0
         Assert.Equal(0.1f, tank.Ammo, 3);
     }
 
-    // --- Task101: 補給拠点（SupplyDepot）の200m自動補給 ---
+    // --- Task101: 200m automatic resupply from supply depots (SupplyDepot) ---
 
     [Fact]
     public void Depot_zone_refills_from_stored_supplies_not_the_faction_pool()
     {
         var s = new WarState();
         var f = new Faction(0, "Red");
-        f.AddSupply(500f); // 勢力プール（使われないはず）
+        f.AddSupply(500f); // faction pool (should remain untouched)
         s.Factions.Add(f);
         LandUnitRoster.RegisterAll(s.Types);
         var depot = new MilitaryBase(1, BaseType.SupplyDepot, new WorldPos(0, 0, 0));
@@ -131,7 +131,7 @@ public class ResupplyStepTests
 
         Assert.Equal(ResupplyStep.RefillPerHour, tank.Ammo, 3);
         Assert.Equal(100f - ResupplyStep.RefillPerHour * ResupplyStep.SupplyPerFullReload, depot.StoredSupplies, 3);
-        Assert.Equal(500f, f.SupplyStock, 3); // プールは減らない
+        Assert.Equal(500f, f.SupplyStock, 3); // the pool is not reduced
     }
 
     [Fact]
@@ -143,12 +143,12 @@ public class ResupplyStepTests
         s.Factions.Add(f);
         LandUnitRoster.RegisterAll(s.Types);
         var emptyDepot = new MilitaryBase(1, BaseType.SupplyDepot, new WorldPos(0, 0, 0));
-        emptyDepot.OwnerFactionId = 0; // 備蓄0
+        emptyDepot.OwnerFactionId = 0; // stores 0
         var bunker = new MilitaryBase(2, BaseType.Bunker, new WorldPos(50, 0, 0));
         bunker.OwnerFactionId = 0;
         var station = new MilitaryBase(3, BaseType.CargoStation, new WorldPos(-50, 0, 0));
         station.OwnerFactionId = 0;
-        station.StoredSupplies = 100f; // 駅は自動補給点ではない
+        station.StoredSupplies = 100f; // a station is not an automatic resupply point
         s.Bases.Add(emptyDepot); s.Bases.Add(bunker); s.Bases.Add(station);
         var tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(20, 0, 0));
         tank.Ammo = 0f;
@@ -156,7 +156,7 @@ public class ResupplyStepTests
 
         ResupplyStep.Advance(s, 1f);
 
-        Assert.Equal(0f, tank.Ammo, 3); // どこからも回復しない（勢力プールは通常基地圏でのみ）
+        Assert.Equal(0f, tank.Ammo, 3); // no refill from anywhere (the faction pool only applies within regular base zones)
     }
 
     [Fact]
@@ -180,6 +180,6 @@ public class ResupplyStepTests
         ResupplyStep.Advance(s, 1f);
 
         Assert.True(fighter.Ammo > 0f, "expected the carrier to rearm its aircraft");
-        Assert.Equal(0f, tank.Ammo, 3); // 空母は陸上ユニットの補給点ではない
+        Assert.Equal(0f, tank.Ammo, 3); // a carrier is not a resupply point for land units
     }
 }

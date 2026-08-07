@@ -44,7 +44,7 @@ public class TierScalingTests
         Assert.Equal(TierScaling.Cost(100f, 5), TierScaling.Cost(100f, 200), 3);
     }
 
-    // --- Task38: 命中率(Accuracy)のTier成長 ---
+    // --- Task38: tier growth of Accuracy ---
 
     [Fact]
     public void Accuracy_tier1_returns_base_value_unchanged()

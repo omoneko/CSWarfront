@@ -2,12 +2,13 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// Task87（ユーザー要望「航空機がターゲットを失った際に静止してしまう→付近の航空基地または空母に
-/// 帰還。海上戦力は付近の海軍基地にもどる」): Idleの航空/海上ユニットの帰還移動テスト。
+/// Task87 (user request: "aircraft freeze in place when they lose their target -> return them to a
+/// nearby air base or carrier; naval forces return to a nearby navy base"): tests for the
+/// return-home movement of Idle air/naval units.
 /// </summary>
 public class ReturnHomeTests
 {
-    /// <summary>地表を一定高さ(0)で返すサンプラー（Task107の着陸テスト用）。</summary>
+    /// <summary>Sampler that returns the ground at a constant height (0) (for the Task107 landing tests).</summary>
     private class FlatGroundSampler : IHeightSampler
     {
         private readonly float _ground;
@@ -15,7 +16,7 @@ public class ReturnHomeTests
         public bool TrySampleHeight(float x, float z, out float height) { height = _ground; return true; }
     }
 
-    /// <summary>全面が水（洋上）のサンプラー（Task107: 空母以外への着水をしないことの検証用）。</summary>
+    /// <summary>Sampler where everything is water (open sea) (Task107: verifies no ditching anywhere except onto a carrier).</summary>
     private class AllWater : IWaterSampler
     {
         public bool IsWater(float x, float z) { return true; }
@@ -48,7 +49,7 @@ public class ReturnHomeTests
         var s = BaseState();
         AddBase(s, 200, BaseType.AirForce, 0, 1000f);
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f, new WorldPos(0, 0, 0));
-        fighter.State = UnitState.Idle; // ターゲット喪失後の状態
+        fighter.State = UnitState.Idle; // state after losing its target
         s.Units.Add(fighter);
 
         MovementStep.Advance(s, 1f);
@@ -67,7 +68,7 @@ public class ReturnHomeTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(0f, fighter.Position.X, 3); // 既に到着圏内なので動かない
+        Assert.Equal(0f, fighter.Position.X, 3); // already within arrival range, so it does not move
     }
 
     [Fact]
@@ -91,8 +92,8 @@ public class ReturnHomeTests
     public void Idle_fighter_ignores_enemy_air_bases()
     {
         var s = BaseState();
-        AddBase(s, 200, BaseType.AirForce, 1, 100f);  // 敵の航空基地（近い）
-        AddBase(s, 201, BaseType.AirForce, 0, -800f); // 自軍の航空基地（遠い）
+        AddBase(s, 200, BaseType.AirForce, 1, 100f);  // enemy air base (near)
+        AddBase(s, 201, BaseType.AirForce, 0, -800f); // own air base (far)
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f, new WorldPos(0, 0, 0));
         fighter.State = UnitState.Idle;
         s.Units.Add(fighter);
@@ -106,8 +107,8 @@ public class ReturnHomeTests
     public void Idle_destroyer_sails_back_toward_its_own_navy_base_not_an_army_base()
     {
         var s = BaseState();
-        AddBase(s, 200, BaseType.Army, 0, 100f);   // 自軍陸軍基地（近いが対象外）
-        AddBase(s, 201, BaseType.Navy, 0, -800f);  // 自軍海軍基地
+        AddBase(s, 200, BaseType.Army, 0, 100f);   // own army base (near, but not a valid destination)
+        AddBase(s, 201, BaseType.Navy, 0, -800f);  // own navy base
         var destroyer = new UnitInstance(1, "Destroyer_T1", 0, 100f, new WorldPos(0, 0, 0));
         destroyer.State = UnitState.Idle;
         s.Units.Add(destroyer);
@@ -120,7 +121,8 @@ public class ReturnHomeTests
     [Fact]
     public void Idle_land_unit_does_not_return_home()
     {
-        // 帰還は航空/海上のみ（地上ユニットの挙動は従来どおりIdleで静止）。
+        // Return-home applies only to air/naval units (land units keep their previous behavior:
+        // standing still while Idle).
         var s = BaseState();
         AddBase(s, 200, BaseType.Army, 0, 1000f);
         var tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
@@ -132,14 +134,14 @@ public class ReturnHomeTests
         Assert.Equal(0f, tank.Position.X, 3);
     }
 
-    // --- Task107（ユーザー報告「目標がなくなった航空戦力が空中でホバリングしてしまう」）---
+    // --- Task107 (user report: "air units that lost their objective end up hovering in mid-air") ---
 
     [Fact]
     public void Idle_fighter_over_its_home_base_lands_instead_of_hovering()
     {
         var s = BaseState();
         s.Height = new FlatGroundSampler();
-        AddBase(s, 200, BaseType.AirForce, 0, 0f); // 真上（＝帰還先へ到着済み）
+        AddBase(s, 200, BaseType.AirForce, 0, 0f); // directly below (= already arrived at the return destination)
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
             new WorldPos(0, MovementStep.CruiseAltitude, 0));
         fighter.State = UnitState.Idle;
@@ -149,7 +151,7 @@ public class ReturnHomeTests
 
         Assert.True(fighter.Position.Y < MovementStep.CruiseAltitude,
             "expected the idle fighter to start descending onto its base");
-        Assert.Equal(0f, fighter.Position.X, 3); // 水平位置は変えない
+        Assert.Equal(0f, fighter.Position.X, 3); // horizontal position must not change
     }
 
     [Fact]
@@ -165,14 +167,15 @@ public class ReturnHomeTests
 
         for (int i = 0; i < 20; i++) MovementStep.Advance(s, 1f);
 
-        Assert.Equal(MovementStep.ParkedAltitude, fighter.Position.Y, 2); // 接地して静止（地面貫通なし）
+        Assert.Equal(MovementStep.ParkedAltitude, fighter.Position.Y, 2); // touched down and at rest (no ground penetration)
     }
 
     [Fact]
     public void Idle_transport_helicopter_lands_at_its_base()
     {
-        // 輸送ヘリはTransportHeliStepが移動を管理する（帰還先解決の対象外）が、待機中に空中で
-        // 止まったままにはせず着陸する。
+        // Transport helicopters are moved by TransportHeliStep (they are excluded from the
+        // return-destination resolution), but while waiting they must land rather than remain
+        // frozen in mid-air.
         var s = BaseState();
         s.Height = new FlatGroundSampler();
         AddBase(s, 200, BaseType.Army, 0, 0f);
@@ -191,7 +194,7 @@ public class ReturnHomeTests
     public void Idle_fighter_over_a_carrier_lands_on_the_deck_not_in_the_sea()
     {
         var s = BaseState();
-        s.Height = new FlatGroundSampler(-30f); // 海底
+        s.Height = new FlatGroundSampler(-30f); // sea floor
         s.Water = new AllWater();
         var carrier = new UnitInstance(2, "Carrier_T1", 0, 100f, new WorldPos(0, 0, 0));
         s.Units.Add(carrier);
@@ -214,7 +217,7 @@ public class ReturnHomeTests
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
             new WorldPos(0, MovementStep.CruiseAltitude, 0));
         fighter.State = UnitState.Idle;
-        s.Units.Add(fighter); // 帰還先も空母も無い＝着陸できる場所が無い
+        s.Units.Add(fighter); // no return destination and no carrier = nowhere to land
 
         MovementStep.Advance(s, 1f);
 
@@ -226,7 +229,7 @@ public class ReturnHomeTests
     {
         var s = BaseState();
         s.Height = new FlatGroundSampler();
-        AddBase(s, 200, BaseType.AirForce, 0, 120f); // DescentStartDistance(500)より内側
+        AddBase(s, 200, BaseType.AirForce, 0, 120f); // inside DescentStartDistance (500)
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
             new WorldPos(0, MovementStep.CruiseAltitude, 0));
         fighter.State = UnitState.Idle;
@@ -246,10 +249,10 @@ public class ReturnHomeTests
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f,
             new WorldPos(0, MovementStep.ParkedAltitude, 0));
         fighter.State = UnitState.Moving;
-        fighter.OrderTargetPos = new WorldPos(100000f, 0, 0); // 遠方へ出撃（1tickでは着かない）
+        fighter.OrderTargetPos = new WorldPos(100000f, 0, 0); // sortie to a distant point (unreachable in 1 tick)
         s.Units.Add(fighter);
 
-        MovementStep.Advance(s, 0.1f); // 実機に近い小さなtick（1tickの上昇量はstepLenが上限）
+        MovementStep.Advance(s, 0.1f); // small tick close to the real game (climb per tick is capped by stepLen)
 
         Assert.True(fighter.Position.Y < MovementStep.CruiseAltitude,
             "expected a climb, not a teleport to cruise altitude");
@@ -260,7 +263,7 @@ public class ReturnHomeTests
     public void Moving_fighter_with_objective_is_unaffected()
     {
         var s = BaseState();
-        AddBase(s, 200, BaseType.AirForce, 0, -1000f); // 反対方向の自軍基地
+        AddBase(s, 200, BaseType.AirForce, 0, -1000f); // own base in the opposite direction
         var fighter = new UnitInstance(1, "AirSuperiority_T1", 0, 100f, new WorldPos(0, 0, 0));
         fighter.State = UnitState.Moving;
         fighter.OrderTargetPos = new WorldPos(1000, 0, 0);

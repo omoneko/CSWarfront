@@ -1,13 +1,14 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
 public class MovementStepTests
 {
-    // Task53: state.Height（IHeightSampler）のフェイク実装。x+zという単純な決定的関数を返すため、
-    // 「移動後のPosition.Yが常にTrySampleHeight(X, Z)の結果と一致する」ことをアサーションだけで
-    // 検証できる（ウェイポイント/直線移動どちらのYとも通常一致しない値なので、旧来のY補間経路が
-    // 誤って使われていないことも同時に検出できる）。
+    // Task53: fake implementation of state.Height (IHeightSampler). It returns the simple deterministic
+    // function x+z, so "Position.Y after movement always equals the result of TrySampleHeight(X, Z)"
+    // can be verified with assertions alone (the value normally matches neither the waypoint Y nor the
+    // straight-line Y, so this simultaneously detects the legacy Y-interpolation path being used by
+    // mistake).
     private class FakeHeightSampler : IHeightSampler
     {
         public bool TrySampleHeight(float x, float z, out float height)
@@ -17,11 +18,12 @@ public class MovementStepTests
         }
     }
 
-    // Task53ハードニング: TrySampleHeightが常にfalseを返す（TerrainManager瞬断/例外を模した）フェイク。
-    // out引数には意図的に「地表からかけ離れた値」(-9999f)を書き込む。もしMovementStep側がfalseの
-    // 戻り値を見落としてこのheightをそのまま採用してしまえば、テストのアサーションで即座に
-    // 検出できるようにするための仕込み（実プロダクションのSurfaceHeightSamplerが失敗時に0fを
-    // 返していたのと同種の「失敗値がそのまま採用される」不具合を再現・検出する）。
+    // Task53 hardening: a fake whose TrySampleHeight always returns false (simulating a TerrainManager
+    // outage/exception). It deliberately writes a value "far away from the ground surface" (-9999f) to
+    // the out parameter. If MovementStep overlooked the false return value and adopted this height as-is,
+    // the test assertions would catch it immediately; this is the trap that reproduces and detects the
+    // same class of "failure value gets adopted as-is" bug where the real production
+    // SurfaceHeightSampler returned 0f on failure.
     private class FailingHeightSampler : IHeightSampler
     {
         public bool TrySampleHeight(float x, float z, out float height)
@@ -31,12 +33,14 @@ public class MovementStepTests
         }
     }
 
-    // Task55: 「ユニットが空中戦を始める」不具合の再発防止（防御的多層化）。SurfaceHeightSamplerが
-    // 誤ったオーバーロード等で将来また荒唐無稽な高さを返しても、MovementStepがそれを鵜呑みにして
-    // ユニットを空へ打ち上げないようにする。TrySampleHeight自体は成功(true)を返すが、値が
-    // 補間済みY（従来のウェイポイント/直線補間の結果）からMaxSurfaceDeviationを超えて乖離していれば、
-    // 採用せず補間済みYを使う。offsetは常に補間済みYからの絶対乖離量として機能する
-    // （このテストで使う全ケースの補間済みYが0のため）。
+    // Task55: regression prevention (defense in depth) for the "units start dogfighting in midair" bug.
+    // Even if SurfaceHeightSampler again returns an absurd height in the future (via a wrong overload,
+    // etc.), MovementStep must not take it at face value and launch the unit into the sky.
+    // TrySampleHeight itself returns success (true), but if the value deviates from the interpolated Y
+    // (the result of the conventional waypoint/straight-line interpolation) by more than
+    // MaxSurfaceDeviation, it is rejected and the interpolated Y is used instead. offset always acts as
+    // the absolute deviation from the interpolated Y (because the interpolated Y is 0 in every case
+    // used by these tests).
     private class OffsetHeightSampler : IHeightSampler
     {
         private readonly float _offset;
@@ -62,9 +66,10 @@ public class MovementStepTests
         return s;
     }
 
-    // Tank_T1の実効速度（Task26でkm/h基準に較正: 40km/h ≈ 5.418 map units/ゲーム内時間。
-    // Task83でGlobalSpeedMultiplier(1.25)が移動に一律にかかるようになったため、この定数は
-    // 倍率込みの「実際に1ゲーム内時間で進む距離」を表す。距離・時間の期待値は全てここから導出する）。
+    // Tank_T1's effective speed (calibrated to a km/h basis in Task26: 40km/h ≈ 5.418 map units per
+    // in-game hour. Since Task83 applies GlobalSpeedMultiplier (1.25) uniformly to movement, this
+    // constant represents the multiplier-inclusive "distance actually traveled per in-game hour".
+    // All distance/time expectations are derived from it.)
     private const float TankSpeedPerHour = 5.418f * MovementStep.GlobalSpeedMultiplier;
 
     [Fact]
@@ -72,7 +77,7 @@ public class MovementStepTests
     {
         var s = OneMovingUnit();
         MovementStep.Advance(s, 1f);
-        // dt=1h, distance 1000 -> TankSpeedPerHour（実効速度、倍率込み）ぶんの部分移動
+        // dt=1h, distance 1000 -> partial move of TankSpeedPerHour (effective speed, multiplier included)
         Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
         Assert.Equal(0f, s.Units[0].Position.Z, 1);
     }
@@ -80,8 +85,9 @@ public class MovementStepTests
     [Fact]
     public void GlobalSpeedMultiplier_is_1_25()
     {
-        // Task83（ユーザー要望「全体的に現在の1.25倍速」）: 移動の唯一の消費点（stepLen計算）に
-        // かかる全体倍率。値そのものが仕様なので定数として固定する。
+        // Task83 (user request "1.25x the current overall speed"): a global multiplier applied at the
+        // single consumption point of movement (the stepLen computation). The value itself is the spec,
+        // so it is pinned as a constant.
         Assert.Equal(1.25f, MovementStep.GlobalSpeedMultiplier, 3);
     }
 
@@ -133,11 +139,13 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.X, 1);
     }
 
-    // Task37: 旧仕様は「移動中もYは常に維持する」だった（テスト名 Advance_preserves_y_coordinate、
-    // 期待値は開始Yの42のまま）。これは道路の勾配を無視して水平飛行する「路面から浮く」バグの原因だった
-    // ため、新仕様では X/Z と同じ補間係数でYも目標へ向けて補間する。以下はその新仕様を検証する
-    // （start Y=42, target Y=0, dist=100, stepLen≈TankSpeedPerHour(≈5.418) -> t≈0.05418,
-    //  Y = 42 + (0-42)*t ≈ 39.72）。
+    // Task37: the old spec was "Y is always preserved while moving" (test name
+    // Advance_preserves_y_coordinate, expected value stayed at the starting Y of 42). That was the cause
+    // of the "floating above the road surface" bug where units flew horizontally, ignoring road grades,
+    // so the new spec interpolates Y toward the target using the same interpolation factor as X/Z.
+    // The following verifies that new spec
+    // (start Y=42, target Y=0, dist=100, stepLen≈TankSpeedPerHour(≈5.418) -> t≈0.05418,
+    //  Y = 42 + (0-42)*t ≈ 39.72).
     [Fact]
     public void Advance_interpolates_y_toward_target_in_straight_line_fallback()
     {
@@ -154,8 +162,9 @@ public class MovementStepTests
         Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1);
     }
 
-    // Task37: 直線フォールバック（Path無し/消化済み）でも、到達時はtargetのYへ完全収束すること
-    // （オーバーシュートせず、丸め誤差もなく厳密にtargetのYになる）を確認する。
+    // Task37: verify that even in the straight-line fallback (no Path / Path exhausted), Y converges
+    // fully to the target's Y on arrival (no overshoot, and exactly the target's Y with no rounding
+    // error).
     [Fact]
     public void Advance_converges_exactly_to_target_y_on_arrival_in_straight_line_fallback()
     {
@@ -164,13 +173,13 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
-        u.OrderTargetPos = new WorldPos(5, 20, 0); // dist=5 << stepLen(≈5.418) -> 1ステップで到達
+        u.OrderTargetPos = new WorldPos(5, 20, 0); // dist=5 << stepLen(≈5.418) -> arrives in a single step
         s.Units.Add(u);
 
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(5f, s.Units[0].Position.X, 1);
-        Assert.Equal(20f, s.Units[0].Position.Y, 4); // targetのYへ厳密に収束（スナップ）
+        Assert.Equal(20f, s.Units[0].Position.Y, 4); // converges exactly to the target's Y (snap)
         Assert.Equal(0f, s.Units[0].Position.Z, 1);
     }
 
@@ -178,7 +187,7 @@ public class MovementStepTests
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
-        s.Types.Register(MvpUnitTypes.Tank_T1()); // Speed ≈5.418 map units / in-game hour（Task26較正後、TankSpeedPerHour参照）
+        s.Types.Register(MvpUnitTypes.Tank_T1()); // Speed ≈5.418 map units / in-game hour (after Task26 calibration, see TankSpeedPerHour)
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(100, 0, 100);
@@ -206,7 +215,7 @@ public class MovementStepTests
     {
         var s = UnitWithPath();
         // dt chosen so that stepLen = TankSpeedPerHour*dt = 150 exactly (150/5.418... ≈ 27.6855469h):
-        // covers 100 to first waypoint, then 50 more toward second (同じ幾何、旧テストのSpeed=250, dt=0.6と同じ結果になるよう選定)
+        // covers 100 to first waypoint, then 50 more toward second (same geometry, chosen so the result matches the old test's Speed=250, dt=0.6)
         MovementStep.Advance(s, 150f / TankSpeedPerHour);
         var u = s.Units[0];
         Assert.Equal(100f, u.Position.X, 1);
@@ -223,7 +232,7 @@ public class MovementStepTests
         u.Position = new WorldPos(100, 0, 100); // arrived at last waypoint already
         u.OrderTargetPos = new WorldPos(200, 0, 100);
 
-        // stepLen = TankSpeedPerHour*20 ≈ 108.4、100離れた目標に到達するには十分（オーバーシュートせず目標でクランプされる）
+        // stepLen = TankSpeedPerHour*20 ≈ 108.4, plenty to reach the target 100 away (clamped at the target without overshoot)
         MovementStep.Advance(s, 20f);
 
         Assert.Equal(200f, u.Position.X, 1);
@@ -239,11 +248,12 @@ public class MovementStepTests
         Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
     }
 
-    // Task37: 旧仕様は「Pathに沿って移動中もYは常に維持する」だった（テスト名
-    // Advance_preserves_y_while_following_path、期待値は開始Yの42のまま）。これは道路の勾配（橋・坂）を
-    // 無視して水平飛行してしまう「路面から浮く」バグの原因だったため、新仕様ではウェイポイントへ向かう
-    // 間もX/Zと同じ補間係数でYを補間する。UnitWithPath()のウェイポイントはY=0なので、42から0へ向けて
-    // 補間されるはず（dist=100, stepLen≈3.2508 -> t≈0.032508, Y=42+(0-42)*t≈40.63）。
+    // Task37: the old spec was "Y is always preserved while moving along a Path too" (test name
+    // Advance_preserves_y_while_following_path, expected value stayed at the starting Y of 42). That was
+    // the cause of the "floating above the road surface" bug where units flew horizontally, ignoring
+    // road grades (bridges/slopes), so the new spec interpolates Y with the same interpolation factor as
+    // X/Z while heading toward a waypoint too. The waypoints of UnitWithPath() have Y=0, so Y should be
+    // interpolated from 42 toward 0 (dist=100, stepLen≈3.2508 -> t≈0.032508, Y=42+(0-42)*t≈40.63).
     [Fact]
     public void Advance_interpolates_y_toward_waypoint_while_following_path()
     {
@@ -253,8 +263,8 @@ public class MovementStepTests
         Assert.Equal(42f - 42f * (TankSpeedPerHour * 0.6f / 100f), s.Units[0].Position.Y, 1);
     }
 
-    // Task37: ウェイポイントへ到達した瞬間は、丸め誤差なくそのウェイポイントのYへ厳密にスナップすること
-    // （坂の上/橋の上で「ちょうど乗った」状態を保証する）。
+    // Task37: at the moment a waypoint is reached, Y must snap exactly to that waypoint's Y with no
+    // rounding error (guaranteeing the unit sits "exactly on top" at the top of a slope / on a bridge).
     [Fact]
     public void Advance_snaps_exactly_to_waypoint_y_on_arrival()
     {
@@ -264,21 +274,22 @@ public class MovementStepTests
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(10, 7, 0);
-        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // 坂の上、Y=7
+        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // top of a slope, Y=7
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
 
-        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達しウェイポイントのYへスナップ
+        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> arrives in one step and snaps to the waypoint's Y
         MovementStep.Advance(s, 2f);
 
         Assert.Equal(10f, s.Units[0].Position.X, 1);
-        Assert.Equal(7f, s.Units[0].Position.Y, 4); // 厳密にウェイポイントのYへスナップ
+        Assert.Equal(7f, s.Units[0].Position.Y, 4); // snaps exactly to the waypoint's Y
         Assert.Equal(1, s.Units[0].PathIndex);
     }
 
-    // Task37: 複数ウェイポイントを跨ぐ大きなステップでも、最後に到達したウェイポイントのYを基準に
-    // 次のウェイポイントへ向けて正しく補間されること（橋を渡るように0->10->20と高さが上がる想定）。
+    // Task37: even with a large step that crosses multiple waypoints, Y must be interpolated correctly
+    // toward the next waypoint based on the last waypoint reached (imagine heights rising 0->10->20 as
+    // if crossing a bridge).
     [Fact]
     public void Advance_large_step_crosses_waypoint_and_interpolates_y_from_last_reached_waypoint()
     {
@@ -293,9 +304,9 @@ public class MovementStepTests
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
 
-        // stepLen≈150（Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt）:
-        // 最初のウェイポイントまで100ぶん到達（Y=10へスナップ）→残り50を2番目(dist100)へ向けて進む
-        // (t=0.5) -> Y = 10 + (20-10)*0.5 = 15。
+        // stepLen≈150 (same dt as Advance_large_step_crosses_first_waypoint_and_continues_toward_second):
+        // travels 100 to reach the first waypoint (snaps to Y=10), then advances the remaining 50 toward
+        // the second (dist 100) (t=0.5) -> Y = 10 + (20-10)*0.5 = 15.
         MovementStep.Advance(s, 150f / TankSpeedPerHour);
         var pos = s.Units[0].Position;
 
@@ -305,7 +316,7 @@ public class MovementStepTests
         Assert.Equal(1, s.Units[0].PathIndex);
     }
 
-    // --- Task44: CoverDestination優先の移動 ---
+    // --- Task44: CoverDestination-priority movement ---
 
     [Fact]
     public void Advance_moves_engaging_unit_toward_CoverDestination_instead_of_OrderTargetPos()
@@ -315,13 +326,13 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Engaging;
-        u.OrderTargetPos = new WorldPos(1000, 0, 0); // 進軍目的地（無視されるはず）
-        u.CoverDestination = new WorldPos(0, 0, 1000); // 遮蔽位置（南北方向、こちらへ動くはず）
+        u.OrderTargetPos = new WorldPos(1000, 0, 0); // advance objective (should be ignored)
+        u.CoverDestination = new WorldPos(0, 0, 1000); // cover position (north-south direction, should move toward this)
         s.Units.Add(u);
 
         MovementStep.Advance(s, 1f);
 
-        // OrderTargetPos(X方向)ではなくCoverDestination(Z方向)へ動いたことを確認する。
+        // Confirm it moved toward CoverDestination (Z direction), not OrderTargetPos (X direction).
         Assert.Equal(0f, s.Units[0].Position.X, 1);
         Assert.True(s.Units[0].Position.Z > 0f, "expected unit to move toward CoverDestination (positive Z)");
     }
@@ -334,22 +345,23 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Engaging;
-        u.CoverDestination = new WorldPos(1f, 0, 0); // 探索半径(arrival distance=3)より近い
+        u.CoverDestination = new WorldPos(1f, 0, 0); // closer than the search radius (arrival distance=3)
 
         s.Units.Add(u);
 
-        MovementStep.Advance(s, 1f); // ステップ長は十分大きい(TankSpeedPerHour≈5.4)
+        MovementStep.Advance(s, 1f); // step length is large enough (TankSpeedPerHour≈5.4)
 
-        // すでにCoverArrivalDistance(3)以内なので動かない。
+        // Already within CoverArrivalDistance(3), so it does not move.
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
 
-    // Task44の旧仕様（テスト名 Advance_does_not_use_CoverDestination_when_not_engaging）は
-    // 「State==EngagingでなければCoverDestinationは無視する」だった。Task45でCoverSeekStepが
-    // 進軍中（交戦前、自勢力圏の外）のユニットにもCoverDestinationを設定するようになったため、
-    // MovementStepはState(Engaging/Moving)に関わらずCoverDestinationが設定されていれば必ず
-    // honorするよう変更した。以下はその新仕様を検証する（State=MovingでもCoverDestinationへ
-    // 向かい、OrderTargetPosは無視される＝bounding advance中の移動）。
+    // Task44's old spec (test name Advance_does_not_use_CoverDestination_when_not_engaging) was
+    // "ignore CoverDestination unless State==Engaging". Since Task45 made CoverSeekStep also set
+    // CoverDestination on units that are advancing (pre-engagement, outside their own faction's
+    // territory), MovementStep was changed to always honor CoverDestination whenever it is set,
+    // regardless of State (Engaging/Moving). The following verifies that new spec (even with
+    // State=Moving, the unit heads toward CoverDestination and OrderTargetPos is ignored = movement
+    // during a bounding advance).
     [Fact]
     public void Advance_uses_CoverDestination_even_when_not_engaging_since_bounding_advance_sets_it_while_moving()
     {
@@ -357,23 +369,24 @@ public class MovementStepTests
         s.Factions.Add(new Faction(0, "Red"));
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
-        u.State = UnitState.Moving; // Engagingではないが、bounding advance中はCoverDestinationを持ちうる
-        u.OrderTargetPos = new WorldPos(1000, 0, 0); // 無視されるはず
-        u.CoverDestination = new WorldPos(0, 0, 1000); // こちらへ動くはず
+        u.State = UnitState.Moving; // not Engaging, but may carry a CoverDestination during a bounding advance
+        u.OrderTargetPos = new WorldPos(1000, 0, 0); // should be ignored
+        u.CoverDestination = new WorldPos(0, 0, 1000); // should move toward this
         u.CoverHold = false;
 
         s.Units.Add(u);
 
         MovementStep.Advance(s, 1f);
 
-        // OrderTargetPos(X方向)ではなくCoverDestination(Z方向)へ動いたことを確認する。
+        // Confirm it moved toward CoverDestination (Z direction), not OrderTargetPos (X direction).
         Assert.Equal(0f, s.Units[0].Position.X, 1);
         Assert.True(s.Units[0].Position.Z > 0f, "expected unit to move toward CoverDestination even while not Engaging");
     }
 
-    // Task45: bounding advance（CoverHold==false）でCoverArrivalDistance以内に到達したら、
-    // その場に留まるのではなくCoverDestinationをクリアし、CoverReevaluateCooldownも0へリセットして
-    // 次のCoverSeekStep評価がすぐ次の遮蔽を選べるようにする（遮蔽から遮蔽への「跳び」を実現する）。
+    // Task45: on a bounding advance (CoverHold==false), when the unit gets within CoverArrivalDistance,
+    // instead of staying put it clears CoverDestination and also resets CoverReevaluateCooldown to 0 so
+    // the next CoverSeekStep evaluation can immediately pick the next cover (realizing the
+    // cover-to-cover "leapfrog").
     [Fact]
     public void Advance_clears_CoverDestination_and_resets_cooldown_on_arrival_when_not_holding()
     {
@@ -382,9 +395,9 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
-        u.CoverDestination = new WorldPos(1f, 0, 0); // CoverArrivalDistance(3)より近い
+        u.CoverDestination = new WorldPos(1f, 0, 0); // closer than CoverArrivalDistance(3)
         u.CoverHold = false;
-        u.CoverReevaluateCooldown = 0.3f; // まだクールダウン中のふり
+        u.CoverReevaluateCooldown = 0.3f; // pretend the cooldown is still running
 
         s.Units.Add(u);
 
@@ -394,8 +407,8 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].CoverReevaluateCooldown);
     }
 
-    // Task45: 対して、CoverHold==true（交戦中）ならCoverArrivalDistance以内でも
-    // CoverDestinationを保持したまま、その場に留まり続ける（従来のTask44挙動）。
+    // Task45: in contrast, with CoverHold==true (in combat), the unit keeps CoverDestination even
+    // within CoverArrivalDistance and stays put (the pre-existing Task44 behavior).
     [Fact]
     public void Advance_keeps_CoverDestination_on_arrival_when_holding()
     {
@@ -412,7 +425,7 @@ public class MovementStepTests
         MovementStep.Advance(s, 1f);
 
         Assert.True(s.Units[0].CoverDestination.HasValue);
-        Assert.Equal(0f, s.Units[0].Position.X, 3); // 動いていない
+        Assert.Equal(0f, s.Units[0].Position.X, 3); // has not moved
     }
 
     [Fact]
@@ -423,9 +436,9 @@ public class MovementStepTests
         u.State = UnitState.Engaging;
         u.CoverDestination = new WorldPos(0, 0, 1000);
         MovementStep.Advance(s, 0.1f);
-        Assert.True(s.Units[0].Position.Z > 0f); // 遮蔽位置へ向かって動いた
+        Assert.True(s.Units[0].Position.Z > 0f); // moved toward the cover position
 
-        // 交戦が終わりCoverDestinationがクリアされ、通常の移動に戻ったと仮定する。
+        // Assume the engagement ended, CoverDestination was cleared, and normal movement resumed.
         u.CoverDestination = null;
         u.State = UnitState.Moving;
         var beforeX = s.Units[0].Position.X;
@@ -538,11 +551,12 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
 
-    // --- Task50: 「建物の陰に隠れながら戦闘するときは停車する」 ---
+    // --- Task50: "stop the vehicle when fighting from behind building cover" ---
 
-    // 遮蔽位置(CoverDestination)が無い交戦中ユニットは、OrderTargetPos/Pathが残っていても
-    // 一切動かない（複数tickにわたって停止し続ける）。RallyHoldでない通常のAiControlled/FreeAdvance
-    // ユニットを想定（RallyHoldは移動しながら応戦する別仕様、下のテスト参照）。
+    // An engaging unit without a cover position (CoverDestination) does not move at all, even if
+    // OrderTargetPos/Path remain (it stays stopped across multiple ticks). This assumes a normal
+    // AiControlled/FreeAdvance unit that is not RallyHold (RallyHold is a separate spec that returns
+    // fire while moving, see the test below).
     [Fact]
     public void Advance_engaging_unit_without_CoverDestination_never_moves_toward_OrderTargetPos()
     {
@@ -557,8 +571,9 @@ public class MovementStepTests
         Assert.Equal(0f, u.Position.X, 3);
     }
 
-    // RallyHold + Engaging は例外: 「移動中・停止後を問わず射程内の敵にしか応戦しない」という
-    // Task48の意図的な仕様どおり、持ち場(RallyPoint)へ向かいながら応戦し続ける（Task50では変更しない）。
+    // RallyHold + Engaging is the exception: per Task48's intentional spec of "only return fire at
+    // enemies within range, whether moving or stopped", the unit keeps returning fire while heading to
+    // its post (RallyPoint) (unchanged by Task50).
     [Fact]
     public void Advance_RallyHold_unit_still_advances_toward_RallyPoint_while_engaging()
     {
@@ -576,9 +591,9 @@ public class MovementStepTests
         Assert.Equal(TankSpeedPerHour, s.Units[0].Position.X, 2);
     }
 
-    // 非交戦(進軍中)のbounding advanceは従来通り機能する（Task50でモード2のみを変更したことの回帰確認）。
-    // CoverHold==false（互換維持のフォールバック経路。現行のCoverSeekStepはもう作らない値だが、
-    // 手動で設定した呼び出し元のために挙動を維持する、Task52）。
+    // The non-engaging (advancing) bounding advance still works as before (regression check that Task50
+    // only changed mode 2). CoverHold==false (compatibility fallback path: the current CoverSeekStep no
+    // longer produces this value, but the behavior is kept for callers that set it manually, Task52).
     [Fact]
     public void Advance_non_engaging_unit_still_bounds_from_cover_to_cover()
     {
@@ -597,11 +612,12 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].CoverReevaluateCooldown);
     }
 
-    // --- Task52: 遮蔽保持(CoverHold==true)の時間上限（MaxCoverHoldHours） ---
+    // --- Task52: time cap on holding cover (CoverHold==true) (MaxCoverHoldHours) ---
 
-    // rule2 TDD: Task52でモード3(進軍中のbounding advance)もCoverHold=trueで「保持」するようになった
-    // （実際に隠れて一時停止する演出のため）。MaxCoverHoldHoursを超えて静止し続けたら、
-    // CoverDestinationを解放し、通常のOrderTargetPosへの前進を再開する（無期限には止まらない）。
+    // rule2 TDD: with Task52, mode 3 (bounding advance while advancing) now also "holds" with
+    // CoverHold=true (to actually depict hiding and pausing). If the unit keeps sitting still beyond
+    // MaxCoverHoldHours, it releases CoverDestination and resumes the normal advance toward
+    // OrderTargetPos (it never stays stopped indefinitely).
     [Fact]
     public void Advance_releases_bounding_CoverHold_after_MaxCoverHoldHours_and_resumes_toward_OrderTargetPos()
     {
@@ -626,15 +642,17 @@ public class MovementStepTests
             "expected the unit to resume advancing once MaxCoverHoldHours elapsed");
     }
 
-    // --- Task53/Task77: state.Heightが供給されている場合のYの取得元 ---
+    // --- Task53/Task77: where Y comes from when state.Height is supplied ---
 
-    // Task77（「地上ユニットが橋の上を渡ってくれない」不具合の修正）: 経路上（ウェイポイント追従中）は
-    // Terrainサンプラーに一切触れず、ウェイポイント自身のY（道路網ノードのY＝橋なら橋桁の高さ）を
-    // そのまま採用する。旧仕様（Task53〜76）はここもTrySampleHeightの結果で上書きしていたため、
-    // 橋の直下（水面/川底）の高さがFakeHeightSamplerのように"それらしい"値を返すと、橋を渡っている
-    // ユニットが水中へ沈んで見える不具合になっていた。乖離(3)はMaxSurfaceDeviation(15)以内に収まる
-    // 値にしてあり、単に乖離クランプで弾かれているのではなく、経路上ではサンプラー自体を参照しない
-    // という仕様変更そのものを検証する。
+    // Task77 (fix for the "ground units won't cross bridges" bug): while on a path (following
+    // waypoints), the terrain sampler is never consulted; the waypoint's own Y (the road-network
+    // node's Y = the deck height in the case of a bridge) is adopted as-is. The old spec (Task53-76)
+    // overwrote this with the result of TrySampleHeight even here, so when the height directly under
+    // the bridge (water surface/riverbed) returned a "plausible-looking" value like FakeHeightSampler
+    // does, units crossing the bridge appeared to sink underwater. The deviation (3) is deliberately
+    // kept within MaxSurfaceDeviation(15), so this verifies the spec change itself — that the sampler
+    // is not consulted at all while on a path — rather than the value merely being rejected by the
+    // deviation clamp.
     [Fact]
     public void Advance_uses_waypoint_y_not_sampled_height_on_arrival_while_following_path()
     {
@@ -644,39 +662,41 @@ public class MovementStepTests
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(10, 7, 0);
-        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // ウェイポイント自体のY=7（橋桁の高さ想定）
+        u.Path = new List<WorldPos> { new WorldPos(10, 7, 0) }; // the waypoint's own Y=7 (imagine the bridge deck height)
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
-        s.Height = new FakeHeightSampler(); // TrySampleHeight(10, 0) -> true, 10（橋の下の水面/地形想定）
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(10, 0) -> true, 10 (imagine the water surface/terrain under the bridge)
 
-        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> 1ステップで到達（ウェイポイントに到達）
+        // stepLen = TankSpeedPerHour*2 ≈ 10.84 >= dist(10) -> arrives in one step (reaches the waypoint)
         MovementStep.Advance(s, 2f);
 
         Assert.Equal(10f, s.Units[0].Position.X, 1);
-        // Task77: 経路上なのでサンプラーの値(10)は無視し、ウェイポイント自身のY(7)へ厳密にスナップする。
+        // Task77: on a path, the sampler's value (10) is ignored and Y snaps exactly to the waypoint's own Y (7).
         Assert.Equal(7f, s.Units[0].Position.Y, 3);
     }
 
-    // Task77: ウェイポイントへ向かう部分移動中も同様にサンプラーを無視し、ウェイポイントのYへ向けた
-    // 補間を維持する（Advance_interpolates_y_toward_waypoint_while_following_pathと同じ幾何・期待値に
-    // HeightSamplerを追加しても結果が変わらないことを確認する回帰テスト）。
+    // Task77: the sampler is likewise ignored during a partial move toward a waypoint, and the
+    // interpolation toward the waypoint's Y is preserved (a regression test confirming that adding a
+    // HeightSampler to the same geometry/expected values as
+    // Advance_interpolates_y_toward_waypoint_while_following_path does not change the result).
     [Fact]
     public void Advance_interpolates_toward_waypoint_y_ignoring_HeightSampler_during_partial_path_move()
     {
         var s = UnitWithPath();
         s.Units[0].Position = new WorldPos(0, 42, 0);
-        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z、経路上では無視されるはず
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z, should be ignored while on a path
 
         MovementStep.Advance(s, 0.6f);
 
         Assert.Equal(42f - 42f * (TankSpeedPerHour * 0.6f / 100f), s.Units[0].Position.Y, 1);
     }
 
-    // Task77（「地上ユニットが橋の上を渡ってくれない」不具合の統合的な回帰テスト）: 橋を模した
-    // Path（Y=0の岸→Y=20の橋の頂点→Y=0の対岸、橋の直下にFakeHeightSamplerが常に低い値(x+z、
-    // 岸のY=0付近)を返す）を渡り切るまで、Yがウェイポイントの高さ通りに上下し、一度も
-    // サンプラーの値へ落ち込まないことを確認する。
+    // Task77 (integration-style regression test for the "ground units won't cross bridges" bug): with a
+    // Path modeling a bridge (Y=0 shore -> Y=20 bridge crest -> Y=0 far shore, and FakeHeightSampler
+    // always returning low values directly beneath the bridge (x+z, near the shore's Y=0)), confirm
+    // that Y rises and falls exactly per the waypoint heights until the bridge is fully crossed, never
+    // once dropping to the sampler's value.
     [Fact]
     public void Advance_crosses_a_bridge_path_following_waypoint_heights_without_dropping_to_sampled_terrain()
     {
@@ -688,37 +708,37 @@ public class MovementStepTests
         u.OrderTargetPos = new WorldPos(200, 0, 0);
         u.Path = new List<WorldPos>
         {
-            new WorldPos(100, 20, 0), // 橋の頂点
-            new WorldPos(200, 0, 0),  // 対岸
+            new WorldPos(100, 20, 0), // bridge crest
+            new WorldPos(200, 0, 0),  // far shore
         };
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
-        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z（橋の下の地形/水面想定）
+        s.Height = new FakeHeightSampler(); // TrySampleHeight(x,z) = x+z (imagine the terrain/water surface under the bridge)
 
-        // 橋の頂点までちょうど到達するステップ長。
+        // Step length that reaches the bridge crest exactly.
         MovementStep.Advance(s, 100f / TankSpeedPerHour);
         Assert.Equal(100f, s.Units[0].Position.X, 1);
-        Assert.Equal(20f, s.Units[0].Position.Y, 2); // サンプラー(100)ではなく橋桁のY(20)
+        Assert.Equal(20f, s.Units[0].Position.Y, 2); // the deck's Y (20), not the sampler's (100)
 
-        // 対岸まで進む。
+        // Continue to the far shore.
         MovementStep.Advance(s, 100f / TankSpeedPerHour);
         Assert.Equal(200f, s.Units[0].Position.X, 1);
-        Assert.Equal(0f, s.Units[0].Position.Y, 2); // サンプラー(200)ではなく対岸のY(0)
+        Assert.Equal(0f, s.Units[0].Position.Y, 2); // the far shore's Y (0), not the sampler's (200)
     }
 
     [Fact]
     public void Advance_uses_sampled_height_during_partial_straight_line_move_when_HeightSampler_supplied()
     {
-        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0)、Yは直線移動では常に0のはず（旧仕様）
+        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0); Y would always be 0 on a straight-line move (old spec)
         s.Height = new FakeHeightSampler();
 
-        MovementStep.Advance(s, 1f); // stepLen ≈ TankSpeedPerHour(5.418), まだ目標に届かない部分移動
+        MovementStep.Advance(s, 1f); // stepLen ≈ TankSpeedPerHour(5.418), a partial move that does not yet reach the target
 
         var pos = s.Units[0].Position;
         Assert.Equal(TankSpeedPerHour, pos.X, 2);
         Assert.Equal(0f, pos.Z, 1);
-        // 旧来の補間ならYは0のまま維持されるはずだが、TrySampleHeight(X, Z) = X + 0 = X が採用される。
+        // Under the legacy interpolation Y would stay 0, but TrySampleHeight(X, Z) = X + 0 = X is adopted.
         Assert.Equal(pos.X, pos.Y, 3);
     }
 
@@ -730,24 +750,25 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Engaging;
-        u.CoverDestination = new WorldPos(0, 0, 1000); // 南北方向、Z方向へ部分移動する
+        u.CoverDestination = new WorldPos(0, 0, 1000); // north-south direction, makes a partial move along Z
         s.Units.Add(u);
         s.Height = new FakeHeightSampler();
 
-        MovementStep.Advance(s, 1f); // まだCoverArrivalDistanceに届かない部分移動
+        MovementStep.Advance(s, 1f); // partial move that does not yet reach CoverArrivalDistance
 
         var pos = s.Units[0].Position;
         Assert.Equal(0f, pos.X, 1);
         Assert.True(pos.Z > 0f, "expected partial movement toward CoverDestination");
-        // TrySampleHeight(X, Z) = X + Z = 0 + Z = Z が採用される（旧来の補間なら0のまま）。
+        // TrySampleHeight(X, Z) = X + Z = 0 + Z = Z is adopted (under the legacy interpolation Y would stay 0).
         Assert.Equal(pos.Z, pos.Y, 3);
     }
 
     [Fact]
     public void Advance_preserves_old_y_interpolation_when_HeightSampler_is_null()
     {
-        // 回帰確認: state.Heightを一切設定しない（既定でnull）場合、Task37の従来のY補間が
-        // そのまま維持されることを明示的に確認する（他の大多数のテストが暗黙に依存している前提）。
+        // Regression check: when state.Height is never set (null by default), explicitly confirm that
+        // Task37's conventional Y interpolation is preserved as-is (a premise most other tests
+        // implicitly rely on).
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Types.Register(MvpUnitTypes.Tank_T1());
@@ -759,14 +780,16 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1); // Advance_interpolates_y_toward_target_in_straight_line_fallbackと同じ期待値
+        Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1); // same expected value as Advance_interpolates_y_toward_target_in_straight_line_fallback
     }
 
-    // Task53ハードニング: TrySampleHeightがfalseを返す（TerrainManager瞬断/例外を模した）場合、
-    // MovementStepはout引数の値（実装によっては0f等、地表と無関係な値）を絶対にYへ採用してはならず、
-    // state.Height == nullのときと全く同じY補間結果になること（＝失敗時のフォールバックが
-    // null-samplerパスと同一の経路を通っていること）を確認する。これが「TerrainManager瞬断で
-    // ユニットが地表の遥か下へ一瞬テレポートする」不具合の再発防止そのもの。
+    // Task53 hardening: when TrySampleHeight returns false (simulating a TerrainManager
+    // outage/exception), MovementStep must never adopt the out parameter's value (which depending on
+    // the implementation may be 0f etc., unrelated to the ground surface) as Y, and the Y interpolation
+    // result must be exactly the same as when state.Height == null (i.e. the failure fallback goes
+    // through the identical code path as the null-sampler path). This is precisely the regression guard
+    // against the "units teleport far below the ground surface for an instant during a TerrainManager
+    // outage" bug.
     [Fact]
     public void Advance_falls_back_to_old_y_interpolation_when_TrySampleHeight_fails()
     {
@@ -777,48 +800,49 @@ public class MovementStepTests
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(100, 0, 0);
         s.Units.Add(u);
-        s.Height = new FailingHeightSampler(); // 常にfalseを返す。out引数(-9999f)は絶対に採用されないはず。
+        s.Height = new FailingHeightSampler(); // always returns false. The out parameter (-9999f) must never be adopted.
 
         MovementStep.Advance(s, 1f);
 
-        // Advance_preserves_old_y_interpolation_when_HeightSampler_is_nullと全く同じ期待値
-        // （= state.Height == nullのときと同一の補間結果になっていることの確認）。
+        // Exactly the same expected value as Advance_preserves_old_y_interpolation_when_HeightSampler_is_null
+        // (= confirming the interpolation result is identical to when state.Height == null).
         Assert.Equal(42f - 42f * (TankSpeedPerHour / 100f), s.Units[0].Position.Y, 1);
         Assert.NotEqual(-9999f, s.Units[0].Position.Y);
     }
 
-    // --- Task55: サンプリング高さの逸脱クランプ（MaxSurfaceDeviation） ---
+    // --- Task55: deviation clamp on the sampled height (MaxSurfaceDeviation) ---
 
-    // TrySampleHeightがtrueを返していても、値が補間済みYからMaxSurfaceDeviation(15f)を大幅に超えて
-    // 乖離していれば無視し、従来のY補間結果を採用すること（「サンプラーが荒唐無稽な値を返しても
-    // ユニットを空へ打ち上げない」防御）。OneMovingUnit()は始点・終点ともY=0のため、補間済みYは
-    // 常に0になる（部分移動中も収束）。
+    // Even when TrySampleHeight returns true, if the value deviates from the interpolated Y by well
+    // over MaxSurfaceDeviation(15f), it is ignored and the conventional Y interpolation result is used
+    // (the defense that "even if the sampler returns an absurd value, units are not launched into the
+    // sky"). OneMovingUnit() has Y=0 at both the start and the target, so the interpolated Y is always
+    // 0 (it converges even during partial moves).
     [Fact]
     public void Advance_ignores_wildly_high_sampled_height_and_uses_interpolated_y_instead()
     {
-        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0), 補間済みYは常に0
-        s.Height = new OffsetHeightSampler(9999f); // MaxSurfaceDeviation(15)を大幅に超える乖離
+        var s = OneMovingUnit(); // start (0,0,0) -> target (1000,0,0), interpolated Y is always 0
+        s.Height = new OffsetHeightSampler(9999f); // deviation far beyond MaxSurfaceDeviation(15)
 
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(0f, s.Units[0].Position.Y, 3);
     }
 
-    // 乖離がMaxSurfaceDeviation(15f)以内であれば、従来どおりサンプリング値を採用する
-    // （Task53が導入した「盛土などの小さな地表変化を反映する」挙動を壊さない）。
+    // If the deviation is within MaxSurfaceDeviation(15f), the sampled value is adopted as before
+    // (not breaking the "reflect small surface changes such as embankments" behavior Task53 introduced).
     [Fact]
     public void Advance_applies_sampled_height_when_deviation_is_within_MaxSurfaceDeviation()
     {
-        var s = OneMovingUnit(); // 補間済みYは常に0
-        s.Height = new OffsetHeightSampler(10f); // 15以内の乖離
+        var s = OneMovingUnit(); // interpolated Y is always 0
+        s.Height = new OffsetHeightSampler(10f); // deviation within 15
 
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(10f, s.Units[0].Position.Y, 3);
     }
 
-    // 境界値: ちょうどMaxSurfaceDeviation(15f)は「超えて」いないので採用される
-    // （仕様は「15fを超えたら」棄却＝15f自体は許容範囲の内側）。
+    // Boundary value: exactly MaxSurfaceDeviation(15f) does not "exceed" it, so it is adopted
+    // (the spec rejects "when it exceeds 15f" = 15f itself is inside the accepted range).
     [Fact]
     public void Advance_applies_sampled_height_when_deviation_exactly_equals_MaxSurfaceDeviation()
     {
@@ -830,7 +854,7 @@ public class MovementStepTests
         Assert.Equal(MovementStep.MaxSurfaceDeviation, s.Units[0].Position.Y, 3);
     }
 
-    // 境界値: MaxSurfaceDeviation(15f)をわずかに超えたら棄却され、補間済みYに戻る。
+    // Boundary value: slightly exceeding MaxSurfaceDeviation(15f) is rejected, reverting to the interpolated Y.
     [Fact]
     public void Advance_ignores_sampled_height_when_deviation_slightly_exceeds_MaxSurfaceDeviation()
     {
@@ -842,7 +866,7 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.Y, 3);
     }
 
-    // --- Task61: Air/Seaドメインの移動則 ---
+    // --- Task61: movement rules for the Air/Sea domains ---
 
     private class FakeWaterSampler : IWaterSampler
     {
@@ -971,14 +995,16 @@ public class MovementStepTests
         Assert.Equal(beforeX, s.Units[0].Position.X, 3);
     }
 
-    // --- Task78: 「海上ユニットが敵拠点へ移動せず自拠点にこもったまま」不具合の修正 ---
-    // 直線移動の次の一歩が陸地に阻まれた場合、±30/60/90度の決定的な迂回方向を順に試し、
-    // 最初に水域へ着地する方向へ進む（簡易wall-follow）。全方向とも塞がっている場合は、
-    // その旨をSeaBlockedHoursへ積算し、MovementStep.SeaBlockedIdleHoursを超えたら
-    // Idleへ遷移して無限に探索し続けるのを防ぐ（新しい目的地を受け取ればリセットされる）。
+    // --- Task78: fix for the "sea units stay holed up at their own base instead of moving to the enemy base" bug ---
+    // When the next straight-line step is blocked by land, deterministic detour directions of
+    // ±30/60/90 degrees are tried in order, and the unit advances in the first direction that lands
+    // in water (a simple wall-follow). If every direction is blocked, that fact is accumulated into
+    // SeaBlockedHours, and once it exceeds MovementStep.SeaBlockedIdleHours the unit transitions to
+    // Idle to prevent searching forever (receiving a new objective resets it).
 
-    // boxMinX<=x<=boxMaxX かつ |z|<=boxHalfZ の矩形だけを陸地とし、それ以外を水域とするフェイク
-    // （半島/岬の付け根を模す：直進はこの矩形にぶつかるが、z方向へ大きく迂回すれば回り込める）。
+    // A fake where only the rectangle boxMinX<=x<=boxMaxX and |z|<=boxHalfZ is land and everything
+    // else is water (models the base of a peninsula/cape: going straight hits this rectangle, but a
+    // wide detour in the z direction can get around it).
     private class FakeWaterExceptBox : IWaterSampler
     {
         private readonly float _minX, _maxX, _halfZ;
@@ -987,8 +1013,10 @@ public class MovementStepTests
         public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
     }
 
-    // 原点からの半径内だけが水域というフェイク（半径をユニットの1tick移動距離より充分小さくすれば、
-    // 直進はもちろんどの迂回方向へ一歩踏み出しても必ず陸地に着地する＝完全に陸に囲まれた目標を模す）。
+    // A fake where only the area within a radius of the origin is water (if the radius is made
+    // sufficiently smaller than the unit's per-tick travel distance, one step in any detour direction —
+    // let alone straight ahead — always lands on land = models an objective completely surrounded by
+    // land).
     private class FakeWaterOnlyNearOrigin : IWaterSampler
     {
         private readonly float _radius;
@@ -1003,22 +1031,24 @@ public class MovementStepTests
         var s = OneSeaUnit(0f, 1000f); // heading is pure +X
         var type = s.Types.Get("Destroyer_T1");
         float stepLen = type.Speed * MovementStep.GlobalSpeedMultiplier * 1f;
-
-        // 直進の着地点(stepLen, 0)だけを覆う狭い矩形の陸地。±30度回転した着地点はどちらもこの矩形の
-        // 外に出るはずなので、迂回ロジックが実際に候補方向を順に試していることを幾何学的に保証する。
+        // A narrow rectangle of land covering only the straight-ahead landing point (stepLen, 0). The
+        // landing points rotated by ±30 degrees should both fall outside this rectangle, geometrically
+        // guaranteeing that the detour logic really does try the candidate directions in order.
         s.Water = new FakeWaterExceptBox(stepLen - 1f, stepLen + 1f, 1f);
 
         MovementStep.Advance(s, 1f);
 
         var pos = s.Units[0].Position;
-        // アルゴリズムは0度(直進)→+30度→-30度→...の順に試す想定。直進が塞がっているので+30度が採用され、
-        // 同じ歩幅(stepLen)で+30度回転した点へ着地するはず。
+        // The algorithm is expected to try 0 degrees (straight) -> +30 -> -30 -> ... in order. Straight
+        // ahead is blocked, so +30 degrees is chosen and the unit should land at the point rotated +30
+        // degrees with the same step length (stepLen).
         double rad = 30.0 * System.Math.PI / 180.0;
         float expectedX = (float)(stepLen * System.Math.Cos(rad));
         float expectedZ = (float)(stepLen * System.Math.Sin(rad));
         Assert.Equal(expectedX, pos.X, 1);
         Assert.Equal(expectedZ, pos.Z, 1);
-        // 迂回後の着地点は矩形の外＝水域でなければならない（陸地へテレポートしていないことの再確認）。
+        // The landing point after the detour must be outside the rectangle = in water (re-confirming it
+        // did not teleport onto land).
         Assert.True(s.Water.IsWater(pos.X, pos.Z));
     }
 
@@ -1026,8 +1056,9 @@ public class MovementStepTests
     public void Sea_unit_makes_net_progress_working_its_way_around_a_peninsula_over_several_ticks()
     {
         var s = OneSeaUnit(0f, 30f);
-        // (10<=x<=20, |z|<=5) だけが陸地: 目的地までの直線上に立ちはだかるが、有限の幅なので
-        // 大きく迂回すれば回り込める（無限に続く壁ではない、という意味で「半島」）。
+        // Only (10<=x<=20, |z|<=5) is land: it stands in the way on the straight line to the objective,
+        // but has finite width, so a wide detour can get around it (a "peninsula" in the sense of not
+        // being an endless wall).
         s.Water = new FakeWaterExceptBox(10f, 20f, 5f);
 
         float initialDist = s.Units[0].Position.HorizontalDistanceTo(new WorldPos(30f, 0f, 0f));
@@ -1036,7 +1067,8 @@ public class MovementStepTests
         float finalDist = s.Units[0].Position.HorizontalDistanceTo(new WorldPos(30f, 0f, 0f));
 
         Assert.True(finalDist < initialDist, $"expected progress toward the target; initial={initialDist} final={finalDist}");
-        // 迂回中も一度も陸地へ着地していないはず（現在位置が常に水域）という不変条件も併せて確認する。
+        // Also verify the invariant that it never landed on land during the detour (its current
+        // position is always in water).
         Assert.True(s.Water.IsWater(s.Units[0].Position.X, s.Units[0].Position.Z));
     }
 
@@ -1044,24 +1076,25 @@ public class MovementStepTests
     public void Sea_unit_gives_up_and_goes_Idle_after_SeaBlockedIdleHours_of_being_fully_landlocked()
     {
         var s = OneSeaUnit(0f, 1000f);
-        // 半径2の円の中だけが水域: destroyerの1tickの移動距離よりずっと小さいので、直進・6方向の
-        // 迂回のいずれを試しても必ず陸地に着地する＝完全に陸へ囲まれた目的地を模す。
+        // Only the circle of radius 2 is water: much smaller than a destroyer's per-tick travel
+        // distance, so straight ahead and all 6 detour directions always land on land = models an
+        // objective completely surrounded by land.
         s.Water = new FakeWaterOnlyNearOrigin(2f);
         var u = s.Units[0];
 
         for (int hour = 1; hour < (int)MovementStep.SeaBlockedIdleHours; hour++)
         {
             MovementStep.Advance(s, 1f);
-            Assert.Equal(UnitState.Moving, u.State); // まだ閾値未満: 進撃状態のまま探索を続けている
-            Assert.Equal(0f, u.Position.X, 3); // どの方向にも進めていない
+            Assert.Equal(UnitState.Moving, u.State); // still below the threshold: keeps searching in the advancing state
+            Assert.Equal(0f, u.Position.X, 3); // has not been able to advance in any direction
         }
 
-        MovementStep.Advance(s, 1f); // ちょうど閾値(SeaBlockedIdleHours)に到達する呼び出し
+        MovementStep.Advance(s, 1f); // the call that reaches the threshold (SeaBlockedIdleHours) exactly
         Assert.Equal(UnitState.Idle, u.State);
         Assert.Equal(0f, u.Position.X, 3);
 
-        // Idleになった後はResolveDomainObjectiveがOrderTargetPosを一切参照しなくなるため、
-        // 何度呼び出しても永遠に同じ場所で静止したまま（見た目のスピンが起きない）。
+        // Once Idle, ResolveDomainObjective no longer consults OrderTargetPos at all, so no matter how
+        // many times it is called the unit stays still in the same place forever (no visible spinning).
         MovementStep.Advance(s, 100f);
         Assert.Equal(UnitState.Idle, u.State);
         Assert.Equal(0f, u.Position.X, 3);
@@ -1078,14 +1111,14 @@ public class MovementStepTests
             MovementStep.Advance(s, 1f);
         Assert.Equal(UnitState.Idle, u.State); // gave up on the first objective
 
-        // 新しい命令(InvasionOrders相当)がOrderTargetPosを変えてState=Movingへ戻したと仮定する。
+        // Assume a new order (equivalent to InvasionOrders) changed OrderTargetPos and returned State to Moving.
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(2000f, 0f, 0f);
 
         MovementStep.Advance(s, 1f);
 
-        // 目的地が変わったのでSeaBlockedHoursは0からやり直しのはず: 1回のtickだけでは
-        // まだ閾値(SeaBlockedIdleHours)に届かず、即座にIdleへ戻ることはない。
+        // The objective changed, so SeaBlockedHours should restart from 0: a single tick does not yet
+        // reach the threshold (SeaBlockedIdleHours), so it must not fall back to Idle immediately.
         Assert.Equal(UnitState.Moving, u.State);
     }
 
@@ -1102,10 +1135,11 @@ public class MovementStepTests
         Assert.Equal(0, u.PathIndex);
     }
 
-    // --- Task77: 「地上ユニットが海の中に入っていける」不具合の修正（陸上ユニットのオフロード水域禁止） ---
+    // --- Task77: fix for the "ground units can walk into the sea" bug (no off-road water entry for land units) ---
 
-    // AdvanceSeaのFakeWaterSampler（x<=boundaryが水）とは逆に、「boundary以上が水」というフェイク
-    // （陸から海へ向けて進む陸上ユニットのシナリオに合わせた向き）。
+    // The opposite of AdvanceSea's FakeWaterSampler (water where x<=boundary): a fake where "water is
+    // at and beyond the boundary" (oriented for the scenario of a land unit advancing from land toward
+    // the sea).
     private class FakeWaterBeyondX : IWaterSampler
     {
         private readonly float _boundaryX;
@@ -1122,24 +1156,26 @@ public class MovementStepTests
         public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return IsWater(x, z); }
     }
 
-    // オフロードの直線フォールバック（Pathなし）で、次の一歩が水域に入るなら、そのtickは一切移動しない
-    // （波打ち際で足止め）。何tick進めても同じ場所に留まり続けることも確認する（AdvanceSeaの陸地版と
-    // 対称の、シンプルで決定的なルール）。
+    // In the off-road straight-line fallback (no Path), if the next step would enter water, the unit
+    // does not move at all that tick (stopped at the water's edge). Also confirm it stays in the same
+    // place no matter how many ticks pass (a simple, deterministic rule symmetric to AdvanceSea's land
+    // version).
     [Fact]
     public void Advance_land_unit_off_road_step_into_water_is_cancelled_and_unit_stays_at_the_shoreline()
     {
-        var s = OneMovingUnit(); // (0,0,0) -> OrderTargetPos (1000,0,0), Pathなし
-        s.Water = new FakeWaterBeyondX(3f); // x>=3が水（stepLen(≈5.4)は一歩でこれを超える）
+        var s = OneMovingUnit(); // (0,0,0) -> OrderTargetPos (1000,0,0), no Path
+        s.Water = new FakeWaterBeyondX(3f); // x>=3 is water (stepLen(≈5.4) crosses it in one step)
 
         MovementStep.Advance(s, 1f);
         Assert.Equal(0f, s.Units[0].Position.X, 3);
 
-        // 複数tick進めても、水域の外に留まったまま（Idle等への自動遷移はしない、単純な足止め）。
+        // Even after several more ticks, it stays outside the water (no automatic transition to Idle
+        // etc., just a simple standstill).
         MovementStep.Advance(s, 5f);
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
 
-    // 集結(RallyHold)の直線フォールバックでも同様に水域侵入は禁止される。
+    // Water entry is likewise forbidden in the rally (RallyHold) straight-line fallback.
     [Fact]
     public void Advance_RallyHold_unit_off_road_step_into_water_is_cancelled()
     {
@@ -1157,7 +1193,7 @@ public class MovementStepTests
         Assert.Equal(0f, s.Units[0].Position.X, 3);
     }
 
-    // 遮蔽移動(AdvanceTowardCover)の直線区間でも同様に水域侵入は禁止される。
+    // Water entry is likewise forbidden in the straight-line segment of cover movement (AdvanceTowardCover).
     [Fact]
     public void Advance_toward_CoverDestination_off_road_step_into_water_is_cancelled()
     {
@@ -1166,26 +1202,28 @@ public class MovementStepTests
         s.Types.Register(MvpUnitTypes.Tank_T1());
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Engaging;
-        u.CoverDestination = new WorldPos(0, 0, 1000); // 南北方向、Z方向へ動こうとする
+        u.CoverDestination = new WorldPos(0, 0, 1000); // north-south direction, tries to move along Z
         s.Units.Add(u);
-        s.Water = new FakeWaterBeyondZ(3f); // z>=3が水
+        s.Water = new FakeWaterBeyondZ(3f); // z>=3 is water
 
         MovementStep.Advance(s, 1f);
 
         Assert.Equal(0f, s.Units[0].Position.Z, 3);
     }
 
-    // Task77の要（橋の回帰防止）: 経路上(Path/ConsumePath)は水域チェックの対象外である。橋の直下は
-    // HasWater的に"水"だが、道路網ノードを辿っている限り通行可能でなければならない。水域サンプラーを
-    // 供給しても、Path追従の結果がAdvance_large_step_crosses_first_waypoint_and_continues_toward_second
-    // と全く同じであること（水域チェックで足止めされていないこと）を確認する。
+    // The heart of Task77 (bridge regression guard): while on a path (Path/ConsumePath), the water
+    // check does not apply. Directly under a bridge is "water" in the HasWater sense, but as long as
+    // the unit is traversing road-network nodes it must remain passable. Confirm that even with a
+    // water sampler supplied, the Path-following result is exactly the same as
+    // Advance_large_step_crosses_first_waypoint_and_continues_toward_second (i.e. it was not stopped
+    // by the water check).
     [Fact]
     public void Advance_water_sampler_does_not_block_movement_while_following_a_road_Path_bridge_regression()
     {
         var s = UnitWithPath(); // waypoints (100,0,0), (100,0,100)
-        s.Water = new FakeWaterBeyondX(0f); // x>=0は全て"水"（橋の下を含む極端なケース）
+        s.Water = new FakeWaterBeyondX(0f); // everything at x>=0 is "water" (an extreme case including under the bridge)
 
-        MovementStep.Advance(s, 150f / TankSpeedPerHour); // Advance_large_step_crosses_first_waypoint_and_continues_toward_secondと同じdt
+        MovementStep.Advance(s, 150f / TankSpeedPerHour); // same dt as Advance_large_step_crosses_first_waypoint_and_continues_toward_second
         var u = s.Units[0];
 
         Assert.Equal(100f, u.Position.X, 1);
@@ -1193,8 +1231,9 @@ public class MovementStepTests
         Assert.Equal(1, u.PathIndex);
     }
 
-    // Path消化後のオフロード残り区間（"経路が目的地の手前で尽きたときの最終区間"）だけが水域チェックの
-    // 対象になり、経路上で既に消化した部分は影響を受けないことを確認する。
+    // Confirm that only the off-road remainder after the Path is consumed (the "final leg when the
+    // path ran out short of the destination") is subject to the water check, and the portion already
+    // consumed on the path is unaffected.
     [Fact]
     public void Advance_blocks_only_the_off_road_remainder_after_Path_is_exhausted_when_it_enters_water()
     {
@@ -1204,17 +1243,18 @@ public class MovementStepTests
         var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
         u.State = UnitState.Moving;
         u.OrderTargetPos = new WorldPos(1000, 0, 0);
-        u.Path = new List<WorldPos> { new WorldPos(50, 0, 0) }; // 陸上の道路の終点
+        u.Path = new List<WorldPos> { new WorldPos(50, 0, 0) }; // end of the on-land road
         u.PathIndex = 0;
         u.PathTarget = u.OrderTargetPos;
         s.Units.Add(u);
-        s.Water = new FakeWaterBeyondX(55f); // 道路の終点(50)より先、水域は x>=55
+        s.Water = new FakeWaterBeyondX(55f); // water is x>=55, beyond the road's end (50)
 
-        // stepLen=60: ConsumePathが50を消化(残り10)、オフロード残り10を(1000,0,0)へ向けて進めようとすると
-        // nx = 50 + 950*(10/950) ≈ 59.95 >= 55 -> 水域なのでオフロード分は一切動かない。
+        // stepLen=60: ConsumePath consumes 50 (10 remaining); trying to advance the off-road remainder
+        // of 10 toward (1000,0,0) gives nx = 50 + 950*(10/950) ≈ 59.95 >= 55 -> water, so the off-road
+        // portion does not move at all.
         MovementStep.Advance(s, 60f / TankSpeedPerHour);
 
-        Assert.Equal(50f, u.Position.X, 1); // 道路の終点で足止め（消化済みの50fは失われない）
-        Assert.Equal(1, u.PathIndex); // ウェイポイントは消化済み
+        Assert.Equal(50f, u.Position.X, 1); // stopped at the road's end (the already-consumed 50f is not lost)
+        Assert.Equal(1, u.PathIndex); // the waypoint has been consumed
     }
 }

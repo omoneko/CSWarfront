@@ -3,14 +3,14 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// FindPath のジッタ付きオーバーロード（う回路選択）のテスト。
-/// RoadGraph自体は辺の集合を外部に公開しないため、テスト側でグラフ構築と並行して
-/// 「どのノードがどのノードに繋がっているか」を独自に記録し、返ってきた経路が
-/// 本当に実在する辺だけを辿っているかを検証するヘルパー(TrackedGraph)を使う。
+/// Tests for the jittered overload of FindPath (detour-route selection).
+/// RoadGraph itself does not expose its edge set, so the tests use a helper (TrackedGraph) that
+/// records "which nodes connect to which" on its own alongside graph construction, and then
+/// verifies that the returned route traverses only edges that actually exist.
 /// </summary>
 public class RoadGraphJitterTests
 {
-    /// <summary>RoadGraphの構築と並行して隣接関係・座標を記録し、返ってきた経路の妥当性を検証できるようにする薄いラッパー。</summary>
+    /// <summary>A thin wrapper that records adjacency and coordinates alongside RoadGraph construction so the returned route can be validated.</summary>
     private class TrackedGraph
     {
         public readonly RoadGraph Graph = new RoadGraph();
@@ -39,7 +39,7 @@ public class RoadGraphJitterTests
             return 0;
         }
 
-        /// <summary>経路の各連続区間が実在の辺であること、および経路が本当にgoalへ到達していることを検証する。</summary>
+        /// <summary>Verifies that every consecutive segment of the route is a real edge and that the route genuinely reaches the goal.</summary>
         public void AssertValidRoute(List<WorldPos> route, WorldPos start, WorldPos goal)
         {
             Assert.NotNull(route);
@@ -87,9 +87,10 @@ public class RoadGraphJitterTests
     }
 
     /// <summary>
-    /// A(0,0,0) から D(100,0,0) へ、B(50,0,50)経由とC(50,0,-50)経由の2つの並行路があり、
-    /// 対称なのでコストは厳密に等しい（ジッタなしでは低id=Bが tie-break で選ばれる）。
-    /// ジッタをかけると辺ごとの係数がseed依存で変わるため、seedによってB経由・C経由が入れ替わる。
+    /// From A(0,0,0) to D(100,0,0) there are two parallel routes, one via B(50,0,50) and one via
+    /// C(50,0,-50); they are symmetric so their costs are exactly equal (without jitter the
+    /// tie-break picks the lower id = B). With jitter, the per-edge factor varies with the seed, so
+    /// different seeds alternate between the B route and the C route.
     /// </summary>
     private static TrackedGraph ParallelRoutes()
     {
@@ -106,7 +107,7 @@ public class RoadGraphJitterTests
     private static readonly WorldPos ParallelStart = new WorldPos(0, 0, 0);
     private static readonly WorldPos ParallelGoal = new WorldPos(100, 0, 0);
 
-    // --- 3引数オーバーロード / seed=0,jitter=0 は現状の最短経路探索と完全に同一であること ---
+    // --- the 3-arg overload / seed=0,jitter=0 must be exactly identical to the current shortest-path search ---
 
     [Fact]
     public void ThreeArg_and_zero_seed_zero_jitter_produce_identical_path_on_chain()
@@ -134,7 +135,7 @@ public class RoadGraphJitterTests
             Assert.Equal(a[i].X, b[i].X, 3);
             Assert.Equal(a[i].Z, b[i].Z, 3);
         }
-        // tie-break: 低いid(node 2 = B, 北側)が選ばれるはず
+        // tie-break: the lower id (node 2 = B, the north side) should be chosen
         Assert.Equal(50f, a[0].Z, 2);
     }
 
@@ -156,13 +157,13 @@ public class RoadGraphJitterTests
         Assert.Equal(shortest[0].Z, withJitterNoSeed[0].Z, 2);
     }
 
-    // --- 実際の "う回路選択" 挙動 ---
+    // --- the actual "detour selection" behavior ---
 
     [Fact]
     public void Different_seeds_choose_different_routes_for_at_least_some_seeds()
     {
         var g = ParallelRoutes();
-        var chosenBranches = new HashSet<float>(); // 経由ノードのZ座標(+50 or -50)で判別
+        var chosenBranches = new HashSet<float>(); // distinguished by the via-node's Z coordinate (+50 or -50)
 
         for (uint seed = 1; seed <= 40; seed++)
         {
@@ -197,7 +198,7 @@ public class RoadGraphJitterTests
     [Fact]
     public void Different_units_ie_different_seeds_can_get_different_routes_on_a_grid()
     {
-        // 3x3グリッドは(0,0)から(200,200)へ複数の等距離最短経路を持つ。
+        // The 3x3 grid has multiple equal-length shortest paths from (0,0) to (200,200).
         var g = Grid3x3();
         var firstWaypoints = new HashSet<string>();
 
@@ -212,14 +213,14 @@ public class RoadGraphJitterTests
             "expected route variety on the grid across 25 seeds, got only: " + string.Join(",", firstWaypoints));
     }
 
-    // --- 連結性・到達可能性はジッタで変化しない ---
+    // --- connectivity/reachability must not change under jitter ---
 
     [Fact]
     public void Jittered_search_still_returns_null_for_disconnected_graph()
     {
         var g = new TrackedGraph();
         g.AddNode(1, new WorldPos(0, 0, 0));
-        g.AddNode(2, new WorldPos(500, 0, 0)); // 辺なし
+        g.AddNode(2, new WorldPos(500, 0, 0)); // no edges
         var path = g.Graph.FindPath(new WorldPos(0, 0, 0), new WorldPos(500, 0, 0), 10f, 7u, 0.35f);
         Assert.Null(path);
     }

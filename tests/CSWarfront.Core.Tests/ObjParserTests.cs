@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
-// Task57: MissileDisaster.Core.ObjParser を CSWarfront.Core へポートしたものの検証。
-// テスト内容は移植元 MissileDisaster.Core.Tests.ObjParserTests と同一（挙動は変更していない）。
+// Task57: verifies the port of MissileDisaster.Core.ObjParser into CSWarfront.Core.
+// The test content is identical to the source MissileDisaster.Core.Tests.ObjParserTests (behavior unchanged).
 public class ObjParserTests
 {
     [Fact]
@@ -133,13 +133,13 @@ public class ObjParserTests
             "v 0 0 0\n" +
             "v 1 0 0\n" +
             "v 0 1 0\n" +
-            "usemtl マテリアル.001\n" +
+            "usemtl Matériau.001\n" +
             "f 1 2 3\n";
 
         ObjData data = ObjParser.Parse(obj);
 
         Assert.Single(data.Submeshes);
-        Assert.Equal("マテリアル.001", data.Submeshes[0].Material);
+        Assert.Equal("Matériau.001", data.Submeshes[0].Material);
     }
 
     [Fact]

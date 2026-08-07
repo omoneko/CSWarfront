@@ -1,15 +1,16 @@
-﻿using CSWarfront.Core;
+using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// Task85（ユーザー要望「敵拠点を占領できるのは地上戦力だけ」「戦闘機は戦闘機・爆撃機・KAIJUのみ」
-/// 「爆撃機は地上目標・KAIJUのみ」「駆逐艦は占領不可」「空母は発着艦プラットフォームのみ」）の
-/// 標的規則とBaseCombatStep/ThreatCombatStepへの適用テスト。
-/// ユニット間の標的制限（CanTargetDomains）はTargetSearchTestsの方でカバーする。
+/// Task85 (user requests: "only ground forces can capture enemy bases", "fighters may target only
+/// fighters, bombers, and KAIJU", "bombers may target only ground targets and KAIJU", "destroyers
+/// cannot capture", "carriers are launch/landing platforms only") — tests for the targeting rules
+/// and their application to BaseCombatStep/ThreatCombatStep.
+/// Unit-vs-unit targeting restrictions (CanTargetDomains) are covered by TargetSearchTests instead.
 /// </summary>
 public class TargetingRulesTests
 {
-    // --- TargetingRules 単体 ---
+    // --- TargetingRules in isolation ---
 
     [Fact]
     public void Fighter_and_carrier_cannot_attack_bases_others_can()
@@ -39,11 +40,11 @@ public class TargetingRulesTests
         Assert.True(TargetingRules.CanAttackThreat(UnitCategory.Tank));
     }
 
-    // --- BaseCombatStep への適用 ---
+    // --- Application to BaseCombatStep ---
 
-    /// <summary>maxHpを省略するとMaxHP=開始HPになり自然回復（Task89）は発生しない
-    /// （回復と無関係なテストの期待値を単純に保つため）。回復を検証するテストは明示的に
-    /// maxHpを渡す。</summary>
+    /// <summary>Omitting maxHp makes MaxHP = starting HP, so natural regeneration (Task89) never
+    /// kicks in (keeps the expected values simple in tests unrelated to regen). Tests that verify
+    /// regeneration pass maxHp explicitly.</summary>
     private static WarState StateWithHostileBase(float baseHp, float maxHp = -1f)
     {
         var s = new WarState();
@@ -61,13 +62,13 @@ public class TargetingRulesTests
     [Fact]
     public void Bomber_reduces_base_hp_only_down_to_one()
     {
-        var s = StateWithHostileBase(10f); // 爆撃機の1tickダメージで余裕で0を割る低HP
+        var s = StateWithHostileBase(10f); // HP low enough that one tick of bomber damage would easily cross 0
         s.Types.Register(AirUnitRoster.Get(UnitCategory.TacticalBomber, 5));
         s.Units.Add(new UnitInstance(1, "TacticalBomber_T5", 0, 100f, new WorldPos(0, 0, 0)));
 
         BaseCombatStep.Advance(s, 5f);
 
-        Assert.Equal(1f, s.Bases[0].CurrentHP, 3); // 0ではなく1で止まる（占領は陸上戦力のみ）
+        Assert.Equal(1f, s.Bases[0].CurrentHP, 3); // Stops at 1, not 0 (capture is land-forces-only)
     }
 
     [Fact]
@@ -91,7 +92,7 @@ public class TargetingRulesTests
 
         BaseCombatStep.Advance(s, 5f);
 
-        Assert.Equal(0f, s.Bases[0].CurrentHP, 3); // 陸上戦力は0まで削れる＝占領できる
+        Assert.Equal(0f, s.Bases[0].CurrentHP, 3); // Land forces can grind HP down to 0 = can capture
     }
 
     [Fact]
@@ -121,7 +122,8 @@ public class TargetingRulesTests
     [Fact]
     public void Air_then_land_can_finish_a_base_the_air_left_at_one_hp()
     {
-        // 航空で1まで削った後、陸上が最後の1を削って0にできる（協同攻略の想定フロー）。
+        // After air grinds it down to 1, land can remove the last 1 HP and take it to 0
+        // (the intended combined-arms capture flow).
         var s = StateWithHostileBase(10f);
         s.Types.Register(AirUnitRoster.Get(UnitCategory.TacticalBomber, 5));
         s.Types.Register(MvpUnitTypes.Tank_T1());
@@ -135,13 +137,14 @@ public class TargetingRulesTests
         Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
     }
 
-    // --- Task88: HP床に達した拠点への攻撃停止 ---
+    // --- Task88: stop attacking bases that have reached the HP floor ---
 
     [Fact]
     public void Bomber_stops_shooting_a_base_already_at_the_floor()
     {
-        // 実機報告「爆撃機が敵拠点HPが1になっても攻撃をやめない」の修正。床(1)に達した拠点へは
-        // ダメージも発砲イベントも一切発生させない（無意味な爆撃を延々と続けない）。
+        // Fix for the field report "bombers keep attacking even after an enemy base's HP hits 1".
+        // Against a base at the floor (1), neither damage nor firing events are produced at all
+        // (no endlessly continuing pointless bombardment).
         var s = StateWithHostileBase(1f);
         s.Types.Register(AirUnitRoster.Get(UnitCategory.TacticalBomber, 1));
         s.Units.Add(new UnitInstance(1, "TacticalBomber_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -149,13 +152,13 @@ public class TargetingRulesTests
         BaseCombatStep.Advance(s, 5f);
 
         Assert.Equal(1f, s.Bases[0].CurrentHP, 3);
-        Assert.Empty(s.RecentShots); // 発砲の見た目も出さない
+        Assert.Empty(s.RecentShots); // No muzzle-flash visuals either
     }
 
     [Fact]
     public void Land_unit_still_finishes_a_base_at_one_hp()
     {
-        // 陸上の床は0なので、HP1の拠点は引き続き攻撃・占領対象。
+        // The land floor is 0, so a base at 1 HP remains a valid attack/capture target.
         var s = StateWithHostileBase(1f);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -165,12 +168,12 @@ public class TargetingRulesTests
         Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
     }
 
-    // --- Task89: 基地HPの自然回復 ---
+    // --- Task89: natural regeneration of base HP ---
 
     [Fact]
     public void Damaged_base_slowly_regenerates_hp()
     {
-        var s = StateWithHostileBase(250f, 500f); // 攻撃者なし
+        var s = StateWithHostileBase(250f, 500f); // No attackers
         BaseCombatStep.Advance(s, 1f);
         Assert.Equal(250f + BaseCombatStep.BaseRegenPerHour, s.Bases[0].CurrentHP, 2);
     }
@@ -178,7 +181,7 @@ public class TargetingRulesTests
     [Fact]
     public void Regeneration_caps_at_max_hp()
     {
-        var s = StateWithHostileBase(499f, 500f); // MaxHP=500の直下
+        var s = StateWithHostileBase(499f, 500f); // Just below MaxHP=500
         BaseCombatStep.Advance(s, 5f);
         Assert.Equal(500f, s.Bases[0].CurrentHP, 2);
     }
@@ -186,7 +189,8 @@ public class TargetingRulesTests
     [Fact]
     public void Captured_base_at_zero_hp_does_not_regenerate()
     {
-        // HP0（占領処理待ち）の基地は回復しない——回復させると占領が二度と成立しなくなる。
+        // A base at 0 HP (awaiting capture processing) does not regenerate — if it did, the
+        // capture could never complete.
         var s = StateWithHostileBase(0f, 500f);
         BaseCombatStep.Advance(s, 1f);
         Assert.Equal(0f, s.Bases[0].CurrentHP, 3);
@@ -195,23 +199,23 @@ public class TargetingRulesTests
     [Fact]
     public void Land_attack_exceeding_regen_still_grinds_the_base_down()
     {
-        // Tank_T1の攻城DPS 40*0.8=32/h > 回復20/h → 正味12/hで削れ続ける＝
-        // 「回復速度を上回る攻撃が地上兵力から加えられた場合のみ占領される」の要件を満たす。
+        // Tank_T1 siege DPS 40*0.8=32/h > regen 20/h -> keeps grinding at a net 12/h, satisfying
+        // the requirement "a base is captured only when ground forces attack faster than it regenerates".
         var s = StateWithHostileBase(100f, 500f);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
 
         BaseCombatStep.Advance(s, 1f);
 
-        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 42f * 0.8f; // 回復→攻撃の順（Task91: Tank Attack 42）
+        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 42f * 0.8f; // Regen first, then attack (Task91: Tank Attack 42)
         Assert.Equal(expected, s.Bases[0].CurrentHP, 2);
     }
 
     [Fact]
     public void Weak_land_attack_below_regen_cannot_capture()
     {
-        // 回復を下回る攻撃（歩兵1体: DamagePerHit(20,0)=20 × siege accuracy 0.8 = 16/h < 20/h）では
-        // 正味プラスで、基地は削り切れない。
+        // An attack below the regen rate (one infantry: DamagePerHit(20,0)=20 x siege accuracy 0.8
+        // = 16/h < 20/h) is a net gain, so the base can never be ground down.
         var s = StateWithHostileBase(100f, 500f);
         s.Types.Register(LandUnitRoster.Get(UnitCategory.Infantry, 1));
         s.Units.Add(new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0)));
@@ -222,7 +226,7 @@ public class TargetingRulesTests
             "expected regen to outpace a sub-regen attack (hp=" + s.Bases[0].CurrentHP + ")");
     }
 
-    // --- ThreatCombatStep への適用 ---
+    // --- Application to ThreatCombatStep ---
 
     [Fact]
     public void Carrier_does_not_damage_threats()
@@ -259,6 +263,6 @@ public class TargetingRulesTests
 
         ThreatCombatStep.Advance(s, 1f);
 
-        Assert.True(threat.CurrentHP < 65000f); // 戦闘機はKAIJUを攻撃できる
+        Assert.True(threat.CurrentHP < 65000f); // Fighters can attack KAIJU
     }
 }

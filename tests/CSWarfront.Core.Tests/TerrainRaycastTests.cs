@@ -4,13 +4,13 @@ using Xunit;
 namespace CSWarfront.Core.Tests
 {
     /// <summary>
-    /// TerrainRaycast（Task77: 右クリック地点指定の修正）のテスト。
-    /// CS1の地形はUnity物理コライダーを持たないため、カメラレイと地形高さ
-    /// （IHeightSampler）の交点を純粋計算で求める。
+    /// Tests for TerrainRaycast (Task77: fix for right-click point targeting).
+    /// CS1 terrain has no Unity physics collider, so the intersection of the camera ray
+    /// and the terrain height (IHeightSampler) is computed purely mathematically.
     /// </summary>
     public sealed class TerrainRaycastTests
     {
-        /// <summary>常に一定高さを返す平坦地形。</summary>
+        /// <summary>Flat terrain that always returns a constant height.</summary>
         private sealed class FlatSampler : IHeightSampler
         {
             private readonly float _height;
@@ -22,7 +22,7 @@ namespace CSWarfront.Core.Tests
             }
         }
 
-        /// <summary>x&gt;=閾値で高くなる段差地形（丘の手前でヒットすることの検証用）。</summary>
+        /// <summary>Stepped terrain that rises at x&gt;=threshold (used to verify hits land in front of the hill).</summary>
         private sealed class StepSampler : IHeightSampler
         {
             public bool TrySampleHeight(float x, float z, out float height)
@@ -58,7 +58,7 @@ namespace CSWarfront.Core.Tests
         [Fact]
         public void ObliqueRay_HitsFlatTerrainAtPlaneIntersection()
         {
-            // 原点(0,100,0)から dir=(1,-1,0)/√2 → y=0平面とは x=100 で交わる
+            // From origin (0,100,0) with dir=(1,-1,0)/sqrt(2) -> intersects the y=0 plane at x=100
             float inv = 1f / (float)System.Math.Sqrt(2.0);
             WorldPos hit;
             bool ok = TerrainRaycast.TryFind(
@@ -73,15 +73,15 @@ namespace CSWarfront.Core.Tests
         [Fact]
         public void ShallowRay_HitsRisingStepBeforeFarPlane()
         {
-            // ほぼ水平のレイ: y=150から緩く下るレイはx=100の段差(高さ200)の壁に当たる。
-            // 平面交差1回では遥か遠方に飛ぶが、レイマーチなら手前の丘で止まる。
+            // Nearly horizontal ray: a gently descending ray from y=150 hits the wall of the step (height 200) at x=100.
+            // A single plane intersection would land far away, but ray marching stops at the hill in front.
             WorldPos hit;
             bool ok = TerrainRaycast.TryFind(
                 new WorldPos(0f, 150f, 0f), 0.999f, -0.045f, 0f,
                 new StepSampler(), 10000f, out hit);
 
             Assert.True(ok);
-            // 段差(x=100)以降、レイ高さ(150弱)が地形(200)を下回った直後でヒットする
+            // Hits just after the ray height (just under 150) drops below the terrain (200) past the step (x=100)
             Assert.InRange(hit.X, 99f, 120f);
         }
 
@@ -121,7 +121,7 @@ namespace CSWarfront.Core.Tests
         [Fact]
         public void TerrainBeyondMaxDistance_Misses()
         {
-            // 真下100mに地形があるが、maxDistance=50なら届かない
+            // Terrain is 100 m straight below, but with maxDistance=50 it cannot be reached
             WorldPos hit;
             bool ok = TerrainRaycast.TryFind(
                 new WorldPos(0f, 100f, 0f), 0f, -1f, 0f,
@@ -133,7 +133,7 @@ namespace CSWarfront.Core.Tests
         [Fact]
         public void OriginBelowTerrain_MissesInsteadOfSnappingBackward()
         {
-            // 開始点が既に地形より下（地下カメラ等の異常系）: 後退ヒットさせず不成立にする
+            // Start point is already below the terrain (abnormal case such as an underground camera): fail instead of hitting backwards
             WorldPos hit;
             bool ok = TerrainRaycast.TryFind(
                 new WorldPos(0f, -10f, 0f), 0f, -1f, 0f,

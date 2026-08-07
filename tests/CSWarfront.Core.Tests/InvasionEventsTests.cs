@@ -2,12 +2,13 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// InvasionEvents（Task94: Workshopコメント要望「敵ユニットが都市の外からスポーンして攻めてくる
-/// オプション」、Task95: 実機フィードバックにより侵略者役を専用のInvader勢力へ変更）のテスト。
+/// Tests for InvasionEvents (Task94: Workshop comment request "an option where enemy units spawn
+/// outside the city and attack it"; Task95: playtest feedback moved the invader role to a dedicated
+/// Invader faction).
 /// </summary>
 public class InvasionEventsTests
 {
-    /// <summary>勢力5＋Invader・勢力0が基地1つを所有する標準状態。</summary>
+    /// <summary>Standard state: 5 factions + Invader, with faction 0 owning one base.</summary>
     private static WarState DefendedState()
     {
         var s = new WarState();
@@ -44,22 +45,22 @@ public class InvasionEventsTests
             Assert.True(s.Relations.Get(f, Faction.InvaderFactionId).IsHostile());
         }
 
-        // Setは黙って無視される（Options等のどの操作でも友好化できない）。
+        // Set is silently ignored (no operation, including Options, can make them friendly).
         s.Relations.Set(Faction.InvaderFactionId, 0, Relation.Allied);
         Assert.True(s.Relations.Get(Faction.InvaderFactionId, 0).IsHostile());
 
-        // 外部脅威（KAIJU/Alien）に対しても常時Hostile（表外Idの既定）。
+        // Always Hostile toward external threats (KAIJU/Alien) as well (the default for ids outside the table).
         Assert.True(s.ThreatRelations.Get(Faction.InvaderFactionId, ThreatKind.Kaiju).IsHostile());
     }
 
     [Fact]
     public void FactionStatus_never_eliminates_the_invader_faction()
     {
-        var s = DefendedState(); // Invaderは基地を1つも所有しない
+        var s = DefendedState(); // the Invader owns no bases at all
         FactionStatus.Refresh(s);
 
         Assert.False(s.FindFaction(Faction.InvaderFactionId).Eliminated);
-        Assert.True(s.FindFaction(1).Eliminated); // 通常勢力は基地なし→従来どおりEliminated
+        Assert.True(s.FindFaction(1).Eliminated); // a normal faction with no bases -> Eliminated as before
     }
 
     [Fact]
@@ -71,14 +72,14 @@ public class InvasionEventsTests
         Assert.True(spawned > 0, "expected a wave to spawn");
         Assert.Equal(spawned, s.Units.Count);
 
-        // 侵略者役 = 専用のInvader勢力（Task95。既存勢力を使い回さない）。
+        // The invader role = the dedicated Invader faction (Task95; existing factions are not reused).
         foreach (var u in s.Units)
             Assert.Equal(Faction.InvaderFactionId, u.FactionId);
 
-        // 防衛側（勢力0）と敵対関係になっている（ハードコード）。
+        // Hostile toward the defenders (faction 0) (hard-coded).
         Assert.True(s.Relations.Get(Faction.InvaderFactionId, 0).IsHostile());
 
-        // スポーン位置はマップ端の辺上（±SpawnEdgeDistance付近、散らし60m以内）。
+        // Spawn positions lie on a map-edge side (around ±SpawnEdgeDistance, scattered within 60m).
         foreach (var u in s.Units)
         {
             float ax = System.Math.Abs(u.Position.X);
@@ -94,7 +95,7 @@ public class InvasionEventsTests
         var s = DefendedState();
         InvasionEvents.SpawnWave(s);
 
-        // スポーン後は通常のAI進軍（AssignAdvance）がそのまま都市内の基地を目標にする。
+        // After spawning, the normal AI advance (AssignAdvance) targets the base inside the city as-is.
         InvasionOrders.AssignAdvance(s, Faction.InvaderFactionId, 0.1f);
         foreach (var u in s.Units)
         {
@@ -114,7 +115,7 @@ public class InvasionEventsTests
 
         InvasionEvents.SpawnWave(s);
 
-        // Task96: 基地持ち勢力のAIユニットは、敵基地の有無に関わらずInvader部隊の迎撃へ向かう。
+        // Task96: AI units of base-owning factions divert to intercept the Invader force regardless of whether enemy bases exist.
         InvasionOrders.AssignAdvance(s, 0, 0.1f);
 
         Assert.Equal(UnitState.Moving, defender.State);
@@ -139,12 +140,14 @@ public class InvasionEventsTests
         InvasionOrders.AssignAdvance(s, 0, 0.1f);
         WorldPos interceptTarget = defender.OrderTargetPos.Value;
 
-        // 侵攻部隊を全滅させると、次の呼び出しから通常行動へ戻る（状態を持たない毎tick再判定）。
+        // Once the invading force is wiped out, behavior returns to normal from the next call
+        // (stateless re-evaluation every tick).
         foreach (var u in s.Units)
             if (u.FactionId == Faction.InvaderFactionId) { u.CurrentHP = 0f; u.State = UnitState.Dead; }
         InvasionOrders.AssignAdvance(s, 0, 0.1f);
 
-        // 敵対所有基地が無いこの状態では自拠点への撤収（またはIdle）になり、迎撃地点は追わない。
+        // With no hostile-owned bases in this state, the unit withdraws to its own base (or goes
+        // Idle) and does not chase the intercept point.
         if (defender.OrderTargetPos.HasValue)
             Assert.True(defender.OrderTargetPos.Value.HorizontalDistanceTo(interceptTarget) > 100f,
                 "expected the defender to stop chasing the dead wave's position");
@@ -153,14 +156,15 @@ public class InvasionEventsTests
     [Fact]
     public void Baseless_factions_do_not_divert_to_invaders()
     {
-        var s = DefendedState(); // 基地を持つのは勢力0だけ
+        var s = DefendedState(); // only faction 0 owns a base
         var bystander = new UnitInstance(1001, "Tank_T1", 2, 100f, new WorldPos(50, 0, 50));
         s.Units.Add(bystander);
 
         InvasionEvents.SpawnWave(s);
         InvasionOrders.AssignAdvance(s, 2, 0.1f);
 
-        // 基地なし勢力は迎撃対象外（宿敵脅威と同じ規則）。敵対する勢力0の基地への通常進軍はする。
+        // Base-less factions are excluded from interception (the same rule as for nemesis threats).
+        // They still perform the normal advance on hostile faction 0's base.
         if (bystander.OrderTargetPos.HasValue)
         {
             foreach (var u in s.Units)
@@ -228,7 +232,7 @@ public class InvasionEventsTests
     {
         var s = DefendedState();
         int spawnedTotal = 0;
-        // High頻度(0.21/判定)で100判定 → 決定的ハッシュでもほぼ確実に1回以上当選する。
+        // 100 checks at High frequency (0.21 per check) -> even with the deterministic hash, at least one hit is near-certain.
         for (int i = 0; i < 100 && spawnedTotal == 0; i++)
         {
             s.TickCounter++;
@@ -241,7 +245,7 @@ public class InvasionEventsTests
     public void Advance_respects_the_check_interval()
     {
         var s = DefendedState();
-        // 判定間隔未満のdtでは、何度呼んでも判定自体が走らない（＝絶対にスポーンしない）。
+        // With dt below the check interval, the check itself never runs no matter how many times we call (= it can never spawn).
         for (int i = 0; i < 50; i++)
         {
             s.TickCounter++;

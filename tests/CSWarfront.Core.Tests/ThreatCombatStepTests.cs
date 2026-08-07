@@ -188,8 +188,9 @@ public class ThreatCombatStepTests
         Assert.Equal(999.3f, s.Threats[0].CurrentHP, 3);
     }
 
-    // Task79: 自爆ドローンは脅威にも継続的なdtスケール射撃を行わない（KamikazeStepが同じ実効射程/
-    // ThreatArmor/ThreatRelationsのルールで体当たり一撃を扱う。KamikazeStepTests.cs参照）。
+    // Task79: suicide drones do not perform continuous dt-scaled fire against threats either (KamikazeStep
+    // handles the single ramming strike under the same effective-range / ThreatArmor / ThreatRelations rules;
+    // see KamikazeStepTests.cs).
     [Fact]
     public void SuicideDrone_deals_no_continuous_damage_to_threats_and_emits_no_ShotEvent()
     {

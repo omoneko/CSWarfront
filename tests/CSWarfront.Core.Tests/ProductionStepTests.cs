@@ -20,7 +20,7 @@ public class ProductionStepTests
     public void Advance_progresses_but_not_complete_before_buildtime()
     {
         var s = OneBaseWithQueue();
-        var done = ProductionStep.Advance(s, 5f); // 10秒中5秒
+        var done = ProductionStep.Advance(s, 5f); // 5 out of 10 seconds
         Assert.Empty(done);
         Assert.Equal(0.5f, s.Bases[0].Queue[0].Progress, 3);
     }
@@ -33,7 +33,7 @@ public class ProductionStepTests
         Assert.Single(done);
         Assert.Equal("Tank_T1", done[0].TypeKey);
         Assert.Equal((byte)0, done[0].FactionId);
-        Assert.Empty(s.Bases[0].Queue); // 取り出し済み
+        Assert.Empty(s.Bases[0].Queue); // already dequeued
     }
 
     [Fact]
@@ -45,9 +45,10 @@ public class ProductionStepTests
         Assert.Empty(done);
     }
 
-    // --- Task78: 「海上ユニットが敵拠点へ移動せず自拠点にこもったまま」の一因——海軍基地(BaseType.Navy)
-    // の建物位置そのものが水上ではないため、そこでスポーンした艦艇の直進判定(AdvanceSea)が
-    // 最初の一歩から水域外と判定され続け、永遠に動けなくなっていた。SpawnPosを水上へ寄せる。
+    // --- Task78: one cause of "sea units never move toward enemy bases and stay holed up at their own base" —
+    // the navy base (BaseType.Navy) building position itself is not on water, so a ship spawned there kept
+    // failing the straight-line water check (AdvanceSea) from its very first step and could never move.
+    // Nudge SpawnPos onto water.
 
     private class FakeWaterHalfPlane : IWaterSampler
     {

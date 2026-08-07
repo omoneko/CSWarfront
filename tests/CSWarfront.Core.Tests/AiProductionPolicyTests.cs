@@ -1,16 +1,18 @@
 using CSWarfront.Core;
 using Xunit;
 
-// Task80: AiProductionPolicyを固定目標比率オンリーの方針から、observe(敵編成) -> payoff(期待効果
-// E[c]) -> hedge(混合戦略) のゲーム理論ベース方針へ全面強化した。このファイルは:
-//   - 平時（敵対ユニットが1体も無い）の挙動が旧来のTask46ロジックのまま不変であることを確認する
-//     既存テスト群（下記「Composition」「Research」「Bootstrap」節。旧→新で変わっていないため
-//     そのまま残す）。
-//   - 交戦時（敵編成が観測できる）の新しいbest-response挙動を確認する新規テスト群
-//     （「Wartime scoring」節）。
-//   - Tierの選択が「常に最高Tier」から「コスト効率のヘッジ」へ変わったことを確認するテスト群
-//     （「Tier hedging」節。旧テストのうち3件はこの変更で前提が崩れたため書き換えた——
-//     旧アサーションと新アサーションの対比はコメントに残す）。
+// Task80: AiProductionPolicy was fully upgraded from a fixed-target-ratio-only policy to a
+// game-theory-based policy of observe (enemy composition) -> payoff (expected effect E[c]) ->
+// hedge (mixed strategy). This file contains:
+//   - Existing tests confirming that peacetime behaviour (not a single hostile unit present)
+//     remains unchanged from the old Task46 logic (the "Composition", "Research", and "Bootstrap"
+//     sections below; kept as-is because nothing changed between old and new).
+//   - New tests confirming the new best-response behaviour while at war (enemy composition is
+//     observable) (the "Wartime scoring" section).
+//   - Tests confirming that tier selection changed from "always the highest tier" to a
+//     cost-effectiveness hedge (the "Tier hedging" section; 3 of the old tests had their premises
+//     invalidated by this change and were rewritten — the old-vs-new assertion contrast is kept in
+//     the comments).
 public class AiProductionPolicyTests
 {
     private static WarState WithFullRoster(float treasury, byte unlockedTier)
@@ -19,9 +21,10 @@ public class AiProductionPolicyTests
         LandUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(treasury);
-        // Task99: 3資源経済。このファイルの各テストは「資金の予算(spendCap)」の意味論を検証するため、
-        // 人的資源は常に潤沢・生産力は0にする——生産力コストは全額が資金代替(×FundsPerProduction)に
-        // なり、affordabilityが従来どおり資金残高だけで決まる（閾値は各テストで換算済み）。
+        // Task99: three-resource economy. The tests in this file verify the semantics of the funds
+        // budget (spendCap), so manpower is always abundant and production is 0 — the full production
+        // cost is then substituted with funds (x FundsPerProduction), and affordability is still
+        // determined by the funds balance alone as before (thresholds are pre-converted in each test).
         f.AddManpower(1000000f);
         f.UnlockedTier = unlockedTier;
         s.Factions.Add(f);
@@ -40,8 +43,9 @@ public class AiProductionPolicyTests
         }
     }
 
-    /// <summary>Task80: 交戦シナリオ用。faction0(Red, テスト対象)とfaction1(Blue, 敵対)を持つ
-    /// WarStateを作る。Land+Airの両ロスターを登録するので、敵ユニットに航空カテゴリも使える。</summary>
+    /// <summary>Task80: for wartime scenarios. Builds a WarState with faction0 (Red, the subject
+    /// under test) and faction1 (Blue, hostile). Registers both the Land and Air rosters, so enemy
+    /// units can also use air categories.</summary>
     private static WarState WithHostileEnemy(float treasury, byte unlockedTier, Relation relation = Relation.Hostile)
     {
         var s = new WarState();
@@ -49,7 +53,7 @@ public class AiProductionPolicyTests
         AirUnitRoster.RegisterAll(s.Types);
         var red = new Faction(0, "Red");
         red.AddTreasury(treasury);
-        red.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨（コメント参照）
+        red.AddManpower(1000000f); // Task99: same rationale as WithFullRoster (see comment there)
         red.UnlockedTier = unlockedTier;
         s.Factions.Add(red);
         var blue = new Faction(1, "Blue");
@@ -63,7 +67,7 @@ public class AiProductionPolicyTests
 
     private static void AddEnemyUnits(WarState s, byte factionId, UnitCategory category, byte tier, int count)
     {
-        string key = category + "_T" + tier; // LandUnitRoster/AirUnitRoster/NavalUnitRosterで共通の形式
+        string key = category + "_T" + tier; // Format shared by LandUnitRoster/AirUnitRoster/NavalUnitRoster
         for (int i = 0; i < count; i++)
             s.Units.Add(new UnitInstance(s.AllocInstanceId(), key, factionId, 100f, new WorldPos(0, 0, 0)));
     }
@@ -246,9 +250,9 @@ public class AiProductionPolicyTests
         // invariant that must ALWAYS still hold: the reserve floor caps spendCap at
         // Treasury-ResearchReserve, so no tier costing more than that cap is ever chosen, and the
         // category is still Tank (composition target unchanged, no hostiles observed here).
-        // Task99換算: 生産力0のため、資金でのユニット費用 = ProductionCost×2 = Cost×0.7×2 = Cost×1.4。
-        // Tank_T3の資金費用 = 132×1.4 = 184.8 <= spendCap(334.8-150=184.8)。
-        // Tank_T4 = 168×1.4 = 235.2 > 184.8 なので絶対に現れてはならない。
+        // Task99 conversion: production is 0, so a unit's funds cost = ProductionCost x 2 = Cost x 0.7 x 2 = Cost x 1.4.
+        // Funds cost of Tank_T3 = 132 x 1.4 = 184.8 <= spendCap (334.8 - 150 = 184.8).
+        // Tank_T4 = 168 x 1.4 = 235.2 > 184.8, so it must never appear.
         var s = WithFullRoster(334.8f, unlockedTier: 4);
         AddLivingUnits(s, UnitCategory.DroneInfantry, 1, 1); // non-bootstrap: reserve applies
         bool sawT1Through3 = false;
@@ -270,15 +274,15 @@ public class AiProductionPolicyTests
     {
         // OLD test asserted exactly Tier5 (the old "always max tier" rule). Task80's hedge normally
         // prefers cheaper tiers, so a literal "always T5" assertion no longer holds.
-        // Task99換算: 生産力0のため資金費用 = Cost×1.4。Treasury=100 は Tank_T1（60×1.4=84）を
-        // ちょうど賄えるが、もし最大Tierでも研究準備金が誤って差し引かれる退行があれば
-        // spendCap=100-150<0 となり全decisionがNoneになる。何かが生産されること自体が
-        // 「Tier5解禁済みなら資金全額が使える」ことの証明。
+        // Task99 conversion: production is 0, so funds cost = Cost x 1.4. Treasury=100 exactly covers
+        // Tank_T1 (60 x 1.4 = 84), but if a regression wrongly deducted the research reserve even at
+        // max tier, spendCap = 100 - 150 < 0 and every decision would be None. The mere fact that
+        // something is produced proves "with Tier5 unlocked, the entire treasury is spendable".
         var s = WithFullRoster(100f, unlockedTier: 5);
         UnitType chosen = FindFirstProducedType(s, maxSeed: 2000);
         Assert.NotNull(chosen);
         Assert.Equal(UnitCategory.Tank, chosen.Category);
-        Assert.Equal((byte)1, chosen.Tier); // 資金100で買えるのはT1（84）のみ
+        Assert.Equal((byte)1, chosen.Tier); // With 100 funds, only T1 (84) is affordable
     }
 
     [Fact]
@@ -326,7 +330,7 @@ public class AiProductionPolicyTests
         }
     }
 
-    // --- Task61: 基地の領域(Domain)に応じた兵科構成 ---
+    // --- Task61: unit-category composition depending on the base's Domain ---
 
     [Fact]
     public void Navy_base_only_ever_chooses_naval_categories()
@@ -335,7 +339,7 @@ public class AiProductionPolicyTests
         NavalUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(10000f);
-        f.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨
+        f.AddManpower(1000000f); // Task99: same rationale as WithFullRoster
         f.UnlockedTier = 5;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.Navy, new WorldPos(0, 0, 0));
@@ -363,7 +367,7 @@ public class AiProductionPolicyTests
         AirUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(10000f);
-        f.AddManpower(1000000f); // Task99: WithFullRosterと同じ趣旨
+        f.AddManpower(1000000f); // Task99: same rationale as WithFullRoster
         f.UnlockedTier = 5;
         s.Factions.Add(f);
         var b = new MilitaryBase(100, BaseType.AirForce, new WorldPos(0, 0, 0));

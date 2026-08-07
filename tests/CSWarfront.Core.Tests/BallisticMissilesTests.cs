@@ -163,8 +163,8 @@ public class BallisticMissilesTests
         Assert.Equal(500f - MissileStep.ImpactDamageBase, enemyBase.CurrentHP, 3);
     }
 
-    // Task89（ユーザー要望「弾道ミサイルも航空攻撃と同様にHP1まで削る仕様に」）:
-    // ミサイルは拠点を占領できない＝HPは1で頭打ち。最後の1は地上兵力が削る。
+    // Task89 (user request "ballistic missiles should also only wear bases down to HP 1, like air strikes"):
+    // missiles cannot capture a base = its HP bottoms out at 1. The last point must be taken by ground forces.
     [Fact]
     public void Impact_reduces_base_hp_only_down_to_one()
     {
@@ -174,7 +174,7 @@ public class BallisticMissilesTests
 
         var enemyBase = new MilitaryBase(200, BaseType.Army, target);
         enemyBase.OwnerFactionId = 1;
-        enemyBase.MaxHP = 500f; enemyBase.CurrentHP = 100f; // ImpactDamageBase(300)で0を割る低HP
+        enemyBase.MaxHP = 500f; enemyBase.CurrentHP = 100f; // low HP that ImpactDamageBase(300) would push below 0
         s.Bases.Add(enemyBase);
 
         MissileStep.Advance(s, MissileStep.FlightHours);

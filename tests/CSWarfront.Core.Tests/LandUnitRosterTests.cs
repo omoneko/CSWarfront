@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using CSWarfront.Core;
@@ -10,7 +10,7 @@ public class LandUnitRosterTests
     public void All_yields_exactly_45_types()
     {
         List<UnitType> all = LandUnitRoster.All().ToList();
-        Assert.Equal(45, all.Count); // Task101: 7戦闘兵科+SupplyTruck+MilitaryTrain = 9カテゴリ×5Tier
+        Assert.Equal(45, all.Count); // Task101: 7 combat branches + SupplyTruck + MilitaryTrain = 9 categories x 5 tiers
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public class LandUnitRosterTests
         var keys = new HashSet<string>();
         foreach (UnitType t in LandUnitRoster.All())
             Assert.True(keys.Add(t.TypeKey), "duplicate key: " + t.TypeKey);
-        Assert.Equal(45, keys.Count); // Task101: 9カテゴリ×5Tier
+        Assert.Equal(45, keys.Count); // Task101: 9 categories x 5 tiers
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class LandUnitRosterTests
         UnitType t = LandUnitRoster.Get(UnitCategory.Tank, 1);
         Assert.Equal("Tank_T1", t.TypeKey);
         Assert.Equal(140f, t.MaxHP, 3);
-        Assert.Equal(42f, t.Attack, 3); // Task91: 40->42（現実寄り再較正）
+        Assert.Equal(42f, t.Attack, 3); // Task91: 40->42 (recalibrated toward realism)
         Assert.Equal(60f, t.Range, 3);
         Assert.Equal(10f, t.Armor, 3);
         Assert.Equal(0f, t.SplashRadius, 3);
@@ -49,7 +49,7 @@ public class LandUnitRosterTests
         Assert.Equal(SpeedCalibration.UnitsPerGameHourFromKmh(40f), t.Speed, 5);
     }
 
-    // --- Task38: 命中率(Accuracy)の基礎値テーブル ---
+    // --- Task38: base value table for hit chance (Accuracy) ---
 
     [Theory]
     [InlineData(UnitCategory.Infantry, 0.75f)]
@@ -94,9 +94,9 @@ public class LandUnitRosterTests
         Assert.Equal(204f, t5.Cost, 3);    // 60 * 3.4
     }
 
-    // --- Task42/Task43: 発砲エフェクトの間隔(FireIntervalHours)・種別(ShotKind)の基礎値テーブル ---
-    // Task43: ユーザーフィードバック（発砲間隔が短すぎる）により全面的に延長した
-    // （Gunfireは3点バーストのバースト間隔、DirectFire/IndirectFireは単発の発射間隔）。
+    // --- Task42/Task43: base value tables for muzzle-effect interval (FireIntervalHours) and kind (ShotKind) ---
+    // Task43: all intervals were lengthened across the board based on user feedback (firing intervals were too short)
+    // (for Gunfire this is the interval between 3-round bursts; for DirectFire/IndirectFire it is the interval between single shots).
     [Theory]
     [InlineData(UnitCategory.Infantry, ShotKind.Gunfire, 0.30f)]
     [InlineData(UnitCategory.MechInfantry, ShotKind.Gunfire, 0.30f)]
@@ -116,7 +116,7 @@ public class LandUnitRosterTests
     [Fact]
     public void Fire_interval_does_not_change_with_tier()
     {
-        // Task42: FireIntervalHoursはTierScalingの対象外（意図的な単純化）。Tier1とTier5で同じ値。
+        // Task42: FireIntervalHours is exempt from TierScaling (an intentional simplification). Same value at Tier1 and Tier5.
         UnitType t1 = LandUnitRoster.Get(UnitCategory.Tank, 1);
         UnitType t5 = LandUnitRoster.Get(UnitCategory.Tank, 5);
         Assert.Equal(t1.FireIntervalHours, t5.FireIntervalHours, 5);
@@ -129,7 +129,7 @@ public class LandUnitRosterTests
     [Fact]
     public void Artillerys_fire_interval_is_longer_than_infantrys()
     {
-        // Task42/43: 砲兵の曲射は歩兵の銃撃より間引き間隔が長い（2.00h vs 0.40h）。
+        // Task42/43: artillery's indirect fire has a longer throttling interval than infantry's gunfire (2.00h vs 0.40h).
         UnitType artillery = LandUnitRoster.Get(UnitCategory.Artillery, 1);
         UnitType infantry = LandUnitRoster.Get(UnitCategory.Infantry, 1);
         Assert.True(artillery.FireIntervalHours > infantry.FireIntervalHours);

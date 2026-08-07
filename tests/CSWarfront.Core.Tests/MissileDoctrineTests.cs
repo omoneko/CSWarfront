@@ -36,7 +36,7 @@ public class MissileDoctrineTests
         Assert.Equal(far.Position.X, s.MissilesInFlight[0].To.X, 3);
     }
 
-    // Task90（ユーザー要望「生産と発射を手動に切り替えられるように」）: 自動発射OFFの基地はAIが撃たない。
+    // Task90 (user request "let production and launching be switched to manual"): the AI does not fire from bases with auto-launch OFF.
     [Fact]
     public void Advance_does_not_launch_from_a_base_with_AutoLaunchMissiles_off()
     {
@@ -48,10 +48,10 @@ public class MissileDoctrineTests
 
         MissileDoctrine.Advance(s, 0f);
 
-        Assert.Equal(1, mb.StockpiledMissiles); // 消費されない
+        Assert.Equal(1, mb.StockpiledMissiles); // not consumed
         Assert.Empty(s.MissilesInFlight);
 
-        // 手動発射（プレイヤーの照準ボタン→TryLaunch）は引き続き可能。
+        // Manual launch (player's aim button -> TryLaunch) remains possible.
         Assert.Equal(LaunchResult.Ok, MissileStep.TryLaunch(s, mb.BaseId, far.Position));
     }
 

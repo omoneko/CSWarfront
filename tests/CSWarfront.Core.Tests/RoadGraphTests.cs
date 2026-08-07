@@ -33,7 +33,7 @@ public class RoadGraphTests
         return g;
     }
 
-    // Task88: 目的地側スナップ半径の独立指定（宿敵追撃の道路経路化）。
+    // Task88: independent destination-side snap radius (road-based routing for nemesis pursuit).
     [Fact]
     public void FindPath_with_unlimited_dest_snap_reaches_the_node_nearest_a_far_target()
     {
@@ -44,14 +44,14 @@ public class RoadGraphTests
         g.AddEdge(1, 2);
         g.AddEdge(2, 3);
 
-        // 目的地(600,0,0)は最寄りノード(200,0,0)から400離れている＝従来のsnapRadius(200)では
-        // スナップ失敗でnullだったケース。
+        // The destination (600,0,0) is 400 away from the nearest node (200,0,0) = a case where the previous
+        // snapRadius (200) failed to snap and returned null.
         var strict = g.FindPath(new WorldPos(10, 0, 0), new WorldPos(600, 0, 0), 200f, 0u, 0f);
         Assert.Null(strict);
 
         var relaxed = g.FindPath(new WorldPos(10, 0, 0), new WorldPos(600, 0, 0), 200f, 0u, 0f, float.MaxValue);
         Assert.NotNull(relaxed);
-        // 経路の末端は目的地に最も近いノード(200,0,0)。残り区間は呼び出し側の直線フォールバックが担う。
+        // The end of the path is the node closest to the destination (200,0,0). The remaining leg is handled by the caller's straight-line fallback.
         Assert.Equal(200f, relaxed[relaxed.Count - 1].X, 1);
     }
 
@@ -63,7 +63,7 @@ public class RoadGraphTests
         g.AddNode(2, new WorldPos(100, 0, 0));
         g.AddEdge(1, 2);
 
-        // 出発点が道路から遠い（>200）場合は従来どおりnull（直線移動が正しい）。
+        // If the start point is far from the road (>200), null is returned as before (straight-line movement is correct).
         var path = g.FindPath(new WorldPos(0, 0, 500), new WorldPos(100, 0, 0), 200f, 0u, 0f, float.MaxValue);
         Assert.Null(path);
     }
@@ -195,7 +195,7 @@ public class RoadGraphTests
         Assert.Equal(0f, path[0].Z, 2);
     }
 
-    // --- Task108: 連結成分の解析とノード融合（軍用列車が走れない不具合の調査で追加）---
+    // --- Task108: connected-component analysis and node welding (added while investigating the bug where military trains could not run) ---
 
     [Fact]
     public void ComputeComponentIds_separates_disconnected_pieces()
@@ -204,7 +204,7 @@ public class RoadGraphTests
         g.AddNode(1, new WorldPos(0, 0, 0));
         g.AddNode(2, new WorldPos(100, 0, 0));
         g.AddEdge(1, 2);
-        g.AddNode(3, new WorldPos(1000, 0, 0)); // 孤立
+        g.AddNode(3, new WorldPos(1000, 0, 0)); // Isolated
 
         var comps = g.ComputeComponentIds();
         Assert.Equal(comps[1], comps[2]);
@@ -222,11 +222,11 @@ public class RoadGraphTests
         g.AddNode(1, new WorldPos(0, 0, 0));
         g.AddNode(2, new WorldPos(100, 0, 0));
         g.AddEdge(1, 2);
-        // 継ぎ目: ほぼ同じ位置にある別idのノード（別ネットワーク側の端点）。
+        // Seam: a node with a different id at almost the same position (an endpoint on the other network's side).
         g.AddNode(3, new WorldPos(102, 0.5f, 0));
         g.AddNode(4, new WorldPos(300, 0, 0));
         g.AddEdge(3, 4);
-        // 立体交差: 水平には重なるが20m上（繋いではいけない）。
+        // Overpass: overlaps horizontally but is 20 m above (must not be joined).
         g.AddNode(5, new WorldPos(100, 20, 0));
         g.AddNode(6, new WorldPos(100, 20, 300));
         g.AddEdge(5, 6);
@@ -235,7 +235,7 @@ public class RoadGraphTests
 
         Assert.Equal(1, added);
         var comps = g.ComputeComponentIds();
-        Assert.Equal(comps[1], comps[4]);      // 継ぎ目が繋がった
-        Assert.NotEqual(comps[1], comps[5]);   // 立体交差は繋がっていない
+        Assert.Equal(comps[1], comps[4]);      // The seam was joined
+        Assert.NotEqual(comps[1], comps[5]);   // The overpass was not joined
     }
 }

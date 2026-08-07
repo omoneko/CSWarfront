@@ -2,8 +2,8 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// UnitStatOverrides（Task92: unit-stats.xmlによる兵科基礎値の外部上書き）のテスト。
-/// 静的状態を持つため、各テストは必ずClear()で後始末する。
+/// Tests for UnitStatOverrides (Task92: external override of unit-class base values via unit-stats.xml).
+/// It holds static state, so every test must clean up with Clear().
 /// </summary>
 public class UnitStatOverridesTests
 {
@@ -17,10 +17,10 @@ public class UnitStatOverridesTests
             UnitType t1 = LandUnitRoster.Get(UnitCategory.Tank, 1);
             Assert.Equal(100f, t1.Attack, 3);
             Assert.Equal(200f, t1.MaxHP, 3);
-            Assert.Equal(60f, t1.Range, 3); // 未指定の項目は既定値のまま
+            Assert.Equal(60f, t1.Range, 3); // unspecified fields keep their defaults
 
             UnitType t5 = LandUnitRoster.Get(UnitCategory.Tank, 5);
-            Assert.Equal(TierScaling.Attack(100f, 5), t5.Attack, 3); // TierScalingは上書き後の値にかかる
+            Assert.Equal(TierScaling.Attack(100f, 5), t5.Attack, 3); // TierScaling is applied on top of the overridden value
         }
         finally
         {

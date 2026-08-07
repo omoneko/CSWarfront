@@ -30,7 +30,7 @@ public class WarStateSerializerTests
         byte[] bytes = WarStateSerializer.Serialize(s);
         var r = WarStateSerializer.Deserialize(bytes, types);
 
-        // 3 = 元の2勢力 + Invader（Task95: DeserializeがInvader実装以前のセーブへ冪等に補完する）。
+        // 3 = the original 2 factions + Invader (Task95: Deserialize idempotently backfills saves predating the Invader implementation).
         Assert.Equal(3, r.Factions.Count);
         Assert.NotNull(r.FindFaction(Faction.InvaderFactionId));
         Assert.Equal(123.5f, r.FindFaction(0).Treasury, 3);
@@ -103,12 +103,12 @@ public class WarStateSerializerTests
     [Fact]
     public void Trenches_are_normalized_to_unowned_on_load()
     {
-        // Task101（ユーザー要望「塹壕は勢力関係なく使える」）: 所有付きで保存された塹壕も
-        // ロード時に無所属へ正規化される。
+        // Task101 (user request "trenches can be used by any faction"): trenches saved with an
+        // owner are normalized to unowned on load.
         var types = new UnitTypeRegistry(); types.Register(MvpUnitTypes.Tank_T1());
         var s = Sample();
         var trench = new MilitaryBase(400, BaseType.Trench, new WorldPos(5, 0, 5));
-        trench.OwnerFactionId = 0; // 旧セーブ相当（所有付き）
+        trench.OwnerFactionId = 0; // Equivalent to an old save (with an owner)
         s.Bases.Add(trench);
 
         var r = WarStateSerializer.Deserialize(WarStateSerializer.Serialize(s), types);
@@ -138,8 +138,8 @@ public class WarStateSerializerTests
         Assert.Equal(17.5f, r.Bases[0].CaptureGraceHours, 3);
     }
 
-    /// <summary>旧形式（v1、基地ブロック末尾にCaptureGraceHoursが無い）を読んでも
-    /// 例外にならず、CaptureGraceHoursが既定値0で復元されることを保証する。</summary>
+    /// <summary>Guarantees that reading the old format (v1, no CaptureGraceHours at the end of the
+    /// base block) does not throw, and that CaptureGraceHours is restored with its default of 0.</summary>
     [Fact]
     public void Deserialize_v1_format_defaults_CaptureGraceHours_to_zero()
     {
@@ -148,7 +148,7 @@ public class WarStateSerializerTests
         using (var ms = new MemoryStream())
         using (var w = new BinaryWriter(ms))
         {
-            w.Write(1); // version 1（旧形式）
+            w.Write(1); // version 1 (old format)
             w.Write(0); // factions count
             for (int a = 0; a < 5; a++)
                 for (int b = 0; b < 5; b++)
@@ -160,7 +160,7 @@ public class WarStateSerializerTests
             w.Write(500f); w.Write(false); // influence radius, isHq
             w.Write(500f); w.Write(250f); // maxHp, currentHp
             w.Write(0); // queue count
-            // 注意: v1にはCaptureGraceHoursが無いのでここで終わり
+            // Note: v1 has no CaptureGraceHours, so the base block ends here
             w.Write(0); // units count
             w.Write((uint)1); // nextInstanceId
             w.Flush();
@@ -203,8 +203,9 @@ public class WarStateSerializerTests
         Assert.True(r.Bases[0].AutoProduce);
     }
 
-    /// <summary>旧形式（v2、基地ブロック末尾にAutoProduceが無い）を読んでも例外にならず、
-    /// AutoProduceが既定値true（AI自動生産の従来動作を維持）で復元されることを保証する。</summary>
+    /// <summary>Guarantees that reading the old format (v2, no AutoProduce at the end of the base
+    /// block) does not throw, and that AutoProduce is restored with its default of true (preserving
+    /// the previous AI auto-production behaviour).</summary>
     [Fact]
     public void Deserialize_v2_format_defaults_AutoProduce_to_true()
     {
@@ -213,7 +214,7 @@ public class WarStateSerializerTests
         using (var ms = new MemoryStream())
         using (var w = new BinaryWriter(ms))
         {
-            w.Write(2); // version 2（AutoProduce導入前）
+            w.Write(2); // version 2 (before AutoProduce was introduced)
             w.Write(0); // factions count
             for (int a = 0; a < 5; a++)
                 for (int b = 0; b < 5; b++)
@@ -226,7 +227,7 @@ public class WarStateSerializerTests
             w.Write(500f); w.Write(250f); // maxHp, currentHp
             w.Write(0); // queue count
             w.Write(3.5f); // CaptureGraceHours (v2 field)
-            // 注意: v2にはAutoProduceが無いのでここで終わり
+            // Note: v2 has no AutoProduce, so the base block ends here
             w.Write(0); // units count
             w.Write((uint)1); // nextInstanceId
             w.Flush();
@@ -259,8 +260,9 @@ public class WarStateSerializerTests
         Assert.Equal((byte)1, r.FindFaction(1).UnlockedTier);
     }
 
-    /// <summary>旧形式（v3、勢力ブロック末尾にResearchPoints/UnlockedTierが無い）を読んでも例外にならず、
-    /// ResearchPointsが0f・UnlockedTierが1（従来のTier1のみ解禁）で復元されることを保証する。</summary>
+    /// <summary>Guarantees that reading the old format (v3, no ResearchPoints/UnlockedTier at the end
+    /// of the faction block) does not throw, and that ResearchPoints is restored as 0f and
+    /// UnlockedTier as 1 (the previous "only Tier 1 unlocked" behaviour).</summary>
     [Fact]
     public void Deserialize_v3_format_defaults_ResearchPoints_to_zero_and_UnlockedTier_to_one()
     {
@@ -269,13 +271,13 @@ public class WarStateSerializerTests
         using (var ms = new MemoryStream())
         using (var w = new BinaryWriter(ms))
         {
-            w.Write(3); // version 3（ResearchPoints/UnlockedTier導入前）
+            w.Write(3); // version 3 (before ResearchPoints/UnlockedTier were introduced)
             w.Write(1); // factions count
             w.Write((byte)0); w.Write("Red");
             w.Write(50f); // treasury
             w.Write(false); w.Write((ushort)0); // no home base
             w.Write(true); w.Write(false); // isPlayer, eliminated
-            // 注意: v3にはResearchPoints/UnlockedTierが無いのでここで終わり
+            // Note: v3 has no ResearchPoints/UnlockedTier, so the faction block ends here
             for (int a = 0; a < 5; a++)
                 for (int b = 0; b < 5; b++)
                     w.Write((int)Relation.Neutral);
@@ -288,12 +290,12 @@ public class WarStateSerializerTests
 
         var r = WarStateSerializer.Deserialize(bytes, types);
 
-        // 2 = 元の1勢力 + Invader（Task95: Deserializeが冪等に補完する）。
+        // 2 = the original 1 faction + Invader (Task95: Deserialize backfills idempotently).
         Assert.Equal(2, r.Factions.Count);
         Assert.Equal(50f, r.FindFaction(0).Treasury, 3);
         Assert.Equal(0f, r.FindFaction(0).ResearchPoints, 3);
         Assert.Equal((byte)1, r.FindFaction(0).UnlockedTier);
-        // Task99: v8以前のセーブは3資源の初期付与（200）を受ける（Invaderは対象外）。
+        // Task99: saves at v8 or earlier receive the initial grant of the 3 resources (200 each); the Invader is excluded.
         Assert.Equal(200f, r.FindFaction(0).Manpower, 3);
         Assert.Equal(200f, r.FindFaction(0).Production, 3);
         Assert.Equal(200f, r.FindFaction(0).SupplyStock, 3);
@@ -319,8 +321,9 @@ public class WarStateSerializerTests
         Assert.Equal(Relation.Hostile, r.ThreatRelations.Get(2, ThreatKind.Kaiju));
     }
 
-    /// <summary>旧形式（v4、ペイロード末尾にThreatRelationsが無い）を読んでも例外にならず、
-    /// 全エントリが既定値Hostile（Task58までの「常に無条件敵対」）で復元されることを保証する。</summary>
+    /// <summary>Guarantees that reading the old format (v4, no ThreatRelations at the end of the
+    /// payload) does not throw, and that every entry is restored with the default Hostile (the
+    /// pre-Task58 "always unconditionally hostile" behaviour).</summary>
     [Fact]
     public void Deserialize_v4_format_defaults_ThreatRelations_to_hostile()
     {
@@ -329,7 +332,7 @@ public class WarStateSerializerTests
         using (var ms = new MemoryStream())
         using (var w = new BinaryWriter(ms))
         {
-            w.Write(4); // version 4（ThreatRelations導入前）
+            w.Write(4); // version 4 (before ThreatRelations was introduced)
             w.Write(1); // factions count
             w.Write((byte)0); w.Write("Red");
             w.Write(50f); // treasury
@@ -342,7 +345,7 @@ public class WarStateSerializerTests
             w.Write(0); // bases count
             w.Write(0); // units count
             w.Write((uint)1); // nextInstanceId
-            // 注意: v4にはThreatRelationsが無いのでここで終わり
+            // Note: v4 has no ThreatRelations, so the payload ends here
             w.Flush();
             bytes = ms.ToArray();
         }
@@ -373,7 +376,7 @@ public class WarStateSerializerTests
         Assert.Equal(0.42f, r.Bases[0].MissileBuildProgress, 3);
     }
 
-    // Task90: v7で追加した自動発射フラグの往復と、v6以前の既定値true。
+    // Task90: roundtrip of the auto-launch flag added in v7, plus the default of true for v6 and earlier.
     [Fact]
     public void Roundtrip_v7_preserves_AutoLaunchMissiles_false()
     {
@@ -386,7 +389,7 @@ public class WarStateSerializerTests
         Assert.False(r.Bases[0].AutoLaunchMissiles);
     }
 
-    // Task92: v8で追加した飛翔中ミサイル＋部隊命令の往復。
+    // Task92: roundtrip of missiles in flight + unit orders added in v8.
     [Fact]
     public void Roundtrip_v8_preserves_missiles_in_flight_and_next_missile_id()
     {
@@ -429,8 +432,8 @@ public class WarStateSerializerTests
         Assert.Equal(456f, ru.RallyPoint.Value.Z, 3);
     }
 
-    /// <summary>旧形式（v5、基地ブロック末尾にStockpiledMissiles/MissileBuildProgressが無い）を読んでも
-    /// 例外にならず、両方とも既定値0で復元されることを保証する。</summary>
+    /// <summary>Guarantees that reading the old format (v5, no StockpiledMissiles/MissileBuildProgress
+    /// at the end of the base block) does not throw, and that both are restored with their default of 0.</summary>
     [Fact]
     public void Deserialize_v5_format_defaults_StockpiledMissiles_and_MissileBuildProgress_to_zero()
     {
@@ -439,7 +442,7 @@ public class WarStateSerializerTests
         using (var ms = new MemoryStream())
         using (var w = new BinaryWriter(ms))
         {
-            w.Write(5); // version 5（StockpiledMissiles/MissileBuildProgress導入前）
+            w.Write(5); // version 5 (before StockpiledMissiles/MissileBuildProgress were introduced)
             w.Write(0); // factions count
             for (int a = 0; a < 5; a++)
                 for (int b = 0; b < 5; b++)
@@ -453,7 +456,7 @@ public class WarStateSerializerTests
             w.Write(0); // queue count
             w.Write(0f); // CaptureGraceHours (v2 field)
             w.Write(true); // AutoProduce (v3 field)
-            // 注意: v5にはStockpiledMissiles/MissileBuildProgressが無いのでここで終わり
+            // Note: v5 has no StockpiledMissiles/MissileBuildProgress, so the base block ends here
             w.Write(0); // units count
             w.Write((uint)1); // nextInstanceId
             for (int f = 0; f < 5; f++)

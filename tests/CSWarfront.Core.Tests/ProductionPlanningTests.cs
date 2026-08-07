@@ -18,7 +18,7 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
-        s.Factions[0].AddManpower(200f);   // Task99: 3資源経済（Tank=人的資源30%/生産力70%）
+        s.Factions[0].AddManpower(200f);   // Task99: 3-resource economy (Tank = 30% manpower / 70% production)
         s.Factions[0].AddProduction(200f);
         s.Factions[0].UnlockedTier = 5;
         s.Types.Register(MvpUnitTypes.Tank_T1()); // Cost 60
@@ -31,7 +31,7 @@ public class ProductionPlanningTests
         Assert.Equal(2, s.Bases[0].Queue.Count);
         Assert.Equal("Tank_T1", s.Bases[0].Queue[0].TypeKey);
         Assert.Equal("Tank_T1", s.Bases[0].Queue[1].TypeKey);
-        // Task99: 支払いは人的資源+生産力（生産力が足りている間、資金は使われない）。
+        // Task99: payment comes from manpower + production (funds are not spent while production suffices).
         Assert.Equal(200f - 2f * 60f * 0.3f, s.Factions[0].Manpower, 3);
         Assert.Equal(200f - 2f * 60f * 0.7f, s.Factions[0].Production, 3);
         Assert.Equal(200f, s.Factions[0].Treasury, 3);
@@ -40,7 +40,7 @@ public class ProductionPlanningTests
     [Fact]
     public void Advance_stops_producing_at_the_per_faction_unit_cap()
     {
-        // Task97: 生存ユニットがMaxUnitsPerFaction以上の勢力は自動生産を止める（重さ対策）。
+        // Task97: a faction with MaxUnitsPerFaction or more living units stops auto-production (performance safeguard).
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(10000f);
@@ -63,7 +63,7 @@ public class ProductionPlanningTests
     [Fact]
     public void Advance_resumes_producing_when_units_are_lost_below_the_cap()
     {
-        // Task97: 上限を1体でも割れば（死亡ユニットは数えない）自動生産が再開する。
+        // Task97: dropping even one unit below the cap (dead units are not counted) resumes auto-production.
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(10000f);
@@ -77,7 +77,7 @@ public class ProductionPlanningTests
         for (uint i = 0; i < ProductionPlanning.MaxUnitsPerFaction; i++)
             s.Units.Add(new UnitInstance(1000 + i, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
         s.Units[0].CurrentHP = 0f;
-        s.Units[0].State = UnitState.Dead; // 1体撃破され149体 → 上限未満
+        s.Units[0].State = UnitState.Dead; // one unit destroyed leaves 149 -> below the cap
 
         ProductionPlanning.Advance(s);
 
@@ -146,7 +146,7 @@ public class ProductionPlanningTests
         LandUnitRoster.RegisterAll(s.Types);
         var f = new Faction(0, "Red");
         f.AddTreasury(treasury);
-        f.AddManpower(treasury);   // Task99: 3資源経済（資金と同じスケールで付与）
+        f.AddManpower(treasury);   // Task99: 3-resource economy (granted at the same scale as funds)
         f.AddProduction(treasury);
         f.UnlockedTier = unlockedTier;
         s.Factions.Add(f);
@@ -227,7 +227,7 @@ public class ProductionPlanningTests
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions[0].AddTreasury(200f);
-        s.Factions[0].AddManpower(200f);   // Task99: 3資源経済
+        s.Factions[0].AddManpower(200f);   // Task99: 3-resource economy
         s.Factions[0].AddProduction(200f);
         s.Factions[0].UnlockedTier = 5; // isolate the AutoProduce wiring from research non-determinism
         s.Types.Register(MvpUnitTypes.Tank_T1());
@@ -245,7 +245,7 @@ public class ProductionPlanningTests
 
         Assert.Empty(playerControlled.Queue);
         Assert.Equal(2, aiControlled.Queue.Count);
-        // Task99: 支払いは人的資源+生産力（AI基地の2両ぶんのみ消費、資金は不変）。
+        // Task99: payment comes from manpower + production (only the AI base's two tanks are paid for; funds unchanged).
         Assert.Equal(200f - 2f * 60f * 0.7f, s.Factions[0].Production, 3);
         Assert.Equal(200f, s.Factions[0].Treasury, 3);
     }

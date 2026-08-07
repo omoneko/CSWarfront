@@ -285,8 +285,9 @@ public class KamikazeStepTests
         Assert.Equal(500f - 260f, quick.Bases[0].CurrentHP, 3);
     }
 
-    // Task85: 旧仕様（Clamps_base_HP_at_zero...、下限0）から変更。自爆ドローンは航空戦力なので、
-    // どれだけオーバーキルしても拠点HPは1で頭打ちになる（占領＝HP0にできるのは地上戦力のみ）。
+    // Task85: changed from the old spec (Clamps_base_HP_at_zero..., floor of 0). A suicide drone is an
+    // air asset, so no matter how much overkill it deals, base HP bottoms out at 1 (only ground forces
+    // can capture, i.e. bring HP to 0).
     [Fact]
     public void Clamps_base_HP_at_one_because_air_units_cannot_capture()
     {

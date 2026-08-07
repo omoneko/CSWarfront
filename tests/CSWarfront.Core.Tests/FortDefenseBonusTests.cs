@@ -1,7 +1,7 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task101: 塹壕/掩蔽壕の守備ボーナス（+50%＝被ダメ÷1.5）と歩兵の陣地志向AI。</summary>
+/// <summary>Task101: trench/bunker defense bonus (+50% = incoming damage / 1.5) and infantry fort-seeking AI.</summary>
 public class FortDefenseBonusTests
 {
     [Fact]
@@ -12,11 +12,11 @@ public class FortDefenseBonusTests
         RelationPresets.ApplyAllHostile(s.Relations, 2);
         LandUnitRoster.RegisterAll(s.Types);
         var trench = new MilitaryBase(1, BaseType.Trench, new WorldPos(0, 0, 0));
-        trench.OwnerFactionId = 1; // 敵所有の塹壕でも
+        trench.OwnerFactionId = 1; // Even an enemy-owned trench
         s.Bases.Add(trench);
 
-        var infantry = new UnitInstance(1, "Infantry_T1", 0, 10000f, new WorldPos(5, 0, 0)); // 塹壕上
-        var infantryOpen = new UnitInstance(2, "Infantry_T1", 0, 10000f, new WorldPos(200, 0, 0)); // 平地
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 10000f, new WorldPos(5, 0, 0)); // On the trench
+        var infantryOpen = new UnitInstance(2, "Infantry_T1", 0, 10000f, new WorldPos(200, 0, 0)); // In the open
         var enemyA = new UnitInstance(3, "Tank_T1", 1, 10000f, new WorldPos(30, 0, 0));
         var enemyB = new UnitInstance(4, "Tank_T1", 1, 10000f, new WorldPos(230, 0, 0));
         s.Units.Add(infantry); s.Units.Add(infantryOpen); s.Units.Add(enemyA); s.Units.Add(enemyB);
@@ -26,7 +26,7 @@ public class FortDefenseBonusTests
         float dmgOnTrench = 10000f - infantry.CurrentHP;
         float dmgOpen = 10000f - infantryOpen.CurrentHP;
         Assert.True(dmgOnTrench > 0f && dmgOpen > 0f);
-        Assert.Equal(dmgOpen / FortDefenseBonus.DamageDivisor, dmgOnTrench, 2); // ÷1.5
+        Assert.Equal(dmgOpen / FortDefenseBonus.DamageDivisor, dmgOnTrench, 2); // / 1.5
     }
 
     [Fact]
@@ -45,17 +45,17 @@ public class FortDefenseBonusTests
     [Fact]
     public void Engaging_infantry_hides_behind_friendly_armor_not_buildings()
     {
-        // Task104: 歩兵の建物遮蔽を廃止し、交戦中は味方装甲（Tank/Apc）の後ろに隠れる。
+        // Task104: infantry no longer takes cover behind buildings; while engaging it hides behind friendly armor (Tank/Apc).
         var s = new WarState();
         for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
         RelationPresets.ApplyAllHostile(s.Relations, 2);
         LandUnitRoster.RegisterAll(s.Types);
         var cover = new CoverMap();
-        cover.Add(new WorldPos(0, 0, 50), 10f); // 建物（歩兵はもう使わない）
+        cover.Add(new WorldPos(0, 0, 50), 10f); // Building (infantry no longer uses these)
         s.Cover = cover;
 
         var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
-        var tank = new UnitInstance(2, "Tank_T1", 0, 100f, new WorldPos(20, 0, 0)); // 味方装甲
+        var tank = new UnitInstance(2, "Tank_T1", 0, 100f, new WorldPos(20, 0, 0)); // Friendly armor
         var enemy = new UnitInstance(3, "Tank_T1", 1, 100f, new WorldPos(35, 0, 0));
         infantry.State = UnitState.Engaging;
         infantry.TargetId = enemy.InstanceId;
@@ -65,11 +65,11 @@ public class FortDefenseBonusTests
 
         Assert.True(infantry.CoverHold);
         Assert.True(infantry.CoverDestination.HasValue);
-        // 立ち位置は「装甲の、敵と反対側」＝装甲(20)より敵(35)から遠い側。
+        // The standing position is "on the far side of the armor from the enemy" = farther from the enemy (35) than the armor (20).
         Assert.True(infantry.CoverDestination.Value.X < 20f,
             "expected a position behind the friendly tank (away from the enemy)");
 
-        // 味方装甲がいなければ遮蔽なし（建物や高架下へは走らない）。
+        // Without friendly armor there is no cover (it does not run to buildings or under overpasses).
         var loneInf = new UnitInstance(4, "Infantry_T1", 0, 100f, new WorldPos(200, 0, 0));
         var loneEnemy = new UnitInstance(5, "Tank_T1", 1, 100f, new WorldPos(230, 0, 0));
         loneInf.State = UnitState.Engaging;
@@ -97,7 +97,7 @@ public class FortDefenseBonusTests
 
         Assert.True(infantry.CoverHold);
         Assert.True(infantry.CoverDestination.HasValue);
-        Assert.Equal(200f, infantry.CoverDestination.Value.X, 1); // 敵に近い側の塹壕
+        Assert.Equal(200f, infantry.CoverDestination.Value.X, 1); // The trench on the side closer to the enemy
     }
 
     [Fact]
@@ -112,17 +112,17 @@ public class FortDefenseBonusTests
         var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
         s.Units.Add(infantry);
 
-        // 敵がいない: 何もしない。
+        // No enemies: does nothing.
         FortSeekStep.Advance(s, 0.1f);
         Assert.False(infantry.CoverHold);
 
-        // 敵歩兵が塹壕を占有: その塹壕へは向かわない。
+        // An enemy infantry occupies the trench: does not head for that trench.
         var enemyInf = new UnitInstance(2, "Infantry_T1", 1, 100f, new WorldPos(205, 0, 0));
         s.Units.Add(enemyInf);
         FortSeekStep.Advance(s, 0.1f);
         Assert.False(infantry.CoverHold);
 
-        // 戦車も撃てない歩兵の守り（FortSeekの対象外確認）: 戦車は陣地志向しない。
+        // Confirming tanks are outside FortSeek's scope: tanks do not seek fortified positions.
         var tank = new UnitInstance(3, "Tank_T1", 0, 100f, new WorldPos(0, 0, 50));
         s.Units.Add(tank);
         FortSeekStep.Advance(s, 0.1f);

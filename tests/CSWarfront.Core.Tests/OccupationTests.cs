@@ -13,10 +13,10 @@ public class OccupationTests
         var b = new MilitaryBase(200, BaseType.Army, new WorldPos(40, 0, 0));
         b.OwnerFactionId = 1; b.CurrentHP = 0f; b.MaxHP = 500f; b.InfluenceRadius = 500f;
         b.IsHeadquarters = true;
-        b.Queue.Add(new ProductionOrder("Tank_T1", 50f, 10f)); // 奪取される備蓄
+        b.Queue.Add(new ProductionOrder("Tank_T1", 50f, 10f)); // Stockpile that will be seized
         s.Bases.Add(b);
-        s.Factions[1].HomeBaseId = 200; // BlueのHQ
-        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(40, 0, 0))); // 攻撃側Red圏内
+        s.Factions[1].HomeBaseId = 200; // Blue's HQ
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(40, 0, 0))); // Attacker Red inside the influence radius
         return s;
     }
 
@@ -25,16 +25,17 @@ public class OccupationTests
     {
         var s = FallenBaseScenario();
         Occupation.ResolveCaptures(s);
-        Assert.Equal((byte)0, s.Bases[0].OwnerFactionId.Value); // Redへ
-        Assert.Equal(500f, s.Bases[0].CurrentHP, 3);           // 回復
-        Assert.Single(s.Bases[0].Queue);                        // 生産キュー奪取
+        Assert.Equal((byte)0, s.Bases[0].OwnerFactionId.Value); // Transferred to Red
+        Assert.Equal(500f, s.Bases[0].CurrentHP, 3);           // Healed
+        Assert.Single(s.Bases[0].Queue);                        // Production queue seized
     }
 
     [Fact]
     public void Losing_hq_no_longer_sets_Eliminated_directly()
     {
-        // Task46: Occupation自体はEliminatedを直接いじらない。所有基地が本当に無くなったかどうかの
-        // 判定はFactionStatus.Refreshへ移した（一度脱落した勢力でも基地を取り戻せば復活できるように）。
+        // Task46: Occupation itself no longer touches Eliminated directly. The check for whether a faction
+        // truly has no bases left was moved to FactionStatus.Refresh (so that a faction that was once
+        // eliminated can come back by recapturing a base).
         var s = FallenBaseScenario();
         Occupation.ResolveCaptures(s);
         Assert.False(s.FindFaction(1).Eliminated);
@@ -46,13 +47,13 @@ public class OccupationTests
         var s = FallenBaseScenario();
         Occupation.ResolveCaptures(s);
         FactionStatus.Refresh(s);
-        Assert.True(s.FindFaction(1).Eliminated); // Blue脱落
+        Assert.True(s.FindFaction(1).Eliminated); // Blue eliminated
     }
 
     [Fact]
     public void No_attacker_in_radius_leaves_base_unchanged()
     {
-        // 攻撃側が圏外にいる場合、基地移管が保留される（次tick待機）
+        // When the attacker is outside the influence radius, the base transfer is deferred (waits for the next tick)
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions.Add(new Faction(1, "Blue"));
@@ -69,16 +70,16 @@ public class OccupationTests
         s.Bases.Add(b);
         s.Factions[1].HomeBaseId = 200;
 
-        // 攻撃側Red が圏外に配置（HorizontalDistance > InfluenceRadius）
+        // Attacker Red placed outside the radius (HorizontalDistance > InfluenceRadius)
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(1000, 0, 0)));
 
         Occupation.ResolveCaptures(s);
 
-        // 基地所有者は変わらない
+        // Base owner does not change
         Assert.Equal((byte)1, s.Bases[0].OwnerFactionId.Value);
-        // HP は治癒されない
+        // HP is not healed
         Assert.Equal(0f, s.Bases[0].CurrentHP);
-        // Blue は脱落しない
+        // Blue is not eliminated
         Assert.False(s.FindFaction(1).Eliminated);
     }
 }

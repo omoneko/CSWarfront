@@ -1,7 +1,7 @@
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task101: 築城の自動射撃（掩蔽壕=射線判定つき単体射撃、砲兵陣地=範囲射撃、弾薬）。</summary>
+/// <summary>Task101: automatic fire from fortifications (bunker = single-target fire with line-of-sight check, artillery post = area fire, ammo).</summary>
 public class FortCombatStepTests
 {
     private static WarState StateWithFort(BaseType fortType, out MilitaryBase fort)
@@ -29,7 +29,7 @@ public class FortCombatStepTests
     {
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
         UnitInstance enemy = AddEnemyTank(s, 100, 0);
-        UnitInstance farEnemy = AddEnemyTank(s, 500, 0, 101); // 射程外
+        UnitInstance farEnemy = AddEnemyTank(s, 500, 0, 101); // Out of range
 
         FortCombatStep.Advance(s, 1f);
 
@@ -44,13 +44,13 @@ public class FortCombatStepTests
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
         UnitInstance enemy = AddEnemyTank(s, 100, 0);
         var cover = new CoverMap();
-        cover.Add(new WorldPos(50, 0, 0), 10f); // 射線のど真ん中に建物
+        cover.Add(new WorldPos(50, 0, 0), 10f); // A building right in the middle of the line of fire
         s.Cover = cover;
 
         FortCombatStep.Advance(s, 1f);
 
-        Assert.Equal(1000f, enemy.CurrentHP, 3); // 建物非貫通
-        Assert.Equal(1f, bunker.FortAmmo, 3);    // 撃っていないので弾薬も減らない
+        Assert.Equal(1000f, enemy.CurrentHP, 3); // Does not penetrate buildings
+        Assert.Equal(1f, bunker.FortAmmo, 3);    // Did not fire, so no ammo is consumed either
     }
 
     [Fact]
@@ -58,8 +58,8 @@ public class FortCombatStepTests
     {
         var s = StateWithFort(BaseType.ArtilleryPost, out MilitaryBase post);
         UnitInstance a = AddEnemyTank(s, 100, 0, 100);
-        UnitInstance b = AddEnemyTank(s, 100, 20, 101); // 目標から20m=Splash(30)内
-        UnitInstance c = AddEnemyTank(s, 100, 90, 102); // Splash外（射程内でも巻き込まれない）
+        UnitInstance b = AddEnemyTank(s, 100, 20, 101); // 20 m from the target = within Splash (30)
+        UnitInstance c = AddEnemyTank(s, 100, 90, 102); // Outside Splash (not caught even though in range)
 
         FortCombatStep.Advance(s, 1f);
 
@@ -74,12 +74,12 @@ public class FortCombatStepTests
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
         UnitInstance enemy = AddEnemyTank(s, 100, 0);
 
-        bunker.FortAmmo = 0f; // 弾切れ
+        bunker.FortAmmo = 0f; // Out of ammo
         FortCombatStep.Advance(s, 1f);
         Assert.Equal(1000f, enemy.CurrentHP, 3);
 
         bunker.FortAmmo = 1f;
-        bunker.OwnerFactionId = null; // 機能停止（中立化）
+        bunker.OwnerFactionId = null; // Out of action (neutralized)
         FortCombatStep.Advance(s, 1f);
         Assert.Equal(1000f, enemy.CurrentHP, 3);
     }

@@ -2,12 +2,13 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// Task90（ユーザー要望「対空機銃・ミサイルは1回の攻撃ごとの命中率をTierごとに設定、外れる場合もある。
-/// 自爆ドローンに対しては機銃、戦闘機や爆撃機に対しては対空ミサイル」）のテスト。
+/// Tests for Task90 (user request: "AA guns and missiles get a per-attack hit chance configured per
+/// Tier, so shots can miss. Use the gun against suicide drones and the AA missile against fighters
+/// and bombers").
 /// </summary>
 public class AntiAirCombatTests
 {
-    // --- 命中率テーブル ---
+    // --- hit-chance table ---
 
     [Fact]
     public void Hit_chances_increase_with_tier_and_stay_within_bounds()
@@ -45,7 +46,7 @@ public class AntiAirCombatTests
     [Fact]
     public void RollHit_rate_approximates_the_requested_chance()
     {
-        // 決定的ハッシュでも、tickを変えながら大量に振れば命中率は指定値へ収束するはず。
+        // Even with the deterministic hash, rolling many times while varying the tick should make the hit rate converge to the requested value.
         const float chance = 0.6f;
         int hits = 0;
         const int n = 2000;
@@ -56,7 +57,7 @@ public class AntiAirCombatTests
         Assert.InRange(rate, chance - 0.05f, chance + 0.05f);
     }
 
-    // --- CombatStepの離散射撃 ---
+    // --- discrete firing in CombatStep ---
 
     private static WarState AaVsAir(string targetTypeKey, out UnitInstance aa, out UnitInstance target)
     {
@@ -69,7 +70,7 @@ public class AntiAirCombatTests
 
         aa = new UnitInstance(1, "AntiAir_T1", 0, 100f, new WorldPos(0, 0, 0));
         s.Units.Add(aa);
-        target = new UnitInstance(2, targetTypeKey, 1, 100000f, new WorldPos(30, 0, 0)); // 射程内・超高HP
+        target = new UnitInstance(2, targetTypeKey, 1, 100000f, new WorldPos(30, 0, 0)); // within range, extremely high HP
         s.Units.Add(target);
         return s;
     }
@@ -80,7 +81,7 @@ public class AntiAirCombatTests
         var s = AaVsAir("AirSuperiority_T1", out var aa, out var target);
         var aaType = s.Types.Get("AntiAir_T1");
 
-        CombatStep.Advance(s, aaType.FireIntervalHours); // クールダウンをちょうど使い切る
+        CombatStep.Advance(s, aaType.FireIntervalHours); // uses up the cooldown exactly
 
         Assert.Single(s.RecentShots);
         Assert.Equal(ShotKind.SamMissile, s.RecentShots[0].Kind);
@@ -102,7 +103,7 @@ public class AntiAirCombatTests
     [Fact]
     public void Missed_shots_deal_no_damage_and_hit_shots_deal_burst_damage()
     {
-        // 何tickか回して命中と外れの両方を観測し、それぞれのダメージ規則を確認する。
+        // Run several ticks to observe both hits and misses, and verify the damage rule for each.
         var s = AaVsAir("AirSuperiority_T1", out var aa, out var target);
         var aaType = s.Types.Get("AntiAir_T1");
         var targetType = s.Types.Get("AirSuperiority_T1");
@@ -114,8 +115,8 @@ public class AntiAirCombatTests
         {
             float hpBefore = target.CurrentHP;
             s.RecentShots.Clear();
-            s.TickCounter++; // 実ゲームではMissileStep.Advanceが毎tick進める（ロールの種を変える）
-            CombatStep.Advance(s, aaType.FireIntervalHours); // 1回のAdvanceで必ず1発撃つ
+            s.TickCounter++; // in the real game MissileStep.Advance increments this every tick (changing the roll seed)
+            CombatStep.Advance(s, aaType.FireIntervalHours); // each Advance always fires exactly one shot
 
             Assert.Single(s.RecentShots);
             var shot = s.RecentShots[0];
@@ -123,12 +124,12 @@ public class AntiAirCombatTests
             if (shot.Missed)
             {
                 sawMiss = true;
-                Assert.Equal(0f, dealt, 2); // 外れは完全にノーダメージ
+                Assert.Equal(0f, dealt, 2); // a miss deals no damage at all
             }
             else
             {
                 sawHit = true;
-                Assert.Equal(burst, dealt, 1); // 命中は1発ぶんの一括ダメージ
+                Assert.Equal(burst, dealt, 1); // a hit deals one shot's worth of damage in a single burst
             }
         }
         Assert.True(sawHit, "expected at least one hit in 60 shots");
@@ -141,20 +142,20 @@ public class AntiAirCombatTests
         var s = AaVsAir("AirSuperiority_T1", out var aa, out var target);
         var aaType = s.Types.Get("AntiAir_T1");
 
-        CombatStep.Advance(s, aaType.FireIntervalHours); // 1発目（クールダウンをリセット）
+        CombatStep.Advance(s, aaType.FireIntervalHours); // first shot (resets the cooldown)
         s.RecentShots.Clear();
         float hpAfterFirst = target.CurrentHP;
 
-        CombatStep.Advance(s, aaType.FireIntervalHours * 0.25f); // まだクールダウン中
+        CombatStep.Advance(s, aaType.FireIntervalHours * 0.25f); // still on cooldown
 
         Assert.Empty(s.RecentShots);
-        Assert.Equal(hpAfterFirst, target.CurrentHP, 3); // ダメージも入らない（離散射撃のみ）
+        Assert.Equal(hpAfterFirst, target.CurrentHP, 3); // no damage is dealt either (discrete firing only)
     }
 
     [Fact]
     public void AA_against_land_target_still_uses_continuous_expected_value_damage()
     {
-        // 対地上は従来の連続方式のまま（離散化は対航空のみ）。
+        // Ground targets keep the old continuous model (discretization applies only against air).
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions.Add(new Faction(1, "Blue"));
@@ -166,7 +167,7 @@ public class AntiAirCombatTests
         s.Units.Add(tank);
 
         float hpBefore = tank.CurrentHP;
-        CombatStep.Advance(s, 0.01f); // 離散射撃なら最初のtickでは撃てない小さなdt
+        CombatStep.Advance(s, 0.01f); // a dt small enough that discrete firing could not shoot on the first tick
 
         Assert.True(tank.CurrentHP < hpBefore, "expected continuous dt-scaled damage against a land target");
     }
@@ -174,7 +175,7 @@ public class AntiAirCombatTests
     [Fact]
     public void Tick_counter_variation_changes_roll_outcomes_across_shots()
     {
-        // 同じ攻撃側・同じ目標でも、tickが違えば命中/外れが変わり得る（全弾同一結果にならない）。
+        // Even with the same attacker and target, different ticks can flip hit/miss (not every shot has the same outcome).
         int distinct = 0;
         bool first = AntiAirCombat.RollHit(1u, 2u, 0u, 0.55f);
         for (uint t = 1; t < 40; t++)

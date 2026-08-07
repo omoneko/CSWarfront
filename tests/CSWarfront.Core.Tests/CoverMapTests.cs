@@ -30,8 +30,9 @@ public class CoverMapTests
     }
 
     /// <summary>
-    /// ユニットは(0,0,0)、脅威は(100,0,0)（真東）。遮蔽物は(50,0,0)（ちょうど中間、真東）に1つだけ。
-    /// 返る立ち位置は遮蔽物の中心から「脅威と反対方向」＝西側に(radius+StandoffMargin)ぶん離れた点になるはず。
+    /// Unit at (0,0,0), threat at (100,0,0) (due east). A single cover object at (50,0,0) (exactly midway, due east).
+    /// The returned standing position should be offset from the cover's centre in the "direction opposite the threat",
+    /// i.e. (radius+StandoffMargin) to the west.
     /// </summary>
     [Fact]
     public void TryFindBestCover_places_standing_position_on_far_side_from_threat()
@@ -42,9 +43,9 @@ public class CoverMapTests
         bool found = map.TryFindBestCover(new WorldPos(0, 0, 0), new WorldPos(100, 0, 0), 60f, 1u, out WorldPos cover);
 
         Assert.True(found);
-        // 脅威(100,0,0)から見て遮蔽物中心(50,0,0)より奥＝Xがより小さい側にあるはず。
+        // As seen from the threat (100,0,0), it should be beyond the cover centre (50,0,0), i.e. on the smaller-X side.
         Assert.True(cover.X < 50f, $"expected standing position west of cover centre, got X={cover.X}");
-        // 遠さは radius(8) + StandoffMargin(4) = 12 → X = 50 - 12 = 38
+        // Distance is radius(8) + StandoffMargin(4) = 12 -> X = 50 - 12 = 38
         Assert.Equal(38f, cover.X, 2);
         Assert.Equal(0f, cover.Z, 2);
     }
@@ -53,15 +54,15 @@ public class CoverMapTests
     public void TryFindBestCover_prefers_cover_between_unit_and_threat_over_cover_behind_unit()
     {
         var map = new CoverMap();
-        // ユニットの背後（脅威と逆方向）にあり、遮蔽としては機能しない遮蔽物: 近いが悪い選択肢
+        // Cover behind the unit (opposite direction from the threat) that provides no actual cover: close but a bad option
         map.Add(new WorldPos(-20, 0, 0), 5f);
-        // ユニットと脅威の間にある遮蔽物: 遠いが良い選択肢
+        // Cover between the unit and the threat: farther but a good option
         map.Add(new WorldPos(50, 0, 0), 5f);
 
         bool found = map.TryFindBestCover(new WorldPos(0, 0, 0), new WorldPos(100, 0, 0), 60f, 1u, out WorldPos cover);
 
         Assert.True(found);
-        // 良い選択肢(50,0,0)から西へ (5+4)=9 ずれた位置になるはず -> X=41（背後の(-20,0,0)なら負のXになる）
+        // Should be offset (5+4)=9 to the west of the good option (50,0,0) -> X=41 (the behind-the-unit (-20,0,0) would yield a negative X)
         Assert.Equal(41f, cover.X, 1);
     }
 
@@ -83,13 +84,14 @@ public class CoverMapTests
         Assert.Equal(first.Z, third.Z, 4);
     }
 
-    /// <summary>複数のほぼ同格な候補があるとき、seedを変えると異なるユニットが異なる点を選び、
-    /// 全員が同一点へ密集しないこと（RoadGraphJitterTestsのDifferent_seeds_choose_different_routesと同じ意図）。</summary>
+    /// <summary>When there are several roughly equal candidates, changing the seed should make different units
+    /// pick different points so that everyone does not cluster at the same spot (same intent as
+    /// Different_seeds_choose_different_routes in RoadGraphJitterTests).</summary>
     [Fact]
     public void TryFindBestCover_spreads_different_seeds_across_different_points_when_several_available()
     {
         var map = new CoverMap();
-        // ユニットからほぼ等距離・脅威との位置関係もほぼ対称な複数の遮蔽物を用意する。
+        // Set up several cover objects roughly equidistant from the unit and roughly symmetric relative to the threat.
         map.Add(new WorldPos(30, 0, 20), 5f);
         map.Add(new WorldPos(30, 0, -20), 5f);
         map.Add(new WorldPos(35, 0, 15), 5f);
@@ -100,7 +102,7 @@ public class CoverMapTests
         {
             bool found = map.TryFindBestCover(new WorldPos(0, 0, 0), new WorldPos(100, 0, 0), 60f, seed, out WorldPos cover);
             Assert.True(found);
-            // XだけだとZ対称な2候補(35,15)と(35,-15)が同じXの立ち位置になり得るため、X:Zの組で判別する。
+            // Using X alone, the Z-symmetric candidates (35,15) and (35,-15) could yield the same standing X, so distinguish by the X:Z pair.
             chosen.Add(cover.X.ToString("0.0") + ":" + cover.Z.ToString("0.0"));
         }
 
@@ -113,15 +115,15 @@ public class CoverMapTests
     public void TryFindBestCover_ignores_cover_outside_search_radius_even_if_it_would_score_better()
     {
         var map = new CoverMap();
-        // 完璧に中間にあるが遠すぎる（探索半径外）。
+        // Perfectly midway but too far (outside the search radius).
         map.Add(new WorldPos(200, 0, 0), 5f);
-        // 探索半径内だが中間からは外れている、それでも唯一の有効候補。
+        // Inside the search radius but off the midline; still the only valid candidate.
         map.Add(new WorldPos(20, 0, 30), 5f);
 
         bool found = map.TryFindBestCover(new WorldPos(0, 0, 0), new WorldPos(1000, 0, 0), 60f, 1u, out WorldPos cover);
 
         Assert.True(found);
-        // (200,0,0)が選ばれていたらcover.Xは200付近になるはずなので、そうならないことを確認する。
+        // If (200,0,0) had been chosen, cover.X would be around 200, so verify that is not the case.
         Assert.True(cover.X < 60f, $"expected the near candidate to win, got X={cover.X}");
     }
 

@@ -2,7 +2,7 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// DisasterImpactStep（Task94: MissileDisasterの着弾によるユニットダメージ）のテスト。
+/// Tests for DisasterImpactStep (Task94: unit damage from MissileDisaster impacts).
 /// </summary>
 public class DisasterImpactStepTests
 {
@@ -29,7 +29,7 @@ public class DisasterImpactStepTests
     [Fact]
     public void Unit_in_burn_ring_takes_lighter_damage()
     {
-        // 破壊半径80の外・延焼半径120の内側 → 延焼ダメージのみ
+        // Outside the destruction radius (80) but inside the burn radius (120) -> burn damage only
         var s = StateWithTank(100f, 0f, DisasterImpactStep.ConventionalBurnDamage + 50f);
         int hit = DisasterImpactStep.ApplyImpact(s, 0f, 0f, 80f, 120f, false);
 
@@ -52,7 +52,7 @@ public class DisasterImpactStepTests
     public void Nuclear_destruction_zone_kills_even_the_toughest_unit()
     {
         var s = StateWithTank(1000f, 0f, 100000f);
-        DisasterImpactStep.ApplyImpact(s, 0f, 0f, 3720f, 5850f, true); // 150kt核の実半径
+        DisasterImpactStep.ApplyImpact(s, 0f, 0f, 3720f, 5850f, true); // real radii of a 150kt nuke
 
         Assert.Equal(UnitState.Dead, s.Units[0].State);
     }

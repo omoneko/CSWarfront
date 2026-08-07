@@ -33,20 +33,20 @@ public class FactionStatusTests
     {
         var s = new WarState();
         var f = new Faction(0, "Red");
-        f.Eliminated = true; // 過去にHQを失って脱落済み（旧バグでは永久にtrueのまま）
+        f.Eliminated = true; // already eliminated after losing its HQ in the past (the old bug left this true forever)
         s.Factions.Add(f);
 
-        FactionStatus.Refresh(s); // まだ基地なし -> Eliminatedのまま
+        FactionStatus.Refresh(s); // still no base -> remains Eliminated
         Assert.True(s.FindFaction(0).Eliminated);
 
-        // プレイヤーが新しい基地を与える
+        // the player grants it a new base
         var b = new MilitaryBase(200, BaseType.Army, new WorldPos(0, 0, 0));
         b.OwnerFactionId = 0;
         s.Bases.Add(b);
 
         FactionStatus.Refresh(s);
 
-        Assert.False(s.FindFaction(0).Eliminated); // 復活
+        Assert.False(s.FindFaction(0).Eliminated); // revived
     }
 
     [Fact]
@@ -101,8 +101,8 @@ public class FactionStatusTests
 
         FactionStatus.Refresh(s);
 
-        Assert.Equal((ushort)100, f.HomeBaseId); // 変わらない
-        Assert.False(other.IsHeadquarters);       // 昇格されない
+        Assert.Equal((ushort)100, f.HomeBaseId); // unchanged
+        Assert.False(other.IsHeadquarters);       // not promoted
     }
 
     [Fact]

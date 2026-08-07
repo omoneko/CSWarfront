@@ -23,11 +23,11 @@ public class TargetSearchTests
     [Fact]
     public void Ignores_non_hostile_and_out_of_range()
     {
-        var rel = new RelationMatrix(5); // 0-1 は Neutral
+        var rel = new RelationMatrix(5); // 0-1 is Neutral
         var self = U(1, 0, 0f);
         var neutral = U(2, 1, 10f);
         rel.Set(0, 2, Relation.Hostile);
-        var hostileFar = U(3, 2, 100f); // 敵対だが射程外
+        var hostileFar = U(3, 2, 100f); // hostile but out of range
         var all = new List<UnitInstance> { self, neutral, hostileFar };
         Assert.Null(TargetSearch.FindNearestHostile(self, all, rel, 60f));
     }
@@ -43,7 +43,7 @@ public class TargetSearchTests
         Assert.Null(TargetSearch.FindNearestHostile(self, all, rel, 60f));
     }
 
-    // --- Task59: Nemesis (宿敵) ---
+    // --- Task59: Nemesis (arch-enemy) ---
 
     [Fact]
     public void Nemesis_counts_as_hostile_for_targeting()
@@ -98,7 +98,7 @@ public class TargetSearchTests
         Assert.Equal((uint)2, t.InstanceId);
     }
 
-    // --- Task61: 領域(Domain)フィルタ ---
+    // --- Task61: Domain filter ---
 
     private static UnitInstance UOf(uint id, byte fac, float x, string typeKey)
         => new UnitInstance(id, typeKey, fac, 100f, new WorldPos(x, 0f, 0f));
@@ -139,9 +139,9 @@ public class TargetSearchTests
         Assert.Equal((uint)2, t.InstanceId);
     }
 
-    // Task85（ユーザー要望「戦闘機は戦闘機・爆撃機・KAIJUのみ攻撃可能」）: 旧仕様
-    // （Air_attacker_can_target_land_sea_and_air_hostiles、CanTargetDomains=All）を廃し、
-    // 戦闘機は航空ユニットしか標的にしない（地上・海上は最寄りでも素通しする）。
+    // Task85 (user request: "fighters may only attack fighters, bombers, and KAIJU"): drops the old
+    // spec (Air_attacker_can_target_land_sea_and_air_hostiles, CanTargetDomains=All); fighters now
+    // target only air units (land and sea units are passed over even when they are the nearest).
     [Fact]
     public void Fighter_targets_only_air_hostiles_ignoring_closer_land_and_sea()
     {
@@ -152,7 +152,7 @@ public class TargetSearchTests
 
         var rel = new RelationMatrix(5);
         rel.Set(0, 1, Relation.Hostile);
-        var self = UOf(1, 0, 0f, "AirSuperiority_T1"); // CanTargetDomains=Air（Task85）
+        var self = UOf(1, 0, 0f, "AirSuperiority_T1"); // CanTargetDomains=Air (Task85)
         var tank = UOf(2, 1, 5f, "Tank_T1");
         var destroyer = UOf(3, 1, 30f, "Destroyer_T1");
         var bomber = UOf(4, 1, 55f, "TacticalBomber_T1");
@@ -160,12 +160,12 @@ public class TargetSearchTests
 
         UnitType fighterType = types.Get("AirSuperiority_T1");
         var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, fighterType.CanTargetDomains, types);
-        Assert.Equal((uint)4, nearest.InstanceId); // 最寄りの戦車・駆逐艦は無視し、航空(爆撃機)だけを狙う
+        Assert.Equal((uint)4, nearest.InstanceId); // ignores the nearest tank and destroyer, targets only the air unit (bomber)
     }
 
-    // Task85→Task88改訂: 爆撃機は地上・海上目標（航空だけは標的にしない）。
-    // 当初のTask85は地上のみだったが、実機で「爆撃機が敵海上ユニットを無視する」とユーザーが
-    // 指摘したため、対艦爆撃を許可する形へ変更した。
+    // Task85 -> revised in Task88: bombers hit land and sea targets (air is the only domain they do
+    // not target). Task85 originally allowed land only, but the user pointed out in-game that
+    // "bombers ignore enemy naval units", so this was changed to permit anti-ship bombing.
     [Fact]
     public void Bomber_targets_land_and_sea_hostiles_ignoring_closer_air()
     {
@@ -176,7 +176,7 @@ public class TargetSearchTests
 
         var rel = new RelationMatrix(5);
         rel.Set(0, 1, Relation.Hostile);
-        var self = UOf(1, 0, 0f, "TacticalBomber_T1"); // CanTargetDomains=Land|Sea（Task88）
+        var self = UOf(1, 0, 0f, "TacticalBomber_T1"); // CanTargetDomains=Land|Sea (Task88)
         var fighter = UOf(2, 1, 5f, "AirSuperiority_T1");
         var destroyer = UOf(3, 1, 30f, "Destroyer_T1");
         var tank = UOf(4, 1, 55f, "Tank_T1");
@@ -184,11 +184,11 @@ public class TargetSearchTests
 
         UnitType bomberType = types.Get("TacticalBomber_T1");
         var nearest = TargetSearch.FindNearestHostile(self, all, rel, 60f, bomberType.CanTargetDomains, types);
-        Assert.Equal((uint)3, nearest.InstanceId); // 最寄りの戦闘機は無視し、次に近い海上(駆逐艦)を狙う
+        Assert.Equal((uint)3, nearest.InstanceId); // ignores the nearest fighter, targets the next-closest sea unit (destroyer)
     }
 
-    // Task91（ユーザー確認依頼「海上戦力から地上戦力に攻撃ができるようになってるか」）:
-    // 駆逐艦は地上ユニットを標的にでき、CombatStepで実際にダメージが入る。
+    // Task91 (user verification request: "can naval forces attack land forces now?"):
+    // destroyers can target land units, and CombatStep actually applies the damage.
     [Fact]
     public void Destroyer_targets_and_damages_a_land_unit_in_range()
     {
@@ -201,7 +201,7 @@ public class TargetSearchTests
 
         var destroyer = new UnitInstance(1, "Destroyer_T1", 0, 260f, new WorldPos(0, 0, 0));
         s.Units.Add(destroyer);
-        var tank = new UnitInstance(2, "Tank_T1", 1, 100000f, new WorldPos(150, 0, 0)); // 射程220内の沿岸目標
+        var tank = new UnitInstance(2, "Tank_T1", 1, 100000f, new WorldPos(150, 0, 0)); // coastal target within the 220 range
         s.Units.Add(tank);
 
         float hpBefore = tank.CurrentHP;
@@ -212,7 +212,7 @@ public class TargetSearchTests
         Assert.True(tank.CurrentHP < hpBefore, "expected the destroyer to damage the land unit");
     }
 
-    // Task85: 空母は何も攻撃しない（発着艦プラットフォーム専任、CanTargetDomains=None）。
+    // Task85: carriers attack nothing (dedicated launch/recovery platform, CanTargetDomains=None).
     [Fact]
     public void Carrier_targets_nothing()
     {
@@ -223,7 +223,7 @@ public class TargetSearchTests
 
         var rel = new RelationMatrix(5);
         rel.Set(0, 1, Relation.Hostile);
-        var self = UOf(1, 0, 0f, "Carrier_T1"); // CanTargetDomains=None（Task85）
+        var self = UOf(1, 0, 0f, "Carrier_T1"); // CanTargetDomains=None (Task85)
         var tank = UOf(2, 1, 5f, "Tank_T1");
         var destroyer = UOf(3, 1, 10f, "Destroyer_T1");
         var fighter = UOf(4, 1, 15f, "AirSuperiority_T1");

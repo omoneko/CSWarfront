@@ -2,9 +2,9 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// ThreatBeamStep（Task83: ゴジラ光線/トライポッドレーザーのユニットダメージ判定）のテスト。
-/// 他MODが発射した一回性のビーム（線分）に対し、線分から一定幅以内の全ユニットへ
-/// 装甲無視・勢力無差別の一撃ダメージを与える。
+/// Tests for ThreatBeamStep (Task83: unit damage checks for the Godzilla beam / tripod laser).
+/// For a one-shot beam (line segment) fired by another MOD, deals one-hit damage that ignores armor
+/// and is faction-indiscriminate to all units within a fixed width of the segment.
 /// </summary>
 public class ThreatBeamStepTests
 {
@@ -21,7 +21,7 @@ public class ThreatBeamStepTests
     [Fact]
     public void Unit_on_beam_path_takes_kaiju_damage_and_dies()
     {
-        var s = StateWithTank(50f, 0f); // 線分(0,0)-(100,0)の真上
+        var s = StateWithTank(50f, 0f); // Directly on the segment (0,0)-(100,0)
         int hit = ThreatBeamStep.ApplyStrike(s, ThreatKind.Kaiju, 0f, 0f, 100f, 0f);
 
         Assert.Equal(1, hit);
@@ -60,7 +60,7 @@ public class ThreatBeamStepTests
     [Fact]
     public void Unit_within_endpoint_circle_is_hit()
     {
-        // 線分の端点から幅以内（端点の丸いキャップ）もヒット扱い
+        // Being within the width of a segment endpoint (the rounded end cap) also counts as a hit
         var s = StateWithTank(100f + ThreatBeamStep.KaijuBeamWidth - 1f, 0f);
         int hit = ThreatBeamStep.ApplyStrike(s, ThreatKind.Kaiju, 0f, 0f, 100f, 0f);
         Assert.Equal(1, hit);
@@ -69,7 +69,7 @@ public class ThreatBeamStepTests
     [Fact]
     public void Alien_strike_uses_alien_damage()
     {
-        // AlienBeamDamageを上回るHPを持たせ、「死なずにきっちりAlienBeamDamageぶん削れる」ことを確認
+        // Give it more HP than AlienBeamDamage and confirm it "does not die and loses exactly AlienBeamDamage worth of HP"
         var s = StateWithTank(50f, 0f, ThreatBeamStep.AlienBeamDamage + 100f);
         int hit = ThreatBeamStep.ApplyStrike(s, ThreatKind.Alien, 0f, 0f, 100f, 0f);
 
@@ -95,8 +95,8 @@ public class ThreatBeamStepTests
     [Fact]
     public void Damage_ignores_faction_relations()
     {
-        // ThreatAuraStepと同じ方針: ThreatRelationsを一切参照せず、全勢力のユニットへ等しく当たる。
-        // （関係設定なしのままでもダメージが入ることをもって「参照していない」ことを確認する）
+        // Same policy as ThreatAuraStep: never consults ThreatRelations and hits units of all factions equally.
+        // (The fact that damage lands even without any relation setup confirms that it "does not consult" them.)
         var s = StateWithTank(50f, 0f);
         int hit = ThreatBeamStep.ApplyStrike(s, ThreatKind.Kaiju, 0f, 0f, 100f, 0f);
         Assert.Equal(1, hit);
@@ -105,9 +105,9 @@ public class ThreatBeamStepTests
     [Fact]
     public void Degenerate_zero_length_segment_acts_as_circle()
     {
-        // トライポッドの真下撃ち等、始点=終点の退化ケースは点周りの円として扱う
+        // Degenerate cases where start = end, such as a tripod firing straight down, are treated as a circle around the point
         var s = StateWithTank(5f, 5f, ThreatBeamStep.AlienBeamDamage + 50f);
         int hit = ThreatBeamStep.ApplyStrike(s, ThreatKind.Alien, 0f, 0f, 0f, 0f);
-        Assert.Equal(1, hit); // 距離√50≈7.1 < AlienBeamWidth(15)
+        Assert.Equal(1, hit); // Distance sqrt(50) ≈ 7.1 < AlienBeamWidth (15)
     }
 }

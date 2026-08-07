@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
-/// <summary>Task48: UnitCommands（プレイヤーの部隊コマンドをUnitInstanceへ適用するAPI）のテスト。
-/// 返り値のカウント・古い注文由来の状態のクリア・存在しない/死亡済みIDの無視を検証する。
-/// 末尾には、Hold/RallyHoldが「受動防御」（射程内は撃つが追撃/遮蔽移動/拠点進撃はしない）であることを
-/// CombatStep/CoverSeekStep/MovementStepを組み合わせた統合テストで確認する。</summary>
+/// <summary>Task48: tests for UnitCommands (the API that applies player unit commands to UnitInstance).
+/// Verifies the returned affected counts, the clearing of state left over from older orders, and that
+/// missing/dead IDs are ignored. At the end, integration tests combining CombatStep/CoverSeekStep/MovementStep
+/// confirm that Hold/RallyHold are "passive defense" (fire while in range, but no chasing / cover movement / base advance).</summary>
 public class UnitCommandsTests
 {
     private static WarState OneUnitState()
@@ -204,7 +204,7 @@ public class UnitCommandsTests
         Assert.Equal(0, UnitCommands.ClearOrders(s, new List<uint> { 12345 }));
     }
 
-    // --- Task48 integration: Hold/RallyHold は「受動防御」（射程内は撃つが追撃/遮蔽移動はしない） ---
+    // --- Task48 integration: Hold/RallyHold are "passive defense" (fire while in range, but no chasing / cover movement) ---
 
     private static WarState HostilePair(out UnitInstance self, out UnitInstance enemy)
     {

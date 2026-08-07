@@ -2,11 +2,12 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// Task86（ユーザー要望「爆撃機は爆弾を落としてヒットアンドアウェイ、戦闘機は停止せずすれ違いながら
-/// ドッグファイト」）: 航空ユニットの交戦パス移動（レーストラック航過）のテスト。
-/// 接近→至近(PassTriggerDistance)で進行方向へ抜ける離脱点(PassEgressDistance)を設定→離脱点まで
-/// 飛び切ってから反転して再進入、を繰り返す。ダメージは従来どおり射程内でのみ入るため、
-/// 射程内滞在時間が減るぶんAirCombat.PassDamageCompensationで補正する。
+/// Task86 (user requests: "bombers drop their bombs and hit-and-run; fighters dogfight in flybys
+/// without stopping"): tests for air units' engagement pass movement (racetrack flyover).
+/// Approach -> at close range (PassTriggerDistance) arm an egress point ahead along the direction
+/// of travel (PassEgressDistance) -> fly all the way to the egress point, then turn around and
+/// re-enter, repeating. Damage still applies only within weapon range, so the reduced time spent
+/// in range is compensated by AirCombat.PassDamageCompensation.
 /// </summary>
 public class AirPassTests
 {
@@ -35,15 +36,15 @@ public class AirPassTests
     {
         UnitInstance fighter;
         var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 100f);
-        fighter.TargetId = 2; // CombatStepがロック済みの想定
+        fighter.TargetId = 2; // Assumes CombatStep has already locked the target
         fighter.State = UnitState.Engaging;
 
-        // 至近距離まで接近するのに十分な回数進める（戦闘機は非常に速い）。
+        // Advance enough ticks to close to point-blank range (fighters are very fast).
         for (int i = 0; i < 200 && !fighter.AirPassEgress.HasValue; i++)
             MovementStep.Advance(s, 0.05f);
 
         Assert.True(fighter.AirPassEgress.HasValue, "expected an egress point to be armed near the target");
-        // 離脱点は標的(100,0)から進行方向(+X)へPassEgressDistanceぶん先。
+        // The egress point is PassEgressDistance beyond the target (100,0) along the direction of travel (+X).
         Assert.Equal(100f + AirCombat.PassEgressDistance, fighter.AirPassEgress.Value.X, 0);
         Assert.Equal(0f, fighter.AirPassEgress.Value.Z, 0);
     }
@@ -56,12 +57,12 @@ public class AirPassTests
         fighter.TargetId = 2;
         fighter.State = UnitState.Engaging;
 
-        // 離脱点が武装されるまで進める。
+        // Advance until the egress point is armed.
         for (int i = 0; i < 200 && !fighter.AirPassEgress.HasValue; i++)
             MovementStep.Advance(s, 0.05f);
         Assert.True(fighter.AirPassEgress.HasValue);
 
-        // 離脱レグを飛び切る（標的の遥か向こう側まで抜ける＝ヒットアンドアウェイの「アウェイ」）。
+        // Fly out the egress leg (well past the far side of the target = the "away" of hit-and-away).
         float maxX = fighter.Position.X;
         for (int i = 0; i < 400 && fighter.AirPassEgress.HasValue; i++)
         {
@@ -72,7 +73,7 @@ public class AirPassTests
         Assert.True(maxX > 100f + AirCombat.PassEgressDistance * 0.8f,
             "expected the fighter to fly well past the target before turning (maxX=" + maxX + ")");
 
-        // 反転して再び標的方向（-X側）へ向かう＝レーストラック。
+        // Turns around and heads back toward the target (the -X side) = the racetrack.
         float xAfterEgress = fighter.Position.X;
         for (int i = 0; i < 40; i++) MovementStep.Advance(s, 0.05f);
         Assert.True(fighter.Position.X < xAfterEgress,
@@ -91,12 +92,12 @@ public class AirPassTests
             MovementStep.Advance(s, 0.05f);
         Assert.True(fighter.AirPassEgress.HasValue);
 
-        // 標的が撃破されてロックも外れた（CombatStepがTargetId=nullにした想定）。
+        // The target was destroyed and the lock released (assumes CombatStep set TargetId=null).
         s.FindUnit(2).CurrentHP = 0f;
         s.FindUnit(2).State = UnitState.Dead;
         fighter.TargetId = null;
 
-        // それでも離脱レグは最後まで飛び切る（境界でのふらつき防止）。
+        // The egress leg is still flown to the end anyway (prevents jitter at the boundary).
         MovementStep.Advance(s, 0.05f);
         Assert.True(fighter.AirPassEgress.HasValue,
             "expected the egress leg to persist after the target died");
@@ -113,7 +114,7 @@ public class AirPassTests
 
         var bomber = new UnitInstance(1, "TacticalBomber_T1", 0, 100f, new WorldPos(0, 0, 0));
         bomber.State = UnitState.Moving;
-        bomber.OrderTargetPos = new WorldPos(100, 0, 0); // 敵基地の位置が進撃目的地
+        bomber.OrderTargetPos = new WorldPos(100, 0, 0); // The enemy base's position is the advance objective
         s.Units.Add(bomber);
 
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(100, 0, 0));
@@ -131,8 +132,9 @@ public class AirPassTests
     [Fact]
     public void Bomber_does_not_keep_passing_over_a_base_already_at_the_floor()
     {
-        // Task88: HP1（航空の床）に達した拠点はもう航過アンカーにしない＝爆撃機は離脱して
-        // 通常の目的地移動へ戻る（実機報告「HP1になっても攻撃をやめない」の移動面の対処）。
+        // Task88: a base that has reached HP 1 (the air floor) is no longer used as a pass anchor =
+        // the bomber disengages and returns to normal objective movement (the movement-side fix for
+        // the field report "keeps attacking even at HP 1").
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
         s.Factions.Add(new Faction(1, "Blue"));
@@ -146,13 +148,13 @@ public class AirPassTests
 
         var enemyBase = new MilitaryBase(200, BaseType.Army, new WorldPos(100, 0, 0));
         enemyBase.OwnerFactionId = 1;
-        enemyBase.CurrentHP = 1f; // 既に床
+        enemyBase.CurrentHP = 1f; // Already at the floor
         s.Bases.Add(enemyBase);
 
         for (int i = 0; i < 300; i++) MovementStep.Advance(s, 0.05f);
 
-        Assert.False(bomber.AirPassEgress.HasValue); // 航過は発生しない
-        Assert.Equal(100f, bomber.Position.X, 0);    // 目的地でホバリング（従来の到着挙動）
+        Assert.False(bomber.AirPassEgress.HasValue); // No pass occurs
+        Assert.Equal(100f, bomber.Position.X, 0);    // Hovers at the objective (the previous arrival behaviour)
     }
 
     [Fact]
@@ -176,7 +178,7 @@ public class AirPassTests
 
         for (int i = 0; i < 300; i++) MovementStep.Advance(s, 0.05f);
 
-        // 戦闘機は基地を攻撃できない（Task85）ので、基地上空でもパスは発生せず目的地でホバリングする。
+        // Fighters cannot attack bases (Task85), so no pass occurs even over the base; the fighter hovers at the objective.
         Assert.False(fighter.AirPassEgress.HasValue);
         Assert.Equal(100f, fighter.Position.X, 0);
     }
@@ -194,11 +196,11 @@ public class AirPassTests
 
         for (int i = 0; i < 100; i++) MovementStep.Advance(s, 0.05f);
 
-        Assert.Equal(50f, bomber.Position.X, 1); // 従来どおり目的地へ到達して静止
+        Assert.Equal(50f, bomber.Position.X, 1); // Reaches the objective and stops, as before
         Assert.False(bomber.AirPassEgress.HasValue);
     }
 
-    // --- ダメージ補正 ---
+    // --- Damage compensation ---
 
     [Fact]
     public void Damage_compensation_applies_to_air_but_not_land_or_kamikaze()
@@ -210,14 +212,14 @@ public class AirPassTests
         Assert.Equal(AirCombat.PassDamageCompensation, AirCombat.DamageMultiplier(types.Get("AirSuperiority_T1")));
         Assert.Equal(AirCombat.PassDamageCompensation, AirCombat.DamageMultiplier(types.Get("TacticalBomber_T1")));
         Assert.Equal(1f, AirCombat.DamageMultiplier(types.Get("Tank_T1")));
-        Assert.Equal(1f, AirCombat.DamageMultiplier(types.Get("SuicideDrone_T1"))); // 体当たりは1回フルダメージのまま
+        Assert.Equal(1f, AirCombat.DamageMultiplier(types.Get("SuicideDrone_T1"))); // Ramming stays a single full-damage hit
     }
 
     [Fact]
     public void CombatStep_applies_air_damage_compensation()
     {
         UnitInstance fighter;
-        var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 50f); // 射程(90)内
+        var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 50f); // Within weapon range (90)
         var target = s.FindUnit(2);
         float hpBefore = target.CurrentHP;
 

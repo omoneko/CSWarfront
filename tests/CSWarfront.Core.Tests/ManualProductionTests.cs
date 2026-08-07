@@ -11,7 +11,7 @@ public class ManualProductionTests
         {
             var f = new Faction(ownerId.Value, "Red");
             f.AddTreasury(treasury);
-            f.AddManpower(treasury);   // Task99: 3資源経済（資金と同じスケールで付与）
+            f.AddManpower(treasury);   // Task99: 3-resource economy (granted at the same scale as funds)
             f.AddProduction(treasury);
             s.Factions.Add(f);
         }
@@ -26,7 +26,7 @@ public class ManualProductionTests
     [Fact]
     public void TryEnqueue_Ok_appends_order_and_spends_treasury()
     {
-        var s = WithBase(100f); // Infantry_T1 costs 20（Task99: 人的資源60%/生産力40%）
+        var s = WithBase(100f); // Infantry_T1 costs 20 (Task99: 60% manpower / 40% production)
         QueueResult r = ManualProduction.TryEnqueue(s, 100, "Infantry_T1");
 
         Assert.Equal(QueueResult.Ok, r);
@@ -34,7 +34,7 @@ public class ManualProductionTests
         Assert.Equal("Infantry_T1", s.Bases[0].Queue[0].TypeKey);
         Assert.Equal(100f - 20f * 0.6f, s.Factions[0].Manpower, 3);
         Assert.Equal(100f - 20f * 0.4f, s.Factions[0].Production, 3);
-        Assert.Equal(100f, s.Factions[0].Treasury, 3); // 生産力が足りている間、資金は使われない
+        Assert.Equal(100f, s.Factions[0].Treasury, 3); // funds are not spent while production suffices
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class ManualProductionTests
         Assert.Empty(s.Bases[0].Queue);
     }
 
-    // --- Task61: 基地の領域(Domain)ゲート ---
+    // --- Task61: base domain gate ---
 
     [Fact]
     public void TryEnqueue_WrongDomain_when_army_base_tries_to_queue_a_naval_unit()

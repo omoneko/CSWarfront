@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using CSWarfront.Core;
 using Xunit;
 
@@ -19,11 +19,11 @@ public class CombatStepTests
     [Fact]
     public void Units_in_range_damage_each_other()
     {
-        var s = TwoHostileTanks(50f); // range 60 内
+        var s = TwoHostileTanks(50f); // within range 60
         CombatStep.Advance(s, 1f);
         // Task28: Tank_T1.Armor is now 10 (was 5). DamagePerHit(40,10)=30.
         // Task38: Tank_T1.Accuracy=0.70 (no drone synergy applies to non-Artillery), matchup Tank->Tank=1.0.
-        // Task91: Tank Attack 40->42。DamagePerHit(42,10)=32, dmg = 32 * dt(1) * matchup(1.0) * accuracy(0.70) = 22.4 -> 100-22.4=77.6
+        // Task91: Tank Attack 40->42. DamagePerHit(42,10)=32, dmg = 32 * dt(1) * matchup(1.0) * accuracy(0.70) = 22.4 -> 100-22.4=77.6
         // (old arithmetic, pre-accuracy: 100-30=70)
         Assert.Equal(77.6f, s.FindUnit(1).CurrentHP, 3);
         Assert.Equal(77.6f, s.FindUnit(2).CurrentHP, 3);
@@ -33,7 +33,7 @@ public class CombatStepTests
     [Fact]
     public void Units_out_of_range_do_not_engage()
     {
-        var s = TwoHostileTanks(100f); // range 60 外
+        var s = TwoHostileTanks(100f); // outside range 60
         CombatStep.Advance(s, 1f);
         Assert.Equal(100f, s.FindUnit(1).CurrentHP, 3);
         Assert.NotEqual(UnitState.Engaging, s.FindUnit(1).State);
@@ -43,13 +43,13 @@ public class CombatStepTests
     public void Unit_dies_when_hp_reaches_zero()
     {
         var s = TwoHostileTanks(50f);
-        // Task38: dmg = DamagePerHit(40,10)=30 * matchup(1.0) * accuracy(0.70) = 21 (dt=1) で死亡させる。
+        // Task38: dmg = DamagePerHit(40,10)=30 * matchup(1.0) * accuracy(0.70) = 21 (dt=1) kills it.
         s.FindUnit(2).CurrentHP = 15f;
         CombatStep.Advance(s, 1f);
         Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
     }
 
-    // --- Task35: 撃破報酬（Research.KillReward）の付与 ---
+    // --- Task35: awarding the kill reward (Research.KillReward) ---
 
     [Fact]
     public void Killing_a_unit_awards_research_points_to_the_killers_faction()
@@ -92,7 +92,7 @@ public class CombatStepTests
         Assert.Equal(88.8f, half.FindUnit(1).CurrentHP, 3);
     }
 
-    // --- Task29: CombatMatchup適用 ---
+    // --- Task29: applying CombatMatchup ---
 
     [Fact]
     public void DroneInfantry_deals_double_damage_against_tank()
@@ -131,7 +131,7 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // Task91: Infantry Attack 20->18。DamagePerHit(18,10)=8, × CombatMatchup(Infantry->Tank)=0.4 × dt(1)
+        // Task91: Infantry Attack 20->18. DamagePerHit(18,10)=8, × CombatMatchup(Infantry->Tank)=0.4 × dt(1)
         // × Infantry.Accuracy(0.75) = 2.4 -> 200-2.4=197.6
         Assert.Equal(197.6f, s.FindUnit(2).CurrentHP, 3);
     }
@@ -155,7 +155,7 @@ public class CombatStepTests
         Assert.Equal(183f, s.FindUnit(2).CurrentHP, 3);
     }
 
-    // --- Task38: 命中率(Accuracy)の適用、ドローン観測支援シナジー ---
+    // --- Task38: applying hit chance (Accuracy), drone spotting-support synergy ---
 
     [Fact]
     public void Artillery_alone_deals_reduced_expected_damage_due_to_low_accuracy()
@@ -171,7 +171,7 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // Task91: Artillery Attack 50->55。期待値は式で導出する（リテラル固定はレート再調整のたびに壊れるため）。
+        // Task91: Artillery Attack 50->55. Derive the expected value from the formula (a hardcoded literal breaks every time the rates are retuned).
         float expectedAlone = 200f - CombatMath.DamagePerHit(55f, 10f) * 0.7f * 0.35f;
         Assert.Equal(expectedAlone, s.FindUnit(2).CurrentHP, 2);
     }
@@ -196,18 +196,18 @@ public class CombatStepTests
 
         CombatStep.Advance(s, 1f);
 
-        // effective accuracy = min(0.95, 0.35 + DroneSpotterAccuracyBonus(0.5)) = 0.85（Task91: Attack 55）
+        // effective accuracy = min(0.95, 0.35 + DroneSpotterAccuracyBonus(0.5)) = 0.85 (Task91: Attack 55)
         // (versus 190.2 without the drone above: the synergy visibly raises artillery damage)
         float expectedSpotted = 200f - CombatMath.DamagePerHit(55f, 10f) * 0.7f * 0.85f;
         Assert.Equal(expectedSpotted, s.FindUnit(2).CurrentHP, 2);
     }
 
-    // --- Task42: 発砲エフェクト(ShotEvent)の間引き ---
+    // --- Task42: throttling of muzzle-fire effects (ShotEvent) ---
 
     [Fact]
     public void Unit_with_no_target_emits_no_shots()
     {
-        var s = TwoHostileTanks(100f); // range 60 外、どちらも交戦しない
+        var s = TwoHostileTanks(100f); // outside range 60, neither engages
         CombatStep.Advance(s, 1f);
         Assert.Empty(s.RecentShots);
     }
@@ -215,32 +215,33 @@ public class CombatStepTests
     [Fact]
     public void Firing_unit_emits_exactly_one_shot_event_on_the_first_tick_it_deals_damage()
     {
-        var s = TwoHostileTanks(50f); // range 60 内、両者交戦
-        CombatStep.Advance(s, 0.01f); // FireCooldown既定0なので、ダメージを与えた瞬間に必ず1発出る
+        var s = TwoHostileTanks(50f); // within range 60, both engage
+        CombatStep.Advance(s, 0.01f); // FireCooldown defaults to 0, so exactly one shot is emitted the instant damage is dealt
 
         var fromUnit1 = s.RecentShots.FindAll(e => e.FactionId == 0);
         Assert.Single(fromUnit1);
         Assert.Equal(ShotKind.DirectFire, fromUnit1[0].Kind); // Tank
         Assert.Equal(0f, fromUnit1[0].From.X, 3);
         Assert.Equal(0f, fromUnit1[0].From.Z, 3);
-        Assert.Equal(50f, fromUnit1[0].To.X, 3); // 標的(unit2)の位置
+        Assert.Equal(50f, fromUnit1[0].To.X, 3); // position of the target (unit2)
         Assert.Equal((byte)0, fromUnit1[0].FactionId);
-        // Task43: 発射位置の高さ補正（モデル中央高さ）をGame層が算出できるよう、攻撃側/標的側の
-        // InstanceIdをShotEventに載せる。
+        // Task43: the attacker/target InstanceIds are carried on the ShotEvent so the Game layer can
+        // compute the height correction of the firing position (model center height).
         Assert.Equal(1u, fromUnit1[0].AttackerId); // unit1 (self)
         Assert.Equal(2u, fromUnit1[0].TargetId);   // unit2 (target)
-        // Task51: 兵科別射撃音をGame層が選べるよう、発砲したユニットのUnitCategoryをShotEventに載せる。
+        // Task51: the firing unit's UnitCategory is carried on the ShotEvent so the Game layer can pick per-branch firing sounds.
         Assert.Equal(UnitCategory.Tank, fromUnit1[0].Category);
     }
 
     [Fact]
     public void Firing_unit_emits_at_most_one_shot_per_its_own_fire_interval()
     {
-        // Task43: Tank.FireIntervalHours = 0.90h（LandUnitRoster、旧0.25hから延長）。
-        // dt=0.31hずつ9回進める＝合計2.79h(=3.1間隔分)。
-        // dt=0.31はFireIntervalHours(0.90)を割り切らない値を意図的に選んでいる：発火/非発火の判定が
-        // 常にゼロから明確に離れた値になり、浮動小数点の丸め誤差でゼロ境界の判定が揺れる心配がない
-        // （決定的シミュレーションのテストとして頑健にするため）。
+        // Task43: Tank.FireIntervalHours = 0.90h (LandUnitRoster, extended from the old 0.25h).
+        // Advance by dt=0.31h nine times = 2.79h total (= 3.1 intervals).
+        // dt=0.31 is deliberately chosen so it does not divide FireIntervalHours(0.90) evenly: the
+        // fire/no-fire decision always lands on values clearly away from zero, so there is no worry
+        // about floating-point rounding error wobbling the decision at the zero boundary
+        // (keeping this robust as a test of a deterministic simulation).
         var s = TwoHostileTanks(50f);
         int shotsFromUnit1 = 0;
         for (int i = 0; i < 9; i++)
@@ -250,11 +251,11 @@ public class CombatStepTests
             shotsFromUnit1 += s.RecentShots.FindAll(e => e.FactionId == 0).Count;
         }
 
-        // FireCooldown推移（unit1、Tank_T1、FireIntervalHours=0.90）:
-        //   step1: 0-0.31=-0.31<=0 → 発砲、reset 0.90
-        //   step2: 0.90-0.31=0.59  step3: 0.59-0.31=0.28  step4: 0.28-0.31=-0.03<=0 → 発砲、reset 0.90
-        //   step5: 0.59  step6: 0.28  step7: -0.03<=0 → 発砲、reset 0.90  step8: 0.59  step9: 0.28
-        // 合計3発（乱数不使用・決定的：毎回同じ値になる）。
+        // FireCooldown progression (unit1, Tank_T1, FireIntervalHours=0.90):
+        //   step1: 0-0.31=-0.31<=0 -> fires, reset 0.90
+        //   step2: 0.90-0.31=0.59  step3: 0.59-0.31=0.28  step4: 0.28-0.31=-0.03<=0 -> fires, reset 0.90
+        //   step5: 0.59  step6: 0.28  step7: -0.03<=0 -> fires, reset 0.90  step8: 0.59  step9: 0.28
+        // 3 shots in total (no randomness, deterministic: the same values every run).
         Assert.Equal(3, shotsFromUnit1);
     }
 
@@ -267,9 +268,10 @@ public class CombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
 
-        // WarState.MaxRecentShotsPerTick(200)を大きく超える数の交戦ペアを作る。各ペアは互いの射程内で、
-        // 他ペアとは十分離れているためTargetSearchが自分のペア相手だけを選ぶ（干渉しない）。
-        const int pairs = 130; // 130ペア×2ユニット=260ユニット、両方向で最大520発の"要求"が出る想定
+        // Create far more engaging pairs than WarState.MaxRecentShotsPerTick(200). Each pair is within
+        // range of each other and far enough from every other pair that TargetSearch only picks its
+        // own pair partner (no interference).
+        const int pairs = 130; // 130 pairs × 2 units = 260 units, expecting up to 520 shot "requests" across both directions
         uint nextId = 1;
         for (int p = 0; p < pairs; p++)
         {
@@ -283,26 +285,27 @@ public class CombatStepTests
         Assert.Equal(WarState.MaxRecentShotsPerTick, s.RecentShots.Count);
     }
 
-    // --- Task51: 撃破イベント(KillEvent)は死亡判定と同じtickで積まれる ---
+    // --- Task51: kill events (KillEvent) are queued in the same tick as the death determination ---
 
     [Fact]
     public void Killing_a_unit_emits_exactly_one_kill_event_at_the_victims_position()
     {
-        var s = TwoHostileTanks(50f); // range 60 内、両者交戦
-        s.FindUnit(2).CurrentHP = 1f; // このtickの一撃で確実に死ぬところまで削っておく
+        var s = TwoHostileTanks(50f); // within range 60, both engage
+        s.FindUnit(2).CurrentHP = 1f; // whittled down so a single hit this tick reliably kills it
 
         CombatStep.Advance(s, 1f);
 
         Assert.Equal(UnitState.Dead, s.FindUnit(2).State);
         Assert.Single(s.RecentKills);
         var kill = s.RecentKills[0];
-        Assert.Equal(50f, kill.Position.X, 3); // 撃破されたunit2の位置
-        Assert.Equal((byte)1, kill.FactionId); // 撃破されたunit2（Blue）の所属勢力
-        Assert.Equal(UnitCategory.Tank, kill.Category); // Task53: 撃破されたunit2の兵科（Tank_T1）
+        Assert.Equal(50f, kill.Position.X, 3); // position of the destroyed unit2
+        Assert.Equal((byte)1, kill.FactionId); // faction of the destroyed unit2 (Blue)
+        Assert.Equal(UnitCategory.Tank, kill.Category); // Task53: category of the destroyed unit2 (Tank_T1)
     }
 
-    // Task53: 歩兵の撃破音オミット判定に使うUnitCategoryが、被撃破ユニットのUnitTypeから
-    // 正しく引かれることを検証する（Game層CombatFx.SpawnKillSoundsのInfantry/DroneInfantry判定の前提）。
+    // Task53: verify that the UnitCategory used for the infantry kill-sound omission check is
+    // correctly looked up from the destroyed unit's UnitType (the premise of the Infantry/DroneInfantry
+    // check in the Game layer's CombatFx.SpawnKillSounds).
     [Fact]
     public void Killing_an_infantry_unit_emits_a_kill_event_with_Infantry_category()
     {
@@ -326,7 +329,7 @@ public class CombatStepTests
     [Fact]
     public void Unit_that_survives_the_tick_emits_no_kill_event()
     {
-        var s = TwoHostileTanks(50f); // range 60 内、両者とも100HPで生存する
+        var s = TwoHostileTanks(50f); // within range 60, both survive with 100 HP
         CombatStep.Advance(s, 1f);
         Assert.Empty(s.RecentKills);
     }
@@ -340,10 +343,11 @@ public class CombatStepTests
         s.Relations.Set(0, 1, Relation.Hostile);
         s.Types.Register(MvpUnitTypes.Tank_T1());
 
-        // WarState.MaxRecentKillsPerTick(200)を大きく超える数の交戦ペアを作り、片方を1HPにしておくことで
-        // 同一tickで全ペアが同時に死亡し得る状況を作る（RecentShots版のキャップ検証と同じ配置パターン）。
-        // 各ペアにつき死亡するのは1HP側の1体のみ（もう一方は100HPで生き残る、攻撃順の都合で反撃も受けない）
-        // なので、200件のキャップを実際に超えさせるにはペア数自体を200超にする必要がある。
+        // Create far more engaging pairs than WarState.MaxRecentKillsPerTick(200) and set one side of
+        // each pair to 1 HP, so that all pairs can die simultaneously in the same tick (the same layout
+        // pattern as the RecentShots cap verification). Only the 1-HP unit of each pair dies (the other
+        // survives at 100 HP and, due to attack ordering, takes no counterattack either), so actually
+        // exceeding the cap of 200 requires more than 200 pairs.
         const int pairs = 250;
         uint nextId = 1;
         for (int p = 0; p < pairs; p++)
@@ -359,24 +363,25 @@ public class CombatStepTests
         Assert.Equal(WarState.MaxRecentKillsPerTick, s.RecentKills.Count);
     }
 
-    // --- Task52: Options画面の勢力関係変更がシミュレーションへ即座に効くことのCoreレベル検証 ---
-    // TargetSearch/CombatStep/BaseCombatStep/AiTargetingは全てRelation.Hostileでゲートしているため、
-    // ペアをNeutral/Alliedへ切り替えれば、それまで交戦していたユニット同士も即座に無視し合うはず。
-    // MilitaryManager.TrySetRelationはCore.RelationMatrix.Setへ委譲するだけの薄いラッパーのため、
-    // ここではWarState.Relations.Setを直接呼んで同じ経路を検証する。
+    // --- Task52: Core-level verification that faction-relation changes made in the Options screen take effect on the simulation immediately ---
+    // TargetSearch/CombatStep/BaseCombatStep/AiTargeting are all gated on Relation.Hostile, so
+    // switching a pair to Neutral/Allied should make even units that had been fighting each other
+    // immediately start ignoring each other. MilitaryManager.TrySetRelation is a thin wrapper that
+    // merely delegates to Core.RelationMatrix.Set, so here we call WarState.Relations.Set directly
+    // and verify the same code path.
 
     [Fact]
     public void Flipping_a_hostile_pair_to_Neutral_makes_units_stop_engaging_each_other()
     {
-        var s = TwoHostileTanks(50f); // range 60 内、Hostileなので交戦する
+        var s = TwoHostileTanks(50f); // within range 60, Hostile so they engage
 
-        // まず敵対のままだと交戦してダメージが出ることを確認する（前提の確認）。
+        // First confirm that, while still hostile, they do engage and deal damage (precondition check).
         var warmup = TwoHostileTanks(50f);
         CombatStep.Advance(warmup, 1f);
         Assert.True(warmup.FindUnit(1).CurrentHP < 100f, "sanity check: hostile units should engage");
 
-        // Options画面から「中立」に変更した操作を模して、両勢力の関係をNeutralへ切り替える
-        // （MilitaryManager.TrySetRelationが実際に呼ぶのと同じRelationMatrix.Set）。
+        // Mimic the operation of selecting "Neutral" in the Options screen by switching the two
+        // factions' relation to Neutral (the same RelationMatrix.Set that MilitaryManager.TrySetRelation actually calls).
         s.Relations.Set(0, 1, Relation.Neutral);
 
         CombatStep.Advance(s, 1f);
@@ -390,7 +395,7 @@ public class CombatStepTests
     [Fact]
     public void Flipping_a_hostile_pair_to_Allied_makes_units_stop_engaging_each_other()
     {
-        var s = TwoHostileTanks(50f); // range 60 内、Hostileなので交戦する
+        var s = TwoHostileTanks(50f); // within range 60, Hostile so they engage
 
         s.Relations.Set(0, 1, Relation.Allied);
 
@@ -402,9 +407,10 @@ public class CombatStepTests
         Assert.NotEqual(UnitState.Engaging, s.FindUnit(2).State);
     }
 
-    // Task52: 既に交戦中(State==Engaging)だったペアがNeutralへ切り替わった場合も、次tickで
-    // 即座にIdleへ戻り、以後ダメージを与え合わない（「敵対から中立/同盟に変更したら戦闘を止める」
-    // というユーザー要件の直接確認、CombatStepが毎tick TargetSearch で再判定するため自動的に成立する）。
+    // Task52: even a pair that was already engaging (State==Engaging) when switched to Neutral
+    // returns to Idle immediately on the next tick and deals no further damage to each other
+    // (direct confirmation of the user requirement "stop fighting when changed from hostile to
+    // neutral/allied"; this holds automatically because CombatStep re-evaluates via TargetSearch every tick).
     [Fact]
     public void Already_engaging_units_stop_fighting_the_tick_after_relation_becomes_Neutral()
     {
@@ -421,7 +427,7 @@ public class CombatStepTests
         Assert.Equal(UnitState.Idle, s.FindUnit(1).State);
     }
 
-    // --- Task61: 領域(Domain)フィルタがCombatStepへ実際に効いていること ---
+    // --- Task61: the domain filter actually takes effect in CombatStep ---
 
     [Fact]
     public void Tank_does_not_engage_hostile_fighter_in_range_even_though_in_range()
@@ -459,12 +465,13 @@ public class CombatStepTests
         Assert.Equal(UnitState.Engaging, s.FindUnit(1).State);
     }
 
-    // --- Task79: 自爆ドローン（旧: Task61のUnitType.IsOneShotによる「射程内で撃ってから自壊」方式） ---
-    // 旧テスト SuicideDrone_dies_immediately_after_dealing_damage /
-    // SuicideDrone_that_never_finds_a_target_does_not_die はCombatStepが自爆ドローンの交戦全体
-    // （ターゲット選定・ダメージ適用・自壊）を担っていた前提のテストだった。Task79でCombatStepは
-    // 自爆ドローンを完全にスキップするよう変更され（下のテストが検証する）、交戦ロジックそのものは
-    // KamikazeStepTests.cs（目標ロック・ダイブ・体当たり起爆）へ丸ごと移設した。
+    // --- Task79: suicide drones (formerly: Task61's "fire within range, then self-destruct" scheme via UnitType.IsOneShot) ---
+    // The old tests SuicideDrone_dies_immediately_after_dealing_damage /
+    // SuicideDrone_that_never_finds_a_target_does_not_die assumed that CombatStep handled the
+    // entire suicide-drone engagement (target selection, damage application, self-destruction).
+    // Task79 changed CombatStep to skip suicide drones entirely (which the test below verifies),
+    // and the engagement logic itself was moved wholesale to KamikazeStepTests.cs (target lock,
+    // dive, ramming detonation).
 
     [Fact]
     public void CombatStep_skips_SuicideDrone_entirely_no_ranged_damage_no_ShotEvent()

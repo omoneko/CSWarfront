@@ -21,7 +21,7 @@ public class CombatZoneTrackerTests
     {
         var tracker = new CombatZoneTracker();
         tracker.ReportCombat(new WorldPos(0, 0, 0));
-        tracker.ReportCombat(new WorldPos(10, 0, 0)); // 十分近い（ZoneRadius=120以内）
+        tracker.ReportCombat(new WorldPos(10, 0, 0)); // Close enough (within ZoneRadius=120)
 
         Assert.Single(tracker.Zones);
     }
@@ -42,9 +42,9 @@ public class CombatZoneTrackerTests
     {
         var tracker = new CombatZoneTracker();
         tracker.ReportCombat(new WorldPos(0, 0, 0));
-        tracker.Advance(1f); // 2h -> 1h残り
+        tracker.Advance(1f); // 2h -> 1h remaining
 
-        tracker.ReportCombat(new WorldPos(5, 0, 0)); // 近傍への再報告で延長されるはず
+        tracker.ReportCombat(new WorldPos(5, 0, 0)); // A repeat report nearby should extend it
         Assert.Equal(CombatZoneTracker.ZoneLingerHours, tracker.Zones[0].RemainingHours);
     }
 
@@ -53,7 +53,7 @@ public class CombatZoneTrackerTests
     {
         var tracker = new CombatZoneTracker();
         tracker.ReportCombat(new WorldPos(0, 0, 0));
-        tracker.ReportCombat(new WorldPos(10000, 0, 10000)); // 十分遠い
+        tracker.ReportCombat(new WorldPos(10000, 0, 10000)); // Far enough away
 
         Assert.Equal(2, tracker.Zones.Count);
     }
@@ -73,7 +73,7 @@ public class CombatZoneTrackerTests
     {
         var tracker = new CombatZoneTracker();
         tracker.ReportCombat(new WorldPos(0, 0, 0));
-        tracker.Advance(CombatZoneTracker.ZoneLingerHours); // ちょうど期限
+        tracker.Advance(CombatZoneTracker.ZoneLingerHours); // Exactly at the deadline
 
         Assert.Empty(tracker.Zones);
     }
@@ -84,9 +84,9 @@ public class CombatZoneTrackerTests
         var tracker = new CombatZoneTracker();
         tracker.ReportCombat(new WorldPos(0, 0, 0));
         tracker.Advance(CombatZoneTracker.ZoneLingerHours - 0.1f);
-        tracker.ReportCombat(new WorldPos(10000, 0, 0)); // 新しいゾーン（フル残り時間）
+        tracker.ReportCombat(new WorldPos(10000, 0, 0)); // New zone (full remaining time)
 
-        tracker.Advance(0.2f); // 最初のゾーンだけ失効するはず
+        tracker.Advance(0.2f); // Only the first zone should expire
 
         Assert.Single(tracker.Zones);
         Assert.Equal(10000f, tracker.Zones[0].Center.X);
@@ -98,19 +98,19 @@ public class CombatZoneTrackerTests
         var tracker = new CombatZoneTracker();
         for (int i = 0; i < CombatZoneTracker.MaxZones; i++)
         {
-            tracker.ReportCombat(new WorldPos(i * 10000, 0, 0)); // 全て互いに遠い
+            tracker.ReportCombat(new WorldPos(i * 10000, 0, 0)); // All far from each other
         }
         Assert.Equal(CombatZoneTracker.MaxZones, tracker.Zones.Count);
 
-        // 最初のゾーンだけ残り時間を減らし、「最も期限が近い」ものにする。
-        // Advanceは全ゾーンへ一律dtを適用するため、代わりに追加報告で個別に延長して差をつける。
+        // Reduce only the first zone's remaining time so it becomes the one "closest to expiry".
+        // Advance applies dt uniformly to all zones, so instead extend the others individually via repeat reports to create a difference.
         for (int i = 1; i < CombatZoneTracker.MaxZones; i++)
         {
-            tracker.ReportCombat(new WorldPos(i * 10000, 0, 0)); // フルへ延長し直す
+            tracker.ReportCombat(new WorldPos(i * 10000, 0, 0)); // Re-extend back to full
         }
-        tracker.Advance(0.1f); // 全ゾーンへ一律適用（相対順序は変わらない）
+        tracker.Advance(0.1f); // Applied uniformly to all zones (relative order does not change)
 
-        // 新しいゾーンを追加すると、上限に達しているため最も残り時間が少ない(index 0)が落ちるはず。
+        // Adding a new zone while at the cap should drop the one with the least remaining time (index 0).
         tracker.ReportCombat(new WorldPos(999999, 0, 0));
 
         Assert.Equal(CombatZoneTracker.MaxZones, tracker.Zones.Count);

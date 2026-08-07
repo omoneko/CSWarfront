@@ -3,13 +3,14 @@ using CSWarfront.Core;
 using Xunit;
 
 /// <summary>
-/// UnitSpatialGrid（Task97: 交戦判定の空間グリッド化・O(N²)対策）のテスト。
-/// 中核となる性質は「結果が総当たり版TargetSearch.FindNearestHostileと完全に同一」であること
-/// （決定的シミュレーションの維持。タイブレークのリスト先頭優先を含む）。
+/// Tests for UnitSpatialGrid (Task97: spatial-grid acceleration of engagement checks, the O(N^2)
+/// countermeasure). The core property is that the results are exactly identical to the brute-force
+/// TargetSearch.FindNearestHostile (preserving the deterministic simulation, including the
+/// lowest-list-index tie-break).
 /// </summary>
 public class UnitSpatialGridTests
 {
-    /// <summary>fmix32風の決定的ハッシュで座標を散らす（テスト内乱数は使わない、Core全体の方針）。</summary>
+    /// <summary>Scatters coordinates via an fmix32-style deterministic hash (no RNG in tests, the Core-wide policy).</summary>
     private static float Hash01(uint a, uint b)
     {
         unchecked
@@ -20,23 +21,23 @@ public class UnitSpatialGridTests
         }
     }
 
-    /// <summary>複数勢力・宿敵関係・死亡ユニット・セル境界跨ぎ・負座標を含む散布状態。</summary>
+    /// <summary>A scattered state including multiple factions, a nemesis relation, dead units, cell-boundary straddling, and negative coordinates.</summary>
     private static WarState ScatteredState(int unitCount)
     {
         var s = new WarState();
         for (byte i = 0; i < 5; i++) s.Factions.Add(new Faction(i, "F" + i));
         RelationPresets.ApplyAllHostile(s.Relations, 5);
         s.Relations.Set(0, 1, Relation.Nemesis);
-        s.Relations.Set(2, 3, Relation.Neutral); // 敵対でないペアも混ぜる
+        s.Relations.Set(2, 3, Relation.Neutral); // mix in a non-hostile pair too
         s.Types.Register(MvpUnitTypes.Tank_T1());
 
         for (uint i = 0; i < (uint)unitCount; i++)
         {
-            float x = (Hash01(i, 1u) - 0.5f) * 4000f; // ±2000m（セル256mを大きく跨ぐ）
+            float x = (Hash01(i, 1u) - 0.5f) * 4000f; // ±2000m (spans far beyond the 256m cell size)
             float z = (Hash01(i, 2u) - 0.5f) * 4000f;
             byte faction = (byte)(Hash01(i, 3u) * 5f);
             var u = new UnitInstance(100 + i, "Tank_T1", faction, 100f, new WorldPos(x, 0, z));
-            if (Hash01(i, 4u) < 0.15f) { u.CurrentHP = 0f; u.State = UnitState.Dead; } // 死亡も混ぜる
+            if (Hash01(i, 4u) < 0.15f) { u.CurrentHP = 0f; u.State = UnitState.Dead; } // mix in dead units too
             s.Units.Add(u);
         }
         return s;
@@ -48,7 +49,7 @@ public class UnitSpatialGridTests
         var s = ScatteredState(120);
         s.UnitGrid.Build(s.Units);
 
-        float[] ranges = { 60f, 250f, 600f, 5000f }; // セル内・セル跨ぎ・広域の各ケース
+        float[] ranges = { 60f, 250f, 600f, 5000f }; // within-cell, cross-cell, and wide-area cases
         foreach (float range in ranges)
         {
             for (int i = 0; i < s.Units.Count; i++)
@@ -69,8 +70,10 @@ public class UnitSpatialGridTests
     [Fact]
     public void Grid_search_prefers_the_lower_list_index_on_distance_ties()
     {
-        // 等距離の敵2体（自分の東西に同距離で、別セルに入るよう十分離す）。
-        // 総当たり版はリスト先頭優先＝先に追加した方を返す。グリッド版も同じでなければならない。
+        // Two equidistant enemies (equally far to the east and west of self, spaced far enough
+        // apart to land in different cells).
+        // The brute-force version prefers the lowest list index = returns the one added first.
+        // The grid version must behave the same.
         var s = new WarState();
         for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
         RelationPresets.ApplyAllHostile(s.Relations, 2);
@@ -86,7 +89,7 @@ public class UnitSpatialGridTests
         UnitInstance grid = TargetSearch.FindNearestHostile(self, s.UnitGrid, s.Relations, 500f,
             DomainMask.All, s.Types);
 
-        Assert.Same(east, linear); // リスト先頭優先の前提確認
+        Assert.Same(east, linear); // confirm the lowest-list-index premise
         Assert.Same(linear, grid);
     }
 
@@ -97,7 +100,7 @@ public class UnitSpatialGridTests
         for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
         RelationPresets.ApplyAllHostile(s.Relations, 2);
         s.Types.Register(MvpUnitTypes.Tank_T1());
-        // セル境界(256m)ぎりぎりの両側。範囲60でも見つからなければならない。
+        // Just on either side of a cell boundary (256m). Must be found even with range 60.
         var self = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(255f, 0, 0));
         var enemy = new UnitInstance(2, "Tank_T1", 1, 100f, new WorldPos(258f, 0, 0));
         s.Units.Add(self); s.Units.Add(enemy);
@@ -119,7 +122,7 @@ public class UnitSpatialGridTests
         s.Units.Add(self); s.Units.Add(enemy);
         s.UnitGrid.Build(s.Units);
 
-        // 対空専用（Airのみ狙える）なら、射程内の陸上ユニットは対象外。
+        // For an anti-air-only attacker (can only target Air), a land unit within range is not a valid target.
         Assert.Null(TargetSearch.FindNearestHostile(self, s.UnitGrid, s.Relations, 60f,
             DomainMask.Air, s.Types));
         Assert.Same(enemy, TargetSearch.FindNearestHostile(self, s.UnitGrid, s.Relations, 60f,
@@ -129,7 +132,7 @@ public class UnitSpatialGridTests
     [Fact]
     public void Units_killed_after_build_disappear_from_subsequent_searches()
     {
-        // CombatStepは同一tick内で先に倒された敵を以後の探索から除外する（総当たり版と同じ挙動）。
+        // CombatStep excludes enemies already killed earlier in the same tick from later searches (same behavior as the brute-force version).
         var s = new WarState();
         for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
         RelationPresets.ApplyAllHostile(s.Relations, 2);
@@ -139,7 +142,7 @@ public class UnitSpatialGridTests
         s.Units.Add(self); s.Units.Add(enemy);
         s.UnitGrid.Build(s.Units);
 
-        enemy.CurrentHP = 0f; // Build後に死亡（State遷移前でもIsAlive=falseになる）
+        enemy.CurrentHP = 0f; // dies after Build (IsAlive becomes false even before the State transition)
         Assert.Null(TargetSearch.FindNearestHostile(self, s.UnitGrid, s.Relations, 60f,
             DomainMask.All, s.Types));
     }
