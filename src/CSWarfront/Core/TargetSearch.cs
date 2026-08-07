@@ -3,21 +3,25 @@ namespace CSWarfront.Core
 {
     public static class TargetSearch
     {
-        /// <summary>射程内・敵対（Hostile/Nemesis）・生存のうち水平距離最小の敵を返す。無ければ null。
-        /// Task59: 宿敵(Nemesis)関係にある相手が射程内に1体でもいれば、通常のHostileより優先し、
-        /// 宿敵の中で最近接のものを返す。宿敵が1体もいなければ、従来通り最近接の通常Hostileを返す
-        /// （宿敵が存在しない場合は挙動が完全に従来のまま＝既存テストへの後方互換）。</summary>
+        /// <summary>Returns the enemy with the smallest horizontal distance among in-range, hostile
+        /// (Hostile/Nemesis), living units; null if none. Task59: if even one Nemesis-relation enemy is
+        /// in range, nemeses take priority over regular Hostiles and the nearest nemesis is returned.
+        /// With no nemesis present, the nearest regular Hostile is returned as before (when no nemesis
+        /// exists the behavior is exactly the legacy one = backward compatible with existing
+        /// tests).</summary>
         public static UnitInstance FindNearestHostile(UnitInstance self,
             IEnumerable<UnitInstance> all, RelationMatrix rel, float range)
         {
             return FindNearestHostile(self, all, rel, range, DomainMask.All, null);
         }
 
-        /// <summary>Task61: 領域(Domain)フィルタ付きの版。attackerCanTargetにtargetのDomain（typesで解決）が
-        /// 含まれない候補は、他の条件（射程・敵対関係）を満たしていても除外する。これがAntiAirを
-        /// 唯一の対空適性を持つ陸上兵科にし、通常の陸上兵科が航空ユニットを一切狙わなくする実体。
-        /// types が null、または候補のTypeKeyが解決できない場合は領域フィルタを適用しない
-        /// （＝従来の4引数版と同じ挙動、既存呼び出し元・テストへの後方互換フォールバック）。</summary>
+        /// <summary>Task61: the domain-filtered version. Candidates whose Domain (resolved via types)
+        /// is not in attackerCanTarget are excluded even when the other conditions (range, hostility)
+        /// hold. This is what makes AntiAir the only land category with anti-air capability and keeps
+        /// regular land categories from ever targeting aircraft. When types is null or a candidate's
+        /// TypeKey cannot be resolved, the domain filter is skipped (= the same behavior as the
+        /// 4-argument version, the backward-compatible fallback for existing callers and
+        /// tests).</summary>
         public static UnitInstance FindNearestHostile(UnitInstance self,
             IEnumerable<UnitInstance> all, RelationMatrix rel, float range,
             DomainMask attackerCanTarget, UnitTypeRegistry types)
@@ -27,7 +31,7 @@ namespace CSWarfront.Core
             UnitInstance bestNemesis = null;
             float bestNemesisDist = float.MaxValue;
 
-            // Task101: 対ヘリ規則（TargetingRules.CanTargetHelicopter）の判定に攻撃側の兵科が要る。
+            // Task101: the anti-helicopter rule (TargetingRules.CanTargetHelicopter) needs the attacker's category.
             UnitCategory? selfCategory = null;
             if (types != null)
             {
@@ -38,7 +42,7 @@ namespace CSWarfront.Core
             foreach (var u in all)
             {
                 if (u.InstanceId == self.InstanceId || !u.IsAlive) continue;
-                if (u.IsCarried) continue; // Task101: 搭乗中（ヘリ/列車の中）は攻撃対象にならない
+                if (u.IsCarried) continue; // Task101: units being carried (inside a heli/train) cannot be targeted
                 Relation r = rel.Get(self.FactionId, u.FactionId);
                 if (!r.IsHostile()) continue;
                 float d = self.Position.HorizontalDistanceTo(u.Position);
@@ -49,8 +53,9 @@ namespace CSWarfront.Core
                     UnitType targetType = types.Get(u.TypeKey);
                     if (targetType != null)
                     {
-                        // Task101: ヘリは専用規則（戦車・対空・戦闘機のみ攻撃可）。戦車は
-                        // CanTargetDomains=Landのままだが対ヘリに限り標的にできる（双方向の例外）。
+                        // Task101: helicopters have their own rule (only tanks, AA and fighters may
+                        // attack them). Tanks keep CanTargetDomains=Land yet may target helicopters
+                        // as the one exception (a two-way exception).
                         if (TargetingRules.IsHelicopter(targetType.Category))
                         {
                             if (!selfCategory.HasValue || !TargetingRules.CanTargetHelicopter(selfCategory.Value))
@@ -75,9 +80,10 @@ namespace CSWarfront.Core
             return bestNemesis != null ? bestNemesis : bestHostile;
         }
 
-        /// <summary>Task97: 空間グリッド版。結果は上の総当たり版と完全に同一で、探索候補を
-        /// 「射程円と重なるセル内」に絞ることでO(N²)→ほぼO(N)にする（UnitSpatialGridの
-        /// クラスコメント参照）。呼び出し元は毎tickの先頭でgrid.Build(state.Units)を済ませておくこと。</summary>
+        /// <summary>Task97: the spatial-grid version. The result is exactly identical to the
+        /// brute-force version above; narrowing candidates to "cells overlapping the range circle"
+        /// takes O(N²) to roughly O(N) (see UnitSpatialGrid's class comment). Callers must have run
+        /// grid.Build(state.Units) at the top of the tick.</summary>
         public static UnitInstance FindNearestHostile(UnitInstance self, UnitSpatialGrid grid,
             RelationMatrix rel, float range, DomainMask attackerCanTarget, UnitTypeRegistry types)
         {

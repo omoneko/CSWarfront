@@ -3,29 +3,32 @@ using System;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// ユニット同士の組み合わせによる相乗効果（シナジー）を計算する（Task38）。
-    /// 現時点で定義されているシナジーは「Artillery（砲兵）＋DroneInfantry（ドローン兵）の観測支援」
-    /// の1件のみだが、AccuracyFor をエントリポイントにしておくことで、将来
-    /// （例: MechInfantryの護衛でTankの装甲UP、AntiAirの掩護でApcの生存率UP等）別カテゴリ向けの
-    /// シナジーを追加する際もこのクラスに判定を積み重ねていける。
+    /// Computes synergy effects between unit combinations (Task38).
+    /// Only one synergy is defined so far — "Artillery + DroneInfantry spotting support" — but with
+    /// AccuracyFor as the entry point, future synergies for other categories (e.g. MechInfantry escort
+    /// boosting tank armor, AntiAir overwatch boosting APC survival) can keep stacking their checks
+    /// into this class.
     ///
-    /// 決定的（乱数不使用）・O(units)：味方ユニット一覧を1回線形走査するだけで済む。
+    /// Deterministic (no RNG), O(units): a single linear scan over the friendly unit list suffices.
     /// </summary>
     public static class CombatSynergy
     {
-        /// <summary>味方ドローン兵がこの水平距離内にいれば、砲兵の観測支援（スポット）が成立する。</summary>
+        /// <summary>A friendly drone-infantry unit within this horizontal distance establishes
+        /// artillery spotting support.</summary>
         public const float DroneSpotterRadius = 150f;
 
-        /// <summary>観測支援が成立した場合に命中率へ加算するボーナス（乗算ではなく加算）。
-        /// 加算後の値は TierScaling.AccuracyMax(0.95) でクランプする。</summary>
+        /// <summary>The bonus added to accuracy when spotting support holds (additive, not
+        /// multiplicative). The post-addition value is clamped at TierScaling.AccuracyMax
+        /// (0.95).</summary>
         public const float DroneSpotterAccuracyBonus = 0.5f;
 
         /// <summary>
-        /// attacker が attackerType として攻撃する際の「実効命中率」を返す。
-        /// 現在定義済みのルール: attackerType.Category が Artillery で、かつ同じ勢力（Faction）の
-        /// 生存中DroneInfantryユニットが DroneSpotterRadius 以内（水平距離）に1体以上いれば、
-        /// min(TierScaling.AccuracyMax, attackerType.Accuracy + DroneSpotterAccuracyBonus) を返す。
-        /// それ以外（非Artillery、または観測支援なし）は attackerType.Accuracy をそのまま返す。
+        /// Returns the "effective accuracy" when attacker attacks as attackerType.
+        /// The rule defined so far: if attackerType.Category is Artillery and at least one living
+        /// DroneInfantry unit of the same faction lies within DroneSpotterRadius (horizontal
+        /// distance), returns min(TierScaling.AccuracyMax, attackerType.Accuracy +
+        /// DroneSpotterAccuracyBonus). Otherwise (non-Artillery, or no spotting support),
+        /// attackerType.Accuracy is returned unchanged.
         /// </summary>
         public static float AccuracyFor(WarState state, UnitInstance attacker, UnitType attackerType)
         {
@@ -35,8 +38,8 @@ namespace CSWarfront.Core
             return Math.Min(TierScaling.AccuracyMax, attackerType.Accuracy + DroneSpotterAccuracyBonus);
         }
 
-        /// <summary>attacker と同じ勢力(FactionId)の、生存中のDroneInfantryが
-        /// DroneSpotterRadius以内（水平距離）に1体でもいればtrue。</summary>
+        /// <summary>True when at least one living DroneInfantry of the attacker's faction (FactionId)
+        /// lies within DroneSpotterRadius (horizontal distance).</summary>
         private static bool HasFriendlyDroneSpotterNearby(WarState state, UnitInstance attacker)
         {
             for (int i = 0; i < state.Units.Count; i++)

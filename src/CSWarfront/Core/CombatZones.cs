@@ -3,8 +3,8 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 1件の「戦闘域」。CombatZoneTracker.ReportCombatで生成/更新される、UnityEngine非依存の値型
-    /// （Task54: 戦闘付近の民間交通の迂回）。
+    /// One "combat zone". A UnityEngine-free value type created/updated by
+    /// CombatZoneTracker.ReportCombat (Task54: civilian traffic detours around fighting).
     /// </summary>
     public struct CombatZone
     {
@@ -21,24 +21,25 @@ namespace CSWarfront.Core
     }
 
     /// <summary>
-    /// 発砲/被弾地点の報告から「戦闘域」を追跡する（Task54）。CombatStep/BaseCombatStepが
-    /// ダメージを実適用したタイミングで対象位置をReportCombatへ渡すことで、近接した報告は
-    /// 1つのゾーンへマージ・延長され、離れた報告は新規ゾーンになる。Game層のCombatRoadBlockerが
-    /// このゾーン集合を読み取り、範囲内の道路セグメントを一時的に封鎖する。
-    /// UnityEngine非依存・決定的・O(n)（nはZones件数、MaxZonesで上限されるためO(1)相当）。
+    /// Tracks "combat zones" from reports of firing/impact locations (Task54). CombatStep and
+    /// BaseCombatStep pass the target position to ReportCombat at the moment damage actually applies;
+    /// nearby reports merge into and extend one zone, distant reports open new zones. The Game layer's
+    /// CombatRoadBlocker reads this zone set and temporarily closes road segments inside them.
+    /// UnityEngine-free, deterministic, O(n) (n = zone count, capped by MaxZones, so effectively O(1)).
     /// </summary>
     public class CombatZoneTracker
     {
-        /// <summary>戦闘地点の周囲この半径（マップ単位＝概ねメートル）を「戦闘域」とする。
-        /// ReportCombatの近傍マージ判定にも同じ半径を使う（「同じ戦闘」とみなす距離のしきい値）。</summary>
+        /// <summary>The radius around a combat point (map units ≈ meters) treated as the "combat
+        /// zone". ReportCombat's proximity-merge check uses the same radius (the distance threshold
+        /// for counting as "the same fight").</summary>
         public const float ZoneRadius = 120f;
 
-        /// <summary>最後の発砲/被弾報告からこの時間（ゲーム内時間）でゾーンを解除する。</summary>
+        /// <summary>The zone lifts this long (in-game hours) after the last firing/impact report.</summary>
         public const float ZoneLingerHours = 2f;
 
-        /// <summary>同時に追跡するゾーン数の上限。大規模乱戦でO(n²)的なゾーン管理コストが
-        /// 際限なく増えないための防御的上限。上限到達時は最も期限の近いゾーンを1つ落として道を空ける
-        /// （決定的：同点はより小さいインデックスを優先）。</summary>
+        /// <summary>The cap on concurrently tracked zones. A defensive ceiling so zone-management cost
+        /// never grows without bound (O(n²)-ish) in huge melees. At the cap, the zone closest to
+        /// expiry is dropped to make room (deterministic: ties prefer the smaller index).</summary>
         public const int MaxZones = 16;
 
         private readonly List<CombatZone> _zones = new List<CombatZone>();
@@ -46,10 +47,10 @@ namespace CSWarfront.Core
         public IList<CombatZone> Zones => _zones;
 
         /// <summary>
-        /// 発砲/被弾地点を1件報告する。ZoneRadius以内に既存ゾーンがあれば、そのうち最も近いものへ
-        /// マージする（中心を単純平均、残り時間をZoneLingerHoursへ延長=リセット）。無ければ新設する。
-        /// MaxZonesに達している状態で新設が必要な場合、最も残り時間が少ない（＝最も期限が近い）
-        /// ゾーンを1つ削除してから追加する。
+        /// Reports one firing/impact location. If an existing zone lies within ZoneRadius, it merges
+        /// into the nearest one (centers simply averaged; the remaining time extended = reset to
+        /// ZoneLingerHours). Otherwise a new zone is opened. When a new zone is needed at MaxZones,
+        /// the zone with the least remaining time (= closest to expiry) is deleted first.
         /// </summary>
         public void ReportCombat(WorldPos position)
         {
@@ -94,8 +95,9 @@ namespace CSWarfront.Core
             _zones.Add(new CombatZone(position, ZoneRadius, ZoneLingerHours));
         }
 
-        /// <summary>全ゾーンの残り時間をdt分だけ減算し、0以下になったものを除去する。
-        /// MilitaryManager.OnSimTickから毎tick、CombatStep/BaseCombatStepと同じdtで呼ばれる想定。</summary>
+        /// <summary>Subtracts dt from every zone's remaining time and removes those at or below zero.
+        /// Expected to be called every tick from MilitaryManager.OnSimTick with the same dt as
+        /// CombatStep/BaseCombatStep.</summary>
         public void Advance(float dt)
         {
             for (int i = _zones.Count - 1; i >= 0; i--)

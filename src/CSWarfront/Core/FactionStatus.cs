@@ -1,15 +1,16 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Eliminated判定とHQ整合性（Faction.HomeBaseId）を勢力単位で導出し直す（Task46）。
+    /// Re-derives Eliminated status and HQ consistency (Faction.HomeBaseId) per faction (Task46).
     ///
-    /// 従来はOccupation.ResolveCapturesがHQ喪失の瞬間にFaction.Eliminated=trueを直接立てるだけで、
-    /// 一度trueになったフラグを消す経路が存在しなかった。そのため、プレイヤーが脱落済み勢力へ
-    /// 新しい基地を与えても、その勢力は二度と戦闘・生産をしないままだった（ユーザー報告バグ）。
+    /// Previously Occupation.ResolveCaptures merely set Faction.Eliminated=true directly at the moment
+    /// the HQ fell, and no path existed to ever clear the flag. So even when the player handed a fresh
+    /// base to an eliminated faction, that faction never fought or produced again (a user-reported
+    /// bug).
     ///
-    /// Refreshは「所有基地が1つも無い」という条件からEliminatedを毎tick導出し直すため、基地を
-    /// 取り戻せば自動的に復活する。MilitaryManager.OnSimTickがOccupation.ResolveCaptures直後、
-    /// 同じ_stateLock内で呼ぶ想定。
+    /// Refresh re-derives Eliminated every tick from the condition "owns no bases at all", so a
+    /// faction that regains a base automatically revives. MilitaryManager.OnSimTick is expected to
+    /// call it right after Occupation.ResolveCaptures, inside the same _stateLock.
     /// </summary>
     public static class FactionStatus
     {
@@ -19,9 +20,10 @@ namespace CSWarfront.Core
             {
                 Faction f = state.Factions[i];
 
-                // Task95: Invader勢力（外部襲来専用）は基地を1つも持たないのが正常状態。
-                // ここでEliminated化するとAI進軍（AssignAdvance）の対象から外れ、侵攻部隊が
-                // スポーン地点で永久に固まる（実機バグの根本原因）ため、常に現役として扱う。
+                // Task95: the Invader faction (outside incursions only) normally owns zero bases.
+                // Flagging it Eliminated here would drop it from AI advances (AssignAdvance) and
+                // freeze invasion forces at their spawn point forever (the root cause of the in-game
+                // bug), so it is always treated as active.
                 if (f.Id == Faction.InvaderFactionId)
                 {
                     f.Eliminated = false;
@@ -40,21 +42,22 @@ namespace CSWarfront.Core
 
                 f.Eliminated = !ownsAnyBase;
 
-                // 所有基地はあるのにHomeBaseIdが無効（null、または既に所有していない基地を指している）
-                // 場合、所有基地の先頭をHQへ昇格する。
+                // Bases are owned but HomeBaseId is invalid (null, or pointing at a base no longer
+                // owned): promote the first owned base to HQ.
                 if (ownsAnyBase && !homeStillOwned)
                     PromoteFirstOwnedBaseToHq(state, f.Id);
             }
         }
 
         /// <summary>
-        /// factionIdが現在所有する基地のうち先頭（state.Bases順）をHQへ昇格する
-        /// （対象基地のIsHeadquarters=true、faction.HomeBaseId=対象基地のBaseId）。所有基地が
-        /// 無ければ何もしない。
+        /// Promotes the first base (in state.Bases order) currently owned by factionId to HQ (setting
+        /// that base's IsHeadquarters=true and faction.HomeBaseId to its BaseId). Does nothing when no
+        /// base is owned.
         ///
-        /// Game層のGame/BasePlacementWatcher.ReassignHqIfCleared（基地解体・所属変更でHQを失った
-        /// 際の昇格）と同じ「所有基地の先頭を新HQにする」ルールを共有する唯一の実装（Task46：
-        /// ロジックの重複を避けるためCoreへ集約し、Game側からはこれを呼ぶ）。
+        /// The single implementation of the "first owned base becomes the new HQ" rule shared with the
+        /// Game layer's Game/BasePlacementWatcher.ReassignHqIfCleared (promotion when the HQ is lost
+        /// to demolition or faction reassignment) — Task46 consolidated it into Core to avoid
+        /// duplicating the logic, and the Game side calls this.
         /// </summary>
         public static void PromoteFirstOwnedBaseToHq(WarState state, byte factionId)
         {

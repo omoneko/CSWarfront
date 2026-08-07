@@ -1,16 +1,17 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Tier（1〜5）がユニット性能をどう伸ばすかを一元管理する（Task28）。
-    /// 陸上ロスター（LandUnitRoster）に限らず、将来のsea/airロスターも同じ式を使うことで
-    /// カテゴリ間・ドメイン間で成長カーブの一貫性を保つ。
+    /// Centralizes how tiers (1–5) grow unit performance (Task28).
+    /// Not just the land roster (LandUnitRoster) — future sea/air rosters use the same formulas, so
+    /// the growth curves stay consistent across categories and domains.
     ///
-    /// 【成長式】各パラメータについて、Tier1の基礎値(baseValue)に対して
+    /// [The growth formula] For each parameter, linear growth over the tier-1 base value (baseValue):
     ///     value(tier) = baseValue * (1 + perTierIncrement * (tier - 1))
-    /// という線形成長を適用する（tier=1のときは baseValue そのまま）。
-    /// tierは1..5にクランプする（範囲外の値は意図しない外挿になるため）。
+    /// (tier=1 returns baseValue unchanged).
+    /// tier is clamped to 1..5 (out-of-range values would extrapolate unintentionally).
     ///
-    /// 【1Tierあたりの増分（HoI風：上位Tierほど強いが建造コストが急増するトレードオフを意図）】
+    /// [Per-tier increments (HoI-flavored: higher tiers are stronger, but build costs surge — an
+    /// intentional trade-off)]
     ///   HP        +35%
     ///   Attack    +40%
     ///   Range     +10%
@@ -19,10 +20,10 @@ namespace CSWarfront.Core
     ///   Cost      +60%
     ///   BuildTime +30%
     ///
-    /// 【Tier5の目安倍率】(1 + increment * 4)
+    /// [Reference tier-5 multipliers] (1 + increment * 4)
     ///   HP x2.4, Attack x2.6, Range x1.4, Armor x2.8, Speed x1.32, Cost x3.4, BuildTime x2.2
-    /// 例: Tier5戦車はTier1に対しHP2.4倍・攻撃2.6倍だが、コストは3.4倍かかる
-    ///     （数を揃えるTier1と、質で押すTier5のトレードオフ）。
+    /// e.g. a tier-5 tank has 2.4× HP and 2.6× attack over tier 1, but costs 3.4× as much
+    ///     (the trade-off between tier-1 numbers and tier-5 quality).
     /// </summary>
     public static class TierScaling
     {
@@ -34,16 +35,17 @@ namespace CSWarfront.Core
         private const float CostPerTier = 0.60f;
         private const float BuildTimePerTier = 0.30f;
 
-        /// <summary>命中率のTierあたり増分（Task38: base値の+6%/Tier）。他パラメータと同じ線形成長式
-        /// value(tier) = baseValue * (1 + 0.06 * (tier-1)) を使うが、命中率だけは0.95で上限クランプする
-        /// （上位Tierほど狙いは良くなるが、絶対に外さない完璧な命中率にはしない、という意図的な上限）。</summary>
+        /// <summary>Accuracy's per-tier increment (Task38: +6% of base per tier). Uses the same linear
+        /// growth formula value(tier) = baseValue * (1 + 0.06 * (tier-1)) as everything else, but
+        /// accuracy alone is capped at 0.95 (higher tiers aim better, yet never reach a perfect
+        /// never-miss accuracy — a deliberate ceiling).</summary>
         private const float AccuracyPerTier = 0.06f;
 
-        /// <summary>命中率の絶対上限（Task38）。ドローン観測支援バフ適用後の値もこの上限でクランプされる
-        /// （CombatSynergy.AccuracyFor参照）。</summary>
+        /// <summary>The absolute accuracy ceiling (Task38). Values after the drone-spotting buff are
+        /// clamped to this ceiling too (see CombatSynergy.AccuracyFor).</summary>
         public const float AccuracyMax = 0.95f;
 
-        /// <summary>tierを1..5へクランプする（1未満は1、5超は5）。</summary>
+        /// <summary>Clamps tier to 1..5 (below 1 becomes 1, above 5 becomes 5).</summary>
         private static byte ClampTier(byte tier)
         {
             if (tier < 1) return 1;
@@ -65,9 +67,9 @@ namespace CSWarfront.Core
         public static float Cost(float baseValue, byte tier) { return Scale(baseValue, tier, CostPerTier); }
         public static float BuildTime(float baseValue, byte tier) { return Scale(baseValue, tier, BuildTimePerTier); }
 
-        /// <summary>命中率のTier成長。Tier1はbaseValueそのまま、以降は+6%/Tierで伸びるが、
-        /// AccuracyMax(0.95)を超えない（tier=1のときの丸め誤差を避けるため、baseValue自体が
-        /// AccuracyMaxを超えている場合でもクランプする）。</summary>
+        /// <summary>Accuracy's tier growth. Tier 1 returns baseValue unchanged; later tiers grow by
+        /// +6%/tier but never exceed AccuracyMax (0.95). It clamps even when baseValue itself exceeds
+        /// AccuracyMax (avoiding tier=1 rounding surprises).</summary>
         public static float Accuracy(float baseValue, byte tier)
         {
             float scaled = Scale(baseValue, tier, AccuracyPerTier);
