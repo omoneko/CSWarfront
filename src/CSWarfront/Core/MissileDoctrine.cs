@@ -1,31 +1,37 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// AI勢力の弾道ミサイル自動発射方針（Task63）。ProductionPlanning/AiProductionPolicyとは独立した
-    /// 小さなヘルパーとして分離する（生産計画とは判断のタイミング・対象が異なるため）。
+    /// The AI factions' automatic ballistic-missile launch doctrine (Task63). Kept as a small helper
+    /// separate from ProductionPlanning/AiProductionPolicy (its decisions differ in timing and subject
+    /// from production planning).
     ///
-    /// 方針: 備蓄が1発以上あり、クールダウンが明けている自軍ミサイル基地は、
-    ///  1. 宿敵(Nemesis)関係にある勢力の所有基地、または宿敵関係の外部脅威（KAIJU/Alien）があれば、
-    ///     そのうち最近接のものへ距離無制限で発射する（AiTargeting.ChooseTargetBase/InvasionOrdersの
-    ///     宿敵優先ロジックと同じ思想：宿敵は距離を問わず最優先）。
-    ///  2. 宿敵が無ければ、通常の敵対(Hostile)所有基地のうち MinLaunchDistance を超えて離れている
-    ///     ものの中で最近接を狙う（近距離は通常戦力の役割であり、ミサイルは遠距離専用という設計意図）。
-    ///  3. どちらも無ければ発射しない。
-    /// 決定的（乱数不使用）。UnityEngine非依存。
+    /// Doctrine: any friendly missile base with at least one missile stockpiled and its cooldown
+    /// elapsed will
+    ///  1. If a base owned by a Nemesis-relation faction, or a Nemesis-relation external threat
+    ///     (KAIJU/Alien), exists, fire at the nearest of them with no distance limit (the same
+    ///     philosophy as the nemesis-first logic in AiTargeting.ChooseTargetBase/InvasionOrders:
+    ///     nemeses come first at any distance).
+    ///  2. With no nemesis, target the nearest regular Hostile-owned base farther than
+    ///     MinLaunchDistance (close range is conventional forces' job; missiles are long-range only,
+    ///     by design).
+    ///  3. With neither, hold fire.
+    /// Deterministic (no RNG). No UnityEngine dependency.
     /// </summary>
     public static class MissileDoctrine
     {
-        /// <summary>これより近い通常Hostile基地はミサイルの対象にしない（宿敵は例外、距離無制限）。</summary>
+        /// <summary>Regular Hostile bases closer than this are never missile targets (nemeses are the
+        /// exception — no distance limit).</summary>
         public const float MinLaunchDistance = 800f;
 
-        /// <summary>1基地あたりの発射クールダウン（ゲーム内時間）。</summary>
+        /// <summary>The launch cooldown per base (in-game hours).</summary>
         public const float LaunchCooldownHours = 12f;
 
         /// <summary>
-        /// 全ミサイル基地のクールダウンを消化し、条件を満たす基地から自動発射する
-        /// （simスレッド、MissileStep.Advanceの前後どちらでもよいが、MilitaryManager.OnSimTickでは
-        /// 生産計画と同様のタイミング＝AI進軍命令の近くで呼ぶ想定）。プレイヤー勢力（Faction.IsPlayer）の
-        /// 基地は対象外（プレイヤーはUI経由で手動発射する、Part1仕様）。
+        /// Runs down every missile base's cooldown and auto-launches from bases meeting the conditions
+        /// (sim thread; either side of MissileStep.Advance works, but MilitaryManager.OnSimTick is
+        /// expected to call it at production-planning-like timing = near the AI advance orders). Bases
+        /// of player factions (Faction.IsPlayer) are excluded (players launch manually via the UI,
+        /// the Part 1 spec).
         /// </summary>
         public static void Advance(WarState state, float dt)
         {
@@ -41,7 +47,7 @@ namespace CSWarfront.Core
                 }
 
                 if (b.OwnerFactionId == null) continue;
-                if (!b.AutoLaunchMissiles) continue; // Task90: 手動発射に切り替えられた基地はAIが撃たない
+                if (!b.AutoLaunchMissiles) continue; // Task90: the AI never fires from bases switched to manual launch
                 Faction f = state.FindFaction(b.OwnerFactionId.Value);
                 if (f == null || f.IsPlayer || f.Eliminated) continue;
                 if (b.StockpiledMissiles <= 0) continue;
@@ -55,8 +61,8 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>宿敵（基地/外部脅威、距離無制限）を最優先、無ければMinLaunchDistanceを超える
-        /// 最近接の通常Hostile基地を返す。どちらも無ければnull。</summary>
+        /// <summary>Nemeses first (bases/external threats, no distance limit); otherwise the nearest
+        /// regular Hostile base beyond MinLaunchDistance. Null if neither exists.</summary>
         private static WorldPos? ChooseTarget(WarState state, byte factionId, WorldPos from)
         {
             WorldPos? bestNemesis = null;
@@ -90,7 +96,7 @@ namespace CSWarfront.Core
                 if (ob.OwnerFactionId == null) continue;
                 if (!state.Relations.Get(factionId, ob.OwnerFactionId.Value).IsHostile()) continue;
                 float d = from.HorizontalDistanceTo(ob.Position);
-                if (d <= MinLaunchDistance) continue; // 近距離は通常戦力の役割（ミサイルの対象外）
+                if (d <= MinLaunchDistance) continue; // close range is conventional forces' job (off-limits to missiles)
                 if (d < bestHostileDist) { bestHostileDist = d; bestHostile = ob.Position; }
             }
             return bestHostile;

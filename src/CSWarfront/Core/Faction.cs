@@ -2,12 +2,14 @@ namespace CSWarfront.Core
 {
     public class Faction
     {
-        /// <summary>Task95: 外部襲来イベント専用勢力「Invader」の固定Id。プレイヤー勢力（0..4）の外側に
-        /// 置かれた第6の勢力で、(1)RelationMatrix/ThreatRelationsがこのIdを常時Hostile扱いにハードコード
-        /// する（Options等でどう操作しても敵対のまま）、(2)FactionStatus.RefreshのEliminated導出対象外
-        /// （基地を1つも持たないのが正常状態のため。従来はここでEliminated化→AI進軍対象外→侵攻部隊が
-        /// スポーン地点で固まる、が実機バグの根本原因だった）、(3)建設先勢力ドロップダウン・関係設定UI
-        /// には登場しない、という特別扱いを受ける。</summary>
+        /// <summary>Task95: the fixed id of "Invader", the faction dedicated to outside-incursion
+        /// events. A sixth faction placed beyond the player factions (0..4), special-cased so that
+        /// (1) RelationMatrix/ThreatRelations hardcode this id as permanently Hostile (it stays hostile
+        /// no matter what the Options do), (2) FactionStatus.Refresh excludes it from the Eliminated
+        /// derivation (owning zero bases is its normal state; formerly it got flagged Eliminated → was
+        /// dropped from AI advances → invasion forces froze at their spawn point, the root cause of the
+        /// in-game bug), and (3) it never appears in the construction faction dropdown or the relations
+        /// UI.</summary>
         public const byte InvaderFactionId = 5;
 
         public byte Id { get; private set; }
@@ -17,31 +19,37 @@ namespace CSWarfront.Core
         public bool IsPlayer { get; set; }
         public bool Eliminated { get; set; }
 
-        /// <summary>研究点。撃破報酬（Research.KillReward）や資金投資（Research.TryInvest）で加算され、
-        /// Research.TryUnlockNext がTier解禁のコストとして消費する（Task35）。</summary>
+        /// <summary>Research points. Added by kill rewards (Research.KillReward) and cash investment
+        /// (Research.TryInvest); Research.TryUnlockNext spends them as the cost of unlocking tiers
+        /// (Task35).</summary>
         public float ResearchPoints;
 
-        /// <summary>解禁済みの最大生産Tier（1..5）。既定は1（陸上ロスターの最低Tier）。
-        /// AiProductionPolicy.Decide（Task46で旧ProductionPlanning.ChooseUnitKeyを置き換え） /
-        /// ManualProduction.TryEnqueue はこれを超えるTierのユニットを選択/発注できない（Task35）。</summary>
+        /// <summary>The highest unlocked production tier (1..5). Defaults to 1 (the land roster's
+        /// lowest tier). AiProductionPolicy.Decide (which replaced the old
+        /// ProductionPlanning.ChooseUnitKey in Task46) / ManualProduction.TryEnqueue can never select or
+        /// order a unit above this tier (Task35).</summary>
         public byte UnlockedTier = 1;
 
         public Faction(byte id, string name) { Id = id; Name = name; UnlockedTier = 1; }
 
-        // --- Task99: 3資源経済（人的資源/生産力。資金=Treasuryは既存プールを流用） ---
-        // 産出: 経済tickで基地1km圏のゾーン別発展度から（住宅→Manpower、商業/オフィス→Treasury、
-        // 工業→Production、TerritoryIncome.ZonedForBase）。消費: ユニット/補給トラック生産と
-        // 補給物資（UnitCosts/ResupplyStep参照。研究・ミサイルは従来どおりTreasury）。
+        // --- Task99: the three-resource economy (manpower/production; money = the existing Treasury
+        // pool). Income: each economy tick, from per-zone development within 1km of a base (residential
+        // → Manpower, commercial/office → Treasury, industrial → Production;
+        // TerritoryIncome.ZonedForBase). Spending: unit/supply-truck production and supplies (see
+        // UnitCosts/ResupplyStep; research and missiles still draw on Treasury).
 
-        /// <summary>人的資源（住宅地区の発展度から産出。ユニット生産の人員コスト）。</summary>
+        /// <summary>Manpower (produced from residential-district development; the personnel cost of
+        /// unit production).</summary>
         public float Manpower { get; private set; }
 
-        /// <summary>生産力（工業地区の発展度から産出。ユニットの装備コスト・補給物資の原資）。</summary>
+        /// <summary>Production capacity (produced from industrial-district development; funds unit
+        /// equipment costs and supplies).</summary>
         public float Production { get; private set; }
 
-        /// <summary>補給物資ストック（勢力共通プール、上限ResupplyStep.SupplyStockCap）。
-        /// 経済tickで生産力から自動生産され（ResupplyStep.ProduceSupplies）、基地圏内自動補給と
-        /// 補給トラックの積載が消費する。v9で永続化。</summary>
+        /// <summary>The supply stockpile (a faction-wide pool, capped at
+        /// ResupplyStep.SupplyStockCap). Auto-produced from Production each economy tick
+        /// (ResupplyStep.ProduceSupplies); in-zone auto-resupply and supply-truck loading spend it.
+        /// Persisted since v9.</summary>
         public float SupplyStock { get; private set; }
 
         public void AddSupply(float amount)
@@ -76,7 +84,8 @@ namespace CSWarfront.Core
             return true;
         }
 
-        /// <summary>研究点を加算する。非正の値は無視する（AddTreasuryと同じ規約、Task35）。</summary>
+        /// <summary>Adds research points. Non-positive amounts are ignored (the same convention as
+        /// AddTreasury, Task35).</summary>
         public void AddResearchPoints(float amount) { if (amount > 0f) ResearchPoints += amount; }
 
         public bool TrySpend(float amount)

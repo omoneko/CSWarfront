@@ -3,17 +3,20 @@ using System.Collections.Generic;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 海上ユニット用の航行可否グリッド＋A*経路探索（Task92、ユーザー要望「海上ユニットの本格的な
-    /// 経路探索」）。従来の直線＋壁沿い迂回（MovementStepSea）では回り込めなかった複雑な岬・入り江を、
-    /// 粗いグリッド（既定96m角）上の8方向A*で迂回する。
+    /// The navigability grid + A* pathfinding for naval units (Task92, user request "real pathfinding
+    /// for naval units"). The old straight-line + wall-following detours (MovementStepSea) could not
+    /// round complex headlands and inlets; an 8-direction A* over a coarse grid (default 96m cells)
+    /// now detours them.
     ///
-    /// RoadGraph（道路A*）と同じ設計原則: UnityEngine非依存・決定的（乱数不使用、同点は
-    /// セルindexの小さい方を選ぶ固定タイブレーク）。Game層のSeaGridBuilderがWaterSampler
-    /// （喫水考慮のIsWater）でセルを埋めて供給する（WarState.SeaNav、実行時のみ・非永続化）。
+    /// Same design principles as RoadGraph (the road A*): no UnityEngine dependency, deterministic
+    /// (no RNG; ties break to the smaller cell index, a fixed tiebreak). The Game layer's
+    /// SeaGridBuilder fills the cells via WaterSampler (draft-aware IsWater) and supplies it
+    /// (WarState.SeaNav, runtime-only, never persisted).
     ///
-    /// 経路はセル中心のWorldPos列（Y=0、実際の水面YはMovementStep.CommitSeaStepが毎歩解決する）。
-    /// グリッドは粗いため、経路の各区間では従来どおりの水域チェック＋壁沿い迂回が最終防衛線として
-    /// 機能し続ける（MovementStepSea参照）。
+    /// Paths are sequences of cell-center WorldPos (Y=0; the actual water-surface Y is resolved each
+    /// step by MovementStep.CommitSeaStep). The grid is coarse, so along each path segment the
+    /// traditional water check + wall-following detour keeps serving as the last line of defense
+    /// (see MovementStepSea).
     /// </summary>
     public class SeaGrid
     {
@@ -50,14 +53,15 @@ namespace CSWarfront.Core
             return _navigable[cz * _width + cx];
         }
 
-        /// <summary>ワールド座標からセル座標へ（範囲外はそのまま返す。呼び出し側が境界を見る）。</summary>
+        /// <summary>World coordinates to cell coordinates (out-of-range values are returned as-is;
+        /// callers check the bounds).</summary>
         public void WorldToCell(float x, float z, out int cx, out int cz)
         {
             cx = (int)((x - _originX) / _cellSize);
             cz = (int)((z - _originZ) / _cellSize);
         }
 
-        /// <summary>セル中心のワールド座標（Y=0）。</summary>
+        /// <summary>The cell center in world coordinates (Y=0).</summary>
         public WorldPos CellCenter(int cx, int cz)
         {
             return new WorldPos(
@@ -66,9 +70,10 @@ namespace CSWarfront.Core
                 _originZ + (cz + 0.5f) * _cellSize);
         }
 
-        /// <summary>from→toの航行経路を求める。両端はsnapRadius以内の最寄り航行可能セルへスナップする。
-        /// 戻り値は出発セルの「次」から目的セルまでのセル中心列。スナップ失敗・経路なしはnull、
-        /// 出発セル==目的セルは空リスト。決定的（RoadGraph.FindPathと同じ契約）。</summary>
+        /// <summary>Finds a sailing route from→to. Both ends snap to the nearest navigable cell within
+        /// snapRadius. Returns the cell centers from just past the start cell to the goal cell; null
+        /// on snap failure or no route; an empty list when start cell == goal cell. Deterministic
+        /// (the same contract as RoadGraph.FindPath).</summary>
         public List<WorldPos> FindPath(WorldPos from, WorldPos to, float snapRadius)
         {
             int startCx, startCz, goalCx, goalCz;
@@ -88,8 +93,8 @@ namespace CSWarfront.Core
             return result;
         }
 
-        /// <summary>posからsnapRadius以内で最寄りの航行可能セルを探す（決定的: 距離同点はindexの
-        /// 小さい方）。posのセル自身が航行可能ならそれを返す。</summary>
+        /// <summary>Finds the nearest navigable cell to pos within snapRadius (deterministic: distance
+        /// ties go to the smaller index). Returns pos's own cell if it is navigable.</summary>
         private bool TrySnapToNavigable(WorldPos pos, float snapRadius, out int cx, out int cz)
         {
             WorldToCell(pos.X, pos.Z, out cx, out cz);
@@ -120,7 +125,7 @@ namespace CSWarfront.Core
             return true;
         }
 
-        // 8方向の探索順（固定＝決定的）。直進4方向を先に、斜め4方向を後に。
+        // The 8-direction visit order (fixed = deterministic). The 4 straights first, the 4 diagonals after.
         private static readonly int[] NeighborDx = { 1, -1, 0, 0, 1, 1, -1, -1 };
         private static readonly int[] NeighborDz = { 0, 0, 1, -1, 1, -1, 1, -1 };
         private const float DiagonalCost = 1.41421356f;
@@ -148,8 +153,9 @@ namespace CSWarfront.Core
                 {
                     int nx = ccx + NeighborDx[n], nz = ccz + NeighborDz[n];
                     if (!IsNavigable(nx, nz)) continue;
-                    // 斜め移動は両隣の直進セルも航行可能なときだけ許す（岬の角を「斜めにすり抜ける」
-                    // ＝実際には陸をかすめる経路を防ぐ）。
+                    // Diagonal moves are allowed only when both adjacent straight cells are navigable
+                    // too (prevents "slipping diagonally past" a headland corner — a route that would
+                    // really graze land).
                     if (n >= 4 && (!IsNavigable(ccx + NeighborDx[n], ccz) || !IsNavigable(ccx, ccz + NeighborDz[n])))
                         continue;
 
@@ -175,7 +181,7 @@ namespace CSWarfront.Core
             int cx = cell % _width, cz = cell / _width;
             int dx = cx > goalCx ? cx - goalCx : goalCx - cx;
             int dz = cz > goalCz ? cz - goalCz : goalCz - cz;
-            // オクタイル距離（8方向移動のadmissibleなヒューリスティック）。
+            // Octile distance (the admissible heuristic for 8-direction movement).
             int min = dx < dz ? dx : dz;
             int max = dx < dz ? dz : dx;
             return max - min + DiagonalCost * min;
