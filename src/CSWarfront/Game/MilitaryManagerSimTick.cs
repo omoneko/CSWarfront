@@ -5,36 +5,40 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// simスレッド駆動（OnSimTick）向けの MilitaryManager 追加メンバー。MilitaryManager.cs の
-    /// 500行制限のため分離した partial class（Task34のMilitaryManagerManualProduction等と同じ方針）。
-    /// _stateLock / State や、Reset()が0クリアする蓄積カウンタ（_economyAccum等）は MilitaryManager.cs
-    /// 側で宣言された private static メンバーで、partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for sim-thread-driven execution (OnSimTick). Split into a
+    /// partial class because of the 500-line limit on MilitaryManager.cs (same policy as Task34's
+    /// MilitaryManagerManualProduction etc.). _stateLock / State and the accumulator counters that
+    /// Reset() zeroes out (_economyAccum etc.) are private static members declared in
+    /// MilitaryManager.cs; since this is a partial class they are directly accessible from here.
     ///
-    /// OnSimTick は ThreadingExtensionBase.OnAfterSimulationTick 経由でsimスレッドから呼ばれ、
-    /// Core判断ロジック＋CSバッファ読み取り専用（Unity GameObject操作は一切行わない）。
+    /// OnSimTick is invoked from the sim thread via ThreadingExtensionBase.OnAfterSimulationTick and
+    /// is dedicated to Core decision logic plus read-only access to CS buffers (it never touches
+    /// Unity GameObjects).
     /// </summary>
     public static partial class MilitaryManager
     {
-        // 診断ログの間引き用（simスレッドのみが触る）。
+        // Throttling for diagnostic logging (touched only by the sim thread).
         private static int _diagTicks;
         private const int DiagIntervalTicks = 300;
-        private const float EconomyIntervalHours = 6f;      // 経済tick間隔（ゲーム内時間、1日4回）
-        // Task35: 0.01fだと収入額が小さすぎてUI上ほぼ0にしか見えず「収入が実装されていない」という
-        // 誤解の原因になっていた。0.04fはゲームバランス調整用の値（バランスノブ）であり、
-        // プレイテストの結果次第で今後さらに調整してよい。
+        private const float EconomyIntervalHours = 6f;      // Economy tick interval (in-game time, 4 times per day)
+        // Task35: with 0.01f the income amounts were so small they looked like essentially zero in the
+        // UI, which caused the misunderstanding that "income is not implemented". 0.04f is a game-balance
+        // tuning value (a balance knob) and may be adjusted further based on playtest results.
         private const float IncomeRate = 0.04f;
 
         private const float RoadRebuildIntervalHours = 12f;
 
-        // Task92: 海上航行グリッド（State.SeaNav）の再構築間隔。水域は道路より変化が稀なので長め。
+        // Task92: rebuild interval for the sea navigation grid (State.SeaNav). Water areas change more
+        // rarely than roads, so this is longer.
         private const float SeaGridRebuildIntervalHours = 24f;
         private static float _seaGridRebuildAccum;
         private static bool _hasAttemptedSeaGridBuild;
 
-        // Task94: 襲来発生をメインスレッドのトースト表示へ伝えるフラグ（sim→mainの一方向、boolのため良性）。
+        // Task94: flag that signals an invasion occurrence to the main thread's toast display
+        // (one-way sim->main; benign because it is a bool).
         private static bool _invasionToastPending;
 
-        // Task101: 線路網（State.Rails）の構築タイマー（道路網と同じパターン）。
+        // Task101: build timers for the rail network (State.Rails) (same pattern as the road network).
         private static float _railBuildRetryAccum;
         private static float _railRebuildAccum;
         private static bool _hasAttemptedRailBuild;
@@ -45,28 +49,29 @@ namespace CSWarfront.Game
 
         private const float BaseReconcileIntervalHours = 6f;
 
-        private const float MaxHoursPerTick = 1f; // セーブロード直後等の大きな時計ジャンプに対するクランプ上限
+        private const float MaxHoursPerTick = 1f; // Clamp ceiling against large clock jumps, e.g. right after a save load
 
         /// <summary>
-        /// simスレッド（ThreadingExtensionBase.OnAfterSimulationTick経由）：判断ロジック（Core）と
-        /// CS実体操作（建物バッファ読み取り等）をこの一箇所に集約する。
-        /// Task19以降、ユニット自体はCS実体（車両）を持たないため、ここでの車両生成/解放は無い。
-        /// 注意: ゲームが一時停止中はOnAfterSimulationTickが発火しないため、基地配置・生産は
-        /// 停止解除まで待機する（MVPとして許容）。
+        /// Sim thread (via ThreadingExtensionBase.OnAfterSimulationTick): concentrates decision logic
+        /// (Core) and CS entity operations (reading the building buffer etc.) in this single place.
+        /// Since Task19 units themselves carry no CS entity (vehicle), so no vehicle creation/release
+        /// happens here.
+        /// Note: OnAfterSimulationTick does not fire while the game is paused, so base placement and
+        /// production wait until the game is unpaused (acceptable for the MVP).
         /// </summary>
         public static void OnSimTick()
         {
             EnsureInitialized();
             if (State == null) return;
 
-            // dt = 前回tickからの経過ゲーム内時間（時間単位）。ゲーム速度(1x/2x/3x)・一時停止を
-            // 自動的に反映する（Task21）。SimulationManager.instance.m_currentGameTime は
-            // Assembly-CSharp.dll をリフレクションで確認済みのDateTimeフィールド。
+            // dt = in-game time elapsed since the previous tick (in hours). Automatically reflects
+            // game speed (1x/2x/3x) and pausing (Task21). SimulationManager.instance.m_currentGameTime
+            // is a DateTime field verified via reflection against Assembly-CSharp.dll.
             DateTime now = SimulationManager.instance.m_currentGameTime;
             float dt;
             if (!_hasLastGameTime)
             {
-                // 初回tick（またはReset()直後）：時刻の基準を取るだけで進行はさせない。
+                // First tick (or right after Reset()): just establish the time baseline without advancing.
                 _lastGameTime = now;
                 _hasLastGameTime = true;
                 dt = 0f;
@@ -77,45 +82,53 @@ namespace CSWarfront.Game
                 _lastGameTime = now;
             }
 
-            if (dt <= 0f) return; // 一時停止中・ゲーム内時計未進行：タイムスタンプ更新のみでこのtickは何もしない
-            if (dt > MaxHoursPerTick) dt = MaxHoursPerTick; // セーブロード直後等の巨大ジャンプから保護
+            if (dt <= 0f) return; // Paused / in-game clock not advancing: only update the timestamp and do nothing this tick
+            if (dt > MaxHoursPerTick) dt = MaxHoursPerTick; // Protect against huge jumps, e.g. right after a save load
 
             SpeedCalibrationDiagnostics.AccumulateGameHours(dt);
 
             lock (_stateLock)
             {
-                // Task42: 発砲エフェクト(ShotEvent)は「直近1tick分」だけを保持するトランジェント・バッファ
-                // なので、戦闘stepより前に必ずクリアする（そうしないと過去tickの分がGame層で二重に
-                // 消費され続け、際限なく肥大化する）。
+                // Task42: muzzle-flash events (ShotEvent) are a transient buffer holding only "the most
+                // recent single tick", so they must be cleared before the combat step (otherwise past
+                // ticks' entries keep getting double-consumed by the Game layer and the buffer grows
+                // without bound).
                 State.RecentShots.Clear();
-                // Task51: 撃破イベント(KillEvent)もRecentShotsと全く同じ理由・同じタイミングでクリアする。
+                // Task51: kill events (KillEvent) are cleared for exactly the same reason and at exactly
+                // the same timing as RecentShots.
                 State.RecentKills.Clear();
-                // Task63: ミサイルの着弾/迎撃イベント(RecentImpacts)もRecentShots/RecentKillsと全く同じ
-                // 理由・同じタイミングでクリアする（MissileStep.Advance自身はクリアしない契約）。
+                // Task63: missile impact/interception events (RecentImpacts) are cleared for exactly the
+                // same reason and at the same timing as RecentShots/RecentKills (the contract is that
+                // MissileStep.Advance itself does not clear them).
                 State.RecentImpacts.Clear();
 
-                // プレイヤーがOptions指定建物として配置/解体した軍事基地建物を論理基地(WarState.Bases)へ
-                // 反映する（Task18、Task82で電力タブの複製プレハブ経路を撤去しこの経路のみに一本化）。
-                // CS建物バッファの読み取りを伴うためsimスレッド専用。新規登録された基地は
-                // この直後のProductionPlanningから同tickで生産対象になる。
+                // Reflect military base buildings that the player placed/demolished as Options-designated
+                // buildings into the logical bases (WarState.Bases) (Task18; Task82 removed the duplicated
+                // electricity-tab prefab route and unified everything onto this route alone).
+                // Sim-thread only because it involves reading the CS building buffer. A newly registered
+                // base becomes a production target in the same tick via the ProductionPlanning call
+                // immediately below.
                 BasePlacementWatcher.ProcessPending(State);
 
-                // Task106: 塹壕ライン敷設（UIが積んだ2点間へCreateBuildingで連続配置。生成された建物は
-                // 次tickのBasePlacementWatcher.ProcessPendingが論理塹壕として登録する）。
+                // Task106: lay trench lines (continuous placement via CreateBuilding between the two points
+                // queued by the UI. The generated buildings are registered as logical trenches by the next
+                // tick's BasePlacementWatcher.ProcessPending).
                 ProcessPendingTrenchLines();
 
-                // Task106: 築城系建物の問題アイコン（道路未接続・電気・水道等）を消す
-                // （野戦築城は都市インフラ不要という扱い）。
+                // Task106: clear problem icons (no road connection, electricity, water, etc.) on
+                // fortification-type buildings (field fortifications are treated as not needing city
+                // infrastructure).
                 SuppressFortificationProblems();
 
-                // Task71: 勢力別アセットのオーバーレイ生成/破棄（BaseVisuals、メインスレッド）が
-                // 記録した「この拠点のバニラ見た目を隠すべきか」のペンディングをCS建物バッファへ
-                // 反映する（要件2、スタッキング防止）。BasePlacementWatcher.ProcessPendingの直後
-                // （基地の登録/解体が確定した後）に置く。
+                // Task71: apply to the CS building buffer the pending "should this base's vanilla look be
+                // hidden" entries recorded by faction-asset overlay creation/destruction (BaseVisuals, main
+                // thread) (requirement 2, anti-stacking). Placed right after
+                // BasePlacementWatcher.ProcessPending (after base registration/demolition has been settled).
                 BaseHiddenSync.ApplyPending();
 
-                // 幽霊基地（建物実体が既に無い論理基地）の掃除（Task24）。CS建物バッファの読み取りを
-                // 伴うためsimスレッド専用。毎tickフルスキャンは無駄なので一定間隔でのみ実行する。
+                // Cleanup of ghost bases (logical bases whose building entity no longer exists) (Task24).
+                // Sim-thread only because it involves reading the CS building buffer. A full scan every
+                // tick is wasteful, so run only at a fixed interval.
                 _baseReconcileAccum += dt;
                 if (_baseReconcileAccum >= BaseReconcileIntervalHours)
                 {
@@ -123,9 +136,9 @@ namespace CSWarfront.Game
                     BasePlacementWatcher.ReconcileBases(State);
                 }
 
-                // 生産計画（軍資金消費でキュー補充）→ 生産 → 完成分をUnitInstanceとして追加するのみ
-                // （Task19：CS車両のCreateVehicleは行わない。見た目はOnMainVisualUpdate側が
-                // State.Unitsから宣言的に再構築する）。
+                // Production planning (refill queues by spending treasury) -> production -> only add
+                // completed items as UnitInstance (Task19: no CS vehicle CreateVehicle. The visuals are
+                // rebuilt declaratively from State.Units by OnMainVisualUpdate).
                 ProductionPlanning.Advance(State);
                 var completed = ProductionStep.Advance(State, dt);
                 foreach (var c in completed)
@@ -134,15 +147,17 @@ namespace CSWarfront.Game
                     var type = State.Types.Get(c.TypeKey);
                     State.Units.Add(new UnitInstance(id, c.TypeKey, c.FactionId, type != null ? type.MaxHP : 100f, c.SpawnPos));
                 }
-                // Task63: 弾道ミサイルの備蓄建造の進捗（ProductionPlanning.Advanceが着手済みの基地のみ対象）。
-                // ユニット生産と同じ「生産計画→進捗消化」の並びに揃える。
+                // Task63: progress of ballistic-missile stockpile construction (only for bases that
+                // ProductionPlanning.Advance has already started on). Aligned with the same
+                // "production planning -> progress consumption" ordering as unit production.
                 MissileStockpile.Advance(State, dt);
 
-                // Task64: 空母の艦載機運用。基地(MilitaryBase)のキュー機構を使わずCarrierAirWingが
-                // 直接UnitInstanceを追加する（ProductionStepと同じ並び位置、ProductionStep自身の
-                // すぐ後）。例外はCarrierAirWing.Advance内で発生させない設計だが、simループを
-                // 絶対に止めないための最終防御としてtry/catchで包む（他のCore step呼び出しには
-                // 無い追加のガードだが、新規ロジックを初めてゲームループに繋ぐタスクのため慎重を期す）。
+                // Task64: carrier air wing operations. CarrierAirWing adds UnitInstances directly without
+                // using the base (MilitaryBase) queue mechanism (same ordering position as ProductionStep,
+                // immediately after ProductionStep itself). The design is that CarrierAirWing.Advance does
+                // not raise exceptions, but it is wrapped in try/catch as a last line of defense so the sim
+                // loop can never be stopped (an extra guard not present on the other Core step calls, but
+                // warranted for a task that hooks new logic into the game loop for the first time).
                 try
                 {
                     CarrierAirWing.Advance(State, dt);
@@ -152,14 +167,16 @@ namespace CSWarfront.Game
                     ModConfig.LogError("MilitaryManager: exception in CarrierAirWing.Advance: " + e);
                 }
 
-                // 道路網（State.Roads）の構築/再構築。InvasionOrdersが同tickで経路計算できるよう、
-                // 進軍命令より先に済ませる（Task23）。未供給ならここで即座に構築し、供給済みなら
-                // プレイヤーの道路建設/破壊を反映するため一定間隔で作り直す。ビルド失敗（null）時は
-                // 既存グラフをそのまま維持する（一時的な失敗で経路探索能力を失わないため）。
+                // Build/rebuild the road network (State.Roads). Done before the advance orders so that
+                // InvasionOrders can compute paths in the same tick (Task23). If not yet supplied, build it
+                // immediately here; if already supplied, rebuild at a fixed interval to reflect the
+                // player's road construction/demolition. On build failure (null), keep the existing graph
+                // as-is (so a transient failure does not lose pathfinding capability).
                 if (State.Roads == null)
                 {
-                    // 失敗が続く間、毎tickフルビルド（＋失敗ログ）を試みないよう間隔を空ける
-                    // （Task23レビューImportant）。セッション初回の試行だけは間隔を待たず即座に行う。
+                    // While failures persist, space out attempts so we don't retry a full build (plus a
+                    // failure log) every tick (Task23 review Important). Only the very first attempt of the
+                    // session runs immediately without waiting for the interval.
                     _roadBuildRetryAccum += dt;
                     if (!_hasAttemptedRoadBuild || _roadBuildRetryAccum >= RoadBuildRetryIntervalHours)
                     {
@@ -180,8 +197,9 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // Task92: 海上航行グリッド（State.SeaNav）の構築/再構築。道路網と同じ供給パターン。
-                // 初回は即座に構築し、以後はSeaGridRebuildIntervalHoursごとに作り直す（失敗時は既存を維持）。
+                // Task92: build/rebuild the sea navigation grid (State.SeaNav). Same supply pattern as the
+                // road network. Build immediately the first time, then rebuild every
+                // SeaGridRebuildIntervalHours (keep the existing grid on failure).
                 if (State.SeaNav == null)
                 {
                     if (!_hasAttemptedSeaGridBuild)
@@ -191,7 +209,7 @@ namespace CSWarfront.Game
                     }
                     else
                     {
-                        // 初回失敗後（水の無いマップ含む）は再構築間隔でだけ再試行する。
+                        // After the first failure (including maps without water), retry only at the rebuild interval.
                         _seaGridRebuildAccum += dt;
                         if (_seaGridRebuildAccum >= SeaGridRebuildIntervalHours)
                         {
@@ -211,8 +229,9 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // Task101: 線路網（State.Rails）の構築/再構築。道路網と同じ供給パターン（12hごと）。
-                // 再構築のたびに貨物駅のレール接続判定（RailConnected）も引き直す。
+                // Task101: build/rebuild the rail network (State.Rails). Same supply pattern as the road
+                // network (every 12h). On every rebuild, re-derive the cargo stations' rail-connection
+                // determination (RailConnected) as well.
                 if (State.Rails == null)
                 {
                     _railBuildRetryAccum += dt;
@@ -224,7 +243,7 @@ namespace CSWarfront.Game
                         if (State.Rails != null)
                         {
                             CargoStationRules.RefreshConnectivity(State);
-                            TrainStep.InvalidateRoutes(State); // Task109: 路線キャッシュを作り直させる
+                            TrainStep.InvalidateRoutes(State); // Task109: force the route cache to be rebuilt
                         }
                     }
                 }
@@ -237,35 +256,39 @@ namespace CSWarfront.Game
                         var rebuiltRail = RailGraphBuilder.Build();
                         if (rebuiltRail != null) State.Rails = rebuiltRail;
                         CargoStationRules.RefreshConnectivity(State);
-                        // Task109: 路線（駅ペア）はペアごとにA*が要る重い計算なので、レール網や駅が
-                        // 変わりうるこのタイミングでだけ捨てて作り直す（毎tick再計算するとsimスレッドが
-                        // 経路探索で埋まり、列車どころか全体が止まる）。
+                        // Task109: routes (station pairs) are a heavy computation requiring an A* per pair,
+                        // so discard and rebuild them only at this timing, when the rail network or stations
+                        // may have changed (recomputing every tick would swamp the sim thread with
+                        // pathfinding, stalling not just the trains but everything).
                         TrainStep.InvalidateRoutes(State);
-                        LogRailRoutes(); // Task107: 列車が動かないときの原因切り分け用
+                        LogRailRoutes(); // Task107: for isolating the cause when trains don't move
                     }
                 }
 
-                // 地表高さサンプラー（State.Height）の供給（Task53）。RoadGraph/Coverと違って毎tick
-                // 作り直す必要のある「スナップショット」ではなく、TerrainManagerへその場で問い合わせる
-                // 薄いアダプタなので、一度だけ生成して以後はそのまま使い回す（未供給時はnullのまま
-                // ＝MovementStepが自動的に従来のY補間へフォールバックするため、失敗時の再試行ロジックは
-                // 不要）。State自体が破棄されればHeightも道連れで消える（Roadsと同じライフサイクル）。
+                // Supply the surface height sampler (State.Height) (Task53). Unlike RoadGraph/Cover it is
+                // not a "snapshot" that needs rebuilding every tick, but a thin adapter that queries
+                // TerrainManager on the spot, so create it once and keep reusing it (while unsupplied it
+                // stays null = MovementStep automatically falls back to the legacy Y interpolation, so no
+                // retry-on-failure logic is needed). When State itself is discarded, Height dies with it
+                // (same lifecycle as Roads).
                 if (State.Height == null)
                 {
                     State.Height = new SurfaceHeightSampler();
                 }
 
-                // 水面サンプラー（State.Water）の供給（Task61）。State.Heightと全く同じパターン：
-                // 一度だけ生成して以後はそのまま使い回す薄いアダプタ（未供給時はnullのまま＝
-                // MovementStepのSea分岐が自動的に「常に水上」フォールバックへ切り替わる）。
+                // Supply the water surface sampler (State.Water) (Task61). Exactly the same pattern as
+                // State.Height: a thin adapter created once and reused thereafter (while unsupplied it
+                // stays null = MovementStep's Sea branch automatically switches to the "always on water"
+                // fallback).
                 if (State.Water == null)
                 {
                     State.Water = new WaterSampler();
                 }
 
-                // 遮蔽物マップ（State.Cover）の構築/再構築（Task44）。RoadGraphと同じ「未供給なら即座に
-                // 構築を試みる／供給済みなら一定間隔で作り直す／失敗時は既存マップを維持する」パターン。
-                // CoverSeekStepが同tickでこのマップを使えるよう、進軍命令より先に済ませる。
+                // Build/rebuild the cover map (State.Cover) (Task44). Same pattern as RoadGraph: "attempt a
+                // build immediately when unsupplied / rebuild at a fixed interval when supplied / keep the
+                // existing map on failure". Done before the advance orders so that CoverSeekStep can use
+                // this map in the same tick.
                 if (State.Cover == null)
                 {
                     _coverBuildRetryAccum += dt;
@@ -288,107 +311,125 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // 外部脅威（ゴジラ災害/エイリアン侵略、Task58）の同期。他MODが導入されていなければ
-                // 何もしない（ExternalThreatBridge内部で間引き・リフレクション解決結果をキャッシュする）。
-                // AI進軍命令（迂回判定）・ThreatCombatStepより前に済ませ、このtick中は最新の位置を使う。
+                // Sync external threats (Godzilla disaster / alien invasion, Task58). Does nothing if the
+                // other mods are not installed (ExternalThreatBridge internally throttles and caches its
+                // reflection resolution results). Done before the AI advance orders (detour decision) and
+                // ThreatCombatStep so the latest positions are used during this tick.
                 ExternalThreatBridge.Advance(State, dt);
 
-                // Task94: MissileDisaster（災害ミサイル）の着弾をユニット被害へ反映する
-                // （Workshopコメント対応。未導入/旧バージョンなら内部で自動無効化）。
+                // Task94: reflect MissileDisaster (disaster missile) impacts as unit damage
+                // (Workshop comment response. Auto-disables internally if not installed / old version).
                 DisasterImpactBridge.Advance(State);
 
-                // Task94: 外部襲来イベント（Optionsトグル、Workshopコメント要望）。スポーンした部隊は
-                // 次のInvasionOrders.AssignAdvanceが通常のAIとして最寄りの敵基地へ進軍させる。
+                // Task94: external invasion events (Options toggle, Workshop comment request). Spawned
+                // squads are marched toward the nearest enemy base as regular AI by the next
+                // InvasionOrders.AssignAdvance.
                 int invaders = InvasionEvents.Advance(State, dt,
                     WarfrontSettings.InvasionEventsEnabled, WarfrontSettings.InvasionFrequencyIndex);
                 if (invaders > 0)
                 {
-                    _invasionToastPending = true; // メインスレッド（OnMainVisualUpdate）でトースト表示
+                    _invasionToastPending = true; // Toast displayed on the main thread (OnMainVisualUpdate)
                     ModConfig.Log("InvasionEvents: spawned an invasion wave of " + invaders + " unit(s).");
                 }
 
-                // AI進軍命令（非プレイヤー勢力）。Task58: 自勢力の territory 近くに外部脅威がいれば
-                // 敵基地より優先してそちらへ迂回する（InvasionOrders.AssignAdvance内部で判定）。
+                // AI advance orders (non-player factions). Task58: if an external threat is near a
+                // faction's own territory, it detours toward it in preference to enemy bases (decided
+                // inside InvasionOrders.AssignAdvance).
                 foreach (var f in State.Factions)
                     if (!f.IsPlayer && !f.Eliminated) InvasionOrders.AssignAdvance(State, f.Id, dt);
 
-                // Task63: AI勢力の弾道ミサイル自動発射（宿敵優先/遠距離Hostile、基地ごとのクールダウン）。
-                // 通常のAI進軍命令の直後に判断させる（同じ「AIの意思決定」フェーズにまとめる）。
+                // Task63: automatic ballistic-missile launches by AI factions (archenemy priority /
+                // long-range Hostile, per-base cooldown). Decided right after the regular AI advance orders
+                // (grouped into the same "AI decision-making" phase).
                 MissileDoctrine.Advance(State, dt);
 
-                // 遮蔽移動の意思決定（交戦中のユニットへ遮蔽物を活かした立ち位置を割り当てる、Task44）。
-                // MovementStepより前に呼ぶことで、このtickで決めた立ち位置へ同じtick内で動き出せるようにする。
+                // Cover-movement decision-making (assigns engaged units a position that exploits cover,
+                // Task44). Called before MovementStep so that units can start moving toward the position
+                // decided this tick within the same tick.
                 CoverSeekStep.Advance(State, dt);
 
-                // Task101: 歩兵の陣地志向（敵接近時に塹壕/掩蔽壕へ）。CoverSeekStepの直後に走り、
-                // 陣地が使える場合は遮蔽の決定を上書きする（陣地＞建物の陰、FortSeekStepコメント参照）。
+                // Task101: infantry position-seeking (head for trenches/bunkers when enemies approach).
+                // Runs right after CoverSeekStep and overrides the cover decision when a fortified position
+                // is available (fortification > shadow of a building, see the FortSeekStep comment).
                 FortSeekStep.Advance(State, dt);
 
-                // 移動（Moving状態のユニットをOrderTargetPosへキネマティック前進、CoverDestination優先はTask44）
+                // Movement (kinematic advance of Moving-state units toward OrderTargetPos; CoverDestination priority is Task44)
                 MovementStep.Advance(State, dt);
 
-                // Task99: 基地/空母圏内の自動補給（弾薬回復、SupplyStock消費）と補給トラックの
-                // 配車・転送。移動の直後＝このtickの最終位置で「圏内かどうか」を判定する。
+                // Task99: automatic resupply within base/carrier range (ammo recovery, SupplyStock
+                // consumption) and supply-truck dispatch/transfer. "In range or not" is judged right after
+                // movement = at this tick's final positions.
                 ResupplyStep.Advance(State, dt);
                 SupplyTruckStep.Advance(State, dt);
-                TransportHeliStep.Advance(State, dt); // Task101: 輸送ヘリ兵站＋搭乗ユニットの位置追従
-                TrainStep.Advance(State, dt);         // Task101: 軍用列車の運行（積載/搭乗/走行/降車）
+                TransportHeliStep.Advance(State, dt); // Task101: transport helicopter logistics + position tracking of boarded units
+                TrainStep.Advance(State, dt);         // Task101: military train operation (loading/boarding/running/unloading)
 
-                // Task98: 水際等でスタックしたユニットの自動消滅（移動直後＝このtickの実際の変位を
-                // 見た上で判定する。自拠点付近・非Moving状態は対象外、無音無爆発でDead化のみ）。
+                // Task98: automatic despawn of units stuck at water edges etc. (judged right after
+                // movement = after seeing this tick's actual displacement. Units near their own bases and
+                // non-Moving states are excluded; no sound, no explosion, just marked Dead).
                 int stuckDespawned = StuckCleanupStep.Advance(State, dt);
                 if (stuckDespawned > 0)
                     ModConfig.Log("StuckCleanupStep: despawned " + stuckDespawned + " stuck unit(s).");
 
-                // Task79: 自爆ドローンの目標ロック・体当たり起爆。MovementStepの直後・CombatStepより前に
-                // 置く（このtickで決めたロックが次tickのMovementStepダイブ移動から参照されるのは通常の
-                // AI意思決定ステップと同じ1tick遅延パターン、CoverSeekStep→MovementStepと対称）。
-                // CombatStepより前に置くことで、KamikazeStepがCurrentHPを0にした自爆ドローン自身・
-                // 起爆で倒した相手ユニットの両方を、直後のCombatStep第2パス（死亡判定・KillEvent発行）が
-                // 同tick内で拾える。
+                // Task79: suicide-drone target locking and ram detonation. Placed right after MovementStep
+                // and before CombatStep (a lock decided this tick being referenced by the next tick's
+                // MovementStep dive movement is the usual 1-tick-delay pattern of AI decision steps,
+                // symmetric with CoverSeekStep -> MovementStep).
+                // Placing it before CombatStep lets the immediately following CombatStep second pass
+                // (death determination / KillEvent issuance) pick up, within the same tick, both the
+                // suicide drone itself whose CurrentHP KamikazeStep set to 0 and the opposing unit killed
+                // by the detonation.
                 KamikazeStep.Advance(State, dt);
 
-                // 戦闘（ユニット同士＋基地攻撃＋外部脅威、Task58）→ 占領 → 勢力状態の再導出（Task46:
-                // 拠点の自衛射撃は廃止。Eliminated/HomeBaseIdはOccupationが直接いじらず、
-                // FactionStatus.Refreshが毎tick所有基地の有無から導出し直す＝一度Eliminatedになっても
-                // 基地を取り戻せば復活する）。ThreatCombatStepは通常の戦闘に「加えて」実行するだけで、
-                // ターゲット選定を奪い合わない（射程内なら両方に同時に撃つ、Core/ThreatCombatStep参照）。
-                // Task101: 築城（掩蔽壕/砲兵陣地）の自動射撃。CombatStepの前に置くことで、
-                // ここで撃破したユニットをCombatStep第2パス（死亡判定・KillEvent）が同tickで拾う
-                // （KamikazeStepと同じパターン）。
+                // Combat (unit vs unit + base attacks + external threats, Task58) -> occupation ->
+                // re-derivation of faction status (Task46: base self-defense fire was removed.
+                // Eliminated/HomeBaseId are not touched directly by Occupation; FactionStatus.Refresh
+                // re-derives them every tick from owned-base presence = even a faction once Eliminated
+                // revives if it retakes a base). ThreatCombatStep runs "in addition to" regular combat and
+                // does not compete for target selection (units fire at both simultaneously when in range,
+                // see Core/ThreatCombatStep).
+                // Task101: automatic fire from fortifications (bunkers / artillery positions). Placed
+                // before CombatStep so units destroyed here are picked up in the same tick by the
+                // CombatStep second pass (death determination / KillEvent) (same pattern as KamikazeStep).
                 FortCombatStep.Advance(State, dt);
                 CombatStep.Advance(State, dt);
                 BaseCombatStep.Advance(State, dt);
                 ThreatCombatStep.Advance(State, dt);
 
-                // Task65: 脅威（ゴジラ/エイリアン）の近接オーラダメージ。ThreatCombatStepの直後
-                // （ユニット→脅威の攻撃が確定した直後）に実行する。ThreatRelationsを見ない逆方向
-                // （脅威→ユニット）のダメージなので、通常戦闘のターゲット選定には一切影響しない。
+                // Task65: proximity aura damage from threats (Godzilla/aliens). Executed right after
+                // ThreatCombatStep (right after unit->threat attacks have been settled). It is
+                // reverse-direction damage (threat->unit) that does not consult ThreatRelations, so it has
+                // no effect whatsoever on regular combat target selection.
                 ThreatAuraStep.Advance(State, dt);
 
-                // Task63: 弾道ミサイルの飛翔進捗・迎撃・着弾解決。仕様どおりThreatCombatStepの直後・
-                // 経済tickより前に実行する（着弾ダメージが同tickのOccupation/FactionStatus再導出に反映される）。
+                // Task63: ballistic missile flight progress, interception, and impact resolution. Per the
+                // spec, executed right after ThreatCombatStep and before the economy tick (impact damage is
+                // reflected in the same tick's Occupation/FactionStatus re-derivation).
                 MissileStep.Advance(State, dt);
 
                 Occupation.ResolveCaptures(State);
                 FactionStatus.Refresh(State);
 
-                // 戦闘域（Task54）の期限管理。上のCombatStep/BaseCombatStepが今tick分の報告を
-                // 積み終えた後に減算する（同tickに報告された分がいきなり0未満になって消えないように）。
+                // Expiry management of combat zones (Task54). Decrement after CombatStep/BaseCombatStep
+                // above have finished stacking this tick's reports (so that entries reported this same tick
+                // don't immediately drop below 0 and vanish).
                 State.CombatZones.Advance(dt);
 
-                // 戦闘域に応じた道路封鎖（Task54）。CombatZonesが確定した後、民間の経路計算より前に
-                // 反映しておきたいところだが、MovementStep（経路の消化・新規計算含む）は既に上で
-                // 終わっている。次tickの経路計算からは反映されるため1tickの遅延は許容する。
+                // Road blocking according to combat zones (Task54). Ideally applied after CombatZones is
+                // settled and before civilian path computation, but MovementStep (including path
+                // consumption and new computations) has already finished above. It is reflected starting
+                // from the next tick's path computations, so a 1-tick delay is acceptable.
                 CombatRoadBlocker.Advance(State, dt);
 
-                // Task65: 戦闘域(State.CombatZones)付近のまれな火災/建物崩壊。DisasterHelpersはsim
-                // スレッド専用のため、同じくCS建物バッファ絡みのCombatRoadBlockerの直後に置く
-                // （道路封鎖の判定が終わった後で問題ない＝両者は互いに依存しない独立した処理）。
+                // Task65: rare fires / building collapses near combat zones (State.CombatZones).
+                // DisasterHelpers is sim-thread only, so placed right after CombatRoadBlocker, which also
+                // deals with the CS building buffer (running after the road-block determination is fine =
+                // the two are independent operations with no dependency on each other).
                 CombatCollateral.Advance(State, dt);
 
-                // 経済（低頻度・ゲーム内時間基準）。時間を失わないよう間隔ぶんだけ減算する
-                // （ゼロクリアだとdtの端数が毎回捨てられ、実質的な頻度が下がってしまうため）。
+                // Economy (low frequency, based on in-game time). Subtract by the interval so no time is
+                // lost (zero-clearing would discard the fractional part of dt every time, effectively
+                // lowering the frequency).
                 _economyAccum += dt;
                 if (_economyAccum >= EconomyIntervalHours)
                 {
@@ -397,11 +438,13 @@ namespace CSWarfront.Game
                     foreach (var b in State.Bases)
                     {
                         if (b.OwnerFactionId == null) continue;
-                        // Task101: 築城・貨物駅は収入を生まない（1km圏収入は軍事基地4種のみ。
-                        // 塹壕を並べるだけで収入が倍々になるのを防ぐ）。
+                        // Task101: fortifications and cargo stations generate no income (1km-radius income
+                        // comes from the 4 military base types only. Prevents income from doubling over and
+                        // over just by lining up trenches).
                         if (FortificationRules.IsFortification(b.Type)) { b.LastIncome = 0f; continue; }
-                        // Task99: 3資源経済。1km圏のゾーン別発展度から住宅→人的資源、
-                        // 商業/オフィス→資金、工業→生産力を産出する（旧: 全建物→資金のみ）。
+                        // Task99: 3-resource economy. From per-zone development levels within a 1km radius,
+                        // residential yields manpower, commercial/office yields funds, and industrial yields
+                        // production (previously: all buildings -> funds only).
                         ZonedIncome inc = TerritoryIncome.ZonedForBase(b, samples, IncomeRate);
                         Faction owner = State.FindFaction(b.OwnerFactionId.Value);
                         if (owner != null)
@@ -410,21 +453,22 @@ namespace CSWarfront.Game
                             owner.AddManpower(inc.Manpower);
                             owner.AddProduction(inc.Production);
                         }
-                        b.LastIncome = inc.Funds; // Task35: UIが基地パネルへ表示するためのキャッシュ（非永続化）
+                        b.LastIncome = inc.Funds; // Task35: cache for the UI to display on the base panel (not persisted)
                     }
 
-                    // Task99: 補給物資の自動生産（生産力→SupplyStock、不足時は資金代替）と
-                    // 補給トラックの自動維持（陸軍基地ごと、勢力30台上限）。どちらも経済tickの頻度で十分。
+                    // Task99: automatic supply production (production -> SupplyStock, with funds as a
+                    // substitute when short) and automatic supply-truck upkeep (per army base, 30-truck cap
+                    // per faction). Economy-tick frequency is sufficient for both.
                     foreach (var f in State.Factions)
                         ResupplyStep.ProduceSupplies(f);
                     SupplyTruckStep.MaintainTrucks(State);
-                    TransportHeliStep.MaintainHelis(State); // Task101: 輸送ヘリの自動維持
-                    TrainStep.MaintainTrains(State);        // Task101: 軍用列車の自動維持（駅ペアごと）
+                    TransportHeliStep.MaintainHelis(State); // Task101: automatic upkeep of transport helicopters
+                    TrainStep.MaintainTrains(State);        // Task101: automatic upkeep of military trains (per station pair)
                 }
 
-                // 死亡ユニットの掃除。見た目（GameObject）は表現を持たないためここでの結合は不要
-                // （UnitVisuals.Syncが次回のOnMainVisualUpdateでState.Unitsとの差分から自動的に
-                // 破棄する＝宣言的reconcile）。
+                // Cleanup of dead units. The visuals (GameObjects) hold no representation here, so no
+                // coupling is needed at this point (UnitVisuals.Sync automatically destroys them on the
+                // next OnMainVisualUpdate from the diff against State.Units = declarative reconcile).
                 State.Units.RemoveAll(u => u.State == UnitState.Dead);
 
                 LogDiagnostics(dt);
@@ -432,9 +476,10 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 一定tickごとに実行時状態を1行で記録する診断ログ（実機でしか再現しない不具合の調査用）。
-        /// ユニットが実際に移動しているか・交戦しているか・基地HPが削れているかを事実として残す。
-        /// 呼び出し元が _stateLock を保持していること。
+        /// Diagnostic log that records the runtime state as a single line every fixed number of ticks
+        /// (for investigating issues that only reproduce on the real game). Records as facts whether
+        /// units are actually moving, whether they are engaging, and whether base HP is being chipped.
+        /// The caller must hold _stateLock.
         /// </summary>
         private static void LogDiagnostics(float dt)
         {
@@ -448,8 +493,9 @@ namespace CSWarfront.Game
                 sb.Append("DIAG dt=").Append(dt.ToString("0.000")).Append("h");
                 sb.Append(" units=").Append(State.Units.Count);
 
-                // 勢力別ユニット数（Task24）：どの勢力にもユニットが存在しない不具合を一目で分かるようにする。
-                // +1はInvader勢力（Task95、Faction.InvaderFactionId=5）のぶん。
+                // Per-faction unit counts (Task24): makes it obvious at a glance when no faction has any
+                // units (a bug). The +1 accounts for the Invader faction (Task95,
+                // Faction.InvaderFactionId=5).
                 var unitsPerFaction = new int[WarfrontSettings.MaxFactions + 1];
                 for (int u = 0; u < State.Units.Count; u++)
                 {
@@ -462,7 +508,8 @@ namespace CSWarfront.Game
 
                 sb.Append(" | roads=").Append(State.Roads != null ? State.Roads.NodeCount : 0);
                 sb.Append(" cover=").Append(State.Cover != null ? State.Cover.Count : 0);
-                // Task58: 現在アクティブな外部脅威（ゴジラ/エイリアン）の残りHP%を一目で分かるようにする。
+                // Task58: makes the remaining HP% of currently active external threats (Godzilla/aliens)
+                // visible at a glance.
                 for (int ti = 0; ti < State.Threats.Count; ti++)
                 {
                     var t = State.Threats[ti];
@@ -482,18 +529,20 @@ namespace CSWarfront.Game
                       .Append(" tgt=").Append(u.OrderTargetPos.HasValue
                           ? u.OrderTargetPos.Value.X.ToString("0") + "," + u.OrderTargetPos.Value.Z.ToString("0")
                           : "none");
-                    // 遮蔽移動モード（Task45）: territory=自勢力圏内で遮蔽移動なし、hold=交戦中で遮蔽に留まる、
-                    // bound=進軍中で遮蔽から遮蔽へ跳んでいる最中、none=遮蔽移動の対象外/候補なし。
+                    // Cover-movement mode (Task45): territory=inside own faction territory, no cover
+                    // movement; hold=engaged and staying in cover; bound=advancing, currently bounding from
+                    // cover to cover; none=not subject to cover movement / no candidate.
                     string coverMode = CoverSeekStep.IsInFriendlyTerritory(State, u) ? "territory"
                         : u.CoverDestination.HasValue ? (u.CoverHold ? "hold" : "bound")
                         : "none";
                     sb.Append(" cov=").Append(coverMode);
-                    // Speed（マップ距離/ゲーム内時間）を較正定数（想定値）でkm/hに逆変換して表示する（Task26）。
+                    // Display Speed (map distance / in-game time) converted back to km/h using the
+                    // calibration constant (assumed value) (Task26).
                     if (ut != null)
                         sb.Append(" spd=").Append((ut.Speed * SpeedCalibration.InGameHoursPerRealSecond * 3.6f).ToString("0")).Append("km/h");
                     if (i == 0)
                     {
-                        // 最初にサンプルしたユニットについてのみ、道路経路の消化状況を記録する（Task23）。
+                        // Record road-path consumption progress for the first sampled unit only (Task23).
                         sb.Append(" path=").Append(u.Path != null ? u.PathIndex + "/" + u.Path.Count : "none");
                     }
                 }

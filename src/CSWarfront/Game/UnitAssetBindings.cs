@@ -7,25 +7,26 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task47: 「複製適用」で選べる複製先の範囲。値はUI（floating panel / Optionsサブページ）両方の
-    /// スコープドロップダウンの選択インデックスと一致させる（並び変更・挿入は両UIの再確認が必要）。
+    /// Task47: The range of copy destinations selectable in "copy apply". Values must match the
+    /// selection indices of the scope dropdown in both UIs (floating panel / Options subpage)
+    /// (reordering or inserting entries requires re-checking both UIs).
     /// </summary>
     internal enum CopyScope
     {
-        /// <summary>同カテゴリの全Tier（同じ勢力、例: Tank_T1〜T5）。</summary>
+        /// <summary>All tiers of the same category (same faction, e.g. Tank_T1 through T5).</summary>
         SameCategoryAllTiers = 0,
-        /// <summary>全ユニット種別（同じ勢力の35キー全て）。</summary>
+        /// <summary>All unit types (all 35 keys of the same faction).</summary>
         AllUnitTypes = 1,
-        /// <summary>全勢力（同じ種別、faction 0..4）。</summary>
+        /// <summary>All factions (same type, faction 0..4).</summary>
         AllFactionsSameType = 2,
-        /// <summary>全勢力・全種別。</summary>
+        /// <summary>All factions and all types.</summary>
         AllFactionsAllTypes = 3
     }
 
-    /// <summary>CopyScope ⇔ 表示ラベルの変換。AssetKindUtil と同じ方針の小さなヘルパー。</summary>
+    /// <summary>CopyScope &lt;=&gt; display label conversion. A small helper following the same policy as AssetKindUtil.</summary>
     internal static class CopyScopeUtil
     {
-        /// <summary>スコープドロップダウンの選択インデックス0..3の並びと完全に一致させること。</summary>
+        /// <summary>Must exactly match the ordering of the scope dropdown's selection indices 0..3.</summary>
         public static readonly CopyScope[] All =
         {
             CopyScope.SameCategoryAllTiers, CopyScope.AllUnitTypes,
@@ -46,56 +47,67 @@ namespace CSWarfront.Game
     }
 
     /// <summary>
-    /// 「(勢力ID, ユニット種別TypeKey) → サブスクライブ済みアセット(種類+名前)」の割り当てを保持・永続化する
-    /// （Task36で導入、Task40で勢力別に拡張、Task41でプロップ以外の種類（建物/車両/樹木）にも対応）。
-    /// セーブゲームではなくMODディレクトリ直下の単純なテキストファイルへ保存するグローバル設定
-    /// （プレイヤーの「自分が持っているアセット」というメンタルモデルに合わせ、セーブ間で共有する）。
+    /// Holds and persists the "(faction ID, unit type TypeKey) -&gt; subscribed asset (kind + name)"
+    /// assignments (introduced in Task36, extended per-faction in Task40, and extended in Task41 to
+    /// asset kinds other than props (buildings/vehicles/trees)).
+    /// This is a global setting saved to a simple text file directly under the MOD directory, not in
+    /// the savegame (matching the player's mental model of "the assets I own", shared across saves).
     ///
-    /// ファイル形式（1行、UTF-8）:
-    ///   "factionId|typeKey=kind:assetName"  … 勢力別の割り当て（Task41で値にkindプレフィックスを追加）
-    ///   "factionId|typeKey=assetName"       … kindプレフィックス無しの値。後方互換のため
-    ///                                          AssetKind.Prop（プロップ）として読み込む。
-    ///   "typeKey=kind:assetName" / "typeKey=assetName" … レガシー行（factionIdプレフィックス無し）。
-    ///                                          「全勢力共通のフォールバック」として読み込む（後方互換）。
+    /// File format (one entry per line, UTF-8):
+    ///   "factionId|typeKey=kind:assetName"  ... per-faction assignment (Task41 added the kind prefix
+    ///                                          to the value)
+    ///   "factionId|typeKey=assetName"       ... value without a kind prefix. Loaded as
+    ///                                          AssetKind.Prop for backward compatibility.
+    ///   "typeKey=kind:assetName" / "typeKey=assetName" ... legacy lines (no factionId prefix).
+    ///                                          Loaded as an "all-factions common fallback"
+    ///                                          (backward compatibility).
     ///
-    /// 解決順序（Task50でTierフォールバックを追加）:
-    ///   1. 勢力別・exact-key（faction, typeKeyそのもの）の割り当て
-    ///   2. レガシー/全勢力共通・exact-keyの割り当て
-    ///   3. 同カテゴリ・他Tierへのフォールバック（typeKeyが "&lt;Category&gt;_T&lt;tier&gt;" として
-    ///      解析できる場合のみ）。直近の下位Tierから1まで、その後は直近の上位Tierから5まで
-    ///      （TypeKeyParser.FallbackTierOrder参照、例: Tank_T4 未割当なら T3→T2→T1→T5の順）を試し、
-    ///      各Tier候補について「勢力別 → レガシー/全勢力共通」の順に確認する。
-    ///   4. 無し（既定モデル）
-    /// これにより「Tier1にだけモデルを割り当てれば、Tier2以降にもそのモデルが自動的に適用される」
-    /// （5Tierすべてを手作業で割り当てる必要がない）。ただし特定Tierへの明示的な割り当て（手順1/2）は
-    /// 常にこのフォールバック（手順3）より優先される。
+    /// Resolution order (tier fallback added in Task50):
+    ///   1. Per-faction, exact-key (faction + the typeKey itself) assignment
+    ///   2. Legacy / all-factions-common, exact-key assignment
+    ///   3. Fallback to other tiers of the same category (only when the typeKey can be parsed as
+    ///      "&lt;Category&gt;_T&lt;tier&gt;"). Tries the nearest lower tiers down to 1, then the nearest higher
+    ///      tiers up to 5 (see TypeKeyParser.FallbackTierOrder; e.g. if Tank_T4 is unassigned, the
+    ///      order is T3 -&gt; T2 -&gt; T1 -&gt; T5), checking "per-faction -&gt; legacy/all-factions-common" for
+    ///      each tier candidate.
+    ///   4. None (default model)
+    /// This means "assigning a model only to Tier1 automatically applies that model to Tier2 and
+    /// above" (no need to manually assign all 5 tiers). However, an explicit assignment to a specific
+    /// tier (steps 1/2) always takes precedence over this fallback (step 3).
     ///
-    /// 基地（軍事拠点）専用の解決は<see cref="TryGetForBase"/>が別に持つ（Tierフォールバックは無関係のため
-    /// TryGetは経由しない）。Task60では基地種別を区別しない単一キー（<see cref="BaseTypeKey"/>、
-    /// "MilitaryBase"）のみだったが、Task66で陸軍/海軍/空軍/ミサイルの4種別キー（<see cref="ArmyBaseTypeKey"/>
-    /// 等）へ分割した。解決順序: 1. 種別別キー・勢力別exact → 2. 種別別キー・レガシー/全勢力共通exact →
-    /// 3. 旧統合キー（"MilitaryBase"）・勢力別exact → 4. 旧統合キー・レガシー/全勢力共通exact → 5. 無し。
-    /// これにより、Task66以前に保存された "faction|MilitaryBase=..." 行は「種別別の明示的割り当てが
-    /// 無い基地種別すべてに共通のフォールバック」として引き続き機能する（unit-assets.txtの書き換え不要）。
+    /// Base (military installation)-specific resolution lives separately in <see cref="TryGetForBase"/>
+    /// (it does not go through TryGet because tier fallback is irrelevant to bases). Task60 had only a
+    /// single key that did not distinguish base types (<see cref="BaseTypeKey"/>, "MilitaryBase");
+    /// Task66 split it into four per-type keys for army/navy/air-force/missile
+    /// (<see cref="ArmyBaseTypeKey"/> etc.). Resolution order: 1. per-type key, per-faction exact -&gt;
+    /// 2. per-type key, legacy/all-factions-common exact -&gt; 3. old unified key ("MilitaryBase"),
+    /// per-faction exact -&gt; 4. old unified key, legacy/all-factions-common exact -&gt; 5. none.
+    /// This way, "faction|MilitaryBase=..." lines saved before Task66 continue to work as a "common
+    /// fallback for all base types that have no explicit per-type assignment" (no need to rewrite
+    /// unit-assets.txt).
     ///
-    /// kindプレフィックスの解析は AssetKindUtil.TryParsePrefix が行う。値の先頭が既知のkind名+':'で
-    /// 始まらない場合は、値全体を（kindプレフィックス無しとして）AssetKind.Propの名前とみなす
-    /// （既存プロップ名にたまたま':'が含まれていても誤解析しない）。
+    /// Kind prefix parsing is done by AssetKindUtil.TryParsePrefix. If the value does not start with a
+    /// known kind name followed by ':', the whole value is treated as an AssetKind.Prop name (as if it
+    /// had no kind prefix) — so an existing prop name that happens to contain ':' is not misparsed.
     ///
-    /// Set()は常に新形式（"kind:assetName"）で書き込む。レガシー行は Set/Clear では作られない（新規保存は
-    /// 必ず勢力別・kindプレフィックス付き形式）が、既存ファイルに残っている場合は読み込み続け、保存時も
-    /// 読み込んだキー形式（factionIdプレフィックスの有無）のまま書き戻す（互換性維持のため消さない。
-    /// 値側は毎回 kind プレフィックス付きで正規化して書き戻す＝再保存後は全行が新形式の値になる）。
+    /// Set() always writes the new format ("kind:assetName"). Legacy lines are never created by
+    /// Set/Clear (new saves are always per-faction with kind prefix), but if they remain in an
+    /// existing file they continue to be loaded, and on save they are written back in the key format
+    /// they were loaded with (with or without the factionId prefix) — they are not removed, for
+    /// compatibility. The value side is always normalized to include the kind prefix when written
+    /// back, so after a re-save every line has a new-format value.
     ///
-    /// 壊れている/存在しないファイルは常に「割り当て無し」として扱い、例外を外へ投げない
-    /// （ここでの失敗がロード自体を止めてはならない）。
-    /// メインスレッド専用という制約は無いが、呼び出しは全てメインスレッド（UI/ロード処理）から行われる想定。
+    /// A corrupted/missing file is always treated as "no assignments" and never throws outward
+    /// (a failure here must not stop loading itself).
+    /// There is no main-thread-only constraint, but all calls are expected to come from the main
+    /// thread (UI / load processing).
     /// </summary>
     internal static partial class UnitAssetBindings
     {
-        // Task66: 基地種別キー定数（BaseTypeKey/ArmyBaseTypeKey等）・表示名・BaseTypeKeyFor/
-        // TryGetBaseTypeForKey/DisplayNameForBaseKey・TryGetForBase・CopyBaseTo は500行制限のため
-        // UnitAssetBindingsBaseTypes.cs（同じ partial class、Game/UnitAssetBindingsBaseTypes.cs）へ分離した。
+        // Task66: The base-type key constants (BaseTypeKey/ArmyBaseTypeKey etc.), display names,
+        // BaseTypeKeyFor/TryGetBaseTypeForKey/DisplayNameForBaseKey, TryGetForBase, and CopyBaseTo were
+        // split out into UnitAssetBindingsBaseTypes.cs (same partial class,
+        // Game/UnitAssetBindingsBaseTypes.cs) due to the 500-line limit.
 
         private const string FileName = "unit-assets.txt";
 
@@ -105,26 +117,30 @@ namespace CSWarfront.Game
             public string Name;
         }
 
-        // 勢力別の割り当て。キーは MakeKey(factionId, typeKey) = "factionId|typeKey"。
+        // Per-faction assignments. Key is MakeKey(factionId, typeKey) = "factionId|typeKey".
         private static readonly Dictionary<string, Binding> _bindings = new Dictionary<string, Binding>();
 
-        // レガシー行（factionIdプレフィックス無し）。キーは typeKey そのもの。全勢力共通のフォールバック。
+        // Legacy lines (no factionId prefix). Key is the typeKey itself. All-factions common fallback.
         private static readonly Dictionary<string, Binding> _anyFactionBindings = new Dictionary<string, Binding>();
 
-        // 解決済みファイルパス。modDirectory が取得できなかった場合は null のままとなり、
-        // Set() はメモリ内のみで保持し保存はスキップする（EnsureRegisteredと同様、ロード自体は止めない）。
+        // Resolved file path. Remains null if modDirectory could not be obtained, in which case
+        // Set() keeps the binding in memory only and skips saving (like EnsureRegistered, loading
+        // itself is never stopped).
         private static string _filePath;
 
-        // Task70: プリセットスロット（unit-assets-set1〜3.txt）のパスを組み立てるために保持する
-        // modDirectory 自体（_filePathはFileName付きの完全パスのため、ディレクトリだけを別途持つ）。
-        // Loadでmod DirectoryをNULLで受け取った場合はこちらもnullのままとなり、
-        // UnitAssetBindingsPresets.cs 側のスロット操作は全て「保存先未解決」として何もせずfalseを返す。
+        // Task70: The modDirectory itself, kept for building preset slot paths
+        // (unit-assets-set1 through 3.txt). (_filePath is the full path including FileName, so the
+        // directory alone is kept separately.)
+        // If Load received a null mod directory, this also stays null, and all slot operations in
+        // UnitAssetBindingsPresets.cs treat it as "save destination unresolved" and return false
+        // without doing anything.
         private static string _modDirectory;
 
         public static int Count { get { return _bindings.Count + _anyFactionBindings.Count; } }
 
-        /// <summary>起動時（WarfrontLoadingExtension.OnLevelLoaded）に一度呼ぶ。冪等ではない
-        /// （毎回ファイルから読み直す。呼び出し側は1レベルロードにつき1回のみ呼ぶ想定）。</summary>
+        /// <summary>Called once at startup (WarfrontLoadingExtension.OnLevelLoaded). Not idempotent
+        /// (re-reads from file every time; the caller is expected to call it only once per level
+        /// load).</summary>
         public static void Load(string modDirectory)
         {
             _bindings.Clear();
@@ -140,7 +156,7 @@ namespace CSWarfront.Game
                     return;
                 }
 
-                _modDirectory = modDirectory; // Task70: プリセットスロットのパス組み立て用に保持
+                _modDirectory = modDirectory; // Task70: kept for building preset slot paths
                 _filePath = Path.Combine(modDirectory, FileName);
                 if (!File.Exists(_filePath))
                 {
@@ -156,17 +172,19 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                // 壊れたファイル・アクセス権限エラー等は「割り当て無し」として継続する（ロードを止めない）。
+                // A corrupted file, access permission error, etc. is treated as "no assignments" and
+                // execution continues (loading is not stopped).
                 ModConfig.LogError("UnitAssetBindings.Load error (continuing with no bindings): " + e);
                 _bindings.Clear();
                 _anyFactionBindings.Clear();
             }
         }
 
-        /// <summary>Task70: ファイル形式のパース本体（Load/UnitAssetBindingsPresets.LoadFromSlotの共有ヘルパー）。
-        /// 呼び出し前に <paramref name="path"/> の存在確認は済ませておくこと（存在しなければ
-        /// File.ReadAllLinesが例外を投げ、呼び出し側のtry/catchで捕捉される想定）。1行ごとの解析仕様は
-        /// クラス冒頭コメントのファイル形式節を参照。</summary>
+        /// <summary>Task70: Core file-format parser (shared helper for Load and
+        /// UnitAssetBindingsPresets.LoadFromSlot). The caller must verify the existence of
+        /// <paramref name="path"/> beforehand (if it does not exist, File.ReadAllLines throws and the
+        /// caller's try/catch is expected to catch it). See the file format section in the class-level
+        /// comment for the per-line parsing spec.</summary>
         private static void ParseFileInto(string path, Dictionary<string, Binding> bindings, Dictionary<string, Binding> anyFactionBindings, out int parsedCount)
         {
             parsedCount = 0;
@@ -177,7 +195,7 @@ namespace CSWarfront.Game
                 if (string.IsNullOrEmpty(line)) continue;
 
                 int eq = line.IndexOf('=');
-                if (eq <= 0 || eq >= line.Length - 1) continue; // キー/値どちらかが空なら無視
+                if (eq <= 0 || eq >= line.Length - 1) continue; // ignore lines where key or value is empty
 
                 string key = line.Substring(0, eq);
                 string rawValue = line.Substring(eq + 1);
@@ -194,7 +212,7 @@ namespace CSWarfront.Game
                 }
                 else
                 {
-                    // レガシー行（Task36形式）。全勢力共通のフォールバックとして扱う。
+                    // Legacy line (Task36 format). Treated as an all-factions common fallback.
                     anyFactionBindings[key] = binding;
                 }
                 parsedCount++;
@@ -202,9 +220,10 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 指定勢力・種別の割り当てを解決する。解決順序（クラス冒頭コメント参照、Task50でTier
-        /// フォールバックを追加）: 勢力別exact → レガシー/全勢力共通exact → 同カテゴリ他Tier
-        /// フォールバック（勢力別優先） → 無し。
+        /// Resolves the assignment for the given faction and type. Resolution order (see the
+        /// class-level comment; tier fallback added in Task50): per-faction exact -&gt;
+        /// legacy/all-factions-common exact -&gt; same-category other-tier fallback (per-faction takes
+        /// precedence) -&gt; none.
         /// </summary>
         public static bool TryGet(byte factionId, string typeKey, out AssetKind kind, out string assetName)
         {
@@ -214,11 +233,12 @@ namespace CSWarfront.Game
 
             if (TryGetExact(factionId, typeKey, out kind, out assetName)) return true;
 
-            // Task50: exact-keyが無ければ、同カテゴリの他Tierへフォールバックする（「Tier1にだけ
-            // モデルを割り当てれば全Tierに効く」を実現する。パース/探索順序の組み立ては
-            // CSWarfront.Core.TypeKeyParser（純ロジック、Core.Testsでテスト済み）に委譲する）。
-            // typeKeyが"<Category>_T<tier>"として解析できない場合（基地種別キー等）はTryParseが
-            // falseを返して素通りするだけで、例外や誤マッチは起きない。
+            // Task50: If there is no exact-key match, fall back to other tiers of the same category
+            // (this realizes "assign a model only to Tier1 and it applies to all tiers". Parsing and
+            // building the search order are delegated to CSWarfront.Core.TypeKeyParser (pure logic,
+            // tested in Core.Tests)).
+            // If typeKey cannot be parsed as "<Category>_T<tier>" (base-type keys etc.), TryParse
+            // simply returns false and this block is skipped — no exceptions or false matches occur.
             UnitCategory category;
             byte tier;
             if (TypeKeyParser.TryParse(typeKey, out category, out tier))
@@ -236,12 +256,13 @@ namespace CSWarfront.Game
             return false;
         }
 
-        // Task66: TryGetEffective/TryGetForBase は UnitAssetBindingsBaseTypes.cs（同じ partial class）へ
-        // 分離した（500行制限）。TryGetExact（下）はどちらからも呼ばれる共有ヘルパーのためこちらに残す。
+        // Task66: TryGetEffective/TryGetForBase were split out into UnitAssetBindingsBaseTypes.cs
+        // (same partial class) due to the 500-line limit. TryGetExact (below) stays here because it is
+        // a shared helper called from both.
 
-        /// <summary>勢力別exact → レガシー/全勢力共通exactの2段のみを見る（フォールバック無し）内部ヘルパー。
-        /// TryGet（Tierフォールバック込み）とTryGetForBase（旧統合キーフォールバック込み）の両方から
-        /// 共有される最小単位。</summary>
+        /// <summary>Internal helper that checks only the two stages per-faction exact -&gt;
+        /// legacy/all-factions-common exact (no fallback). The minimal unit shared by both TryGet
+        /// (with tier fallback) and TryGetForBase (with old-unified-key fallback).</summary>
         private static bool TryGetExact(byte factionId, string typeKey, out AssetKind kind, out string assetName)
         {
             kind = AssetKind.Prop;
@@ -263,9 +284,9 @@ namespace CSWarfront.Game
             return false;
         }
 
-        /// <summary>指定(勢力, TypeKey)へアセット（種類+名前）を割り当て、直ちに保存する。常に勢力別・
-        /// kindプレフィックス付き形式で保存する（レガシー/全勢力共通のエントリはここでは作らない・
-        /// 変更しない）。</summary>
+        /// <summary>Assigns an asset (kind + name) to the given (faction, TypeKey) and saves
+        /// immediately. Always saves in the per-faction, kind-prefixed format (legacy /
+        /// all-factions-common entries are neither created nor modified here).</summary>
         public static void Set(byte factionId, string typeKey, AssetKind kind, string assetName)
         {
             if (string.IsNullOrEmpty(typeKey) || string.IsNullOrEmpty(assetName)) return;
@@ -274,8 +295,9 @@ namespace CSWarfront.Game
             Save();
         }
 
-        /// <summary>指定(勢力, TypeKey)の勢力別割り当てのみを解除し（全勢力共通/既定フォールバックへ戻す）、
-        /// 直ちに保存する。全勢力共通(レガシー)のエントリは変更しない。</summary>
+        /// <summary>Removes only the per-faction assignment for the given (faction, TypeKey)
+        /// (reverting to the all-factions-common / default fallback) and saves immediately.
+        /// All-factions-common (legacy) entries are not modified.</summary>
         public static void Clear(byte factionId, string typeKey)
         {
             if (string.IsNullOrEmpty(typeKey)) return;
@@ -287,23 +309,27 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task47: 「複製適用」。指定(勢力,TypeKey)の現在の割り当てを、scopeで指定した範囲の全(勢力,TypeKey)
-        /// へまとめて複製する。コピー元自体は書き込み対象から除外する（既に同じ値のため無駄な書き込み/
-        /// ログを避ける）。保存はループ内でSet()を都度呼ばず、全件の変更を終えてから1回だけ行う
-        /// （書き込み件数分ディスクI/Oが走るのを避けるため）。呼び出し元（AssetAssignPanel/
-        /// Options page）はUnitVisuals.DestroyAll()を自分で呼ぶこと（このメソッドは永続化のみ担当し、
-        /// 見た目の再生成トリガーには関与しない＝floating panelとOptionsページの両方から呼ばれるため、
-        /// 副作用はどちらのUIからも明示的に呼ぶ形に統一する）。
+        /// Task47: "Copy apply". Copies the current assignment of the given (faction, TypeKey) in bulk
+        /// to every (faction, TypeKey) in the range specified by scope. The copy source itself is
+        /// excluded from the write targets (it already has the same value, so this avoids a pointless
+        /// write/log). Saving is done once after all changes are finished, rather than calling Set()
+        /// inside the loop (to avoid one disk I/O per written entry). The caller (AssetAssignPanel /
+        /// Options page) must call UnitVisuals.DestroyAll() itself (this method is responsible only
+        /// for persistence and is not involved in triggering visual regeneration — since it is called
+        /// from both the floating panel and the Options page, the side effect is uniformly made
+        /// explicit in each UI).
         /// </summary>
-        /// <returns>実際に書き込んだ(勢力,TypeKey)の件数。コピー元に割り当てが無い、またはTypeKeyが
-        /// 不明な場合は0を返し、何も変更しない。</returns>
+        /// <returns>The number of (faction, TypeKey) entries actually written. Returns 0 and changes
+        /// nothing if the copy source has no assignment or the TypeKey is unknown.</returns>
         public static int CopyTo(byte fromFaction, string fromTypeKey, CopyScope scope)
         {
-            // Task66: コピー元が基地種別キー（Army/Navy/Air/MissileBaseTypeKey）の場合は専用の複製処理へ
-            // 分岐する。LandUnitRoster.All() を線形探索する下のユニット向けロジックはこの仮想的な"種別"を
-            // 決して含まないため、そのまま流すと必ず0件（TryGetCategory失敗）になってしまう。
-            // 「現在の割り当て」表示（TryGetForBase、旧統合キーへのフォールバックを含む）と同じ実効値を
-            // 複製できるよう、コピー元の解決も TryGet ではなく TryGetForBase を使う。
+            // Task66: If the copy source is a base-type key (Army/Navy/Air/MissileBaseTypeKey), branch
+            // into the dedicated copy routine. The unit-oriented logic below, which linearly scans
+            // LandUnitRoster.All(), never contains this virtual "type", so passing it through would
+            // always yield 0 entries (TryGetCategory failure).
+            // So that the same effective value shown by the "current assignment" display (TryGetForBase,
+            // including the fallback to the old unified key) can be copied, the copy source is also
+            // resolved with TryGetForBase instead of TryGet.
             BaseType fromBaseType;
             bool isBaseKey = TryGetBaseTypeForKey(fromTypeKey, out fromBaseType);
 
@@ -348,14 +374,14 @@ namespace CSWarfront.Game
                 {
                     for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
                     {
-                        if (f == fromFaction && t.TypeKey == fromTypeKey) continue; // コピー元自身はスキップ
+                        if (f == fromFaction && t.TypeKey == fromTypeKey) continue; // skip the copy source itself
                         _bindings[MakeKey(f, t.TypeKey)] = new Binding { Kind = kind, Name = name };
                         written++;
                     }
                 }
                 else
                 {
-                    if (t.TypeKey == fromTypeKey) continue; // コピー元自身はスキップ
+                    if (t.TypeKey == fromTypeKey) continue; // skip the copy source itself
                     _bindings[MakeKey(fromFaction, t.TypeKey)] = new Binding { Kind = kind, Name = name };
                     written++;
                 }
@@ -367,13 +393,14 @@ namespace CSWarfront.Game
             return written;
         }
 
-        // Task66: CopyBaseTo（コピー元が基地種別キーの場合の専用複製処理）は
-        // UnitAssetBindingsBaseTypes.cs（同じ partial class）へ分離した（500行制限）。
-        // _bindings/MakeKey/Save は private static だが partial class 内では全パーツで共有されるため
-        // 問題なくそちらから呼べる。
+        // Task66: CopyBaseTo (the dedicated copy routine used when the copy source is a base-type key)
+        // was split out into UnitAssetBindingsBaseTypes.cs (same partial class) due to the 500-line
+        // limit. _bindings/MakeKey/Save are private static, but partial class members are shared across
+        // all parts, so they can be called from there without issue.
 
-        /// <summary>TypeKeyからUnitCategoryを逆引きする（LandUnitRoster.All()を線形探索、35件のみなので
-        /// コストは無視できる）。見つからない場合はfalse。</summary>
+        /// <summary>Reverse-looks up the UnitCategory from a TypeKey (linear scan of
+        /// LandUnitRoster.All(); only 35 entries, so the cost is negligible). Returns false if not
+        /// found.</summary>
         private static bool TryGetCategory(string typeKey, out UnitCategory category)
         {
             foreach (UnitType t in LandUnitRoster.All())
@@ -388,9 +415,10 @@ namespace CSWarfront.Game
             return false;
         }
 
-        /// <summary>値部分（"kind:assetName" または後方互換の "assetName" のみ）を解析する。
-        /// 先頭が既知のkind名+':'であればそのkindとして扱い、そうでなければ値全体をAssetKind.Propの
-        /// 名前として扱う（後方互換: Task36/Task40当時のファイルにkindプレフィックスは存在しない）。</summary>
+        /// <summary>Parses the value part ("kind:assetName", or just "assetName" for backward
+        /// compatibility). If it starts with a known kind name followed by ':', it is treated as that
+        /// kind; otherwise the whole value is treated as an AssetKind.Prop name (backward
+        /// compatibility: files from the Task36/Task40 era have no kind prefix).</summary>
         private static void ParseValue(string rawValue, out Binding binding)
         {
             int colon = rawValue.IndexOf(':');
@@ -408,8 +436,9 @@ namespace CSWarfront.Game
             binding = new Binding { Kind = AssetKind.Prop, Name = rawValue };
         }
 
-        /// <summary>"factionId|typeKey" 形式のキーを解析する。factionIdプレフィックスが無い/数値でない場合は
-        /// false を返す（呼び出し側はその行をレガシー/全勢力共通として扱う）。</summary>
+        /// <summary>Parses a key in "factionId|typeKey" format. Returns false if the factionId prefix
+        /// is missing or not numeric (the caller then treats that line as
+        /// legacy/all-factions-common).</summary>
         private static bool TryParseFactionKey(string key, out byte factionId, out string typeKey)
         {
             factionId = 0;
@@ -453,24 +482,27 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task70: シリアライズ本体（Save/UnitAssetBindingsPresets.SaveToSlotの共有ヘルパー）。
-        /// ファイル形式はクラス冒頭コメント参照。呼び出し側のtry/catchで例外を捕捉する想定
-        /// （このメソッド自身は例外を握りつぶさない）。</summary>
+        /// <summary>Task70: Core serializer (shared helper for Save and
+        /// UnitAssetBindingsPresets.SaveToSlot). See the class-level comment for the file format.
+        /// Exceptions are expected to be caught by the caller's try/catch (this method itself does not
+        /// swallow them).</summary>
         private static void WriteBindingsToFile(string path, Dictionary<string, Binding> bindings, Dictionary<string, Binding> anyFactionBindings)
         {
-            // File.WriteAllLines(path, lines, encoding) は .NET 4.0 以降の追加オーバーロードであり、
-            // 本プロジェクトの TargetFrameworkVersion v3.5 環境では確実に存在するとは限らないため、
-            // .NET 1.1 から存在する StreamWriter を明示的に使う（WarStateSerializer等、既存コードの
-            // File.ReadAllText/File.Exists 止まりの使用実績に対し、書き込みはより保守的な経路を選ぶ）。
+            // File.WriteAllLines(path, lines, encoding) is an overload added in .NET 4.0 and later and
+            // is not guaranteed to exist in this project's TargetFrameworkVersion v3.5 environment, so
+            // we explicitly use StreamWriter, which has existed since .NET 1.1 (existing code such as
+            // WarStateSerializer only goes as far as File.ReadAllText/File.Exists; for writes we choose
+            // the more conservative path).
             using (StreamWriter writer = new StreamWriter(path, false, Encoding.UTF8))
             {
-                // レガシー/全勢力共通の行は読み込んだキー形式（factionIdプレフィックス無し）のまま
-                // 書き戻す。値は毎回 kind プレフィックス付きの新形式へ正規化する。
+                // Legacy / all-factions-common lines are written back in the key format they were
+                // loaded with (no factionId prefix). The value is always normalized to the new
+                // kind-prefixed format.
                 foreach (KeyValuePair<string, Binding> kv in anyFactionBindings)
                 {
                     writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);
                 }
-                // 勢力別の行はキーが既に "factionId|typeKey" 形式。
+                // Per-faction lines already have keys in "factionId|typeKey" format.
                 foreach (KeyValuePair<string, Binding> kv in bindings)
                 {
                     writer.WriteLine(kv.Key + "=" + AssetKindUtil.ToPrefix(kv.Value.Kind) + ":" + kv.Value.Name);

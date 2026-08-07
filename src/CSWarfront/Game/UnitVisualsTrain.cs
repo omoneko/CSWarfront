@@ -7,23 +7,25 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task108（ユーザー要望「線路上を移動するときは車体の連結部で線路に沿うように曲がってほしい」）:
-    /// 軍用貨物列車の「連接表示」。
+    /// Task108 (user request "when moving on rails, the body should bend at the couplings to follow
+    /// the track"): "Articulated rendering" for the military freight train.
     ///
-    /// モデル側が車両ごとの独立オブジェクトへ分割されている（2026-08-05にユーザーが更新。
-    /// Unit_MilitaryTrain＝機関車＋Coach/Van/TankWagon/Flatの4両）。ここでは、
-    ///   1. 生成時に後続車両のモデルを読み込み、編成順に「先頭からの距離」を割り当てる
-    ///      （距離＝各車両の実寸＋連結間隔から算出。モデルを差し替えれば自動的に追従する）
-    ///   2. 先頭が通った軌跡（Trail）を記録し、各車両を「先頭から自分の距離だけ後ろの軌跡上の点」へ、
-    ///      その地点の接線方向で置く
-    /// ことで、実際に走った線路の形に沿って編成が折れ曲がる。
+    /// The model side has been split into independent per-car objects (updated by the user on
+    /// 2026-08-05: Unit_MilitaryTrain = locomotive + the 4 cars Coach/Van/TankWagon/Flat). Here we
+    ///   1. load the trailing car models at creation time and assign each a "distance from the head"
+    ///      in consist order (the distance is derived from each car's actual size + coupling gap, so
+    ///      it follows automatically if the models are swapped)
+    ///   2. record the trail traced by the head (Trail), and place each car at "the point on the
+    ///      trail that lies its own distance behind the head", oriented along the tangent at that
+    ///      point
+    /// so the consist bends along the shape of the track it actually traveled.
     ///
-    /// 後続車両のモデルが1つも読めない場合は何もしない（＝先頭車だけの従来表示。安全側フォールバック）。
-    /// すべてメインスレッド専用（UnitVisualsと同じ規約）。
+    /// If none of the trailing car models can be loaded, do nothing (= the previous head-car-only
+    /// rendering; safe fallback). Everything is main thread only (same convention as UnitVisuals).
     /// </summary>
     public static partial class UnitVisuals
     {
-        /// <summary>編成順（先頭車Unit_MilitaryTrainの後ろに、この順で連結する）。</summary>
+        /// <summary>Consist order (coupled behind the head car Unit_MilitaryTrain in this order).</summary>
         private static readonly string[] TrailingCarModels =
         {
             "Unit_MilitaryTrainCoach",
@@ -32,16 +34,18 @@ namespace CSWarfront.Game
             "Unit_MilitaryTrainFlat"
         };
 
-        /// <summary>連結器のすき間（m）。車両どうしが密着して見えないようにする。</summary>
+        /// <summary>Coupler gap (m). Keeps the cars from looking glued together.</summary>
         private const float CouplingGap = 1.0f;
 
-        /// <summary>軌跡を記録する間隔（m）。細かいほど曲線再現が滑らかだが点が増える。</summary>
+        /// <summary>Trail sampling interval (m). Finer means smoother curve reproduction but more points.</summary>
         private const float TrailSampleSpacing = 2f;
 
-        /// <summary>保持する軌跡点の最大数（TrailSampleSpacing×これ＝再現できる編成長の上限）。</summary>
+        /// <summary>Maximum number of trail points kept (TrailSampleSpacing x this = the upper bound
+        /// of consist length that can be reproduced).</summary>
         private const int MaxTrailPoints = 200;
 
-        /// <summary>このTypeKeyは連接表示の対象か（現状は軍用貨物列車のみ）。</summary>
+        /// <summary>Whether this TypeKey is subject to articulated rendering (currently only the
+        /// military freight train).</summary>
         private static bool IsArticulatedType(string typeKey)
         {
             UnitCategory category;
@@ -50,8 +54,9 @@ namespace CSWarfront.Game
             return category == UnitCategory.MilitaryTrain;
         }
 
-        /// <summary>後続車両をrootの子として生成し、各車両の「先頭からの距離」を返す。
-        /// 1両も作れなければfalse（＝先頭車だけの従来表示）。</summary>
+        /// <summary>Creates the trailing cars as children of root and returns each car's "distance
+        /// from the head". Returns false if not even one car could be built (= the previous
+        /// head-car-only rendering).</summary>
         private static bool TryBuildTrainCars(GameObject root, Mesh headMesh,
             out GameObject[] cars, out float[] behindHead)
         {
@@ -63,7 +68,8 @@ namespace CSWarfront.Game
                 var builtCars = new List<GameObject>();
                 var offsets = new List<float>();
 
-                // 先頭車の中心から後端までの距離を起点に、後ろへ積み上げていく。
+                // Starting from the distance between the head car's center and its rear end,
+                // accumulate backwards.
                 float cursor = headMesh.bounds.size.z * 0.5f;
 
                 for (int i = 0; i < TrailingCarModels.Length; i++)
@@ -79,8 +85,9 @@ namespace CSWarfront.Game
                     var carGo = new GameObject("Car_" + TrailingCarModels[i]);
                     carGo.transform.SetParent(root.transform, false);
 
-                    // 車両GameObjectは毎フレーム軌跡上へワールド座標で置く。モデルの上下ピボット補正
-                    // （底面をY=0に合わせる）は先頭車と同じく子の"Model"側で吸収する。
+                    // The car GameObject is placed on the trail in world coordinates every frame.
+                    // The model's vertical pivot correction (aligning the bottom to Y=0) is absorbed
+                    // by the child "Model", same as the head car.
                     var model = new GameObject("Model");
                     model.transform.SetParent(carGo.transform, false);
                     model.transform.localPosition = new Vector3(0f, -mesh.bounds.min.y, 0f);
@@ -107,8 +114,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>毎フレーム（MoveVisualから）: 先頭の軌跡を記録し、各車両を軌跡上へ配置する。
-        /// 軌跡がまだ足りない（出現直後など）ぶんは、現在の向きにまっすぐ並べてフォールバックする。</summary>
+        /// <summary>Every frame (from MoveVisual): records the head's trail and places each car on
+        /// it. Where the trail is not yet long enough (e.g. right after spawn), falls back to lining
+        /// the cars up straight along the current facing.</summary>
         private static void UpdateTrainCars(VisualEntry entry, Vector3 headPosition, Quaternion headRotation)
         {
             if (entry.Cars == null || entry.Cars.Length == 0) return;
@@ -139,8 +147,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>軌跡（古い→新しい順）を先頭からdistanceだけ遡った点と、その地点での進行方向を返す。
-        /// 軌跡がdistanceに満たなければfalse。</summary>
+        /// <summary>Returns the point reached by walking distance back from the head along the trail
+        /// (ordered old to new), and the direction of travel at that point. Returns false if the
+        /// trail is shorter than distance.</summary>
         private static bool TrySampleTrail(List<Vector3> trail, Vector3 head, float distance,
             out Vector3 position, out Vector3 forward)
         {
@@ -167,7 +176,7 @@ namespace CSWarfront.Game
                 remaining -= len;
                 current = previous;
             }
-            return false; // 軌跡が足りない（出現直後）
+            return false; // trail not long enough (right after spawn)
         }
     }
 }

@@ -3,9 +3,10 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 基地情報パネル（Game/UI/BaseInfoPanel）向けの読み取り専用スナップショット（Task25）。
-    /// UIが WarState / MilitaryBase へ直接触れずに済むよう、MilitaryManager.TryGetBaseSnapshot が
-    /// _stateLock 内で値をコピーして渡す。500行制限のため MilitaryManager.cs から分離（Task30）。
+    /// Read-only snapshot for the base info panel (Game/UI/BaseInfoPanel) (Task25).
+    /// So that the UI never touches WarState / MilitaryBase directly, MilitaryManager.TryGetBaseSnapshot
+    /// copies the values inside _stateLock and hands them over. Split out of MilitaryManager.cs because
+    /// of the 500-line limit (Task30).
     /// </summary>
     public struct BaseUiSnapshot
     {
@@ -16,76 +17,76 @@ namespace CSWarfront.Game
         public int QueueCount;
         public bool IsHeadquarters;
 
-        /// <summary>先頭の生産オーダー（キューが空なら空文字列）。何を作っているかをUIに出すため（Task30）。</summary>
+        /// <summary>The head production order (empty string if the queue is empty). Used to show in the UI what is being built (Task30).</summary>
         public string ProducingTypeKey;
-        /// <summary>先頭オーダーの進捗（0..1）。キューが空なら0。</summary>
+        /// <summary>Progress of the head order (0..1). 0 if the queue is empty.</summary>
         public float ProducingProgress;
-        /// <summary>先頭オーダーのビルド時間（ゲーム内時間）。キューが空なら0。</summary>
+        /// <summary>Build time of the head order (in-game time). 0 if the queue is empty.</summary>
         public float ProducingBuildTime;
-        /// <summary>所属勢力の軍資金。未所属なら0。</summary>
+        /// <summary>War treasury of the owning faction. 0 if unowned.</summary>
         public float OwnerTreasury;
-        /// <summary>所属勢力が現在保有する生存ユニット数。未所属なら0。</summary>
+        /// <summary>Number of living units the owning faction currently has. 0 if unowned.</summary>
         public int OwnerUnitCount;
 
-        /// <summary>trueならAIがこの基地のキューを自動補充する（Task34、MilitaryBase.AutoProduceの写し）。</summary>
+        /// <summary>If true, the AI auto-refills this base's queue (Task34, a copy of MilitaryBase.AutoProduce).</summary>
         public bool AutoProduce;
 
-        /// <summary>trueならAI（MissileDoctrine）がこの基地から弾道ミサイルを自動発射する
-        /// （Task90、MilitaryBase.AutoLaunchMissilesの写し。MissileBase以外では未使用）。</summary>
+        /// <summary>If true, the AI (MissileDoctrine) auto-launches ballistic missiles from this base
+        /// (Task90, a copy of MilitaryBase.AutoLaunchMissiles. Unused for anything other than MissileBase).</summary>
         public bool AutoLaunchMissiles;
 
-        /// <summary>現在のキュー内容をTypeKeyだけの配列にした表示用コピー（Task34）。
-        /// index 0 == 生産中（ProducingTypeKeyと同じ内容）。選択中の1基地分のみ構築するため
-        /// 毎tickのホットパスではない（TryGetBaseSnapshot呼び出し時のみ）。</summary>
+        /// <summary>Display copy of the current queue contents as an array of TypeKeys only (Task34).
+        /// index 0 == in production (same content as ProducingTypeKey). Built only for the single
+        /// selected base, so this is not a per-tick hot path (only when TryGetBaseSnapshot is called).</summary>
         public string[] QueuedTypeKeys;
 
-        /// <summary>直近の経済tickでこの基地から実際に加算された収入（Task35。MilitaryBase.LastIncomeの
-        /// 写し）。未所属でも0として表示できるよう常に埋める。</summary>
+        /// <summary>Income actually credited from this base in the most recent economy tick (Task35;
+        /// a copy of MilitaryBase.LastIncome). Always filled so it can be shown as 0 even when unowned.</summary>
         public float LastIncome;
 
-        /// <summary>所属勢力の研究点（Task35）。未所属なら0。</summary>
+        /// <summary>Research points of the owning faction (Task35). 0 if unowned.</summary>
         public float OwnerResearchPoints;
 
-        /// <summary>所属勢力が解禁済みの最大生産Tier（1..5、Task35）。未所属なら1（Faction既定値）。</summary>
+        /// <summary>Highest production Tier the owning faction has unlocked (1..5, Task35). 1 (the Faction default) if unowned.</summary>
         public byte OwnerUnlockedTier;
 
-        /// <summary>次のTier解禁に必要な研究点（Research.CostToUnlock(OwnerUnlockedTier+1)、Task35）。
-        /// 既に最大Tier（5）または未所属なら0。</summary>
+        /// <summary>Research points required to unlock the next Tier (Research.CostToUnlock(OwnerUnlockedTier+1), Task35).
+        /// 0 if already at the maximum Tier (5) or unowned.</summary>
         public float OwnerNextTierCost;
 
-        /// <summary>この基地の種別（Army/Navy/AirForce/MissileBase、Task61）。BaseInfoPanelが
-        /// 「陸軍基地/海軍基地/航空基地」等の表示に使う。</summary>
+        /// <summary>This base's type (Army/Navy/AirForce/MissileBase, Task61). Used by BaseInfoPanel
+        /// for labels like "Army base / Navy base / Air base".</summary>
         public BaseType Type;
 
-        /// <summary>この基地が生産できる領域（MilitaryBase.SpawnableDomainsの写し、Task61）。
-        /// BaseInfoPanelが「生産可能: 陸上」等の表示に使う。</summary>
+        /// <summary>Domains this base can produce for (a copy of MilitaryBase.SpawnableDomains, Task61).
+        /// Used by BaseInfoPanel for labels like "Can produce: Land".</summary>
         public DomainMask SpawnableDomains;
 
-        /// <summary>完成済みの弾道ミサイル備蓄数（Task63、MilitaryBase.StockpiledMissilesの写し）。
-        /// BaseType.MissileBase以外では常に0。</summary>
+        /// <summary>Number of completed ballistic missiles in stock (Task63, a copy of MilitaryBase.StockpiledMissiles).
+        /// Always 0 for anything other than BaseType.MissileBase.</summary>
         public int StockpiledMissiles;
 
-        /// <summary>現在建造中のミサイルの進捗（0..1、Task63、MilitaryBase.MissileBuildProgressの写し）。</summary>
+        /// <summary>Progress of the missile currently under construction (0..1, Task63, a copy of MilitaryBase.MissileBuildProgress).</summary>
         public float MissileBuildProgress;
 
-        /// <summary>建造中か（MissileStockpile.IsBuildingの写し、Task63）。</summary>
+        /// <summary>Whether a missile is under construction (a copy of MissileStockpile.IsBuilding, Task63).</summary>
         public bool IsBuildingMissile;
 
-        // --- Task99: 3資源経済＋補給物資（所有勢力のプールの写し） ---
+        // --- Task99: three-resource economy + supply goods (copies of the owning faction's pools) ---
         public float OwnerManpower;
         public float OwnerProduction;
         public float OwnerSupplyStock;
 
-        // --- Task101: 野戦築城（この基地自身の備蓄/施設弾薬/レール接続の写し） ---
+        // --- Task101: field fortification (copies of this base's own stockpile / fort ammo / rail connection) ---
         public float StoredSupplies;
         public float FortAmmo;
         public bool RailConnected;
     }
 
     /// <summary>
-    /// BaseUiSnapshot の組み立てロジック（Task30）。MilitaryManager.TryGetBaseSnapshot の
-    /// _stateLock 内から呼ばれる想定 — 呼び出し側がロックを保持していること（このクラス自体はロックしない）。
-    /// MilitaryManager.cs の500行制限のため分離。
+    /// Assembly logic for BaseUiSnapshot (Task30). Intended to be called from inside _stateLock in
+    /// MilitaryManager.TryGetBaseSnapshot — the caller must hold the lock (this class itself does not lock).
+    /// Split out because of MilitaryManager.cs's 500-line limit.
     /// </summary>
     internal static class BaseUiSnapshotBuilder
     {
@@ -115,10 +116,10 @@ namespace CSWarfront.Game
                 if (f != null)
                 {
                     ownerTreasury = f.Treasury;
-                    ownerManpower = f.Manpower;         // Task99: 3資源＋補給物資
+                    ownerManpower = f.Manpower;         // Task99: three resources + supply goods
                     ownerProduction = f.Production;
                     ownerSupplyStock = f.SupplyStock;
-                    // Task35: 研究点・解禁Tier・次のTierまでのコストをUI表示用に写す。
+                    // Task35: copy research points, unlocked Tier, and the cost to the next Tier for UI display.
                     ownerResearchPoints = f.ResearchPoints;
                     ownerUnlockedTier = f.UnlockedTier;
                     ownerNextTierCost = f.UnlockedTier < 5
@@ -133,7 +134,7 @@ namespace CSWarfront.Game
                 }
             }
 
-            // Task34: 選択中の1基地分のみ、キューのTypeKeyだけをUI表示用にコピーする。
+            // Task34: copy only the queue's TypeKeys for UI display, for the single selected base only.
             var queuedTypeKeys = new string[mb.Queue.Count];
             for (int q = 0; q < mb.Queue.Count; q++) queuedTypeKeys[q] = mb.Queue[q].TypeKey;
 

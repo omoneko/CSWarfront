@@ -9,24 +9,27 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// MODフォルダの unit-stats.xml から兵科基礎値の上書きを読み込み、Core.UnitStatOverridesへ
-    /// 供給する（Task92、ユーザー要望「UnitType定義のXML/JSON外出し」設計書§4.3）。
+    /// Loads unit-class base-stat overrides from unit-stats.xml in the MOD folder and feeds them to
+    /// Core.UnitStatOverrides (Task92, user request "externalize UnitType definitions to XML/JSON",
+    /// design doc §4.3).
     ///
-    /// ファイル形式（属性は全て省略可＝省略した項目はMOD既定値のまま）:
+    /// File format (all attributes are optional; omitted stats keep the MOD default values):
     ///   &lt;UnitStats&gt;
     ///     &lt;Unit category="Tank" hp="140" attack="42" range="60" armor="10" speedKmh="40"
     ///           splash="0" cost="60" buildTime="8" accuracy="0.70" fireIntervalHours="1.20" /&gt;
     ///   &lt;/UnitStats&gt;
-    /// 値はいずれもTier1基準（Tier2以降はMODのTierScalingが同様にかかる）。categoryは
-    /// UnitCategoryの列挙名（Infantry/MechInfantry/Apc/Tank/Artillery/DroneInfantry/AntiAir/
-    /// Destroyer/Carrier/AirSuperiority/TacticalBomber/SuicideDrone）。
+    /// All values are Tier1-based (the MOD's TierScaling applies to Tier2 and above in the same way as
+    /// usual). category is a UnitCategory enum name (Infantry/MechInfantry/Apc/Tank/Artillery/
+    /// DroneInfantry/AntiAir/Destroyer/Carrier/AirSuperiority/TacticalBomber/SuicideDrone).
     ///
-    /// ファイルが無い場合は、現在の既定値を全て書き込んだテンプレートを生成する（購読者が
-    /// 数値を書き換えるだけでバランス調整できるように）。読み込みはレベルロードごとに1回
-    /// （EnsureLoadedは冪等）。変更の反映にはセーブのロードし直しが必要。
+    /// If the file does not exist, a template containing all current default values is generated
+    /// (so that subscribers can tune the balance simply by editing the numbers). Loading happens once
+    /// per level load (EnsureLoaded is idempotent). Reloading the save is required for changes to take
+    /// effect.
     ///
-    /// スレッド注記: EnsureLoadedはロード経路（WarStateDataExtension.OnLoadData/
-    /// MilitaryManagerの状態初期化）から、ロスター構築より前に呼ぶこと。
+    /// Threading note: EnsureLoaded must be called from the load path
+    /// (WarStateDataExtension.OnLoadData / MilitaryManager state initialization), before roster
+    /// construction.
     /// </summary>
     internal static class UnitStatsFile
     {
@@ -34,7 +37,7 @@ namespace CSWarfront.Game
 
         private static bool _loadAttempted;
 
-        /// <summary>冪等。ロスター構築（RegisterAll）より前に呼ぶ。</summary>
+        /// <summary>Idempotent. Call before roster construction (RegisterAll).</summary>
         public static void EnsureLoaded()
         {
             if (_loadAttempted) return;
@@ -53,7 +56,7 @@ namespace CSWarfront.Game
                 if (!File.Exists(path))
                 {
                     WriteTemplate(path);
-                    return; // テンプレート＝既定値なので読み込む必要は無い
+                    return; // the template equals the defaults, so there is no need to load it
                 }
 
                 Load(path);
@@ -64,9 +67,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>レベルアンロード時。次のロードで再読込させる（プレイ中のファイル編集を
-        /// 次セッションで拾えるように）。上書き自体はロスター構築時に固定化済みのため、
-        /// ここでUnitStatOverridesをクリアしても進行中の状態には影響しない。</summary>
+        /// <summary>Called on level unload. Makes the next load re-read the file (so that file edits
+        /// made during play are picked up in the next session). The overrides themselves have already
+        /// been baked in at roster construction time, so clearing UnitStatOverrides here does not
+        /// affect the in-progress state.</summary>
         public static void Reset()
         {
             _loadAttempted = false;
@@ -111,7 +115,7 @@ namespace CSWarfront.Game
                     BuildTime = ParseAttr(el, "buildTime"),
                     Accuracy = ParseAttr(el, "accuracy"),
                     FireIntervalHours = ParseAttr(el, "fireIntervalHours"),
-                    AmmoCombatHours = ParseAttr(el, "ammoCombatHours") // Task99: 連続射撃可能時間（0=弾薬無限）
+                    AmmoCombatHours = ParseAttr(el, "ammoCombatHours") // Task99: continuous firing time (0 = infinite ammo)
                 };
                 UnitStatOverrides.Set(category, o);
                 applied++;
@@ -132,7 +136,7 @@ namespace CSWarfront.Game
             return null;
         }
 
-        /// <summary>現在のMOD既定値（Tier1基準）を全て書き込んだテンプレートを生成する。</summary>
+        /// <summary>Generates a template containing all current MOD default values (Tier1-based).</summary>
         private static void WriteTemplate(string path)
         {
             try
@@ -175,7 +179,8 @@ namespace CSWarfront.Game
         {
             if (t == null) return;
             var inv = System.Globalization.CultureInfo.InvariantCulture;
-            // SpeedはCore内部表現から作者向けのkm/hへ逆変換して書く（読み込み時にまた順変換される）。
+            // Speed is written by converting the Core internal representation back to author-facing
+            // km/h (it is converted forward again on load).
             float speedKmh = SpeedCalibration.KmhFromUnitsPerGameHour(t.Speed);
             w.WriteLine(string.Format(inv,
                 "  <Unit category=\"{0}\" hp=\"{1:0.##}\" attack=\"{2:0.##}\" range=\"{3:0.##}\" armor=\"{4:0.##}\"" +

@@ -7,52 +7,57 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// 部隊コマンドのホットキー入力（Task48）。WarfrontSettings.FreeAdvanceKey/HoldKey/RallyKey を
-    /// 毎フレームポーリングし、Game/UI/UnitBoxSelection.SelectedIds を対象に MilitaryManager の
-    /// コマンドラッパー（Game/MilitaryManagerUnitCommands.cs）を呼ぶ。
+    /// Hotkey input for unit commands (Task48). Polls WarfrontSettings.FreeAdvanceKey/HoldKey/RallyKey
+    /// every frame and calls MilitaryManager's command wrappers (Game/MilitaryManagerUnitCommands.cs)
+    /// targeting Game/UI/UnitBoxSelection.SelectedIds.
     ///
-    /// RallyKeyは即座に命令を出さず、「次の右クリックで集結地点を指定する」ターゲティングモードへ入る
-    /// （プレイヤーがまず地点を選ぶ必要があるため）。ターゲティング中はEscでキャンセルできる。
-    /// 地点のワールド座標は Game/UI/GroundClickRaycast で解決する（Task77）:
-    /// Physics.Raycast（ユニット/建物などMOD自前コライダーへの精密ヒット）→外れたら
-    /// Core.TerrainRaycast（TerrainManager高さサンプリングとの交差計算）の順。
-    /// CS1の地形はUnity物理コライダーを持たないため、Physics.Raycast単独では開けた地面の
-    /// クリックが全て失敗する（Task62時点の「地形コライダーも反応する」という前提は誤りだった。
-    /// ユニット選択が動いていたのはUnitVisualsが自前コライダーを付けているため）。
+    /// RallyKey does not issue an order immediately; it enters a targeting mode where "the next right-click
+    /// designates the rally point" (because the player must pick a location first). Targeting can be
+    /// cancelled with Esc while active.
+    /// The location's world coordinates are resolved by Game/UI/GroundClickRaycast (Task77):
+    /// Physics.Raycast (precise hits against the mod's own colliders such as units/buildings) → on a miss,
+    /// Core.TerrainRaycast (intersection against TerrainManager height sampling).
+    /// CS1's terrain has no Unity physics colliders, so with Physics.Raycast alone every click on open
+    /// ground fails (the Task62-era assumption that "the terrain collider also responds" was wrong;
+    /// unit selection worked only because UnitVisuals attaches its own colliders).
     ///
-    /// Task62（実機ログで右クリックによる集結地点の指定が一度も成功していなかった不具合の修正）:
-    /// 旧実装は Input.GetMouseButtonDown(1) の立ち上がりフレームだけで即座にraycastしていた。これだと
-    /// 「カメラを回転させるための右クリック押しっぱなし+ドラッグ」の押し始めがたまたま開けた地面の
-    /// 上だった場合、プレイヤーがカメラ回転のつもりで押した瞬間に意図せず集結地点が確定してしまう
-    /// （＝Downだけを見ると「クリック」と「ドラッグの開始」を区別できない）。新実装は押し下げ位置を
-    /// 記録しておき、Input.GetMouseButtonUp(1) で「離した位置が押し下げ位置からClickMoveThresholdPixels
-    /// 以内」であることを確認してから初めてraycastする（＝カメラ回転ドラッグは無視し、その場でのクリック
-    /// のみ地点として確定する）。副次的な効果として、何らかの理由で押し下げフレームの検知を取りこぼしても
-    /// 離す瞬間のフレームでも判定できるため、単一フレームの検知漏れにも強くなる。
-    /// 却下されたクリックは理由ごとに1回だけログする（UI上で押した/UI上で離した/カメラ回転とみなした/
-    /// カメラ未準備/raycastが何にも当たらなかった）。実機ログだけで原因を切り分けられるようにするため。
+    /// Task62 (fix for the bug where, per in-game logs, right-click rally point designation never succeeded
+    /// even once): the old implementation raycast immediately, only on the Input.GetMouseButtonDown(1)
+    /// rising-edge frame. With that, if the start of a "hold right button + drag to rotate the camera"
+    /// gesture happened to be over open ground, a rally point was unintentionally confirmed the moment the
+    /// player pressed the button intending to rotate the camera (= looking at Down alone cannot distinguish
+    /// a "click" from the "start of a drag"). The new implementation records the press-down position and
+    /// only raycasts once Input.GetMouseButtonUp(1) confirms that "the release position is within
+    /// ClickMoveThresholdPixels of the press-down position" (= camera-rotation drags are ignored and only an
+    /// in-place click confirms the location). As a side benefit, even if detection of the press-down frame
+    /// is somehow missed, the check can still fire on the release frame, making it robust against
+    /// single-frame detection misses.
+    /// Rejected clicks are logged once per reason (pressed over UI / released over UI / treated as camera
+    /// rotation / camera not ready / raycast hit nothing), so the cause can be isolated from in-game logs
+    /// alone.
     ///
-    /// ホットキー/右クリックのどちらも、バニラのEscメニューが開いている間・何らかのテキスト入力欄に
-    /// フォーカスがある間は完全に無視する（ColossalFramework.UI.UIView.HasInputFocus()、
-    /// ColossalManaged.dll をリフレクションで確認済みの public static bool メソッド）。
+    /// Both hotkeys and right-clicks are ignored entirely while the vanilla Esc menu is open or while any
+    /// text input field has focus (ColossalFramework.UI.UIView.HasInputFocus(), a public static bool method
+    /// verified via reflection on ColossalManaged.dll).
     ///
-    /// メインスレッド専用。WarfrontThreadingExtension.OnUpdate から、UnitBoxSelection.Update の後に呼ぶこと
-    /// （同じフレームで確定した選択を対象にコマンドを出せるようにするため）。
+    /// Main thread only. Call from WarfrontThreadingExtension.OnUpdate, after UnitBoxSelection.Update
+    /// (so commands can target a selection confirmed in the same frame).
     /// </summary>
     public static class UnitCommandInput
     {
-        /// <summary>右クリックの押し下げ位置からこの距離（実スクリーンピクセル）を超えて動いてから
-        /// 離した場合は「カメラ回転ドラッグ」とみなし、集結地点としては確定しない（Task62）。
-        /// UnitBoxSelection.DragThresholdPixelsと同じ考え方・同じ値を採用する。</summary>
+        /// <summary>If the mouse moved farther than this distance (in real screen pixels) from the
+        /// right-click press-down position before being released, it is treated as a "camera-rotation drag"
+        /// and not confirmed as a rally point (Task62).
+        /// Same rationale and same value as UnitBoxSelection.DragThresholdPixels.</summary>
         private const float ClickMoveThresholdPixels = 10f;
 
         private static bool _awaitingRallyClick;
 
-        // Task62: 右クリックの押し下げ〜離すまでを追跡するための状態（HandleRallyTargeting専用）。
-        private static bool _rightMouseDownPending; // UI外で右ボタンが押し下げられ、まだ離されていない
+        // Task62: state for tracking a right-click from press-down to release (used only by HandleRallyTargeting).
+        private static bool _rightMouseDownPending; // The right button was pressed outside UI and has not been released yet
         private static Vector2 _rightMouseDownScreen;
 
-        /// <summary>集結地点のターゲティング中か（Game/UI/UnitInfoPanel等がヒント表示に使ってよい、Task48時点は未使用）。</summary>
+        /// <summary>Whether rally-point targeting is active (may be used by Game/UI/UnitInfoPanel etc. for hint display; unused as of Task48).</summary>
         public static bool IsAwaitingRallyClick { get { return _awaitingRallyClick; } }
 
         public static void Update()
@@ -61,23 +66,23 @@ namespace CSWarfront.Game.UI
             {
                 if (!PanelChrome.IsGameReadyForUi())
                 {
-                    _awaitingRallyClick = false; // Task56: ロード/アンロード中はUIライブラリに触れない
+                    _awaitingRallyClick = false; // Task56: do not touch the UI library while loading/unloading
                     _rightMouseDownPending = false;
                     return;
                 }
 
                 if (PanelChrome.IsGameMenuOpen())
                 {
-                    _awaitingRallyClick = false; // メニューが開いたらターゲティングは打ち切る
+                    _awaitingRallyClick = false; // Abort targeting when the menu opens
                     _rightMouseDownPending = false;
                     return;
                 }
-                if (UIView.HasInputFocus()) return; // テキスト入力欄にフォーカスがある間はホットキーを一切拾わない
+                if (UIView.HasInputFocus()) return; // Do not pick up any hotkey while a text input field has focus
 
                 if (_awaitingRallyClick)
                 {
                     HandleRallyTargeting();
-                    return; // ターゲティング中は他のホットキーを無視（誤操作防止）
+                    return; // Ignore the other hotkeys while targeting (prevents mis-operation)
                 }
 
                 if (IsHotkeyDown(WarfrontSettings.FreeAdvanceKey))
@@ -101,22 +106,25 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。ターゲティング状態を残さない。</summary>
+        /// <summary>Call at level unload (via MilitaryManager.Reset). Leaves no targeting state behind.</summary>
         public static void Reset()
         {
             _awaitingRallyClick = false;
             _rightMouseDownPending = false;
         }
 
-        /// <summary>Task62（NumLock対策）: WarfrontSettings.KeyOptionsのテンキー候補(Keypad0〜9)が
-        /// 割り当てられている間、NumLockがOFFのWindows環境ではOS側がテンキーの物理キーを別のキー
-        /// （矢印/Home/End等）として送るため、Unityの Input.GetKeyDown(KeyCode.KeypadN) が
-        /// 一切反応しない既知の問題がある。対策として、テンキーが割り当てられている場合は対応する
-        /// 最上段の数字キー（Alpha0〜9）も常にフォールバックとして受け付ける
-        /// （両方のキーで反応する＝害はなく、NumLock状態を問わず必ずどちらかで発火する）。
-        /// テンキー以外（F5〜F12等）が割り当てられている場合は従来通り単純に GetKeyDown するだけ。
-        /// Task76: internal化してUnitBoxSelectionの部隊選択モードキー（既定Numpad0、同じKeyOptions
-        /// テンキー候補群）からも再利用する（NumLock対策ロジックを重複させないため）。</summary>
+        /// <summary>Task62 (NumLock workaround): while one of the numpad candidates (Keypad0-9) from
+        /// WarfrontSettings.KeyOptions is assigned, there is a known problem on Windows environments with
+        /// NumLock OFF where the OS sends the numpad's physical keys as different keys (arrows/Home/End
+        /// etc.), so Unity's Input.GetKeyDown(KeyCode.KeypadN) never responds at all. As a workaround, when
+        /// a numpad key is assigned, the corresponding top-row digit key (Alpha0-9) is always accepted as a
+        /// fallback too (responding to both keys does no harm, and one of the two is guaranteed to fire
+        /// regardless of the NumLock state).
+        /// When something other than the numpad (F5-F12 etc.) is assigned, it is a plain GetKeyDown as
+        /// before.
+        /// Task76: made internal and reused by UnitBoxSelection's unit selection mode key (default Numpad0,
+        /// from the same KeyOptions numpad candidate group) to avoid duplicating the NumLock workaround
+        /// logic.</summary>
         internal static bool IsHotkeyDown(KeyCode key)
         {
             if (Input.GetKeyDown(key)) return true;
@@ -184,7 +192,7 @@ namespace CSWarfront.Game.UI
             {
                 if (UIInput.hoveredComponent != null)
                 {
-                    // UI上で押し下げたクリックは対象外（ターゲティング自体は継続、離すまで待つ必要も無い）。
+                    // A click pressed down over UI is excluded (targeting itself continues; no need to wait for the release either).
                     _rightMouseDownPending = false;
                     ModConfig.Log("UnitCommandInput: rally click rejected - pressed over UI");
                 }
@@ -196,16 +204,16 @@ namespace CSWarfront.Game.UI
                 return;
             }
 
-            if (!Input.GetMouseButtonUp(1)) return; // 右ボタンが離されるまで待つ。それまでターゲティング状態を維持する。
+            if (!Input.GetMouseButtonUp(1)) return; // Wait until the right button is released. Targeting state is kept until then.
 
             bool wasPending = _rightMouseDownPending;
             _rightMouseDownPending = false;
-            if (!wasPending) return; // 押し下げがUI上だった、またはこのモードに入る前から押されていた分は無視。
+            if (!wasPending) return; // Ignore presses that were over UI, or that were already held before entering this mode.
 
             if (Vector2.Distance(Input.mousePosition, _rightMouseDownScreen) > ClickMoveThresholdPixels)
             {
                 ModConfig.Log("UnitCommandInput: rally click rejected - treated as camera drag");
-                return; // カメラ回転ドラッグとみなす。ターゲティングは継続し、次のクリックを待つ。
+                return; // Treated as a camera-rotation drag. Targeting continues; wait for the next click.
             }
 
             if (UIInput.hoveredComponent != null)
@@ -214,15 +222,15 @@ namespace CSWarfront.Game.UI
                 return;
             }
 
-            // Task77: 地点の解決はGroundClickRaycastへ委譲（Physics.Raycast→地形交差フォールバック）。
-            // CS1の地形はコライダーを持たないため、従来のPhysics.Raycast単独では開けた地面の
-            // クリックが全て「raycast hit nothing」で却下されていた。
+            // Task77: location resolution is delegated to GroundClickRaycast (Physics.Raycast → terrain
+            // intersection fallback). CS1's terrain has no colliders, so with the previous Physics.Raycast
+            // alone every click on open ground was rejected with "raycast hit nothing".
             Vector3 clicked;
             string reason;
             if (!GroundClickRaycast.TryGetPoint(out clicked, out reason))
             {
                 ModConfig.Log("UnitCommandInput: rally click rejected - " + reason);
-                return; // ターゲティング継続。次のクリックで再試行。
+                return; // Targeting continues. Retry on the next click.
             }
 
             WorldPos point = new WorldPos(clicked.x, clicked.y, clicked.z);

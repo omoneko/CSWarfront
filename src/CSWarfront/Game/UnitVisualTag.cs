@@ -2,11 +2,12 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// ユニットのルートGameObjectに付ける識別タグ（Task31）。クリック選択（Game/UI/UnitSelection）が
-    /// raycastヒット先（子の可視性マーカーの場合を含む）から、どの論理ユニット(InstanceId)に属するかを
-    /// 逆引きするためだけに使う純粋なデータタグ。ロジックは一切持たない。
-    /// 2つ目の辞書（GameObject→InstanceId）を別途保持・同期する必要が無いよう、
-    /// GameObject自身にID を持たせる方式にしている。
+    /// Identification tag attached to a unit's root GameObject (Task31). A pure data tag used only so
+    /// that click selection (Game/UI/UnitSelection) can back-resolve which logical unit (InstanceId)
+    /// a raycast hit (including the case where it is a child visibility marker) belongs to. Carries no
+    /// logic at all.
+    /// The ID is held on the GameObject itself so there is no need to keep and synchronize a second
+    /// dictionary (GameObject to InstanceId).
     /// </summary>
     public class UnitVisualTag : MonoBehaviour
     {

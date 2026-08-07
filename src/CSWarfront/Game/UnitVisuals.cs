@@ -6,8 +6,8 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// メインスレッド専用スナップショット。ユニット1体分の「見た目」を決めるのに必要な最小限の情報のみ。
-    /// CSの実体（Vehicle等）は一切含まない値型。
+    /// Main-thread-only snapshot. Contains only the minimum information needed to determine the
+    /// "appearance" of a single unit. A value type that contains no CS entities (Vehicle etc.) at all.
     /// </summary>
     public struct UnitVisualState
     {
@@ -15,31 +15,37 @@ namespace CSWarfront.Game
         public string TypeKey;
         public byte FactionId;
         public Vector3 Position;
-        /// <summary>Core側 UnitType.AssetPrefabName（Workshopアセット等）。空文字なら既定フォールバックを使う。</summary>
+        /// <summary>Core-side UnitType.AssetPrefabName (Workshop asset etc.). If empty, the default
+        /// fallback is used.</summary>
         public string AssetPrefabName;
     }
 
     /// <summary>
-    /// ユニットの見た目を「本物のCS車両」ではなく、素のUnity GameObjectとして自前描画する。
-    /// 借用するのはメッシュのみ（VehicleInfo.m_mesh、なければ m_lodMesh）で、AIやTransferManager
-    /// 連携は一切引き継がない。これにより FireTruckAI 等サービス車両AI由来のクラッシュ
-    /// （TransferManager.RemoveIncomingOffer の配列範囲外アクセス）を根本的に回避する。
-    /// 借用元はプレハブ名で解決するため、将来 Workshop カスタムアセットへ差し替えても
-    /// （そのアセットがどんなAIを積んでいても）安全に動作する。
-    /// マテリアルはCS車両のものを一切借用しない（<see cref="UnitMaterialFactory"/> 参照）。
-    /// CS車両マテリアルは専用シェーダーがCS自身のレンダラー由来のper-instanceデータを要求するため、
-    /// 素の MeshRenderer に割り当てると不可視/黒になる（実際に発生していた不可視バグの原因）。
-    /// 代わりに自前の標準シェーダーマテリアルを勢力ごとに1つ生成・共有し、勢力を色で判別できるようにする。
+    /// Renders unit visuals ourselves as plain Unity GameObjects instead of "real CS vehicles".
+    /// Only the mesh is borrowed (VehicleInfo.m_mesh, or m_lodMesh if absent); no AI or
+    /// TransferManager integration is inherited at all. This fundamentally avoids crashes caused by
+    /// service vehicle AIs such as FireTruckAI (out-of-range array access in
+    /// TransferManager.RemoveIncomingOffer).
+    /// Because the borrow source is resolved by prefab name, swapping in Workshop custom assets in
+    /// the future works safely regardless of whatever AI those assets carry.
+    /// Materials are never borrowed from CS vehicles (see <see cref="UnitMaterialFactory"/>).
+    /// CS vehicle materials use dedicated shaders that require per-instance data from CS's own
+    /// renderer, so assigning them to a plain MeshRenderer makes objects invisible/black (this was
+    /// the actual cause of the invisibility bug we hit).
+    /// Instead we create and share one standard-shader material of our own per faction, so factions
+    /// can be told apart by color.
     ///
-    /// Task37: 上記の可視性マーカー立方体・勢力色は「割り当て済みアセットが無いユニット」専用の見た目に
-    /// 縮小した。TypeKeyにアセットが割り当てられている場合（UnitMeshSource.TryResolveのfromAssignedProp）は
-    /// マーカーを出さず、マテリアルもアセット自身の見た目（<see cref="UnitMaterialFactory.TryGetAssetMaterial"/>）
-    /// を使う。クリック選択の当たり判定はマーカーのBoxColliderに代わってルートGameObject自身のBoxColliderで
-    /// 提供する（CreateVisual/AttachPropCollider参照）。Task41でプロップ以外（建物/車両/樹木）にも対応した。
+    /// Task37: The visibility marker cube and faction color above were narrowed down to be the look
+    /// used only for "units with no assigned asset". When the TypeKey has an assigned asset
+    /// (fromAssignedProp in UnitMeshSource.TryResolve), no marker is shown and the material uses the
+    /// asset's own look (<see cref="UnitMaterialFactory.TryGetAssetMaterial"/>).
+    /// Click-selection hit testing is provided by a BoxCollider on the root GameObject itself
+    /// instead of the marker's BoxCollider (see CreateVisual/AttachPropCollider). Task41 extended
+    /// this beyond props (buildings/vehicles/trees).
     ///
-    /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
-    /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
-    /// sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと。
+    /// Thread boundary: every public method of this class is "main thread only"
+    /// (new GameObject / AddComponent / Destroy / transform writes are Unity main-thread constraints).
+    /// Never call from the sim thread (MilitaryManager.OnSimTick).
     /// </summary>
     public static partial class UnitVisuals
     {
@@ -48,108 +54,128 @@ namespace CSWarfront.Game
             public GameObject GameObject;
             public Vector3 LastPosition;
 
-            /// <summary>Task43: このユニットのモデルの「中央高さ」（ルートGameObjectのposition、
-            /// すなわちユニットの論理座標からの相対Y）。CreateVisual時に1回だけ計算してキャッシュする
-            /// （メッシュはビジュアルの生存中変わらないため）。CombatFxが発砲エフェクトの発射/着弾高さを
-            /// 地面レベルからこの高さへ持ち上げるために使う（TryGetMuzzleOffset参照）。</summary>
+            /// <summary>Task43: The "center height" of this unit's model (the root GameObject's
+            /// position, i.e. Y relative to the unit's logical coordinates). Computed once at
+            /// CreateVisual time and cached (the mesh never changes while the visual is alive).
+            /// Used by CombatFx to raise the firing/impact height of muzzle effects from ground level
+            /// up to this height (see TryGetMuzzleOffset).</summary>
             public float MuzzleOffsetY;
 
-            /// <summary>Task49: 勢力アイコン（小さな球）の子GameObject。WarfrontSettings.ShowFactionIconsが
-            /// OFFの間、または生成にまだ成功していない間はnull（毎フレームのUpdateFactionIconが遅延生成/破棄
-            /// を担当する）。fromAssignedProp（割り当て済みアセット）ユニットも含め、全ユニットに付く。</summary>
+            /// <summary>Task49: Child GameObject for the faction icon (small sphere). Null while
+            /// WarfrontSettings.ShowFactionIcons is OFF, or while creation has not yet succeeded
+            /// (the per-frame UpdateFactionIcon handles lazy creation/destruction). Attached to all
+            /// units, including fromAssignedProp (assigned-asset) units.</summary>
             public GameObject Icon;
 
-            /// <summary>アイコンをルートGameObjectのローカル座標系で置く高さ（Y）。CreateVisual時に
-            /// mesh.bounds.max.y + ギャップから1回だけ計算してキャッシュする（MuzzleOffsetYと同じ方針）。</summary>
+            /// <summary>Height (Y) at which the icon is placed in the root GameObject's local
+            /// coordinate space. Computed once at CreateVisual time from mesh.bounds.max.y + gap and
+            /// cached (same policy as MuzzleOffsetY).</summary>
             public float IconLocalHeightY;
 
-            /// <summary>Task83（ユーザー要望「攻撃するときは攻撃方向を向く」）: 直近の発砲の射撃方向
-            /// （水平、正規化済み）。NotifyShotsが発砲イベントから設定し、FacingHoldUntilまでの間
-            /// MoveVisualが移動方向ではなくこちらを向きに採用する。</summary>
+            /// <summary>Task83 (user request "face the attack direction when attacking"): The firing
+            /// direction of the most recent shot (horizontal, normalized). NotifyShots sets this from
+            /// shot events, and until FacingHoldUntil, MoveVisual adopts this as the facing instead of
+            /// the movement direction.</summary>
             public Vector3 FacingDirection;
 
-            /// <summary>射撃方向を向き続ける期限（Time.time基準の実時間）。発砲のたびに更新されるため、
-            /// 交戦が続く限り目標の方を向き続け、交戦が終われば数秒で移動方向の向きに戻る。</summary>
+            /// <summary>Deadline (real time, Time.time based) until which the unit keeps facing the
+            /// firing direction. Refreshed on every shot, so the unit keeps facing the target as long
+            /// as the engagement continues, and reverts to movement-direction facing a few seconds
+            /// after the engagement ends.</summary>
             public float FacingHoldUntil;
 
-            /// <summary>Task108（ユーザー報告「ヘリが着陸するとき機体が下を向くのが不自然」）:
-            /// 向きを水平成分だけから決めるか。着陸/離陸の垂直移動でも機首は水平のまま保たれる。
-            /// 航空ユニット（ヘリ・戦闘機・爆撃機）で true。自爆ドローンは目標へ突っ込む姿勢が
-            /// 見た目上重要なので false（従来どおり移動方向そのままを向く）。陸上/海上も false
-            /// （坂道でのわずかな前後傾きは地形に沿って見えるので残す）。</summary>
+            /// <summary>Task108 (user report "it looks unnatural that a helicopter noses down when
+            /// landing"): Whether the facing is decided from the horizontal component only. The nose
+            /// stays level even during vertical landing/takeoff movement. True for air units
+            /// (helicopters, fighters, bombers). False for kamikaze drones, because the dive-into-target
+            /// attitude matters visually (they keep facing the raw movement direction as before).
+            /// Also false for land/sea units (the slight pitch on slopes looks like following the
+            /// terrain, so it is kept).</summary>
             public bool LevelFlight;
 
-            /// <summary>Task108: 連接表示（軍用貨物列車）の車両GameObject（前から後ろの順）。
-            /// null＝従来どおり一体の剛体として描画する。詳細はUnitVisualsTrain.cs。</summary>
+            /// <summary>Task108: Car GameObjects for articulated rendering (military freight train),
+            /// ordered front to back. Null = rendered as a single rigid body as before. See
+            /// UnitVisualsTrain.cs for details.</summary>
             public GameObject[] Cars;
 
-            /// <summary>各車両が先頭から何m後ろを走るか（Carsと同じ並び）。</summary>
+            /// <summary>How many meters behind the head each car travels (same ordering as Cars).</summary>
             public float[] CarBehindHead;
 
-            /// <summary>先頭が通った軌跡（古い→新しい）。各車両はこの上に配置される。</summary>
+            /// <summary>Trail traced by the head (old to new). Each car is placed on it.</summary>
             public List<Vector3> Trail;
 
-            /// <summary>Task109: 移動音のループAudioSource（この種別に移動音が無ければnull）。</summary>
+            /// <summary>Task109: Looping AudioSource for the movement sound (null if this unit type
+            /// has no movement sound).</summary>
             public AudioSource Engine;
 
-            /// <summary>Task109: 直近のフレームで実際に動いたか（移動音の再生判定に使う）。</summary>
+            /// <summary>Task109: Whether the unit actually moved in the most recent frame (used to
+            /// decide whether to play the movement sound).</summary>
             public bool MovedThisFrame;
 
-            /// <summary>Task109: 移動音の付け直しを試みる時刻（Time.time基準）。wavの読込はコルーチンで
-            /// 非同期に進むため、ロード直後に生成されたユニットは生成時点ではクリップを掴めない。
-            /// 数回だけ間隔を空けて再試行し、それでも駄目なら諦める（float.MaxValue）。</summary>
+            /// <summary>Task109: Time (Time.time based) at which to retry attaching the movement
+            /// sound. Wav loading proceeds asynchronously in a coroutine, so units spawned right
+            /// after a load cannot grab the clip at creation time. We retry only a few times with
+            /// spacing, then give up (float.MaxValue).</summary>
             public float EngineRetryAt;
             public int EngineRetries;
 
-            /// <summary>Task90: 対空ミサイル接近時の回避機動（視覚上のジンク）の終了時刻
-            /// （Time.time基準）。AaMissileFxがNotifyEvadeで設定する。論理位置（Core）は変えず、
-            /// 表示位置にだけ減衰する横揺れオフセットを加える。</summary>
+            /// <summary>Task90: End time (Time.time based) of the evasive maneuver (visual jink) when
+            /// an anti-air missile is closing in. Set by AaMissileFx via NotifyEvade. The logical
+            /// position (Core) is unchanged; only the display position gets a decaying lateral sway
+            /// offset.</summary>
             public float EvadeUntil;
 
-            /// <summary>回避機動の横方向（水平・正規化済み）。NotifyEvadeが進行方向と直交する向きに設定する。</summary>
+            /// <summary>Lateral direction of the evasive maneuver (horizontal, normalized).
+            /// NotifyEvade sets it perpendicular to the direction of travel.</summary>
             public Vector3 EvadeDir;
         }
 
-        /// <summary>回避機動の長さ（実秒）と最大振れ幅（m）。</summary>
+        /// <summary>Duration of the evasive maneuver (real seconds) and its max sway amplitude (m).</summary>
         private const float EvadeDurationSeconds = 1.2f;
         private const float EvadeAmplitude = 10f;
 
-        /// <summary>発砲後に射撃方向を向き続ける実時間（秒）。交戦中の発砲間隔より長めにして
-        /// 「戦闘中はずっと相手を向いている」ように見せる。</summary>
+        /// <summary>Real time (seconds) to keep facing the firing direction after a shot. Made longer
+        /// than the shot interval during an engagement so the unit appears to "face the enemy the
+        /// whole time it is fighting".</summary>
         private const float FacingHoldSeconds = 4f;
 
-        // 可視性マーカー（プリミティブ立方体）の大きさと、地面へ埋まらないための持ち上げ量。
-        // Task37: 割り当て済みプロップがある場合はもう使わない（AttachVisibilityMarkerのfromAssignedProp分岐参照）。
+        // Size of the visibility marker (primitive cube) and the lift amount to keep it from sinking
+        // into the ground.
+        // Task37: No longer used when an assigned prop exists (see the fromAssignedProp branch of
+        // AttachVisibilityMarker).
         private const float MarkerSize = 8f;
         private const float MarkerHeight = 5f;
 
-        // Task37: 割り当て済みプロップ（マーカー無し）のクリック当たり判定用BoxColliderの最小サイズ。
-        // 極小プロップでもクリックできるようにするための下限。
+        // Task37: Minimum size of the click-hit-test BoxCollider for assigned props (no marker).
+        // A lower bound so that even tiny props remain clickable.
         private const float MinPropColliderSize = 4f;
 
         private const float MinMoveDeltaForRotation = 0.01f;
 
-        // Task43: TryGetMuzzleOffsetが返す値のクランプ範囲。借用メッシュ（アセットによって大きさが
-        // まちまち）が極端に平ら/巨大でも発砲エフェクトの高さが不自然にならないための安全域。
+        // Task43: Clamp range for the value returned by TryGetMuzzleOffset. A safety band so that
+        // muzzle-effect heights do not become unnatural even when the borrowed mesh (whose size
+        // varies wildly by asset) is extremely flat/huge.
         private const float MinMuzzleOffsetY = 1f;
         private const float MaxMuzzleOffsetY = 20f;
 
-        // Task49: 勢力アイコン（小さな球）をモデル上端からどれだけ浮かせるか、その安全域クランプ。
-        // ここで使うのはCreateVisual（下）のみ。スケール関連定数・生成/更新ロジックは
-        // UnitVisualsFactionIcon.cs 側の partial class 定義に分離した（500行制限のため、
-        // MilitaryManagerUnitCommands.csと同じ方針。privateメンバーでもpartial class間で共有できる）。
+        // Task49: How far to float the faction icon (small sphere) above the top of the model, plus
+        // its safety clamp. Only CreateVisual (below) uses these here. Scale-related constants and
+        // the creation/update logic were split into the partial class definition in
+        // UnitVisualsFactionIcon.cs (due to the 500-line limit, same policy as
+        // MilitaryManagerUnitCommands.cs; private members are still shared across partial class parts).
         private const float IconGapAboveMesh = 1.5f;
         private const float MinIconLocalHeightY = 2f;
         private const float MaxIconLocalHeightY = 25f;
 
         private static readonly Dictionary<uint, VisualEntry> _visuals = new Dictionary<uint, VisualEntry>();
 
-        // メッシュ解決不能などで生成に失敗した instance id。毎フレームの再試行とログ連発を防ぐため
-        // 一度失敗したidはここに記録し、以後 Sync() でスキップする。スナップショットから消えたら
-        // （死亡・削除等）id再利用に備えて解放する（下の stale 処理で _visuals と同じパスで実施）。
+        // Instance ids whose creation failed, e.g. because the mesh could not be resolved. To avoid
+        // per-frame retries and log spam, an id that failed once is recorded here and skipped by
+        // Sync() from then on. When it disappears from the snapshot (death, deletion, etc.) it is
+        // released in preparation for id reuse (done in the stale handling below, same path as _visuals).
         private static readonly HashSet<uint> _failedInstances = new HashSet<uint>();
 
-        // Sync() 実行毎に使い回すワーク領域（GC回避）。
+        // Work areas reused across Sync() runs (GC avoidance).
         private static readonly HashSet<uint> _seenIds = new HashSet<uint>();
         private static readonly List<uint> _staleIds = new List<uint>();
         private static readonly List<uint> _staleFailedIds = new List<uint>();
@@ -157,10 +183,11 @@ namespace CSWarfront.Game
         public static int Count { get { return _visuals.Count; } }
 
         /// <summary>
-        /// raycastヒット先GameObject（子の可視性マーカーである場合を含む）から、それが属する論理ユニットの
-        /// InstanceIdを解決する（Task31: Game/UI/UnitSelectionから使用）。本MODのユニット表現に
-        /// 属さないヒット（バニラの建物・地形・道路等）はfalseを返す — 呼び出し側はその場合、選択状態を
-        /// 変えずバニラのクリック挙動へそのまま委ねること。
+        /// Resolves the InstanceId of the logical unit that a raycast-hit GameObject (including the
+        /// case where it is a child visibility marker) belongs to (Task31: used from
+        /// Game/UI/UnitSelection). Returns false for hits that do not belong to this MOD's unit
+        /// representation (vanilla buildings, terrain, roads, etc.) — in that case the caller must
+        /// leave the selection state unchanged and defer to vanilla click behavior as-is.
         /// </summary>
         public static bool TryGetInstanceId(GameObject go, out uint instanceId)
         {
@@ -175,11 +202,12 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 指定idの可視表現の「現在の」ワールド座標を返す（メインスレッド専用）。
-        /// Task32: UnitInfoPanelがユニットへ追従する際、スナップショット由来の座標ではなく
-        /// 実際に描画されているGameObjectのtransform.positionを権威とするために使う
-        /// （パネルは「描画されているものそのもの」を追いかけるべきで、スナップショットの
-        /// コピー元とはタイミングがずれ得るため）。見た目が未生成/破棄済みならfalseを返す。
+        /// Returns the "current" world position of the visual for the given id (main thread only).
+        /// Task32: Used so that when UnitInfoPanel follows a unit, the authoritative position is the
+        /// transform.position of the actually-rendered GameObject rather than snapshot-derived
+        /// coordinates (the panel should chase "the thing actually being drawn", which can drift in
+        /// timing from the snapshot's source). Returns false if the visual has not been created yet
+        /// or has been destroyed.
         /// </summary>
         public static bool TryGetPosition(uint instanceId, out Vector3 position)
         {
@@ -194,12 +222,13 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 指定idの可視表現の「モデル中央の高さ」を、ユニットの論理座標（position.y）からの相対値で
-        /// 返す（メインスレッド専用、Task43）。CombatFxが発砲エフェクトの発射/着弾位置を地面レベルから
-        /// 持ち上げるために使う。CreateVisual時に mesh.bounds から1回だけ計算してキャッシュ済みの値
-        /// （<see cref="MinMuzzleOffsetY"/>〜<see cref="MaxMuzzleOffsetY"/> にクランプ済み）を返すのみで、
-        /// 呼び出しのたびにメッシュへ再アクセスすることはない。見た目が未生成/破棄済みならfalseを返す
-        /// （呼び出し側はTask43既定値、例: DefaultMuzzleHeight/BaseTargetHeightへフォールバックすること）。
+        /// Returns the "model center height" of the visual for the given id, relative to the unit's
+        /// logical position (position.y) (main thread only, Task43). Used by CombatFx to raise the
+        /// firing/impact positions of muzzle effects up from ground level. Only returns the value
+        /// computed once from mesh.bounds at CreateVisual time and cached (already clamped to
+        /// <see cref="MinMuzzleOffsetY"/>–<see cref="MaxMuzzleOffsetY"/>); the mesh is never accessed
+        /// again per call. Returns false if the visual has not been created yet or has been destroyed
+        /// (the caller must fall back to the Task43 defaults, e.g. DefaultMuzzleHeight/BaseTargetHeight).
         /// </summary>
         public static bool TryGetMuzzleOffset(uint instanceId, out float yOffset)
         {
@@ -214,19 +243,21 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// スナップショットに基づき、生成/移動/破棄を宣言的に反映する（メインスレッド専用）。
-        /// スナップショットに存在しないid（死亡・削除・未ロード含む）はここで破棄される。
+        /// Declaratively applies creation/movement/destruction based on the snapshot (main thread
+        /// only). Ids that are absent from the snapshot (including dead, deleted, and not-yet-loaded)
+        /// are destroyed here.
         /// </summary>
         public static void Sync(List<UnitVisualState> snapshot)
         {
             if (snapshot == null) return;
 
-            // Task49: 勢力アイコンの距離スケーリング用にカメラを1回だけ取得する（Camera.mainはタグ検索を
-            // 伴いうるため、ユニット数分ではなくフレーム当たり1回に抑える）。見つからない場合はnullのまま
-            // 渡し、UpdateFactionIcon側でスケール計算をスキップする（アイコン自体の生成/破棄は継続する）。
+            // Task49: Fetch the camera once for faction-icon distance scaling (Camera.main can
+            // involve a tag search, so keep it to once per frame instead of once per unit). If not
+            // found, pass null through and UpdateFactionIcon skips the scale computation (icon
+            // creation/destruction itself continues).
             Camera mainCamera = Camera.main;
             Vector3? cameraPos = mainCamera != null ? (Vector3?)mainCamera.transform.position : null;
-            UnitEngineAudio.BeginFrame(); // Task109: 移動音の同時再生数カウンタをリセット
+            UnitEngineAudio.BeginFrame(); // Task109: reset the concurrent movement-sound counter
 
             _seenIds.Clear();
             for (int i = 0; i < snapshot.Count; i++)
@@ -238,7 +269,7 @@ namespace CSWarfront.Game
                 {
                     if (_failedInstances.Contains(s.InstanceId))
                     {
-                        continue; // 生成不能と判明済み。ログ連発・再試行を避けて次のユニットへ。
+                        continue; // Known to be uncreatable. Skip to the next unit to avoid log spam/retries.
                     }
 
                     VisualEntry entry;
@@ -247,7 +278,7 @@ namespace CSWarfront.Game
                         entry = CreateVisual(s);
                         if (entry == null)
                         {
-                            // CreateVisual内でログ済み（1回のみ）。以後このidはSyncの先頭でスキップされる。
+                            // Already logged inside CreateVisual (once only). This id is skipped at the top of Sync from now on.
                             _failedInstances.Add(s.InstanceId);
                             continue;
                         }
@@ -258,13 +289,15 @@ namespace CSWarfront.Game
                         MoveVisual(entry, s.Position);
                     }
 
-                    // Task49: 生成/移動どちらの経路でも、この後で毎フレーム呼ぶ（トグルON/OFF・距離変化への
-                    // 追従を両方の経路で一元化する）。fromAssignedProp（割り当て済みアセット）ユニットも
-                    // 除外しない＝両方で動作する（要件）。
+                    // Task49: Called every frame after this point on both the create and move paths
+                    // (centralizes tracking of the ON/OFF toggle and distance changes in both paths).
+                    // fromAssignedProp (assigned-asset) units are not excluded = works for both
+                    // (requirement).
                     UpdateFactionIcon(entry, s.FactionId, mainCamera);
 
-                    // Task109: 移動音（ループ）。wavの非同期読込が間に合わずクリップを掴めなかった
-                    // 個体は、数回だけ間隔を空けて付け直しを試みる。
+                    // Task109: Movement sound (loop). Individuals that could not grab the clip
+                    // because the async wav load was not done in time retry attaching only a few
+                    // times, with spacing.
                     if (entry.Engine == null && entry.EngineRetries < 5 && Time.time >= entry.EngineRetryAt)
                     {
                         entry.Engine = UnitEngineAudio.TryAttach(entry.GameObject, s.TypeKey);
@@ -279,7 +312,8 @@ namespace CSWarfront.Game
                 }
             }
 
-            // スナップショットに無いidを列挙して破棄（ループ中の Dictionary 変更を避けるため2段階）。
+            // Enumerate ids missing from the snapshot and destroy them (two phases to avoid
+            // modifying the Dictionary during the loop).
             _staleIds.Clear();
             foreach (var kv in _visuals)
             {
@@ -290,7 +324,8 @@ namespace CSWarfront.Game
                 DestroyVisual(_staleIds[i]);
             }
 
-            // スナップショットに無い失敗済みidも解放する（id再利用時に永久ブロックされないように）。
+            // Also release failed ids missing from the snapshot (so an id is not blocked forever
+            // when it gets reused).
             _staleFailedIds.Clear();
             foreach (var failedId in _failedInstances)
             {
@@ -303,9 +338,10 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 現在生成済みの可視表現の InstanceId と実際の描画位置を列挙する（メインスレッド専用、Task48）。
-        /// Game/UI/UnitBoxSelection が範囲選択（画面矩形とワールド座標のスクリーン投影の当たり判定）に使う。
-        /// 呼び出し側が渡したバッファを Clear() してから詰め直す（GC回避、UnitVisuals.Sync と同じ規約）。
+        /// Enumerates the InstanceIds and actual render positions of the currently-created visuals
+        /// (main thread only, Task48). Used by Game/UI/UnitBoxSelection for box selection (hit testing
+        /// the screen rectangle against screen projections of world coordinates). The caller-provided
+        /// buffers are Clear()ed and refilled (GC avoidance, same convention as UnitVisuals.Sync).
         /// </summary>
         public static void CollectVisible(List<uint> ids, List<Vector3> positions)
         {
@@ -320,7 +356,7 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>追跡中の全ビジュアルを破棄する（レベルアンロード時、メインスレッド専用）。</summary>
+        /// <summary>Destroys all tracked visuals (on level unload, main thread only).</summary>
         public static void DestroyAll()
         {
             try
@@ -360,19 +396,20 @@ namespace CSWarfront.Game
                     return null;
                 }
 
-                // Task37: 割り当て済みアセット（プロップ/建物/車両/樹木、Task41で拡張）がある場合は
-                // アセット自身の見た目（テクスチャ）を維持し、勢力色で塗らない。
-                // Task69: 既定(built-in)モデルは、割り当て済みモデルと同様に自分自身の色
-                // （builtInMaterials、tools/export_builtin_obj.py 由来モデルの実際のMTL色）で描画し、
-                // 勢力色ティントはしない（勢力の識別は既存の勢力アイコンに一本化）。
-                // どちらでもない場合のみ、従来通り勢力色の単一マテリアルを使う。
+                // Task37: When an assigned asset exists (prop/building/vehicle/tree, extended in
+                // Task41), keep the asset's own look (texture) and do not paint it in faction color.
+                // Task69: Default (built-in) models, like assigned models, are rendered in their own
+                // colors (builtInMaterials, the actual MTL colors of models produced by
+                // tools/export_builtin_obj.py) with no faction-color tint (faction identification is
+                // unified into the existing faction icon).
+                // Only when neither applies is the single faction-color material used, as before.
                 bool useBuiltInMaterials = fromBuiltInModel && builtInMaterials != null && builtInMaterials.Length > 0;
 
                 Material material = null;
                 bool materialOk;
                 if (useBuiltInMaterials)
                 {
-                    materialOk = true; // マテリアルは WarfrontModelProvider.TryGetModel が既に用意済み
+                    materialOk = true; // materials were already prepared by WarfrontModelProvider.TryGetModel
                 }
                 else if (fromAssignedProp)
                 {
@@ -390,28 +427,31 @@ namespace CSWarfront.Game
 
                 var go = new GameObject("CSWarfrontUnit_" + s.InstanceId);
 
-                // Task31: クリック選択(UnitSelection)がraycastヒット先から論理ユニットを逆引きできるよう、
-                // ルートGameObjectに識別タグを付ける（GameObject→InstanceIdの別辞書は持たない）。
+                // Task31: Attach an identification tag to the root GameObject so click selection
+                // (UnitSelection) can back-resolve the logical unit from the raycast hit (no separate
+                // GameObject-to-InstanceId dictionary is kept).
                 UnitVisualTag tag = go.AddComponent<UnitVisualTag>();
                 tag.InstanceId = s.InstanceId;
 
-                // Task37: メッシュのピボットが底面にない場合、モデルが路面に半分埋まって見えることがある。
-                // ルートのtransform.position自体はユニットの論理座標そのもの（垂直オフセットを一切加えない）
-                // に保つため、メッシュ描画専用の子("Model")にだけこのオフセットを載せる。
+                // Task37: When a mesh's pivot is not at its bottom face, the model can appear half
+                // sunk into the road. To keep the root's transform.position exactly the unit's
+                // logical position (no vertical offset added at all), this offset is applied only to
+                // a mesh-rendering-only child ("Model").
                 float pivotOffsetY = -mesh.bounds.min.y;
 
-                // Task43: 「モデル中央の高さ」＝ pivotOffsetY（ルート相対でメッシュの底面をY=0に
-                // 合わせる補正）＋ mesh.bounds.center.y（メッシュ自身のローカル空間での中心Y）。
-                // pivotOffsetYのおかげでメッシュは常にルートのY=0を底面として描画されるため、この和は
-                // 常に「メッシュ高さの半分」＝ルート位置から見たモデル中央の高さになる（メッシュの
-                // ピボットが底面/中心/どこにあっても関係なく成立する）。極端なメッシュ（平ら/巨大）に
-                // 備えて安全域へクランプする。
+                // Task43: "Model center height" = pivotOffsetY (the correction that aligns the mesh's
+                // bottom to Y=0 relative to the root) + mesh.bounds.center.y (the mesh's own center Y
+                // in its local space). Thanks to pivotOffsetY, the mesh is always rendered with its
+                // bottom at the root's Y=0, so this sum is always "half the mesh height" = the model
+                // center height as seen from the root position (this holds regardless of where the
+                // mesh pivot is — bottom/center/anywhere). Clamp to a safety band in case of extreme
+                // meshes (flat/huge).
                 float muzzleOffsetY = Mathf.Clamp(pivotOffsetY + mesh.bounds.center.y, MinMuzzleOffsetY, MaxMuzzleOffsetY);
 
-                // Task49: 勢力アイコンをモデル上端の少し上に置くための高さ。pivotOffsetYのおかげで
-                // メッシュは常にルートのY=0を底面として描画されるため、pivotOffsetY + mesh.bounds.max.y が
-                // 「モデル上端」のルート相対高さになる。そこへギャップを足し、安全域へクランプする
-                // （muzzleOffsetYと同じ考え方）。
+                // Task49: Height for placing the faction icon slightly above the model top. Thanks to
+                // pivotOffsetY, the mesh is always rendered with its bottom at the root's Y=0, so
+                // pivotOffsetY + mesh.bounds.max.y is the root-relative height of the "model top".
+                // Add the gap to that and clamp to a safety band (same idea as muzzleOffsetY).
                 float iconLocalHeightY = Mathf.Clamp(pivotOffsetY + mesh.bounds.max.y + IconGapAboveMesh, MinIconLocalHeightY, MaxIconLocalHeightY);
 
                 GameObject model = new GameObject("Model");
@@ -431,29 +471,31 @@ namespace CSWarfront.Game
 
                 go.transform.position = s.Position;
 
-                // Task108: 軍用貨物列車は「先頭車（このmesh）＋後続車両」の連接編成として描画する
-                // （1両ずつ軌跡上に並べるのでカーブで編成が折れ曲がる。UnitVisualsTrain.cs）。
+                // Task108: A military freight train is rendered as an articulated consist of "the
+                // head car (this mesh) + trailing cars" (each car is placed on the trail, so the
+                // consist bends on curves. UnitVisualsTrain.cs).
                 GameObject[] cars = null;
                 float[] carBehindHead = null;
                 if (IsArticulatedType(s.TypeKey))
                     TryBuildTrainCars(go, mesh, out cars, out carBehindHead);
 
-                // Task109: 移動音（この種別に音があれば停止状態のループAudioSourceを付ける）。
+                // Task109: Movement sound (attach a stopped looping AudioSource if this type has a sound).
                 AudioSource engine = UnitEngineAudio.TryAttach(go, s.TypeKey);
 
                 if (fromAssignedProp || fromBuiltInModel)
                 {
-                    // 要件1: プロップ割り当てがある場合は可視性マーカー立方体を出さない。
-                    // Task57: 既定(built-in)モデルも同様（本物のシルエットを持つため、借用メッシュ
-                    // 用の保険マーカーはもう不要）。クリック選択の当たり判定は代わりにルートへ
-                    // 直接付ける（マーカーが無いため）。
+                    // Requirement 1: Do not show the visibility marker cube when a prop assignment exists.
+                    // Task57: Same for default (built-in) models (they have a real silhouette, so the
+                    // safety marker for borrowed meshes is no longer needed). Click-selection hit
+                    // testing is instead attached directly to the root (since there is no marker).
                     AttachPropCollider(go, mesh, pivotOffsetY);
                 }
                 else
                 {
-                    // 可視性の保険＆切り分け: CS由来の借用メッシュが環境によって描画されない可能性があるため、
-                    // 確実に描画されるプリミティブ（MissileDisasterのフォールバック球と同じ手法）を子に付ける。
-                    // これが見えて借用メッシュが見えない場合、原因はメッシュ側だと確定できる。
+                    // Visibility insurance & triage: since a CS-borrowed mesh might not render in some
+                    // environments, attach a reliably-rendered primitive as a child (same technique as
+                    // MissileDisaster's fallback sphere). If this is visible while the borrowed mesh is
+                    // not, the cause is confirmed to be on the mesh side.
                     AttachVisibilityMarker(go, material);
                 }
 
@@ -479,11 +521,13 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task37: 割り当て済みプロップ（マーカー無し）用に、ルートGameObjectへ直接BoxColliderを付ける。
-        /// マーカー立方体が無くなったため、クリック選択の当たり判定はこれが唯一の手段になる。
-        /// メッシュのbounds（"Model"子への pivotOffsetY 適用後のルート相対座標に変換したもの）を元に
-        /// サイズ・中心を決め、極小プロップでもクリックできるよう各軸最小 <see cref="MinPropColliderSize"/>
-        /// を保証する。isTriggerはfalseのまま、GameObjectのlayerは変更しない（AttachVisibilityMarkerと同じ理由）。
+        /// Task37: Attaches a BoxCollider directly to the root GameObject for assigned props (no
+        /// marker). Since the marker cube is gone, this becomes the only means of click-selection hit
+        /// testing. The size and center are derived from the mesh bounds (converted into root-relative
+        /// coordinates after applying pivotOffsetY to the "Model" child), and a per-axis minimum of
+        /// <see cref="MinPropColliderSize"/> is guaranteed so even tiny props remain clickable.
+        /// isTrigger stays false and the GameObject's layer is not changed (same reasoning as
+        /// AttachVisibilityMarker).
         /// </summary>
         private static void AttachPropCollider(GameObject root, Mesh mesh, float pivotOffsetY)
         {
@@ -499,7 +543,7 @@ namespace CSWarfront.Game
                 col.size = size;
 
                 Vector3 center = mesh.bounds.center;
-                center.y += pivotOffsetY; // "Model"子と同じオフセットをルート相対座標に反映
+                center.y += pivotOffsetY; // apply the same offset as the "Model" child, in root-relative coordinates
                 col.center = center;
             }
             catch (Exception e)
@@ -509,14 +553,15 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// ユニットGameObjectに、確実に描画されるプリミティブ立方体を子として付ける（メインスレッド専用）。
-        /// 借用メッシュの描画可否に依存せずユニット位置を視認できるようにするための保険。
-        /// Task37: 割り当て済みプロップがある場合（fromAssignedProp）はもう呼ばれない
-        /// （AttachPropColliderで当たり判定のみ用意する）。既定/未割り当てユニットの見た目保険として残す。
-        /// Task31: このマーカーが生成時に持つBoxColliderは破棄せず、そのままクリック選択の当たり判定
-        /// として流用する（isTriggerはfalseのまま＝Physics.Raycastで検出可能）。GameObjectのlayerは
-        /// 変更しない（layerを変えるとCS側カメラのカリング/レイヤーマスクに影響し、既に解決済みの
-        /// 不可視バグを再発させるリスクがあるため）。
+        /// Attaches a reliably-rendered primitive cube as a child of the unit GameObject (main thread
+        /// only). Insurance so the unit's position can be seen regardless of whether the borrowed mesh
+        /// renders. Task37: No longer called when an assigned prop exists (fromAssignedProp)
+        /// (AttachPropCollider provides hit testing only instead). Kept as the visual insurance for
+        /// default/unassigned units.
+        /// Task31: The BoxCollider that this marker gets at creation is not destroyed but reused as-is
+        /// for click-selection hit testing (isTrigger stays false = detectable by Physics.Raycast).
+        /// The GameObject's layer is not changed (changing the layer would affect the CS camera's
+        /// culling/layer mask and risk re-triggering the already-resolved invisibility bug).
         /// </summary>
         private static void AttachVisibilityMarker(GameObject parent, Material material)
         {
@@ -539,10 +584,11 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task108: このTypeKeyのユニットは「常に機体を水平に保つ」対象か
-        /// （＝向きを移動方向の水平成分だけから決める）。着陸/離陸の垂直移動で機首が真下/真上を
-        /// 向く不自然さを避けるためのもので、航空機・ヘリが対象。自爆ドローンは突入姿勢が
-        /// 見た目上重要なので対象外。解析できないTypeKeyは従来どおり（false）。</summary>
+        /// <summary>Task108: Whether units of this TypeKey should "always keep the airframe level"
+        /// (= decide facing from the horizontal component of movement only). This exists to avoid the
+        /// unnatural look of the nose pointing straight down/up during vertical landing/takeoff
+        /// movement; aircraft and helicopters are targeted. Kamikaze drones are excluded because the
+        /// dive attitude matters visually. Unparseable TypeKeys behave as before (false).</summary>
         private static bool IsLevelFlightType(string typeKey)
         {
             UnitCategory category;
@@ -559,12 +605,15 @@ namespace CSWarfront.Game
         {
             if (entry == null || entry.GameObject == null) return;
             Vector3 delta = newPosition - entry.LastPosition;
-            // Task109: 移動音の判定は「向き」用の加工（下のLevelFlightによるY成分の除去）より前の
-            // 生の移動量で行う——垂直に降下しているだけのヘリも「移動中」として音を鳴らすため。
+            // Task109: The movement-sound check uses the raw movement amount, before the
+            // facing-related processing below (removal of the Y component under LevelFlight) — so
+            // that a helicopter that is merely descending vertically still counts as "moving" and
+            // makes sound.
             float moveSqr = delta.sqrMagnitude;
 
-            // Task90: 対空ミサイル接近中の回避機動。論理位置はCoreのまま、表示位置にだけ
-            // 減衰する横揺れ（バンクを切って逃げるジンク）を加える。
+            // Task90: Evasive maneuver while an anti-air missile closes in. The logical position stays
+            // as Core says; only the display position gets a decaying lateral sway (a banking jink to
+            // escape).
             Vector3 displayPosition = newPosition;
             if (Time.time < entry.EvadeUntil)
             {
@@ -575,16 +624,18 @@ namespace CSWarfront.Game
             }
             entry.GameObject.transform.position = displayPosition;
 
-            // Task108: 航空ユニットは向きを水平成分だけから決める（着陸/離陸の垂直移動で機首が
-            // 真下/真上を向くのを防ぐ）。水平成分がほぼ無い＝真下へ降りているだけなら向きは
-            // 現状維持（最後に飛んでいた方向を向いたまま降りる）。
+            // Task108: Air units decide facing from the horizontal component only (prevents the nose
+            // from pointing straight down/up during vertical landing/takeoff movement). If there is
+            // almost no horizontal component — i.e. the unit is just descending straight down — the
+            // facing is left unchanged (it descends still facing the direction it last flew).
             if (entry.LevelFlight)
             {
                 delta.y = 0f;
             }
 
-            // Task83: 直近に発砲したユニットは移動方向ではなく射撃方向を向く（静止中の交戦でも
-            // 相手の方を向くよう、移動デルタの有無に関わらず毎フレーム適用する）。
+            // Task83: A unit that fired recently faces the firing direction instead of the movement
+            // direction (applied every frame regardless of whether there is a movement delta, so that
+            // it faces the enemy even in a stationary engagement).
             if (Time.time < entry.FacingHoldUntil && entry.FacingDirection.sqrMagnitude > 1e-6f)
             {
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(entry.FacingDirection);
@@ -594,19 +645,21 @@ namespace CSWarfront.Game
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
 
-            // Task108: 連接車両（軍用貨物列車）を先頭の軌跡上へ並べ直す。
+            // Task108: Re-place the articulated cars (military freight train) along the head's trail.
             if (entry.Cars != null)
                 UpdateTrainCars(entry, displayPosition, entry.GameObject.transform.rotation);
 
-            // Task109: 移動音の再生判定に使う（実際に位置が変わったフレームだけ「移動中」とみなす）。
+            // Task109: Used for the movement-sound check (only frames where the position actually
+            // changed count as "moving").
             entry.MovedThisFrame = moveSqr > MinMoveDeltaForRotation * MinMoveDeltaForRotation;
 
             entry.LastPosition = newPosition;
         }
 
-        /// <summary>Task90: 対空ミサイルが接近した標的機に回避機動（視覚ジンク）を開始させる
-        /// （AaMissileFxから、フレア放出と同時に呼ばれる。メインスレッド専用）。
-        /// 横方向は現在の機首方向と直交する水平ベクトル。</summary>
+        /// <summary>Task90: Makes a targeted aircraft start an evasive maneuver (visual jink) when an
+        /// anti-air missile has closed in (called from AaMissileFx at the same moment flares are
+        /// released. Main thread only). The lateral direction is a horizontal vector perpendicular to
+        /// the current nose direction.</summary>
         public static void NotifyEvade(uint instanceId)
         {
             try
@@ -628,9 +681,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task83: 発砲イベントから射撃方向を拾い、該当ユニットのビジュアルに
-        /// 「FacingHoldSecondsの間、射撃方向を向く」指示を与える（メインスレッド専用。
-        /// MilitaryManagerVisualsがロック解放後、CombatFx.Spawnと同じスナップショットで呼ぶ）。</summary>
+        /// <summary>Task83: Picks up firing directions from shot events and instructs the relevant
+        /// units' visuals to "face the firing direction for FacingHoldSeconds" (main thread only.
+        /// MilitaryManagerVisuals calls this after releasing the lock, with the same snapshot as
+        /// CombatFx.Spawn).</summary>
         public static void NotifyShots(System.Collections.Generic.List<ShotEvent> shots)
         {
             try
@@ -639,15 +693,17 @@ namespace CSWarfront.Game
                 {
                     ShotEvent shot = shots[i];
                     if (shot.AttackerId == 0) continue;
-                    // Task86: 航空機は常に進行方向を向く（射撃方向を向くと飛行方向と別方向を向いた
-                    // まま飛ぶ「横滑り」の見た目になるため。機動はパス航過のすれ違いで表現する）。
+                    // Task86: Aircraft always face their direction of travel (facing the firing
+                    // direction would make them fly while pointing away from the flight direction — a
+                    // "side-slip" look. Maneuvering is expressed through the pass-and-overfly of path
+                    // traversal instead).
                     if (shot.Category.IsAircraft()) continue;
 
                     VisualEntry entry;
                     if (!_visuals.TryGetValue(shot.AttackerId, out entry)) continue;
 
                     Vector3 dir = new Vector3(shot.To.X - shot.From.X, 0f, shot.To.Z - shot.From.Z);
-                    if (dir.sqrMagnitude < 1e-6f) continue; // 真上/同一地点への射撃は向きを変えない
+                    if (dir.sqrMagnitude < 1e-6f) continue; // shots straight up/at the same spot do not change facing
 
                     entry.FacingDirection = dir.normalized;
                     entry.FacingHoldUntil = Time.time + FacingHoldSeconds;
@@ -659,7 +715,7 @@ namespace CSWarfront.Game
             }
         }
 
-        // Task49: UpdateFactionIcon/CreateFactionIcon は UnitVisualsFactionIcon.cs（同じ partial class）参照。
+        // Task49: For UpdateFactionIcon/CreateFactionIcon see UnitVisualsFactionIcon.cs (same partial class).
 
         private static void DestroyVisual(uint instanceId)
         {

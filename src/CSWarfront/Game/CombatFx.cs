@@ -6,99 +6,115 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 発砲エフェクト（Task42）: WarState.RecentShotsから受け取ったShotEventを、短命なUnity
-    /// GameObjectとして描画する。戦略ビューであることを踏まえ、シューターゲームのような派手さではなく
-    /// 「何が起きているか一目でわかる」程度の軽量な表現にとどめる。
+    /// Muzzle-fire effects (Task42): renders the ShotEvents received from WarState.RecentShots as
+    /// short-lived Unity GameObjects. Given that this is a strategic view, the presentation is kept
+    /// lightweight — just enough to "see at a glance what is happening" — rather than the flashiness
+    /// of a shooter game.
     ///
-    /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
-    /// （new GameObject / AddComponent / Destroy / transform書込みはUnityのメインスレッド制約）。
-    /// sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと（UnitVisualsと同じ規約）。
+    /// Thread boundary: all public methods on this class are "main thread only"
+    /// (new GameObject / AddComponent / Destroy / transform writes are Unity main-thread constraints).
+    /// Never call from the sim thread (MilitaryManager.OnSimTick) (same convention as UnitVisuals).
     ///
-    /// マテリアルはCS由来のものを一切借用しない。UnitMaterialFactoryと同じ理由（CS車両シェーダーは
-    /// CS自身のレンダラー由来のper-instanceデータを要求し、素のRendererに割り当てると不可視/黒になる）
-    /// により、自前の標準シェーダーMaterialを勢力に依存しない固定色で生成・共有する（sharedMaterial、
-    /// per-instance化しない）。勢力色でチントしない＝トレーサーは「発砲そのもの」として読めるようにし、
-    /// 陣営マーカーと誤読されないようにする（要件）。
+    /// No CS-derived materials are borrowed at all. For the same reason as UnitMaterialFactory (CS
+    /// vehicle shaders require per-instance data provided by CS's own renderers, and assigning them
+    /// to a plain Renderer renders invisible/black), we create and share our own standard-shader
+    /// Materials with fixed faction-independent colors (sharedMaterial, no per-instance copies).
+    /// Not tinting with faction colors means tracers read as "the gunfire itself" and cannot be
+    /// misread as side markers (a requirement).
     /// </summary>
     internal static partial class CombatFx
     {
-        /// <summary>同時に生きていられるエフェクトの上限（Task42）。大規模乱戦でGameObjectが
-        /// 際限なく増えないようにする防御的上限。ShotEvent側の上限(WarState.MaxRecentShotsPerTick)とは
-        /// 独立に、こちらは「現在生存中」の総数を制限する。
-        /// Task43: 銃撃が1発→3点バーストになったことで、同じ発砲を発端に一時的に生きるエフェクト数が
-        /// 最大3倍近くまで増え得るため、120→200へ引き上げた（大規模乱戦でも従来と同程度の余裕を保つ）。</summary>
+        /// <summary>Cap on how many effects may be alive simultaneously (Task42). A defensive limit so
+        /// GameObjects cannot grow without bound in large melees. Independent of the ShotEvent-side cap
+        /// (WarState.MaxRecentShotsPerTick), this one limits the total "currently alive" count.
+        /// Task43: with gunfire changing from 1 round to a 3-round burst, the number of effects
+        /// temporarily alive from the same shot can grow up to nearly 3x, so this was raised from
+        /// 120 to 200 (keeping roughly the same headroom as before in large melees).</summary>
         private const int MaxLiveEffects = 200;
 
-        // カメラから遠すぎる発砲は生成自体をスキップする（軽量な距離チェックのみ）。
+        // Shots too far from the camera skip spawning entirely (only a lightweight distance check).
         private const float MaxSpawnDistanceFromCamera = 2000f;
 
-        // Task43: 発射/着弾位置をモデル中央高さへ持ち上げるための既定値（UnitVisuals.TryGetMuzzleOffset
-        // が見つからない場合のフォールバック）。AttackerId/TargetIdが0（基地等、論理ユニットでない対象）
-        // か、見た目がまだ生成されていない場合に使う。基地は建物なので既定の発射高さより高めに設定する。
+        // Task43: defaults for lifting the firing/impact positions up to model-center height (fallback
+        // when UnitVisuals.TryGetMuzzleOffset finds nothing). Used when AttackerId/TargetId is 0 (a base
+        // etc. — not a logical unit) or when the visual has not been created yet. Bases are buildings,
+        // so their height is set higher than the default firing height.
         private const float DefaultMuzzleHeight = 3f;
         private const float BaseTargetHeight = 8f;
 
-        // Task108（ユーザー指摘「砲兵陣地の発射高さがモデルとズレている」）: 築城施設（掩蔽壕/
-        // 砲兵陣地）は論理ユニットではないため銃口オフセットを引けず（ShotEvent.AttackerId==0）、
-        // 上のDefaultMuzzleHeight(3m)にフォールバックしていた。同梱モデルから実測した高さに置き換える:
-        //   Models/Fort_ArtilleryPost.obj … 全高3.6m。中央の榴弾砲の砲身まわりが約2.2〜2.9m
-        //   Models/Fort_Bunker.obj        … 全高5.3m（アンテナ込み）。本体の銃眼は約1.1〜1.6m
-        // 施設からの射撃は兵科で施設種別が一意に決まる（砲兵陣地=Artillery / 掩蔽壕=Infantry、
-        // Core/FortCombatStep.cs の attackerCategory 参照）。別サイズのアセットを指定した場合は
-        // この2つの値を調整する。
+        // Task108 (user report "the artillery post's firing height is misaligned with the model"):
+        // fortification structures (bunker / artillery post) are not logical units, so no muzzle offset
+        // can be looked up (ShotEvent.AttackerId==0) and they fell back to DefaultMuzzleHeight (3m)
+        // above. Replace that with heights measured from the bundled models:
+        //   Models/Fort_ArtilleryPost.obj … total height 3.6m. The barrel area of the central howitzer
+        //   is roughly 2.2–2.9m
+        //   Models/Fort_Bunker.obj        … total height 5.3m (including the antenna). The embrasures
+        //   on the body are roughly 1.1–1.6m
+        // Fire from a structure maps one-to-one from unit category to structure type (artillery post =
+        // Artillery / bunker = Infantry; see attackerCategory in Core/FortCombatStep.cs). Adjust these
+        // two values if differently sized assets are designated.
         private const float ArtilleryPostMuzzleHeight = 2.4f;
         private const float BunkerMuzzleHeight = 1.3f;
 
-        // Gunfire（Infantry/MechInfantry/Apc/DroneInfantry/AntiAir）: 細く短いトレーサー＋小さなマズルフラッシュ。
-        // Task43: 1発→3点バースト化に合わせて、1発ごとの表示時間を0.08s→0.06sへわずかに短縮した
-        // （バースト間隔0.07sより短く保ち、次弾が出る前に前弾が消え切るようにするため）。
-        // Task108（ユーザー指摘「砲撃の光跡が太すぎる。よりリアルに」）: トレーサーの太さとマズル
-        // フラッシュの大きさを実物寄りに絞った（銃撃0.15→0.08 / 直射0.35→0.15 / 曲射0.4→0.15、
-        // フラッシュも同様に縮小）。遠景で完全に消えない下限としてこの辺りが実用的な落としどころ。
+        // Gunfire (Infantry/MechInfantry/Apc/DroneInfantry/AntiAir): thin short tracer + small muzzle flash.
+        // Task43: to match the 1-round -> 3-round-burst change, the per-round display time was slightly
+        // shortened from 0.08s to 0.06s (keeping it shorter than the 0.07s burst gap so each round fully
+        // fades before the next one fires).
+        // Task108 (user report "artillery light trails are too thick; make them more realistic"): tracer
+        // widths and muzzle-flash sizes were narrowed toward real-world proportions (gunfire 0.15→0.08 /
+        // direct fire 0.35→0.15 / indirect fire 0.4→0.15, flashes shrunk likewise). This range is a
+        // practical sweet spot as the lower bound where they do not vanish entirely at long distances.
         private const float GunfireTracerDuration = 0.06f;
         private const float GunfireTracerWidth = 0.08f;
         private const float GunfireFlashSize = 0.7f;
 
-        // Task43: 銃撃1回＝3点バースト。1発目は即座に、2/3発目はGunfireBurstRoundGap間隔で
-        // 実時間ベースに遅延させて発射する（_pendingBursts、Update内でブロッキングなしに進める）。
+        // Task43: one gunfire shot = a 3-round burst. The first round fires immediately; rounds 2/3 are
+        // delayed on a real-time basis at GunfireBurstRoundGap intervals (_pendingBursts, advanced
+        // without blocking inside Update).
         private const int GunfireBurstRounds = 3;
         private const float GunfireBurstRoundGap = 0.07f;
 
-        // DirectFire（Tank、直射）: 同じトレーサーだが太く・明るく・やや長持ち＋一回り大きいフラッシュ。
+        // DirectFire (Tank, direct fire): same tracer but thicker, brighter, slightly longer-lived + a
+        // slightly larger flash.
         private const float DirectFireTracerDuration = 0.15f;
         private const float DirectFireTracerWidth = 0.15f; // Task108: 0.35→0.15
         private const float DirectFireFlashSize = 1.4f;    // Task108: 2.2→1.4
 
-        // IndirectFire（Artillery、曲射）: Fromから放物線を飛ぶ光跡（トレーサー、Task43でモデル球から変更）
-        // ＋着弾時の短い噴煙。
+        // IndirectFire (Artillery, indirect fire): a light trail flying a parabola from From (a tracer,
+        // changed from a model sphere in Task43) + a short impact puff on landing.
         private const float ArcTravelDuration = 1.2f;
-        private const float ArcApexRatio = 0.18f;   // 頂点高さ = 水平距離 × この比率（Task108: 0.25→0.18）
+        private const float ArcApexRatio = 0.18f;   // apex height = horizontal distance x this ratio (Task108: 0.25→0.18)
         private const float ArcApexMin = 4f;
         private const float ArcApexMax = 120f;
 
-        // Task108（ユーザー報告「砲兵陣地の光跡がものすごくずれて見える／砲口から着弾までの曲線だけで
-        // いい」）: 従来は光跡を頂点2個のLineRenderer（頭＝弾、尾＝TrailLagTぶん遅れた点）で描いていた
-        // ため、実際に描かれるのは放物線上の2点を結ぶ"弦"であり、弾道の曲線からは大きく外れて見えていた
-        // （距離が短いほど弦と曲線のズレが大きい）。ArcSegmentsぶんの折れ線で放物線そのものをなぞり、
-        // 発射点から現在の弾位置までを伸ばしていく「曲線」に置き換える。
+        // Task108 (user report "the artillery post's light trail looks wildly off / just a curve from
+        // the muzzle to the impact point would be fine"): previously the trail was drawn as a 2-vertex
+        // LineRenderer (head = the shell, tail = a point lagging by TrailLagT), so what was actually
+        // drawn was the "chord" connecting two points on the parabola, which visibly diverged from the
+        // ballistic curve (the shorter the distance, the larger the chord-vs-curve gap). Replace it
+        // with a polyline of ArcSegments segments that traces the parabola itself, a "curve" extending
+        // from the launch point to the shell's current position.
         private const int ArcSegments = 24;
-        /// <summary>Task108: 光跡の太さ。0.4は実物に対して太すぎる（ユーザー指摘）ため細くする。</summary>
+        /// <summary>Task108: trail width. 0.4 is too thick relative to the real thing (user feedback),
+        /// so make it thinner.</summary>
         private const float ArcTrailWidth = 0.15f;
         private const float ImpactPuffDuration = 0.3f;
         private const float ImpactPuffSize = 3.5f;
 
-        // Task108（ユーザー要望「曲射にも砲口フラッシュを足す」）: 曲射は従来、光跡が飛び始めるだけで
-        // 発射側に何も出ていなかった（直射/銃撃にはSpawnTracerのマズルフラッシュがある）。砲らしい
-        // 重さを出すため、直射より一回り大きく・わずかに長く残るフラッシュを発射点に出す。
-        private const float ArcMuzzleFlashSize = 1.8f; // Task108: 3.2→1.8（フラッシュの縮小に合わせる）
+        // Task108 (user request "add a muzzle flash to indirect fire too"): previously indirect fire
+        // only had the trail start flying, with nothing shown on the firing side (direct fire/gunfire
+        // get SpawnTracer's muzzle flash). To convey a cannon's heft, show a flash at the launch point
+        // that is a size larger than direct fire's and lingers slightly longer.
+        private const float ArcMuzzleFlashSize = 1.8f; // Task108: 3.2→1.8 (matching the flash shrink)
         private const float ArcMuzzleFlashDuration = 0.18f;
 
-        // 暖色系固定（勢力色でチントしない）。
-        private static readonly Color GunfireColor = new Color(1f, 0.92f, 0.55f);     // 暖かい黄白色
-        private static readonly Color DirectFireColor = new Color(1f, 0.75f, 0.25f);  // より濃いオレンジ（直射の重み）
+        // Fixed warm colors (no faction-color tinting).
+        private static readonly Color GunfireColor = new Color(1f, 0.92f, 0.55f);     // warm yellowish white
+        private static readonly Color DirectFireColor = new Color(1f, 0.75f, 0.25f);  // deeper orange (the weight of direct fire)
         private static readonly Color FlashColor = new Color(1f, 0.95f, 0.8f);
-        // Task43: 曲射砲弾の光跡色。DirectFireより深いオレンジにして、遠目でも銃撃/直射と見分けやすくする
-        // （勢力色でチントしないのは他のトレーサーと同じ方針）。
+        // Task43: trail color for indirect-fire shells. A deeper orange than DirectFire so it is easy to
+        // distinguish from gunfire/direct fire even from afar (no faction-color tinting, same policy as
+        // the other tracers).
         private static readonly Color ArcTrailColor = new Color(1f, 0.55f, 0.15f);
         private static readonly Color PuffColor = new Color(0.55f, 0.5f, 0.45f);
 
@@ -111,16 +127,18 @@ namespace CSWarfront.Game
             public float Elapsed;
             public float Duration;
 
-            // Tracer(Gunfire/DirectFire)専用、およびArcTravel専用（Task43: 光跡トレーサーとして共用）。
+            // Tracer (Gunfire/DirectFire) only, and ArcTravel only (Task43: shared as the trail tracer).
             public LineRenderer Line;
             public float InitialWidth;
 
-            // Tracerのマズルフラッシュ、またはImpactPuffの噴煙（役割はPhaseで決まる）を指す共有transform。
-            // Task43: ArcTravel中はもう使わない（曲射砲弾の「弾」表現はLineに置き換わった）。
+            // Shared transform pointing to either the Tracer's muzzle flash or the ImpactPuff's smoke
+            // (the role is determined by Phase).
+            // Task43: no longer used during ArcTravel (the indirect shell's "projectile" representation
+            // was replaced with Line).
             public Transform FlashOrShell;
             public float InitialFlashSize;
 
-            // ArcTravel専用。
+            // ArcTravel only.
             public Vector3 From;
             public Vector3 To;
             public float ApexHeight;
@@ -128,9 +146,9 @@ namespace CSWarfront.Game
 
         private static readonly List<Effect> _effects = new List<Effect>();
 
-        /// <summary>Task43: 銃撃3点バーストのうち、まだ発射していない後続弾を実時間で待たせておく
-        /// キュー。Update()内でブロッキングなしに実時間を消費して進める（乱数不使用・sim tickとは無関係、
-        /// あくまでGame層の見た目専用の演出）。</summary>
+        /// <summary>Task43: real-time queue holding the not-yet-fired follow-up rounds of a gunfire
+        /// 3-round burst. Advanced without blocking by consuming real time inside Update() (no random
+        /// numbers, unrelated to sim ticks — purely a Game-layer, visuals-only flourish).</summary>
         private class PendingBurst
         {
             public Vector3 From;
@@ -150,8 +168,8 @@ namespace CSWarfront.Game
         private static Material _puffMaterial;
 
         /// <summary>
-        /// 1tick分のShotEventからエフェクトを生成する（メインスレッド専用）。
-        /// MaxLiveEffectsに達していれば、それ以降のshotsは静かに無視する（例外にしない）。
+        /// Spawns effects from one tick's worth of ShotEvents (main thread only).
+        /// Once MaxLiveEffects is reached, the remaining shots are silently ignored (not an exception).
         /// </summary>
         public static void Spawn(List<ShotEvent> shots)
         {
@@ -174,9 +192,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトと、実行待ちのバースト後続弾(Task43)を実時間(realDeltaTime)で
-        /// 進める（メインスレッド専用）。ArcTravelはDurationに達すると新規GameObjectを作らず、同じ弾を
-        /// 着弾噴煙(ImpactPuff)へ転生させてから継続する。</summary>
+        /// <summary>Advances all live effects and the pending burst follow-up rounds (Task43) by real
+        /// time (realDeltaTime) (main thread only). When ArcTravel reaches its Duration, it does not
+        /// create a new GameObject; the same shell is reincarnated into an impact puff (ImpactPuff) and
+        /// continues.</summary>
         public static void Update(float realDeltaTime)
         {
             if (_effects.Count == 0 && _pendingBursts.Count == 0) return;
@@ -218,10 +237,11 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task43: 銃撃3点バーストの2/3発目を、ブロッキングせず実時間の経過だけで進める。
-        /// GunfireBurstRoundGapごとに1発ずつ、既存のSpawnTracerで新規トレーサーを生成する。
-        /// MaxLiveEffectsに達している間は生成だけを静かにスキップする（キューの消化自体は止めない、
-        /// 大規模乱戦で待ち行列が際限なく伸び続けないようにするため）。</summary>
+        /// <summary>Task43: advances rounds 2/3 of the gunfire 3-round burst purely by real-time
+        /// elapsing, without blocking. Spawns one new tracer per GunfireBurstRoundGap via the existing
+        /// SpawnTracer. While MaxLiveEffects is reached, only the spawning is silently skipped (queue
+        /// consumption itself never stops, so the wait queue cannot keep growing without bound in a
+        /// large melee).</summary>
         private static void AdvancePendingBursts(float realDeltaTime)
         {
             if (_pendingBursts.Count == 0) return;
@@ -250,9 +270,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトと待機中のバースト後続弾(Task43)を破棄する
-        /// （レベルアンロード時、メインスレッド専用）。キャッシュ済みマテリアルはGameObjectではないため
-        /// 破棄しない（UnitMaterialFactoryと同じ扱い、次セッションでも使い回せる）。</summary>
+        /// <summary>Destroys all live effects and the waiting burst follow-up rounds (Task43)
+        /// (at level unload, main thread only). Cached materials are not destroyed since they are not
+        /// GameObjects (same treatment as UnitMaterialFactory; they can be reused in the next session).</summary>
         public static void DestroyAll()
         {
             try
@@ -270,7 +290,7 @@ namespace CSWarfront.Game
             finally
             {
                 _effects.Clear();
-                _pendingBursts.Clear(); // Task43: レベルアンロード後に旧セッションの後続弾が漏れて発射されないように。
+                _pendingBursts.Clear(); // Task43: so no follow-up rounds from the old session leak out and fire after level unload.
             }
         }
 
@@ -279,9 +299,10 @@ namespace CSWarfront.Game
             Vector3 from = new Vector3(e.From.X, e.From.Y, e.From.Z);
             Vector3 to = new Vector3(e.To.X, e.To.Y, e.To.Z);
 
-            // Task43: 発射/着弾位置を地面レベルからモデル中央の高さへ持ち上げる。攻撃側(From)は
-            // AttackerIdの、着弾側(To)はTargetIdの見た目の高さを使う。TargetId==0は基地（または
-            // 不明な対象＝論理ユニットではない）を意味し、見た目のルックアップを試みず既定値を使う。
+            // Task43: lift the firing/impact positions from ground level up to model-center height. The
+            // attacker side (From) uses AttackerId's visual height, the impact side (To) uses TargetId's.
+            // TargetId==0 means a base (or an unknown target = not a logical unit), so no visual lookup
+            // is attempted and the default is used.
             from.y += ResolveAttackerMuzzleHeight(e.AttackerId, e.Category);
             to.y += ResolveTargetMuzzleHeight(e.TargetId);
 
@@ -295,8 +316,9 @@ namespace CSWarfront.Game
             switch (e.Kind)
             {
                 case ShotKind.Gunfire:
-                    // Task43: 銃撃は3点バースト。1発目はここで即座に、2/3発目はGunfireBurstRoundGap
-                    // 間隔で実時間ベースに遅延させる（AdvancePendingBursts、Updateからブロッキングなしで進行）。
+                    // Task43: gunfire is a 3-round burst. The first round fires immediately here; rounds
+                    // 2/3 are delayed on a real-time basis at GunfireBurstRoundGap intervals
+                    // (AdvancePendingBursts, advanced from Update without blocking).
                     SpawnTracer(from, to, GunfireTracerDuration, GunfireTracerWidth, GunfireFlashSize,
                         GetGunfireMaterial());
                     _pendingBursts.Add(new PendingBurst
@@ -308,7 +330,8 @@ namespace CSWarfront.Game
                     });
                     break;
                 case ShotKind.DirectFire:
-                    // Task87: 爆撃機はトレーサーではなく爆弾投下モーション（BombFxが落下・着弾爆発まで扱う）。
+                    // Task87: bombers get a bomb-drop motion instead of a tracer (BombFx handles the fall
+                    // through to the impact explosion).
                     if (e.Category == UnitCategory.TacticalBomber)
                     {
                         BombFx.SpawnDrop(from, to);
@@ -322,19 +345,21 @@ namespace CSWarfront.Game
                     SpawnArc(from, to);
                     break;
                 case ShotKind.SamMissile:
-                    // Task90: 対空ミサイル。追尾弾体・フレア・回避機動はAaMissileFxが完結して扱う。
+                    // Task90: surface-to-air missile. The homing projectile, flares, and evasive
+                    // maneuvers are handled entirely by AaMissileFx.
                     AaMissileFx.Spawn(from, to, e.TargetId, e.Missed);
                     break;
             }
 
-            // Task51: 兵科別の発砲音再生（実装はCombatFxSound.cs、同じpartial class）。
+            // Task51: per-category shot sound playback (implemented in CombatFxSound.cs, same partial class).
             PlayShotSound(e, from, cameraPos);
         }
 
-        /// <summary>攻撃側(From)の見た目の高さ（Task43）。見た目がまだ無い（生成前/破棄済み）場合は
-        /// DefaultMuzzleHeightにフォールバックする。
-        /// Task108: attackerIdが0＝築城施設からの射撃（FortCombatStep）なので、施設のモデルに
-        /// 合わせた高さを兵科から引く（上の定数コメント参照）。</summary>
+        /// <summary>Visual height of the attacker side (From) (Task43). Falls back to
+        /// DefaultMuzzleHeight when the visual does not exist yet (pre-spawn/destroyed).
+        /// Task108: attackerId of 0 = fire from a fortification structure (FortCombatStep), so the
+        /// height matching the structure's model is derived from the unit category (see the constant
+        /// comments above).</summary>
         private static float ResolveAttackerMuzzleHeight(uint attackerId, UnitCategory category)
         {
             if (attackerId != 0)
@@ -344,14 +369,15 @@ namespace CSWarfront.Game
                 return DefaultMuzzleHeight;
             }
 
-            if (category == UnitCategory.Artillery) return ArtilleryPostMuzzleHeight; // 砲兵陣地
-            if (category == UnitCategory.Infantry) return BunkerMuzzleHeight;         // 掩蔽壕
+            if (category == UnitCategory.Artillery) return ArtilleryPostMuzzleHeight; // artillery post
+            if (category == UnitCategory.Infantry) return BunkerMuzzleHeight;         // bunker
             return DefaultMuzzleHeight;
         }
 
-        /// <summary>着弾側(To)の見た目の高さ（Task43）。targetId==0は基地（または不明な対象）を意味し
-        /// 見た目のルックアップを試みずBaseTargetHeightを使う。targetId!=0だが見た目が無い場合
-        /// （対象ユニットが死亡・未生成等）はDefaultMuzzleHeightにフォールバックする。</summary>
+        /// <summary>Visual height of the impact side (To) (Task43). targetId==0 means a base (or an
+        /// unknown target); no visual lookup is attempted and BaseTargetHeight is used. When targetId!=0
+        /// but no visual exists (the target unit is dead, not spawned yet, etc.), falls back to
+        /// DefaultMuzzleHeight.</summary>
         private static float ResolveTargetMuzzleHeight(uint targetId)
         {
             if (targetId == 0) return BaseTargetHeight;
@@ -397,9 +423,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task108: 発射点だけの短命なフラッシュ（光跡を伴わない）。曲射（砲口フラッシュ）用。
-        /// Tracerフェーズを流用するが、Lineを持たないためStepTracerは球の縮小だけを進める。
-        /// エフェクト総数の上限を超えていれば黙って省略する（見た目の飾りより本体の弾道を優先する）。</summary>
+        /// <summary>Task108: a short-lived flash at the launch point only (with no trail). For indirect
+        /// fire (muzzle flash). Reuses the Tracer phase, but since it has no Line, StepTracer only
+        /// advances the sphere's shrinking. Silently omitted if the total effect cap is exceeded (the
+        /// actual ballistics take priority over visual garnish).</summary>
         private static void SpawnMuzzleFlash(Vector3 at, float size, float duration)
         {
             if (_effects.Count >= MaxLiveEffects) return;
@@ -429,9 +456,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task43: 曲射砲弾を、球のモデルではなく銃撃のような光跡（トレーサー）として描く。
-        /// LineRenderer1本の頭(head)を放物線上のtに沿って進め、尾(tail)をTrailLagTぶん遅らせて追従させる
-        /// ことで、短いストリークが弧を描いて飛んでいくように見せる（StepArcTravel参照）。</summary>
+        /// <summary>Task43: draws the indirect-fire shell as a gunfire-like light trail (tracer) instead
+        /// of a sphere model. Advancing the head of a single LineRenderer along the parabola at t while
+        /// the tail follows lagging by TrailLagT makes a short streak appear to fly in an arc (see
+        /// StepArcTravel).</summary>
         private static void SpawnArc(Vector3 from, Vector3 to)
         {
             Material trailMaterial = GetArcTrailMaterial();
@@ -445,7 +473,8 @@ namespace CSWarfront.Game
                 line.useWorldSpace = true;
                 line.SetVertexCount(ArcSegments + 1);
                 line.SetWidth(ArcTrailWidth, ArcTrailWidth);
-                // 初回StepArcTravelまでの1フレーム、伸び切った光跡が一瞬見えないよう全頂点を発射点に畳んでおく。
+                // Fold all vertices onto the launch point so a fully stretched trail is not visible for
+                // the one frame before the first StepArcTravel.
                 for (int i = 0; i <= ArcSegments; i++) line.SetPosition(i, from);
 
                 float horizontalDist = Mathf.Sqrt((to.x - from.x) * (to.x - from.x) + (to.z - from.z) * (to.z - from.z));
@@ -469,8 +498,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>クリック選択のraycastを邪魔しないよう、Colliderを無効化した小さな球を作る
-        /// （マズルフラッシュ／曳光弾／着弾噴煙で共用）。</summary>
+        /// <summary>Creates a small sphere with its Collider disabled so it does not interfere with the
+        /// click-selection raycast (shared by muzzle flashes / tracers / impact puffs).</summary>
         private static Transform CreateSmallSphere(Transform parent, Vector3 worldPos, float size, Material material)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -502,20 +531,23 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>放物線上のパラメータt(0=発射, 1=着弾)における世界座標を返す（Task43:
-        /// StepArcTravelが光跡の頭・尾の両方でこれを呼ぶための共通ヘルパー）。</summary>
+        /// <summary>Returns the world position at parameter t (0=launch, 1=impact) on the parabola
+        /// (Task43: a shared helper so StepArcTravel can call this for both the head and the tail of
+        /// the trail).</summary>
         private static Vector3 ArcPositionAt(Effect fx, float t)
         {
             t = Mathf.Clamp01(t);
             Vector3 pos = Vector3.Lerp(fx.From, fx.To, t);
-            // 4*apex*t*(1-t): t=0(発射)/1(着弾)で0、t=0.5でapex高さになる標準的な放物線補間。
+            // 4*apex*t*(1-t): the standard parabolic interpolation — 0 at t=0 (launch) / t=1 (impact),
+            // apex height at t=0.5.
             pos.y += 4f * fx.ApexHeight * t * (1f - t);
             return pos;
         }
 
-        /// <summary>Task108: 発射点(t=0)から現在の弾位置(t)までの放物線を、ArcSegmentsぶんの折れ線で
-        /// なぞる（＝弾道そのものの曲線が伸びていく）。従来は頂点2個で「弧上の2点を結ぶ弦」を描いており、
-        /// 弾道の曲線から大きく外れて見えていた（ユーザー報告「光跡がものすごくずれて見える」）。</summary>
+        /// <summary>Task108: traces the parabola from the launch point (t=0) to the shell's current
+        /// position (t) with a polyline of ArcSegments segments (= the ballistic curve itself grows).
+        /// Previously two vertices drew "the chord connecting two points on the arc", which visibly
+        /// diverged from the ballistic curve (user report "the light trail looks wildly off").</summary>
         private static void StepArcTravel(Effect fx)
         {
             if (fx.Line == null) return;
@@ -532,10 +564,12 @@ namespace CSWarfront.Game
             fx.FlashOrShell.localScale = new Vector3(s, s, s);
         }
 
-        /// <summary>着弾した光跡(Line)を消し、代わりに小さな着弾噴煙(puff)を1つだけ生成して継続する
-        /// （Task43: 曲射砲弾の「弾」表現が球からトレーサーに変わったため、旧実装のように既存の球を
-        /// 使い回すのではなく、この時点で初めて着弾フラッシュ用の球を作る。曲射砲弾自体は最後まで球にしない）。
-        /// 転生に失敗した場合はエフェクトを取り残さないよう即座に破棄する。</summary>
+        /// <summary>Hides the trail (Line) that landed, and instead spawns exactly one small impact puff
+        /// and continues (Task43: since the indirect shell's "projectile" representation changed from a
+        /// sphere to a tracer, we do not reuse an existing sphere like the old implementation did — the
+        /// impact-flash sphere is created for the first time at this point. The shell itself is never a
+        /// sphere at any stage). If the reincarnation fails, the effect is destroyed immediately so it
+        /// is not left behind.</summary>
         private static void TransitionToImpactPuff(Effect fx)
         {
             try

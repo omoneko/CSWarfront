@@ -8,29 +8,33 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// クリック選択したユニットのステータスパネル（Task31/Task32）。UnitSelection.SelectedInstanceIdが0以外、
-    /// かつ MilitaryManager.TryGetUnitSnapshot がそのidの生存ユニットを返す間だけ表示する。
+    /// Status panel for the unit selected by clicking (Task31/Task32). Shown only while
+    /// UnitSelection.SelectedInstanceId is non-zero and MilitaryManager.TryGetUnitSnapshot returns a living
+    /// unit for that id.
     ///
-    /// Task32: 画面上の対象ユニットへ追従する（CSのバニラ車両/市民ワールド情報パネルと同様）。
-    /// BaseInfoPanel（Game/UI/BaseInfoPanel.cs）と異なり「バニラパネルの隣に追従」する方式ではない
-    /// —— ユニット選択はCSのWorldInfoPanelシステムと無関係な自前クリック判定（UnitSelection）のため、
-    /// 追従すべきバニラパネルが存在しない。代わりに UnitVisuals.TryGetPosition で取得した実際の
-    /// 描画位置（ワールド座標）を毎フレーム画面座標へ変換し、その真上にパネルを配置する。
+    /// Task32: follows the target unit on screen (like CS's vanilla vehicle/citizen world info panels).
+    /// Unlike BaseInfoPanel (Game/UI/BaseInfoPanel.cs), this is NOT the "follow alongside a vanilla panel"
+    /// approach — unit selection uses our own click hit-testing (UnitSelection) unrelated to CS's
+    /// WorldInfoPanel system, so there is no vanilla panel to follow. Instead, the actual render position
+    /// (world coordinates) obtained via UnitVisuals.TryGetPosition is converted to screen coordinates every
+    /// frame and the panel is placed directly above it.
     ///
-    /// スレッド注記: このクラスの public メソッドは全てメインスレッド専用（Unity UI API呼び出しのため）。
-    /// WarfrontThreadingExtension.OnUpdate から毎フレーム呼ばれる想定。WarState へは一切直接触れず、
-    /// MilitaryManager.TryGetUnitSnapshot / UnitVisuals.TryGetPosition 経由でのみ読む（_stateLock は
-    /// 前者の内部で短時間だけ取られ、ここでは保持しない）。
+    /// Threading note: all public methods of this class are main-thread only (because they call Unity UI
+    /// APIs). Expected to be called every frame from WarfrontThreadingExtension.OnUpdate. Never touches
+    /// WarState directly; reads only via MilitaryManager.TryGetUnitSnapshot / UnitVisuals.TryGetPosition
+    /// (_stateLock is taken briefly inside the former and never held here).
     /// </summary>
     internal static class UnitInfoPanel
     {
         private const string PanelName = "CSWarfrontUnitInfoPanel";
 
-        // Task33: 旧240pxではステータス行が wordWrap 前提の幅に収まらず、単語単位の折り返しで
-        // 「状態」「目標」「経路」がパネル外/下にはみ出していた。ラベルは wordWrap=false に固定し、
-        // パネル幅は最長行（「装甲: 100    速度: 50km/h」「目標: ユニット#<uint>」等）がtextScale=0.75
-        // で収まる幅まで拡張する（全角≈16px/半角≈9px @ scale1.0 の概算＋安全マージンで最長行は約163px、
-        // 実測フォントとの誤差に備え260px（内側幅244px）を確保）。
+        // Task33: at the old 240px the status lines did not fit within a wordWrap-based width, and the
+        // word-level wrapping pushed "Status", "Target", and "Path" outside/below the panel. The label is
+        // now fixed to wordWrap=false, and the panel width is widened until the longest line
+        // ("Armor: 100    Speed: 50km/h", "Target: Unit#<uint>", etc.) fits at textScale=0.75 (a rough
+        // estimate of full-width≈16px/half-width≈9px @ scale1.0 plus a safety margin puts the longest line
+        // at about 163px; 260px (244px inner width) is reserved to allow for deviation from the actual
+        // font metrics).
         private const float PanelWidth = 260f;
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
@@ -38,9 +42,10 @@ namespace CSWarfront.Game.UI
         private const float ButtonGap = 4f;
 
         /// <summary>
-        /// Task32: パネルをユニットの真上に置くための、ワールド座標での上方オフセット。
-        /// 可視性マーカー（UnitVisuals.MarkerSize=8、地面から MarkerHeight=5 持ち上げて中心配置なので
-        /// 上端はおよそ地上+9）より確実に高い位置を狙い、+12 とした（上端との間に約3ユニットの余白）。
+        /// Task32: upward offset in world coordinates for placing the panel directly above the unit.
+        /// Aims reliably higher than the visibility marker (UnitVisuals.MarkerSize=8, lifted MarkerHeight=5
+        /// off the ground and center-positioned, so its top is roughly ground+9); chose +12 (about 3 units
+        /// of clearance above the marker top).
         /// </summary>
         private static readonly Vector3 VerticalOffset = new Vector3(0f, 12f, 0f);
 
@@ -48,41 +53,43 @@ namespace CSWarfront.Game.UI
         private static UILabel _titleLabel;
         private static UIButton _closeButton;
         private static UIButton _collapseButton;
-        private static PanelChrome.Handles _chrome; // Task40: タイトル行の最小化ボタン+ドラッグハンドル
+        private static PanelChrome.Handles _chrome; // Task40: collapse button + drag handle on the title row
         private static UILabel _statusLabel;
         private static bool _loggedCreated;
 
-        /// <summary>Task40: このパネルには元々最小化機能が無かったため新設。BaseInfoPanel.ApplyCollapsedState
-        /// と同じ考え方（タイトル行だけを残して畳む）。セッション中は選択解除・再選択をまたいで保持する。</summary>
+        /// <summary>Task40: newly added because this panel originally had no collapse feature. Same idea as
+        /// BaseInfoPanel.ApplyCollapsedState (fold down to just the title row). Persists across
+        /// deselect/reselect within the session.</summary>
         private static bool _collapsed;
 
-        /// <summary>Task40: 展開時の全体高さキャッシュ（BaseInfoPanel._expandedHeightと同じ役割）。</summary>
+        /// <summary>Task40: cached full height when expanded (same role as BaseInfoPanel._expandedHeight).</summary>
         private static float _expandedHeight;
 
         /// <summary>
-        /// Task40: ユーザーがタイトル行をドラッグした後は true になり、その間は UpdateTrackingPosition
-        /// による毎フレームのユニット追従を止める（ドラッグ位置を維持するため）。パネルが「閉じる」
-        /// （選択解除・×ボタン・対象ユニット消失）と false に戻り、次に選択したユニットには
-        /// 通常どおり追従する。
+        /// Task40: becomes true after the user drags the title row; while true, the per-frame unit tracking
+        /// by UpdateTrackingPosition is stopped (to preserve the dragged position). Reset to false when the
+        /// panel "closes" (deselection, the × button, or the target unit disappearing), so the next selected
+        /// unit is tracked normally again.
         /// </summary>
         private static bool _detached;
 
-        /// <summary>RefreshContents で毎フレーム再利用するバッファ（BaseInfoPanelと同じ理由：
-        /// 文字列連結の毎フレームアロケーションを避けるため、StringBuilder.Clear() で使い回す）。</summary>
+        /// <summary>Buffer reused every frame by RefreshContents (same reason as BaseInfoPanel: avoid
+        /// per-frame allocations from string concatenation by reusing via StringBuilder.Clear()).</summary>
         private static readonly StringBuilder _statusBuilder = new StringBuilder(256);
 
         /// <summary>
-        /// 冪等。まだ生成していなければ UIView が準備できた時点で自前パネルを構築する
-        /// （BaseInfoPanel.EnsureCreated と同じ「毎フレームポーリングして条件が揃ったら一度だけ作る」方式）。
+        /// Idempotent. Builds our own panel once the UIView is ready, if not created yet
+        /// (same "poll every frame and create exactly once when the conditions are met" approach as
+        /// BaseInfoPanel.EnsureCreated).
         /// </summary>
         public static void EnsureCreated()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (_panel != null) return;
                 UIView view = PanelChrome.GetCachedView();
-                if (view == null) return; // UI未初期化。次フレーム再試行。
+                if (view == null) return; // UI not initialized yet. Retry next frame.
                 Build(view);
             }
             catch (Exception e)
@@ -92,22 +99,23 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// 毎メインスレッドフレーム呼ぶ。選択中ユニットが存在する間だけ表示・内容更新し、それ以外は隠す。
-        /// 選択中ユニットが死亡/削除等で見つからなくなった場合は、パネルを隠すと同時に選択も解除する
-        /// （消えたユニットを選択したまま次のクリックまで待たされる状態を避けるため）。
+        /// Call every main-thread frame. Shows and refreshes the panel only while a selected unit exists;
+        /// hides it otherwise. If the selected unit can no longer be found (dead/removed etc.), the panel is
+        /// hidden and the selection is cleared at the same time (to avoid being stuck with a vanished unit
+        /// selected until the next click).
         /// </summary>
         public static void UpdateVisibility()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
-                if (_panel == null) return; // EnsureCreated 待ち
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
+                if (_panel == null) return; // Waiting for EnsureCreated
 
-                // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、
-                // 生のUIPanelだけを隠す（_detached等のロジック状態には一切触れない）。private Hide()を
-                // 経由しない理由はBaseInfoPanel.UpdateVisibilityと同じ（Hide()は「選択解除」相当で
-                // _detached=falseにリセットしてしまい、メニューを閉じた次のフレームで同じユニットへ
-                // 通常どおり追従復帰できなくなる）。
+                // Task47: while the vanilla Esc menu is open, skip this frame's processing entirely and hide
+                // only the raw UIPanel (never touching logic state such as _detached). The reason for not
+                // going through the private Hide() is the same as BaseInfoPanel.UpdateVisibility (Hide() is
+                // equivalent to "deselection" and would reset _detached=false, so on the frame after closing
+                // the menu the panel could no longer resume tracking the same unit normally).
                 if (PanelChrome.IsGameMenuOpen())
                 {
                     if (_panel.isVisible) _panel.Hide();
@@ -129,7 +137,7 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                // Task40: 折りたたみ中はタイトル行しか見えないため再構築は無駄（BaseInfoPanelと同じ最適化）。
+                // Task40: while collapsed only the title row is visible, so rebuilding is wasted work (same optimization as BaseInfoPanel).
                 if (!_collapsed) RefreshContents(snapshot);
                 UpdateTrackingPosition(selected);
             }
@@ -139,7 +147,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。パネルを破棄し静的状態を残さない。</summary>
+        /// <summary>Call at level unload (via MilitaryManager.Reset). Destroys the panel and leaves no static state behind.</summary>
         public static void Destroy()
         {
             try
@@ -167,10 +175,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>パネルを隠す。Task40: 「閉じる」（選択解除・×ボタン・対象ユニット消失）相当のため、
-        /// 切り離しモードも解除し次の選択には通常どおり追従させる。UpdateTrackingPosition内の
-        /// 一時的な非表示経路（可視表現未生成/カメラ後方等）は、_detached=true の間は別枝で早期returnし
-        /// ここを通らないため、ドラッグ中に誤ってリセットされる心配はない。</summary>
+        /// <summary>Hides the panel. Task40: this is equivalent to "closing" (deselection, the × button, or
+        /// the target unit disappearing), so it also exits detached mode, letting the next selection be
+        /// tracked normally. The temporary hide paths inside UpdateTrackingPosition (visual not yet created /
+        /// behind the camera etc.) early-return on a separate branch while _detached==true and never reach
+        /// here, so there is no risk of an accidental reset during a drag.</summary>
         private static void Hide()
         {
             if (_panel != null && _panel.isVisible) _panel.Hide();
@@ -179,7 +188,7 @@ namespace CSWarfront.Game.UI
 
         private static void Build(UIView view)
         {
-            if (view.FindUIComponent<UIPanel>(PanelName) != null) return; // 二重生成防止
+            if (view.FindUIComponent<UIPanel>(PanelName) != null) return; // Prevent double creation
 
             UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
             if (panel == null)
@@ -195,15 +204,16 @@ namespace CSWarfront.Game.UI
             float w = PanelWidth - Pad * 2f;
             float y = Pad;
 
-            // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
-            // タイトルラベル(非対話的)・最小化ボタン・×(閉じる)ボタン(いずれも対話的)を重ねる。
-            // 後から追加したコンポーネントが前面に来るため、ボタンのクリックはドラッグハンドルに
-            // 横取りされない（BaseInfoPanelと同じ方式、PanelChrome.AddTitleBarChrome参照）。
+            // Task40: first add a drag handle (target=_panel) covering the entire title row, then layer the
+            // title label (non-interactive) plus the collapse button and × (close) button (both interactive)
+            // on top. Components added later render in front, so button clicks are not intercepted by the
+            // drag handle (same approach as BaseInfoPanel; see PanelChrome.AddTitleBarChrome).
             _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
             _chrome.DragHandle.eventMouseDown += OnTitleBarMouseDown;
             _collapseButton = _chrome.CollapseButton;
-            // ×ボタンの左に並べるため、最小化ボタンをさらに左へ動かす（AddTitleBarChromeの既定位置は
-            // パネル右端＝×ボタンと同じ場所のため、ここで詰め直す）。
+            // Move the collapse button further left so it sits to the left of the × button
+            // (AddTitleBarChrome's default position is the panel's right edge = the same spot as the ×
+            // button, so it is repositioned here).
             _collapseButton.relativePosition = new Vector3(
                 PanelWidth - Pad - CloseButtonSize - ButtonGap - PanelChrome.CollapseButtonSize, y);
 
@@ -214,7 +224,7 @@ namespace CSWarfront.Game.UI
             _titleLabel.relativePosition = new Vector3(Pad, y);
 
             _closeButton = _panel.AddUIComponent<UIButton>();
-            _closeButton.text = "×"; // ×（閉じるボタン、必須）
+            _closeButton.text = "×"; // × (close button, required)
             _closeButton.size = new Vector2(CloseButtonSize, CloseButtonSize);
             _closeButton.relativePosition = new Vector3(PanelWidth - Pad - CloseButtonSize, y - 2f);
             _closeButton.textScale = 0.9f;
@@ -227,10 +237,11 @@ namespace CSWarfront.Game.UI
             _statusLabel = _panel.AddUIComponent<UILabel>();
             _statusLabel.textScale = 0.75f;
             _statusLabel.textColor = new Color32(220, 220, 220, 255);
-            // Task33: autoSize(既定true)とwordWrapの組み合わせがラベル幅を単語単位で縮めてしまう不具合の
-            // 直接原因だったため、autoSize=false・wordWrap=false に固定して幅wを維持する。
-            // 代わりに autoHeight=true でラベル自身の高さを実際の行数（"\n"の数）に追従させ、
-            // RecomputePanelHeight() でパネル全体の高さをそこから毎更新算出する。
+            // Task33: the combination of autoSize (default true) and wordWrap was the direct cause of the
+            // bug where the label width shrank word by word, so autoSize=false and wordWrap=false are fixed
+            // and the width w is kept. Instead, autoHeight=true lets the label's own height follow the
+            // actual number of lines (the number of "\n"s), and RecomputePanelHeight() derives the whole
+            // panel's height from it on every refresh.
             _statusLabel.wordWrap = false;
             _statusLabel.autoSize = false;
             _statusLabel.autoHeight = true;
@@ -240,7 +251,7 @@ namespace CSWarfront.Game.UI
 
             RecomputePanelHeight();
             _panel.isVisible = false;
-            ApplyCollapsedState(); // Task40: 展開/折りたたみの初期反映（BaseInfoPanel.Buildと同じ方式）
+            ApplyCollapsedState(); // Task40: initial application of the expanded/collapsed state (same approach as BaseInfoPanel.Build)
 
             if (!_loggedCreated)
             {
@@ -249,7 +260,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>×ボタンのクリックハンドラ。選択を解除してパネルを隠す（ユーザーの明示的な閉じる操作）。</summary>
+        /// <summary>Click handler for the × button. Clears the selection and hides the panel (the user's explicit close action).</summary>
         private static void OnCloseClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -263,8 +274,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: _collapsed の現在値をUIに反映する（BaseInfoPanel.ApplyCollapsedStateと同じ方式）。
-        /// このパネルには折りたたみ対象のセクションがステータスラベル1つしか無いため単純。</summary>
+        /// <summary>Task40: applies the current value of _collapsed to the UI (same approach as
+        /// BaseInfoPanel.ApplyCollapsedState). Simple, since this panel has only one collapsible section:
+        /// the status label.</summary>
         private static void ApplyCollapsedState()
         {
             if (_panel == null) return;
@@ -278,7 +290,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>最小化トグルボタンのクリックハンドラ（BaseInfoPanel.OnCollapseClickと同じ方式）。</summary>
+        /// <summary>Click handler for the collapse toggle button (same approach as BaseInfoPanel.OnCollapseClick).</summary>
         private static void OnCollapseClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -292,16 +304,17 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: タイトル行(ドラッグハンドル)への最初のマウスダウンで「切り離し」モードに入る。
-        /// 以降はUpdateTrackingPositionによる自動追従を止め、UIDragHandle自身がパネルを自由に動かせる
-        /// ようにする（毎フレームの位置上書きとドラッグ操作の競合を避けるため）。Hide()（選択解除・
-        /// ×ボタン・対象ユニット消失）で false に戻る。</summary>
+        /// <summary>Task40: the first mouse down on the title row (drag handle) enters "detached" mode.
+        /// From then on, automatic tracking by UpdateTrackingPosition is stopped so the UIDragHandle itself
+        /// can move the panel freely (avoiding contention between the per-frame position overwrite and the
+        /// drag gesture). Reset to false by Hide() (deselection, the × button, or the target unit
+        /// disappearing).</summary>
         private static void OnTitleBarMouseDown(UIComponent component, UIMouseEventParameter eventParam)
         {
             _detached = true;
         }
 
-        /// <summary>タイトル・ステータスラベルの文言を、ロック内でコピー済みのスナップショットから更新する。</summary>
+        /// <summary>Updates the title and status label text from a snapshot already copied inside the lock.</summary>
         private static void RefreshContents(UnitUiSnapshot snapshot)
         {
             if (_titleLabel != null)
@@ -323,7 +336,7 @@ namespace CSWarfront.Game.UI
                 sb.Append("\nArmor: ").Append(snapshot.Armor.ToString("0")).Append("    Speed: ").Append(snapshot.SpeedKmh.ToString("0")).Append("km/h");
                 sb.Append("\nAccuracy: ").Append((snapshot.Accuracy * 100f).ToString("0")).Append("%");
                 if (snapshot.AccuracyBoosted) sb.Append(" (Spotted)");
-                // Task99: 弾薬ゲージ（弾薬無限の兵科・Invaderは非表示）。弾切れは明示的に警告する。
+                // Task99: ammo gauge (hidden for branches with infinite ammo and for the Invader). Running out of ammo is warned about explicitly.
                 if (snapshot.HasAmmoGauge)
                 {
                     sb.Append("\nAmmo: ").Append((snapshot.Ammo * 100f).ToString("0")).Append("%");
@@ -342,11 +355,13 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// Task33: ステータスラベル（autoHeight有効）の実際の高さからパネル全体高さを算出し、
-        /// 変化があった場合のみ書き換える（毎フレームの無駄なレイアウト再計算を避ける）。
-        /// Task40: 最小化機能の追加により、展開時の高さを _expandedHeight にキャッシュするようになった
-        /// （BaseInfoPanel.RecomputeExpandedHeightと同じ方式。このメソッドは _collapsed==false の時にだけ
-        /// RefreshContents経由で呼ばれるため、常に「展開時の高さ」を計算している前提で問題ない）。
+        /// Task33: derives the whole panel height from the actual height of the status label (with
+        /// autoHeight enabled) and rewrites it only when it changed (avoiding wasteful layout recalculation
+        /// every frame).
+        /// Task40: with the addition of the collapse feature, the expanded height is now cached in
+        /// _expandedHeight (same approach as BaseInfoPanel.RecomputeExpandedHeight. This method is only
+        /// called via RefreshContents while _collapsed==false, so it is safe to assume it always computes
+        /// the "expanded height").
         /// </summary>
         private static void RecomputePanelHeight()
         {
@@ -376,7 +391,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task48: プレイヤーの指揮コマンド（UnitOrder）の表示ラベル。</summary>
+        /// <summary>Task48: display label for the player's command (UnitOrder).</summary>
         private static string OrderLabel(UnitOrder order)
         {
             switch (order)
@@ -389,33 +404,36 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// Task32: 選択中ユニットの実際の描画位置を毎フレーム画面座標へ変換し、その真上にパネルを追従させる。
-        /// 位置決めに必要な前提（可視表現・メインカメラ・UIView）のいずれかが今フレーム揃わない場合、
-        /// または対象がカメラの後方にある場合は、選択を維持したままこのフレームだけパネルを隠す
-        /// （反転表示や誤った位置での表示を避けるため）。
+        /// Task32: converts the selected unit's actual render position to screen coordinates every frame and
+        /// keeps the panel directly above it. If any of the prerequisites for positioning (the visual, the
+        /// main camera, the UIView) is missing this frame, or the target is behind the camera, the panel is
+        /// hidden for this frame only while keeping the selection (to avoid mirrored or wrongly positioned
+        /// display).
         ///
-        /// 座標変換API（ColossalManaged.dll をリフレクション/IL逆アセンブルで確認済み）:
+        /// Coordinate conversion APIs (verified against ColossalManaged.dll via reflection/IL disassembly):
         ///   - UIView.GetAView(): static UIView
         ///   - UIView.WorldPointToGUI(Camera cam, Vector3 worldPoint): Vector2
-        ///     実装は「Camera.WorldToScreenPoint → x/yをそれぞれ (GetScreenResolution() / uiCamera.pixelWidth・
-        ///     pixelHeight) でスケール → UIView.ScreenPointToGUI」という順で、Unity画面座標（左下原点、実ピクセル）
-        ///     を UIView の仮想GUI解像度（GetScreenResolution()、relativePosition等が使う座標系）へ正しく
-        ///     変換してくれる。
-        ///   - UIView.ScreenPointToGUI(Vector2): Vector2 単体では
-        ///     `result.y = GetScreenResolution().y - result.y` という単純なY反転のみで、実画面ピクセルと
-        ///     UIViewの仮想解像度が異なる場合（UIスケール設定等）にX/Yのスケール補正を行わない。
-        ///     そのため本メソッドでは「カメラ背後判定」にのみ Camera.WorldToScreenPoint を自前で呼び、
-        ///     実際のGUI座標への変換は上記の理由から WorldPointToGUI に委ねる
-        ///     （どちらも UIView.GetAView() 経由で得た同一 UIView インスタンス上のメソッド）。
+        ///     The implementation is "Camera.WorldToScreenPoint → scale x/y by
+        ///     (GetScreenResolution() / uiCamera.pixelWidth and pixelHeight respectively) →
+        ///     UIView.ScreenPointToGUI", which correctly converts Unity screen coordinates (bottom-left
+        ///     origin, real pixels) into UIView's virtual GUI resolution (GetScreenResolution(), the
+        ///     coordinate space used by relativePosition etc.).
+        ///   - UIView.ScreenPointToGUI(Vector2): Vector2 — on its own this only performs the simple Y-flip
+        ///     `result.y = GetScreenResolution().y - result.y` and applies no X/Y scale correction when the
+        ///     real screen pixels and UIView's virtual resolution differ (UI scale setting etc.).
+        ///     Therefore this method calls Camera.WorldToScreenPoint itself only for the "behind the camera"
+        ///     check, and delegates the actual conversion to GUI coordinates to WorldPointToGUI for the
+        ///     reason above (both are methods on the same UIView instance obtained via UIView.GetAView()).
         /// </summary>
         private static void UpdateTrackingPosition(uint instanceId)
         {
             if (_panel == null) return;
 
-            // Task40: ユーザーがタイトル行をドラッグ済み（切り離しモード）の間は、ここで完全に
-            // スキップして毎フレームの位置上書きを止める（UIDragHandle自身が動かした位置を維持する）。
-            // 世界座標・カメラ・UIViewが今フレーム揃わない場合の一時非表示（下記のHide()呼び出し群）も
-            // 併せて不要になる：追従自体をしないので、それらの前提が無くても表示を維持してよい。
+            // Task40: while the user has already dragged the title row (detached mode), skip entirely here
+            // and stop the per-frame position overwrite (preserving the position the UIDragHandle itself
+            // moved the panel to). The temporary hides for when the world position / camera / UIView are
+            // missing this frame (the Hide() calls below) also become unnecessary: since we are not tracking
+            // at all, the panel may stay visible even without those prerequisites.
             if (_detached)
             {
                 if (!_panel.isVisible) _panel.Show();
@@ -426,18 +444,18 @@ namespace CSWarfront.Game.UI
             Vector3 unitPos;
             if (!UnitVisuals.TryGetPosition(instanceId, out unitPos))
             {
-                Hide(); // 見た目が今フレーム未生成/破棄済み。選択は維持し次フレーム再試行。
+                Hide(); // The visual is not created yet / already destroyed this frame. Keep the selection and retry next frame.
                 return;
             }
 
             Camera cam = Camera.main;
             if (cam == null)
             {
-                Hide(); // カメラ未準備（レベルロード中等）。選択は維持し次フレーム再試行。
+                Hide(); // Camera not ready (during level load etc.). Keep the selection and retry next frame.
                 return;
             }
 
-            UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
+            UIView view = PanelChrome.GetCachedView(); // Task56: called every frame, so use the cached accessor
             if (view == null)
             {
                 Hide();
@@ -446,12 +464,12 @@ namespace CSWarfront.Game.UI
 
             Vector3 targetPos = unitPos + VerticalOffset;
 
-            // カメラ後方判定専用。GUI座標そのものはこの下で WorldPointToGUI に委ねる
-            // （クラスコメント参照：ScreenPointToGUI単体はスケール未補正のため）。
+            // Only for the behind-the-camera check. The GUI coordinates themselves are delegated to
+            // WorldPointToGUI below (see the class comment: ScreenPointToGUI alone lacks the scale correction).
             Vector3 screenPoint = cam.WorldToScreenPoint(targetPos);
             if (screenPoint.z <= 0f)
             {
-                // カメラの後方＝そのままではミラー表示されてしまうため、このフレームは隠す（選択は維持）。
+                // Behind the camera = it would be displayed mirrored as-is, so hide for this frame (keeping the selection).
                 Hide();
                 return;
             }
@@ -459,11 +477,11 @@ namespace CSWarfront.Game.UI
             Vector2 guiPoint = view.WorldPointToGUI(cam, targetPos);
             Vector2 res = view.GetScreenResolution();
 
-            // 水平方向はユニット中心、垂直方向はパネル全体をguiPointの上に来るように配置。
+            // Horizontally centered on the unit; vertically, place the whole panel above guiPoint.
             float x = guiPoint.x - _panel.width * 0.5f;
             float y = guiPoint.y - _panel.height;
 
-            // 画面のどの辺からもパネル全体がはみ出さないようクランプする。
+            // Clamp so the whole panel never spills over any edge of the screen.
             x = Mathf.Clamp(x, 0f, Mathf.Max(0f, res.x - _panel.width));
             y = Mathf.Clamp(y, 0f, Mathf.Max(0f, res.y - _panel.height));
 

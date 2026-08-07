@@ -6,94 +6,101 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task71: 勢力別アセットのオーバーレイ（<see cref="BaseVisuals"/>）が表示されている拠点について、
-    /// バニラ/既定モデルの建物メッシュを Building.Flags.Hidden で個別に隠す（要件2、
-    /// オーバーレイと二重描画（スタッキング）にならないようにする）。
+    /// Task71: for bases whose per-faction asset overlay (<see cref="BaseVisuals"/>) is shown, hides
+    /// the vanilla/default-model building mesh individually via Building.Flags.Hidden (requirement 2:
+    /// avoid double rendering (stacking) with the overlay).
     ///
-    /// なぜ Building.Flags.Hidden か（ゲーム本体 Assembly-CSharp.dll を ilspycmd で逆コンパイルして
-    /// 確認済み、詳細は task-71-report.md）:
-    ///   - Building.RenderInstance の先頭:
+    /// Why Building.Flags.Hidden (confirmed by decompiling the game's Assembly-CSharp.dll with
+    /// ilspycmd; details in task-71-report.md):
+    ///   - The top of Building.RenderInstance:
     ///     `if ((flags &amp; (Flags.Created | Flags.Deleted | Flags.Hidden)) != Flags.Created) return;`
-    ///     によりメッシュ/LOD/props/通知アイコンの描画呼び出しが丸ごとスキップされる。
-    ///   - クリック選択のヒット判定（BuildingManager.RayCast → Building.RayCast(buildingID, ray, out t)）
-    ///     はレンダリングと完全に独立した、footprint（Width/Length）に対する幾何グリッドラウンド
-    ///     キャストであり、Hiddenフラグを一切参照しない（呼び出し元が渡す ignoreFlags に Hidden を
-    ///     含めない限り素通りする）。よって選択・BaseInfoPanel・占領（Core側はCS実体のflagsを
-    ///     一切見ない）は Hidden を立てても壊れない。
-    ///   - PlayAudio のみ Hidden 中は無音になる（既知の軽微な副作用として許容: 見た目を差し替えて
-    ///     いる拠点で環境音が消える程度）。
+    ///     skips the mesh/LOD/props/notification-icon render calls entirely.
+    ///   - The click-selection hit test (BuildingManager.RayCast → Building.RayCast(buildingID, ray, out t))
+    ///     is a geometric grid raycast against the footprint (Width/Length), completely independent of
+    ///     rendering, and never consults the Hidden flag (it passes right through unless the caller
+    ///     includes Hidden in the ignoreFlags it supplies). Therefore selection, BaseInfoPanel, and
+    ///     capture (the Core side never looks at CS-entity flags) do not break when Hidden is set.
+    ///   - Only PlayAudio goes silent while Hidden (accepted as a known minor side effect: at most,
+    ///     ambient sound disappears on bases whose appearance is swapped).
     ///
-    /// スレッド境界:
-    ///   - <see cref="SetDesired"/> はメインスレッド専用。BaseVisuals（オーバーレイのGameObject
-    ///     生成/破棄と同じ箇所）からのみ呼ぶ。CS実体（Building構造体）には一切触れず、
-    ///     (baseId, hidden) のペンディングをロックで保護した辞書へ積むだけ
-    ///     （BasePlacementWatcher._pendingCreated/_pendingReleasedと全く同じブリッジパターン）。
-    ///   - <see cref="ApplyPending"/> はsimスレッド専用（MilitaryManager.OnSimTick、_stateLock
-    ///     保持中）から呼び、ペンディングを排出してCS建物バッファへ実際に書き込む。
-    ///   - <see cref="IsHiddenApplied"/> はメインスレッド専用。Hiddenが実際にCS建物バッファへ
-    ///     反映済みかどうかを _lock 経由で安全に読む（Task75、BaseVisuals参照）。
+    /// Thread boundary:
+    ///   - <see cref="SetDesired"/> is main-thread-only. Called only from BaseVisuals (the same places
+    ///     that create/destroy the overlay GameObjects). It never touches CS entities (the Building
+    ///     struct); it merely pushes a (baseId, hidden) pending entry into a lock-protected dictionary
+    ///     (exactly the same bridge pattern as BasePlacementWatcher._pendingCreated/_pendingReleased).
+    ///   - <see cref="ApplyPending"/> is sim-thread-only (called from MilitaryManager.OnSimTick while
+    ///     holding _stateLock); it drains the pending entries and actually writes into the CS building
+    ///     buffer.
+    ///   - <see cref="IsHiddenApplied"/> is main-thread-only. Safely reads via _lock whether Hidden has
+    ///     actually been applied to the CS building buffer (Task75, see BaseVisuals).
     ///
-    /// Task75（基地二重表示バグの根本原因と修正、当時の経緯）:
-    ///   実機ログ（output_log.txt）で確認したところ、このMODで実際に配置された基地は全て
-    ///   Task74の「Optionsで指定した建物アセット」経路（<see cref="BaseBuildingDesignation"/>）
-    ///   で登録されていた（例: Info.name="MilitaryBase_Army.MilitaryBase_Army_Data"、当時まだ
-    ///   登録されていた電力タブの複製プレハブ名"CSWarfront Military Base"等ではない）。ところが
-    ///   旧実装の <see cref="ApplyPending"/> は「対象は必ず当時の電力タブ複製プレハブ機構が登録した
-    ///   自MOD基地プレハブと一致するidのみに限定する」保険チェックのみを見ており、Task74で追加された
-    ///   もう一方の正規登録経路（BaseBuildingDesignation）を見ていなかった（Task61時点のコメントの
-    ///   まま更新されていなかった）。
-    ///   結果、BaseBuildingDesignation経由で登録された基地は BaseVisuals.Sync がオーバーレイを生成し
-    ///   SetDesiredで「隠すべき」と要求しても、当時の保険チェックが常にfalseを返すため
-    ///   Building.Flags.Hidden が永久に立たない＝バニラの実体とオーバーレイが同時に描画され続ける
-    ///   （プレイヤーが割り当てたオーバーレイのアセット名と配置に使ったアセット名が一致していれば、
-    ///   文字通り「同じ建物」が重なって見える。占領等でそのオーバーレイが破棄されるまで消えない
-    ///   ＝ユーザー報告の「一定時間」と一致）。修正: BasePlacementWatcher.ProcessCreatedと全く同じ
-    ///   判定に揃えた（Task82で電力タブの複製プレハブ機構自体を完全撤去した現在は、判定は
-    ///   BaseBuildingDesignation.TryMatchの一本のみ）。
+    /// Task75 (root cause and fix of the base double-rendering bug — the history at the time):
+    ///   Checking the live-game log (output_log.txt) showed that every base actually placed by this
+    ///   mod had been registered via Task74's "Options-designated building asset" path
+    ///   (<see cref="BaseBuildingDesignation"/>) (e.g. Info.name="MilitaryBase_Army.MilitaryBase_Army_Data",
+    ///   not the power-tab cloned-prefab name "CSWarfront Military Base" etc. that was still registered
+    ///   back then). However, the old implementation of <see cref="ApplyPending"/> only looked at the
+    ///   safety check "the target must be limited to ids matching our mod's base prefab registered by
+    ///   the then power-tab cloned-prefab mechanism", and did not look at the other legitimate
+    ///   registration path added in Task74 (BaseBuildingDesignation) (the comment had never been
+    ///   updated since Task61).
+    ///   As a result, for bases registered via BaseBuildingDesignation, even though BaseVisuals.Sync
+    ///   created an overlay and requested "should be hidden" via SetDesired, the then safety check
+    ///   always returned false, so Building.Flags.Hidden was never set = the vanilla entity and the
+    ///   overlay kept being rendered simultaneously (if the asset name the player assigned to the
+    ///   overlay matched the asset name used for placement, literally "the same building" appeared
+    ///   stacked. It did not disappear until that overlay was destroyed, e.g. by capture — matching the
+    ///   user report of "for a while"). Fix: aligned with exactly the same check as
+    ///   BasePlacementWatcher.ProcessCreated (now that Task82 has completely removed the power-tab
+    ///   cloned-prefab mechanism itself, the check is solely BaseBuildingDesignation.TryMatch).
     ///
-    ///   加えて、これとは独立した理論上の競合（メインスレッドでオーバーレイ生成 → 次のsimスレッド
-    ///   tickでHidden反映、の1tick分のギャップ）も閉じる。<see cref="_confirmedHidden"/>
-    ///   （ApplyPendingが実際にHiddenを立てた瞬間だけ追加）を新設し、BaseVisuals.Syncは
-    ///   IsHiddenAppliedがtrueを返すまでオーバーレイの生成を待つ（先にSetDesired(true)だけ発行し、
-    ///   確認が取れてから初めてGameObjectを作る）。これにより「バニラ実体とオーバーレイが同一フレームで
-    ///   同時に見える瞬間」が理論上も発生しなくなる。
+    ///   Additionally, an independent theoretical race (the 1-tick gap of "overlay created on the main
+    ///   thread → Hidden applied on the next sim-thread tick") is also closed. A new
+    ///   <see cref="_confirmedHidden"/> (added only at the moment ApplyPending actually sets Hidden)
+    ///   was introduced, and BaseVisuals.Sync waits to create the overlay until IsHiddenApplied returns
+    ///   true (it first issues only SetDesired(true), and creates the GameObject only after
+    ///   confirmation). This eliminates, even in theory, any moment where "the vanilla entity and the
+    ///   overlay are visible simultaneously in the same frame".
     /// </summary>
     internal static class BaseHiddenSync
     {
         private static readonly object _lock = new object();
         private static readonly Dictionary<ushort, bool> _pending = new Dictionary<ushort, bool>();
 
-        // Task75: ApplyPendingが実際にBuilding.Flags.Hiddenを立てた（かつ、まだ外していない）baseIdの集合。
-        // _lock で保護し、メインスレッド（IsHiddenApplied経由）とsimスレッド（ApplyPending経由）の
-        // 両方から安全にアクセスできるようにする（_pendingと同じロックを共有、専用ロックを増やさない）。
-        // UnhideAllForSave/ReapplyAfterSaveはセーブ処理向けの一時的な物理ビット操作であり、このMODの
-        // 「隠したい」という論理的な意図（＝オーバーレイがその基地を代表しているという事実）は変わらない
-        // ため、この2メソッドはここを一切更新しない（更新するとセーブ中にオーバーレイが一瞬消える）。
+        // Task75: the set of baseIds for which ApplyPending actually set Building.Flags.Hidden (and has
+        // not yet cleared it). Protected by _lock so it can be accessed safely from both the main
+        // thread (via IsHiddenApplied) and the sim thread (via ApplyPending) (shares the same lock as
+        // _pending; no extra dedicated lock is added).
+        // UnhideAllForSave/ReapplyAfterSave are temporary physical bit operations for the save process;
+        // this mod's logical intent to "hide" (= the fact that an overlay represents that base) does
+        // not change, so those two methods never update this set (updating it would make the overlay
+        // vanish for a moment during saving).
         private static readonly HashSet<ushort> _confirmedHidden = new HashSet<ushort>();
 
-        // Task72: 現在このMODが Building.Flags.Hidden を立てていると認識している建物id集合
-        // （simスレッド専用、ロック不要＝MilitaryManager.OnSimTick/SerializeLocked経由の
-        // _stateLock内、またはReset()＝レベルアンロード時のメインスレッドからのみ触られる。
-        // CombatRoadBlocker._ownedと全く同じ所有権追跡パターン）。ApplyPendingが実際にフラグを
-        // 立てた/消した瞬間にだけ更新する。セーブ直前後のクリア/再アサート（UnhideAllForSave/
-        // ReapplyAfterSave）とレベルアンロード時の一括解除（Reset）は、この集合を頼りに
-        // 「今どの建物が隠れているか」を知る。
+        // Task72: the set of building ids this mod currently believes it has Building.Flags.Hidden set
+        // on (sim-thread-only, no lock needed = touched only inside _stateLock via
+        // MilitaryManager.OnSimTick/SerializeLocked, or from the main thread via Reset() = level
+        // unload. Exactly the same ownership-tracking pattern as CombatRoadBlocker._owned). Updated
+        // only at the moments ApplyPending actually sets/clears the flag. The clear/re-assert around a
+        // save (UnhideAllForSave/ReapplyAfterSave) and the bulk release on level unload (Reset) rely on
+        // this set to know "which buildings are currently hidden".
         private static readonly HashSet<ushort> _hiddenIds = new HashSet<ushort>();
 
-        /// <summary>メインスレッド専用。次回 <see cref="ApplyPending"/> で反映される「この拠点を
-        /// 隠すべきか」の最新の希望状態を記録する（同一tick内に複数回呼ばれても最後の値だけが残る
-        /// ＝上書きでよい）。</summary>
+        /// <summary>Main thread only. Records the latest desired state of "should this base be hidden",
+        /// to be applied on the next <see cref="ApplyPending"/> (if called multiple times within the
+        /// same tick, only the last value remains = overwriting is fine).</summary>
         public static void SetDesired(ushort baseId, bool hidden)
         {
             lock (_lock) { _pending[baseId] = hidden; }
         }
 
         /// <summary>
-        /// メインスレッド専用（Task75）。<see cref="SetDesired"/>(baseId, true) で要求した
-        /// Hiddenが、simスレッドの <see cref="ApplyPending"/> によって実際にCS建物バッファへ
-        /// 反映済みかどうかを返す。BaseVisualsはこれがtrueになるまでオーバーレイのGameObjectを
-        /// 生成しない（生成前に隠れていないバニラ実体と一瞬でも同時に見える＝報告された二重表示
-        /// バグを、確認が取れるまで待つことで構造的に防ぐ）。
+        /// Main thread only (Task75). Returns whether the Hidden requested via
+        /// <see cref="SetDesired"/>(baseId, true) has actually been applied to the CS building buffer
+        /// by the sim thread's <see cref="ApplyPending"/>. BaseVisuals does not create the overlay
+        /// GameObject until this returns true (waiting until confirmation structurally prevents the
+        /// reported double-rendering bug where the not-yet-hidden vanilla entity would be visible
+        /// simultaneously, even for an instant, before creation).
         /// </summary>
         public static bool IsHiddenApplied(ushort baseId)
         {
@@ -101,12 +108,14 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// simスレッド専用（呼び出し元が _stateLock を保持していること）。ペンディングを排出し、
-        /// CS建物バッファの Flags.Hidden ビットへ反映する。対象は必ずOptions指定建物
-        /// （BaseBuildingDesignation）に一致するidのみに限定する（他Modや通常建物のidを誤って
-        /// 書き換えないための保険。idは常に BasePlacementWatcher.ProcessCreated が TryMatch で
-        /// 確認済みのものだけが WarState.Bases → BaseVisuals.Sync のスナップショット経由でここに来る
-        /// ため理論上は不要だが、CS建物バッファへの直接ビット書き込みという性質上、多層防御として維持する）。
+        /// Sim thread only (the caller must hold _stateLock). Drains the pending entries and applies
+        /// them to the Flags.Hidden bit in the CS building buffer. Targets are strictly limited to ids
+        /// matching the Options-designated building (BaseBuildingDesignation) (a safeguard against
+        /// accidentally rewriting ids of other mods or ordinary buildings. In theory this is
+        /// unnecessary, since only ids already verified via TryMatch by
+        /// BasePlacementWatcher.ProcessCreated ever arrive here through the WarState.Bases →
+        /// BaseVisuals.Sync snapshot, but given the nature of writing bits directly into the CS
+        /// building buffer, it is kept as defense in depth).
         /// </summary>
         public static void ApplyPending()
         {
@@ -121,8 +130,9 @@ namespace CSWarfront.Game
             if (!Singleton<BuildingManager>.exists) return;
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
 
-            // Task75: このtickで確定した確認状態の変化を集め、Building構造体のロックとは別に
-            // 一度だけ_lockを取って反映する（ループ本体を_lock保持中に回さないため）。
+            // Task75: collect the confirmation-state changes finalized in this tick, and apply them by
+            // taking _lock just once, separately from the Building struct writes (so the loop body does
+            // not run while holding _lock).
             List<ushort> newlyHidden = null;
             List<ushort> newlyUnhidden = null;
 
@@ -133,12 +143,14 @@ namespace CSWarfront.Game
                     ushort id = kv.Key;
                     bool hidden = kv.Value;
                     if (id >= buf.Length) continue;
-                    if ((buf[id].m_flags & Building.Flags.Created) == 0) continue; // 既に解体済み等
+                    if ((buf[id].m_flags & Building.Flags.Created) == 0) continue; // Already demolished, etc.
 
-                    // Task75/Task82: 対象は必ずこのMODが登録した自基地idのみに限定する（多層防御、
-                    // クラス冒頭コメント参照）。BasePlacementWatcher.ProcessCreatedが基地登録時に
-                    // 使う判定と全く同じ、Optionsで指定した建物アセット(BaseBuildingDesignation)との
-                    // 名前一致を見る（電力タブの複製プレハブ機構=WarfrontBasePrefabはTask82で撤去済み）。
+                    // Task75/Task82: targets are strictly limited to our own base ids registered by
+                    // this mod (defense in depth, see the comment at the top of the class). Uses the
+                    // exact same check that BasePlacementWatcher.ProcessCreated uses when registering a
+                    // base: a name match against the Options-designated building asset
+                    // (BaseBuildingDesignation) (the power-tab cloned-prefab mechanism =
+                    // WarfrontBasePrefab was removed in Task82).
                     BaseType ignored;
                     if (buf[id].Info == null) continue;
                     bool isOwnBase = BaseBuildingDesignation.TryMatch(buf[id].Info.name, out ignored);
@@ -176,11 +188,11 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// セーブ直前に呼ぶ（Task72）。このMODが立てたHiddenビットをセーブデータへ焼き込まないよう
-        /// 一時的に全部クリアする。<see cref="_hiddenIds"/> 自体はメモリ上に保持したままにし、
-        /// <see cref="ReapplyAfterSave"/> で同じ集合へ立て直す。呼び出し元
-        /// （MilitaryManager.SerializeLocked）が _stateLock を保持したまま呼ぶため、simスレッドとの
-        /// 競合は無い。CombatRoadBlocker.UnblockAllForSaveと全く同じパターン。
+        /// Called right before saving (Task72). Temporarily clears all Hidden bits set by this mod so
+        /// they are not baked into the save data. <see cref="_hiddenIds"/> itself is kept in memory,
+        /// and <see cref="ReapplyAfterSave"/> re-sets the bits on the same set. The caller
+        /// (MilitaryManager.SerializeLocked) invokes this while holding _stateLock, so there is no race
+        /// with the sim thread. Exactly the same pattern as CombatRoadBlocker.UnblockAllForSave.
         /// </summary>
         public static void UnhideAllForSave()
         {
@@ -201,16 +213,17 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// UnhideAllForSaveで外したHiddenビットを立て直す（Task72）。
+        /// Re-sets the Hidden bits that UnhideAllForSave cleared (Task72).
         ///
-        /// 重要: このメソッドは「WarStateSerializer.Serializeの直後」ではなく、必ず
-        /// 「バニラのBuildingManager.Data.Serializeが実際にBuilding.m_flagsをストリームへ書き終えた後」
-        /// に呼ばれるよう、呼び出し元（MilitaryManagerPersistence.SerializeLocked）が
-        /// Singleton&lt;SimulationManager&gt;.instance.AddAction で次のアクションとして遅延実行する
-        /// 契約になっている（ilspycmdでSimulationManager.Data.Serialize/LoadingManager.SaveSimulationData
-        /// を逆コンパイルして確認した実際のセーブ順序に基づく。詳細はSerializeLockedのコメント参照）。
-        /// 建物が解体済み（Created落ち）になっていれば、それは静かに諦めて集合から落とす
-        /// （CombatRoadBlocker.ReassertOwnedのstale処理と同じ）。
+        /// Important: by contract this method is called not "immediately after
+        /// WarStateSerializer.Serialize" but always "after the vanilla BuildingManager.Data.Serialize
+        /// has actually finished writing Building.m_flags to the stream"; the caller
+        /// (MilitaryManagerPersistence.SerializeLocked) defers execution as the next action via
+        /// Singleton&lt;SimulationManager&gt;.instance.AddAction (based on the actual save order
+        /// confirmed by decompiling SimulationManager.Data.Serialize/LoadingManager.SaveSimulationData
+        /// with ilspycmd; see the comments on SerializeLocked for details).
+        /// If a building has been demolished (Created dropped), it is silently given up on and removed
+        /// from the set (same as the stale handling in CombatRoadBlocker.ReassertOwned).
         /// </summary>
         public static void ReapplyAfterSave()
         {
@@ -243,13 +256,14 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// レベルアンロード時（MilitaryManager.Reset()から呼ばれる）：このMODがHiddenにした建物を
-        /// 全部素の見た目へ戻してから内部状態をクリアする（Task72）。CombatRoadBlocker.Resetと同じ
-        /// 理由・同じ形: Reset()はメインスレッド（OnLevelUnloading経由）から呼ばれ、以後simスレッドの
-        /// OnSimTick（延いてはApplyPendingによる_pendingの排出）はもう回らない可能性が高いため、
-        /// SetDesiredで_pendingへ積むだけでは戻す保証にならない。ここでCS建物バッファへ直接書き込む。
-        /// レベルがティアダウン中でBuildingManagerが既に無効化されているケースもありうるため、
-        /// 解除に失敗しても（ログするだけで）例外を外へ伝播しない。
+        /// On level unload (called from MilitaryManager.Reset()): restores every building this mod set
+        /// to Hidden back to its plain appearance, then clears internal state (Task72). Same reason and
+        /// same shape as CombatRoadBlocker.Reset: Reset() is called on the main thread (via
+        /// OnLevelUnloading), and after that the sim thread's OnSimTick (and hence ApplyPending's
+        /// draining of _pending) most likely never runs again, so merely pushing into _pending via
+        /// SetDesired is no guarantee of restoration. Here we write directly into the CS building
+        /// buffer. Since the level may be mid-teardown with BuildingManager already invalidated, a
+        /// failure to unhide is only logged and never propagated as an exception.
         /// </summary>
         public static void Reset()
         {

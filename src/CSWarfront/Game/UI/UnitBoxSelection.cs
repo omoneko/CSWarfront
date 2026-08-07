@@ -7,77 +7,86 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// ユニットの範囲選択（Task48）。既存の単発クリック選択（Game/UI/UnitSelection.Update、
-    /// GetMouseButtonDownの立ち上がりフレームで即raycastし、命中すればSelectedInstanceIdへ反映する）は
-    /// 一切変更しない。本クラスは「そのクリックが実はドラッグの始まりだった」場合にのみ、mouse upの
-    /// 時点で選択を範囲選択の結果へ上書きする。こうすることで
-    /// 「ドラッグにならない普通のクリックは既存の単発選択挙動のまま」という要件を、既存のraycast
-    /// ロジックを一切複製・変更せずに満たす（UnitSelection.Update自体は従来通り毎フレーム呼ばれ続ける）。
+    /// Box selection of units (Task48). The existing single-click selection (Game/UI/UnitSelection.Update,
+    /// which raycasts immediately on the GetMouseButtonDown rising-edge frame and, on a hit, writes to
+    /// SelectedInstanceId) is left completely untouched. This class only overwrites the selection with the
+    /// box-selection result at mouse up, and only when "that click actually turned out to be the start of a
+    /// drag". This satisfies the requirement that "an ordinary click that never becomes a drag keeps the
+    /// existing single-click selection behavior" without duplicating or modifying any of the existing raycast
+    /// logic (UnitSelection.Update itself keeps being called every frame as before).
     ///
-    /// ドラッグの成立条件: 左ボタンが押し下げられた瞬間にカーソルがUI上（UIInput.hoveredComponent!=null）
-    /// またはバニラのEscメニューが開いていれば、そのドラッグ全体を無視する（矩形も出さないし選択も
-    /// 変更しない）。押し下げ位置からDragThresholdPixelsを超えて動いた時点で初めて「ドラッグ確定」とみなし
-    /// 矩形の描画を開始する。それに満たないまま離された場合は「ただのクリック」としてUnitSelection.Update
-    /// の結果をそのまま残す。
+    /// Conditions for a drag: if, at the moment the left button is pressed down, the cursor is over UI
+    /// (UIInput.hoveredComponent!=null) or the vanilla Esc menu is open, the entire drag is ignored (no
+    /// rectangle is shown and the selection is not changed). Only once the cursor has moved more than
+    /// DragThresholdPixels from the press-down position is the drag considered "confirmed" and rectangle
+    /// drawing begins. If the button is released before that, it is treated as "just a click" and the result
+    /// of UnitSelection.Update is left as-is.
     ///
-    /// 選択結果の反映先: SelectedIds（範囲選択した全ID、コマンド入力 Game/UI/UnitCommandInput が使う）と
-    /// UnitSelection.SelectedInstanceId（先頭の1件、既存のユニット情報パネルが単一ユニット向けに参照する。
-    /// 0件なら0＝未選択）の両方。
+    /// Where the selection result goes: both SelectedIds (all box-selected IDs, used by the command input
+    /// Game/UI/UnitCommandInput) and UnitSelection.SelectedInstanceId (the first entry, referenced by the
+    /// existing unit info panel for the single-unit case; 0 = nothing selected when the list is empty).
     ///
-    /// 矩形の当たり判定はスクリーン座標系（Camera.WorldToScreenPoint と Input.mousePosition、どちらも
-    /// 左下原点・実ピクセル）で完結させ、ColossalFramework の UIView 仮想GUI解像度（UIスケール設定次第で
-    /// 実ピクセルと一致しない）を一切経由しない。これにより選択判定自体はUIスケール設定に左右されない。
+    /// The rectangle hit test is done entirely in screen coordinates (Camera.WorldToScreenPoint and
+    /// Input.mousePosition, both bottom-left origin, real pixels) and never goes through the
+    /// ColossalFramework UIView virtual GUI resolution (which may not match real pixels depending on the UI
+    /// scale setting). This keeps the selection test itself independent of the UI scale setting.
     ///
-    /// 矩形の「見た目」（下記UpdateRectVisual）はUIPanel.relativePositionを使うため、UIViewのGUI座標系
-    /// （UIView.fixedHeight/UIスケールを反映した解像度、左上原点）へ変換する必要がある。
-    /// Task76（実機で「ドラッグした場所と矩形がズレる」と報告された不具合の修正）: 旧実装は
-    /// view.ScreenPointToGUI(rawScreenPos) をそのまま呼んでいたが、ilspycmdでColossalManaged.dllを
-    /// 逆コンパイルして確認したところ ScreenPointToGUI 自体は
-    /// `position.y = GetScreenResolution().y - position.y; return position;` というY反転のみの実装で、
-    /// スクリーン実ピクセル→GUI解像度のスケール変換は一切行っていない。そのスケール変換は
-    /// UIView.WorldPointToGUI が内部で別途行っている
-    /// （`screenResolution.x * (rawX / uiCamera.pixelWidth)` 等）。つまり旧実装は「スケール変換をせずに
-    /// Y反転だけ」しており、fixedHeight（既定1080）と実解像度が一致しない、またはUIスケールが既定(100%)
-    /// でない環境では常にズレが生じていた（原点からの距離に比例して拡大するため、遠くにドラッグするほど
-    /// 顕著になる）。当たり判定側（FinishBoxSelect、上記）はスクリーン実ピクセル空間のみで完結しており
-    /// この変換を経由しないため、選択そのものはこのバグの影響を受けていなかった。
-    /// 修正: 下記ScreenToGuiPointが、UIView.WorldPointToGUIと同一のスケール変換
-    /// （GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight 比）をScreenPointToGUIの前段で行う
-    /// （UIView自身が使っている検証済みの変換と同じ式に統一する）。UpdateRectVisualの開始点・現在点の
-    /// 両方をこのヘルパー経由に統一した。
+    /// The rectangle's "visual" (UpdateRectVisual below) uses UIPanel.relativePosition, so it must be
+    /// converted into the UIView GUI coordinate space (a resolution reflecting UIView.fixedHeight/UI scale,
+    /// top-left origin).
+    /// Task76 (fix for the bug reported in-game as "the rectangle is offset from where I dragged"): the old
+    /// implementation called view.ScreenPointToGUI(rawScreenPos) directly, but decompiling
+    /// ColossalManaged.dll with ilspycmd shows that ScreenPointToGUI itself is only a Y-flip —
+    /// `position.y = GetScreenResolution().y - position.y; return position;` — and performs no scale
+    /// conversion from real screen pixels to the GUI resolution. That scale conversion is done separately
+    /// inside UIView.WorldPointToGUI
+    /// (`screenResolution.x * (rawX / uiCamera.pixelWidth)` etc.). In other words the old implementation
+    /// did "Y-flip only, no scale conversion", so on any environment where fixedHeight (default 1080) does
+    /// not match the real resolution, or the UI scale is not at its default (100%), it was always offset
+    /// (the error grows in proportion to distance from the origin, so it becomes more pronounced the farther
+    /// you drag). The hit-test side (FinishBoxSelect, above) works entirely in real screen-pixel space and
+    /// never goes through this conversion, so the selection itself was unaffected by this bug.
+    /// Fix: ScreenToGuiPoint below performs the same scale conversion as UIView.WorldPointToGUI
+    /// (the GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight ratio) before calling ScreenPointToGUI
+    /// (unifying on the same, verified formula UIView itself uses). Both the start point and the current
+    /// point in UpdateRectVisual now go through this helper.
     ///
-    /// 選択ユニットのハイライト: 各選択ユニットの位置へ毎フレーム追従する薄い円柱プリミティブ
-    /// （コライダーは除去し、Physics.Raycastによるクリック判定を一切邪魔しない）。安価な視覚的合図として
-    /// 採用した。共有マテリアルを1つだけ生成して全ハイライトで使い回す（ユニット本体のマテリアル/勢力色は
-    /// 一切変更しない）。
+    /// Highlighting selected units: a thin cylinder primitive that tracks each selected unit's position every
+    /// frame (with the collider removed, so it never interferes with click hit-testing via Physics.Raycast).
+    /// Adopted as a cheap visual cue. A single shared material is created and reused by every highlight (the
+    /// units' own materials/faction colors are never modified).
     ///
-    /// 部隊選択モード（Task76、WarfrontSettings.SelectionModeKey、既定Numpad0）: このホットキーを押すたびに
-    /// ON/OFFがトグルする。ONの間だけボックスドラッグによる範囲選択（本クラスの主機能）が働く。
-    /// 単発クリックでの選択（UnitSelection.Update、および上のmouse down分岐でのSelectedIds追従）は
-    /// モードの状態に関わらず常時動作する。モードがONの間にUI上でmouse downした場合は従来通りドラッグ候補
-    /// にしない（_pendingDragCandidate、下記）。もう一度SelectionModeKeyを押す、またはEscでOFFに戻る
-    /// （ドラッグ中にOFFへ切り替えた場合は進行中のドラッグも即座に破棄する）。
+    /// Unit selection mode (Task76, WarfrontSettings.SelectionModeKey, default Numpad0): each press of this
+    /// hotkey toggles ON/OFF. Box-drag selection (this class's main feature) only works while ON.
+    /// Single-click selection (UnitSelection.Update, plus the SelectedIds follow-up in the mouse down branch
+    /// above) always works regardless of the mode's state. A mouse down over UI while the mode is ON is,
+    /// as before, not treated as a drag candidate (_pendingDragCandidate, below). Pressing SelectionModeKey
+    /// again, or Esc, returns it to OFF (switching to OFF mid-drag also discards the in-progress drag
+    /// immediately).
     ///
-    /// メインスレッド専用（Unity/ColossalFramework UI API呼び出しのため）。WarfrontThreadingExtension.OnUpdate
-    /// から、位置同期（MilitaryManager.OnMainVisualUpdate）より後・UnitInfoPanelより前に呼ぶこと。
+    /// Main thread only (because it calls Unity/ColossalFramework UI APIs). Call from
+    /// WarfrontThreadingExtension.OnUpdate, after position sync (MilitaryManager.OnMainVisualUpdate) and
+    /// before UnitInfoPanel.
     /// </summary>
     public static class UnitBoxSelection
     {
         private const string RectPanelName = "CSWarfrontBoxSelectRect";
 
-        /// <summary>この距離（実スクリーンピクセル）を超えて動いて初めて「ドラッグ」とみなす。
-        /// 手ぶれ程度の移動を伴う「ただのクリック」を誤ってドラッグ扱いしないための遊び。
-        /// Task62: 実機ログで「selected 0 unit(s) via drag」が連発していた根本原因がこの値。
-        /// 旧値(6px)は高DPI環境やマウスセンサーのジッタで通常のクリックですら容易に超えてしまい、
-        /// 普通の単発クリックが誤ってドラッグ判定され、範囲内に何も無ければ選択を巻き添えで
-        /// 消していた（後述のFinishBoxSelectの「空振りドラッグでは選択を消さない」ルールと合わせて
-        /// 二重に対策する）。8px以上を推奨値として10pxへ引き上げる。</summary>
+        /// <summary>Movement beyond this distance (in real screen pixels) is what first counts as a "drag".
+        /// Slack so that a "plain click" with hand-tremor-level movement is not mistakenly treated as a drag.
+        /// Task62: this value was the root cause of the repeated "selected 0 unit(s) via drag" entries in
+        /// in-game logs. The old value (6px) was easily exceeded even by an ordinary click on high-DPI setups
+        /// or due to mouse sensor jitter, so a normal single click was mistakenly classified as a drag and,
+        /// if the rectangle contained nothing, wiped the selection as collateral damage (mitigated twice
+        /// over, together with FinishBoxSelect's "an empty drag does not clear the selection" rule described
+        /// below). Raised to 10px, with 8px+ as the recommended range.</summary>
         private const float DragThresholdPixels = 10f;
 
-        private const float MaxCameraDistanceCheck = 100000f; // WorldToScreenPointのz>0判定にのみ使用（距離クランプ無し）
+        private const float MaxCameraDistanceCheck = 100000f; // Used only for the z>0 check of WorldToScreenPoint (no distance clamping)
 
-        // ハイライト（選択マーカー）の見た目定数。UnitVisuals.AttachVisibilityMarkerと同系統だが
-        // 独立した薄い円柱にすることでユニット本体のマーカー/メッシュと視覚的に区別する。
+        // Visual constants for the highlight (selection marker). Same family as
+        // UnitVisuals.AttachVisibilityMarker, but a separate thin cylinder so it is visually distinct from
+        // the unit's own marker/mesh.
         private const float HighlightRadius = 5f;
         private const float HighlightThinHeight = 0.15f;
         private const float HighlightYOffset = 0.3f;
@@ -86,36 +95,38 @@ namespace CSWarfront.Game.UI
 
         private static UIPanel _rectPanel;
 
-        private static bool _pendingDragCandidate; // mouse down がUI外で起きた＝ドラッグに発展しうる
-        private static bool _dragging;              // DragThresholdPixelsを超えて確定した
+        private static bool _pendingDragCandidate; // Mouse down happened outside UI = may develop into a drag
+        private static bool _dragging;              // Confirmed by exceeding DragThresholdPixels
         private static Vector2 _dragStartScreen;
 
-        private static bool _selectionModeActive; // Task76: WarfrontSettings.SelectionModeKeyでトグル。ONの間だけボックスドラッグを許可する
+        private static bool _selectionModeActive; // Task76: toggled by WarfrontSettings.SelectionModeKey. Box drag is allowed only while ON
 
-        /// <summary>部隊選択モード（Task76）が現在ONか。単発クリック選択には影響しない
-        /// （常時動作、上のクラス冒頭コメント参照）。UI側でヒント表示等に使ってよい、Task76時点は未使用。</summary>
+        /// <summary>Whether unit selection mode (Task76) is currently ON. Does not affect single-click
+        /// selection (always active, see the class-level comment above). May be used by UI for hint display
+        /// etc.; unused as of Task76.</summary>
         public static bool IsSelectionModeActive { get { return _selectionModeActive; } }
 
-        /// <summary>直前フレーム終了時点の UnitSelection.SelectedInstanceId（Task48）。mouse down 時点で
-        /// これと異なっていれば「この押し下げでUnitSelection.Update（同フレーム内で先に実行済み）が
-        /// 新たにユニットへ命中した」と判定できる。単発クリックでもSelectedIdsを追従させるために使う
-        /// （下のUpdate冒頭のコメント参照）。</summary>
+        /// <summary>UnitSelection.SelectedInstanceId as of the end of the previous frame (Task48). If it
+        /// differs at mouse down time, we can conclude "this press caused UnitSelection.Update (already run
+        /// earlier in the same frame) to newly hit a unit". Used to keep SelectedIds in sync even for single
+        /// clicks (see the comment at the top of Update below).</summary>
         private static uint _lastSeenSelectedInstanceId;
 
         private static readonly List<uint> _idBuffer = new List<uint>();
         private static readonly List<Vector3> _posBuffer = new List<Vector3>();
-        private static readonly List<uint> _foundBuffer = new List<uint>(); // Task62: FinishBoxSelectの結果を確定前に貯めておくワーク領域（GC回避）
+        private static readonly List<uint> _foundBuffer = new List<uint>(); // Task62: scratch area holding FinishBoxSelect results before committing (avoids GC)
 
         private static readonly Dictionary<uint, GameObject> _highlightMarkers = new Dictionary<uint, GameObject>();
         private static readonly List<uint> _staleHighlightIds = new List<uint>();
         private static Material _highlightMaterial;
 
-        /// <summary>冪等。矩形パネルをUIViewが準備できた時点で一度だけ生成する（他パネルと同じ方式）。</summary>
+        /// <summary>Idempotent. Creates the rectangle panel exactly once, when the UIView is ready (same
+        /// approach as the other panels).</summary>
         public static void EnsureCreated()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (_rectPanel != null) return;
                 UIView view = PanelChrome.GetCachedView();
                 if (view == null) return;
@@ -128,13 +139,15 @@ namespace CSWarfront.Game.UI
                     return;
                 }
                 panel.name = RectPanelName;
-                // "EmptySprite": バニラUIアトラスに含まれる単色1x1スプライト。colorで着色し半透明矩形として使う
-                // （CS modding で単色矩形オーバーレイに広く使われる定番の組み合わせ）。万一このスプライト名が
-                // 環境によって存在しなくても、ColossalFramework は単に何も描画しないだけで例外にはならない
-                // ため、矩形が見えないだけで選択ロジック（スクリーン座標の当たり判定）自体は影響を受けない。
+                // "EmptySprite": a solid 1x1 sprite included in the vanilla UI atlas. Tinted via color and
+                // used as a translucent rectangle (a classic combination widely used in CS modding for
+                // solid-color rectangle overlays). Even if this sprite name did not exist in some
+                // environment, ColossalFramework would simply draw nothing rather than throw, so only the
+                // rectangle would be invisible — the selection logic itself (screen-space hit test) is
+                // unaffected.
                 panel.backgroundSprite = "EmptySprite";
                 panel.color = new Color32(120, 170, 255, 90);
-                panel.isInteractive = false; // クリック/ドラッグを横取りしない
+                panel.isInteractive = false; // Do not intercept clicks/drags
                 panel.isVisible = false;
                 _rectPanel = panel;
             }
@@ -144,15 +157,15 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>毎メインスレッドフレーム呼ぶ。UnitSelection.Update と同じフレームで、その後に呼ぶこと
-        /// （呼び出し順序はWarfrontThreadingExtension.OnUpdateが保証する）。</summary>
+        /// <summary>Call every main-thread frame. Must run in the same frame as UnitSelection.Update and
+        /// after it (the call order is guaranteed by WarfrontThreadingExtension.OnUpdate).</summary>
         public static void Update()
         {
             try
             {
                 if (!PanelChrome.IsGameReadyForUi())
                 {
-                    // Task56: ロード/アンロード中はUIライブラリに触れない。進行中のドラッグ候補も破棄する。
+                    // Task56: do not touch the UI library while loading/unloading. Also discard any drag candidate in progress.
                     CancelDrag();
                     return;
                 }
@@ -164,22 +177,23 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                HandleSelectionModeToggle(); // Task76: 単発クリック選択より前に判定してよい（同じフレームでもトグル即反映で問題ない）
+                HandleSelectionModeToggle(); // Task76: fine to evaluate before single-click selection (applying the toggle immediately within the same frame is not a problem)
 
                 if (Input.GetMouseButtonDown(0))
                 {
-                    // UI上で始まった押し下げはドラッグ候補にしない（UnitSelection.Updateと同じガード）。
+                    // A press that started over UI is not a drag candidate (same guard as UnitSelection.Update).
                     _pendingDragCandidate = UIInput.hoveredComponent == null;
                     _dragging = false;
                     _dragStartScreen = Input.mousePosition;
 
                     if (_pendingDragCandidate)
                     {
-                        // UnitSelection.Update は同フレーム内でこれより先に実行済み。今回の押し下げが
-                        // 新たにユニットへ命中していれば（前フレーム終了時点の値と異なっていれば）、
-                        // 最終的にドラッグへ発展しなかった場合でもSelectedIdsを追従させる（単発クリックでも
-                        // SelectedIds/SelectedInstanceId の整合を保つため）。命中しなかった/前回と同じ場合は
-                        // 何もしない＝UnitSelection本来の「空振りは現在の選択を維持する」契約をそのまま守る。
+                        // UnitSelection.Update has already run earlier in this frame. If this press newly
+                        // hit a unit (i.e. the value differs from what it was at the end of the previous
+                        // frame), keep SelectedIds in sync even if the press never develops into a drag
+                        // (to keep SelectedIds/SelectedInstanceId consistent for single clicks too). If
+                        // nothing was hit / it is the same as before, do nothing — preserving
+                        // UnitSelection's original contract that "a miss keeps the current selection".
                         uint clicked = UnitSelection.SelectedInstanceId;
                         if (clicked != 0 && clicked != _lastSeenSelectedInstanceId)
                         {
@@ -190,10 +204,12 @@ namespace CSWarfront.Game.UI
                 }
                 else if (_selectionModeActive && _pendingDragCandidate && Input.GetMouseButton(0))
                 {
-                    // Task76: 部隊選択モードがONの間だけドラッグ確定（矩形描画）へ進む。OFFの間は
-                    // _pendingDragCandidate/_dragStartScreenの記録自体は素通しするが、この分岐に入らない
-                    // ため矩形は一切出ず_draggingもtrueにならない＝mouse up時のFinishBoxSelectも呼ばれない
-                    // （単発クリックの選択反映は上のmouse down分岐で完結済みなのでモードの影響を受けない）。
+                    // Task76: only advance to drag confirmation (rectangle drawing) while unit selection
+                    // mode is ON. While OFF, the recording of _pendingDragCandidate/_dragStartScreen itself
+                    // still happens, but this branch is never entered, so no rectangle appears and _dragging
+                    // never becomes true = FinishBoxSelect is not called at mouse up either
+                    // (single-click selection was fully handled in the mouse down branch above, so it is
+                    // unaffected by the mode).
                     Vector2 cur = Input.mousePosition;
                     if (!_dragging && Vector2.Distance(cur, _dragStartScreen) >= DragThresholdPixels)
                     {
@@ -207,16 +223,17 @@ namespace CSWarfront.Game.UI
                     {
                         FinishBoxSelect(_dragStartScreen, Input.mousePosition);
                     }
-                    // ドラッグが確定しなかった（ただのクリック）場合はここで何もしない＝
-                    // 上のmouse down分岐で既に反映済みの単発選択（またはUnitSelectionの空振り時の
-                    // 「現在の選択を維持」）をそのまま残す。
+                    // If the drag never got confirmed (it was just a click), do nothing here =
+                    // keep the single-click selection already applied in the mouse down branch above (or
+                    // UnitSelection's "keep the current selection" behavior on a miss) as-is.
                     CancelDrag();
                 }
 
-                // Task88（「緑の縁が選択解除後も残る」バグ修正）: 単発選択が外部で解除された
-                // （UnitInfoPanelの閉じるボタン/ESC/選択ユニットの死亡等がUnitSelection.Clearを呼んだ）
-                // 場合、複数選択リストも連動して解除する。従来はSelectedIdsを消す経路がここに無く、
-                // SyncHighlightsが選択解除後もハイライトを描き続けていた。
+                // Task88 (fix for the "green rim remains after deselection" bug): when the single selection
+                // is cleared externally (UnitInfoPanel's close button / ESC / death of the selected unit
+                // etc. called UnitSelection.Clear), clear the multi-selection list along with it. Previously
+                // there was no code path here that cleared SelectedIds, so SyncHighlights kept drawing
+                // highlights even after deselection.
                 if (UnitSelection.SelectedInstanceId == 0 && _lastSeenSelectedInstanceId != 0 && SelectedIds.Count > 0)
                 {
                     SelectedIds.Clear();
@@ -232,7 +249,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。パネル/マーカーを破棄し静的状態を残さない。</summary>
+        /// <summary>Call at level unload (via MilitaryManager.Reset). Destroys the panel/markers and leaves no static state behind.</summary>
         public static void Destroy()
         {
             try
@@ -255,7 +272,7 @@ namespace CSWarfront.Game.UI
                 _pendingDragCandidate = false;
                 _dragging = false;
                 _lastSeenSelectedInstanceId = 0;
-                _selectionModeActive = false; // Task76: セッションをまたいだ既定値(OFF)へのリセットは許容（他のWarfrontSettingsと同じMVP方針）
+                _selectionModeActive = false; // Task76: resetting to the default (OFF) across sessions is acceptable (same MVP policy as the other WarfrontSettings)
             }
         }
 
@@ -266,10 +283,11 @@ namespace CSWarfront.Game.UI
             if (_rectPanel != null && _rectPanel.isVisible) _rectPanel.Hide();
         }
 
-        /// <summary>Task76: WarfrontSettings.SelectionModeKey（既定Numpad0）のポーリングとトグル処理。
-        /// テキスト入力欄にフォーカスがある間は無視する（Game/UI/UnitCommandInput.Updateの
-        /// UIView.HasInputFocus()ガードと同じ理由）。ONの間にEscを押しても即OFFへ戻れる
-        /// （HandleRallyTargeting同様、バニラのEscメニュー自体を消費/妨害するわけではない）。</summary>
+        /// <summary>Task76: polls WarfrontSettings.SelectionModeKey (default Numpad0) and handles the
+        /// toggle. Ignored while a text input field has focus (same reason as the UIView.HasInputFocus()
+        /// guard in Game/UI/UnitCommandInput.Update). Pressing Esc while ON also returns it to OFF
+        /// immediately (like HandleRallyTargeting, this does not consume/interfere with the vanilla Esc
+        /// menu itself).</summary>
         private static void HandleSelectionModeToggle()
         {
             if (UIView.HasInputFocus()) return;
@@ -289,17 +307,18 @@ namespace CSWarfront.Game.UI
         {
             if (_selectionModeActive == active) return;
             _selectionModeActive = active;
-            if (!active) CancelDrag(); // ドラッグ中にOFFへ切り替えた場合は即座に破棄する（矩形も消す）
+            if (!active) CancelDrag(); // Switching OFF mid-drag discards the drag immediately (also hides the rectangle)
             ModConfig.Log("UnitBoxSelection: selection mode " + (active ? "ON" : "OFF"));
             CommandToast.Show(active ? "Unit selection mode ON (drag to box-select)" : "Unit selection mode OFF");
         }
 
-        /// <summary>スクリーン実ピクセル座標（Input.mousePositionと同じ空間、左下原点）をUIViewのGUI座標
-        /// （UIPanel.relativePositionが期待する空間、左上原点）へ変換する。クラス冒頭コメント参照：
-        /// UIView.ScreenPointToGUI自体はY反転のみでスケール変換を行わないため、UIView.WorldPointToGUIが
-        /// 内部で使っているのと同じスケール変換（GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight）
-        /// を先に適用してからScreenPointToGUIを呼ぶ。uiCameraが取得できない場合（起動直後等の異常系）は
-        /// 従来のフォールバックとして無変換でScreenPointToGUIへ渡す（例外を投げない）。</summary>
+        /// <summary>Converts real screen-pixel coordinates (same space as Input.mousePosition, bottom-left
+        /// origin) into the UIView GUI coordinates (the space UIPanel.relativePosition expects, top-left
+        /// origin). See the class-level comment: UIView.ScreenPointToGUI itself only does a Y-flip and no
+        /// scale conversion, so we first apply the same scale conversion UIView.WorldPointToGUI uses
+        /// internally (GetScreenResolution() ÷ uiCamera.pixelWidth/pixelHeight) and then call
+        /// ScreenPointToGUI. If uiCamera is unavailable (abnormal cases like right after startup), fall back
+        /// to the previous behavior and pass the point to ScreenPointToGUI unconverted (never throws).</summary>
         private static Vector2 ScreenToGuiPoint(UIView view, Vector2 screenPoint)
         {
             Camera cam = view.uiCamera;
@@ -317,7 +336,7 @@ namespace CSWarfront.Game.UI
         private static void UpdateRectVisual(Vector2 startScreen, Vector2 curScreen)
         {
             if (_rectPanel == null) return;
-            UIView view = PanelChrome.GetCachedView(); // Task56: 毎フレーム呼ばれるためキャッシュ済みアクセサを使う
+            UIView view = PanelChrome.GetCachedView(); // Task56: called every frame, so use the cached accessor
             if (view == null) return;
 
             Vector2 a = ScreenToGuiPoint(view, startScreen);
@@ -335,16 +354,18 @@ namespace CSWarfront.Game.UI
             _rectPanel.BringToFront();
         }
 
-        /// <summary>ドラッグ終了時に一度だけ呼ばれる。スクリーン矩形内に投影されるユニットをSelectedIdsへ
-        /// 反映し、UnitSelection.SelectedInstanceId も先頭のIDで上書きする。
+        /// <summary>Called exactly once when the drag ends. Writes the units projected inside the screen
+        /// rectangle into SelectedIds, and also overwrites UnitSelection.SelectedInstanceId with the first ID.
         ///
-        /// Task62: 決定事項 — 矩形内に1体も見つからない「空振りドラッグ」は、既存の選択を
-        /// サイレントに消さない（何もせず直前の選択をそのまま残す）。理由: DragThresholdPixels引き上げ後も
-        /// 手ぶれ等で意図せずドラッグが確定することはあり得るうえ、コマンド待機中（UnitCommandInput.
-        /// IsAwaitingRallyClick等）に選択が空振りドラッグで消えると、直後に出すコマンドが対象0件で
-        /// 空振りする実害が出る。矩形が実際に1体以上を捉えた場合のみSelectedIdsを置き換える
-        /// （範囲を変えて選び直す通常のドラッグ操作はこれまで通り機能する）。選択を明示的に0件へ戻す
-        /// UI操作は本タスクの対象外（既存にも無い）。</summary>
+        /// Task62: decision — an "empty drag" where nothing is found inside the rectangle does NOT silently
+        /// clear the existing selection (it does nothing and leaves the previous selection as-is). Rationale:
+        /// even after raising DragThresholdPixels, a drag can still be confirmed unintentionally due to hand
+        /// tremor etc., and if the selection is wiped by an empty drag while a command is pending
+        /// (UnitCommandInput.IsAwaitingRallyClick etc.), the command issued right afterwards misfires with 0
+        /// targets — real harm. SelectedIds is replaced only when the rectangle actually captured one or
+        /// more units (the normal drag gesture of re-selecting with a different area keeps working as
+        /// before). A UI action to explicitly reset the selection to 0 entries is out of scope for this task
+        /// (none exists today either).</summary>
         private static void FinishBoxSelect(Vector2 startScreen, Vector2 endScreen)
         {
             Camera cam = Camera.main;
@@ -361,21 +382,21 @@ namespace CSWarfront.Game.UI
             for (int i = 0; i < _idBuffer.Count; i++)
             {
                 Vector3 sp = cam.WorldToScreenPoint(_posBuffer[i]);
-                if (sp.z <= 0f || sp.z > MaxCameraDistanceCheck) continue; // カメラ後方は対象外
+                if (sp.z <= 0f || sp.z > MaxCameraDistanceCheck) continue; // Behind the camera is excluded
                 if (sp.x < minX || sp.x > maxX || sp.y < minY || sp.y > maxY) continue;
                 _foundBuffer.Add(_idBuffer[i]);
             }
 
-            if (_foundBuffer.Count == 0) return; // Task62: 空振りドラッグは既存の選択を維持する（上記コメント参照）。
+            if (_foundBuffer.Count == 0) return; // Task62: an empty drag keeps the existing selection (see comment above).
 
             SelectedIds.Clear();
             SelectedIds.AddRange(_foundBuffer);
             UnitSelection.Set(SelectedIds[0]);
-            ModConfig.Log("UnitBoxSelection: selected " + SelectedIds.Count + " unit(s) via drag"); // Task62: 0件はもう発生しないためログはcount>0のみ
+            ModConfig.Log("UnitBoxSelection: selected " + SelectedIds.Count + " unit(s) via drag"); // Task62: 0 entries can no longer occur, so this logs only when count>0
         }
 
-        /// <summary>選択中ユニットへ毎フレーム追従する簡易ハイライト（薄い円柱、コライダー無し）を
-        /// 宣言的に同期する（UnitVisuals.Syncと同じreconcileパターン）。</summary>
+        /// <summary>Declaratively syncs the lightweight highlight (thin cylinder, no collider) that follows
+        /// each selected unit every frame (same reconcile pattern as UnitVisuals.Sync).</summary>
         private static void SyncHighlights()
         {
             _staleHighlightIds.Clear();
@@ -397,8 +418,9 @@ namespace CSWarfront.Game.UI
                 Vector3 pos;
                 if (!UnitVisuals.TryGetPosition(id, out pos))
                 {
-                    // Task88: 見た目が破棄済み（＝ユニット死亡）の選択IDはリストからも外し、残っている
-                    // ハイライトも即座に破棄する（従来はcontinueで放置され、死亡地点に緑の縁が残り続けた）。
+                    // Task88: a selected ID whose visual has been destroyed (= the unit died) is also removed
+                    // from the list, and any remaining highlight is destroyed immediately (previously it was
+                    // left behind via continue, and a green rim lingered at the death location).
                     GameObject dead;
                     if (_highlightMarkers.TryGetValue(id, out dead) && dead != null)
                         UnityEngine.Object.Destroy(dead);
@@ -424,7 +446,7 @@ namespace CSWarfront.Game.UI
             {
                 GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                 Collider col = go.GetComponent<Collider>();
-                if (col != null) UnityEngine.Object.Destroy(col); // クリック判定を邪魔しない
+                if (col != null) UnityEngine.Object.Destroy(col); // Do not interfere with click hit-testing
                 go.transform.localScale = new Vector3(HighlightRadius, HighlightThinHeight, HighlightRadius);
                 MeshRenderer renderer = go.GetComponent<MeshRenderer>();
                 if (renderer != null) renderer.sharedMaterial = GetHighlightMaterial();

@@ -6,15 +6,16 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// プレイヤーがOptions指定建物（BaseBuildingDesignation）として配置/解体した軍事基地建物を検知し、
-    /// 対応する論理 MilitaryBase を作成/削除する（Task18、Task82で電力タブの複製プレハブ経路を撤去し
-    /// この経路のみに一本化）。
-    /// スレッド注記:
-    ///  - CS のイベント（EventBuildingCreated/EventBuildingReleased）はどのスレッドから発火するか
-    ///    保証されないため、ハンドラは最小限（idの記録のみ）に留め、CS API呼び出しやWarState操作は
-    ///    一切行わない（ここで例外が漏れるとゲーム側が未捕捉ポップアップを出すため try/catch で必ず握る）。
-    ///  - 実際の反映（BuildingManagerバッファ読み取り＋WarState更新）は ProcessPending 経由で
-    ///    MilitaryManager.OnSimTick（simスレッド、_stateLock保持済み）からのみ行う。
+    /// Detects military base buildings that the player placed/demolished as Options-designated buildings
+    /// (BaseBuildingDesignation), and creates/deletes the corresponding logical MilitaryBase (Task18;
+    /// Task82 removed the power-tab cloned-prefab path and consolidated onto this path only).
+    /// Threading notes:
+    ///  - CS events (EventBuildingCreated/EventBuildingReleased) give no guarantee about which thread
+    ///    they fire on, so the handlers are kept minimal (only recording ids) and never make CS API
+    ///    calls or touch WarState (an exception escaping here would make the game show an unhandled
+    ///    popup, so everything is always wrapped in try/catch).
+    ///  - The actual application (reading the BuildingManager buffer + updating WarState) happens only
+    ///    via ProcessPending, called from MilitaryManager.OnSimTick (sim thread, _stateLock already held).
     /// </summary>
     public static class BasePlacementWatcher
     {
@@ -24,36 +25,38 @@ namespace CSWarfront.Game
         private static readonly List<ushort> _pendingReleased = new List<ushort>();
 
         /// <summary>
-        /// Task60: 基地建物の向き（ラジアン、CS Building.m_angle）のキャッシュ。Game/BaseVisuals.cs が
-        /// 勢力別モデルのオーバーレイを正しい向きで表示するために使う。書き込みは常にこのクラスの
-        /// simスレッド専用メソッド（ProcessCreated、呼び出し元 MilitaryManager.OnSimTick が既に
-        /// _stateLock を保持している）から行う——ここで既にCS建物バッファ（Building構造体）を
-        /// 読んでいるため、便乗して1回の読み取りで済ませ、メインスレッドから BuildingManager へ
-        /// 触れる経路を増やさない（既定の安全な選択：CS実体はsimスレッド専用というルールを維持する）。
-        /// 読み取り（<see cref="TryGetAngle"/>）は MilitaryManager.OnMainVisualUpdate が同じ
-        /// _stateLock を保持したままスナップショット構築中に呼ぶ想定（Dictionary自体はスレッドセーフで
-        /// はないため、呼び出し側の規約でスレッド安全性を担保する）。
+        /// Task60: cache of base building orientations (radians, CS Building.m_angle). Used by
+        /// Game/BaseVisuals.cs to display the per-faction model overlays with the correct orientation.
+        /// Writes always happen from this class's sim-thread-only method (ProcessCreated, whose caller
+        /// MilitaryManager.OnSimTick already holds _stateLock) — we are already reading the CS building
+        /// buffer (Building struct) there, so we piggyback on that single read and avoid adding another
+        /// path that touches BuildingManager from the main thread (the safe default choice: keep the
+        /// rule that CS entities are sim-thread-only).
+        /// Reads (<see cref="TryGetAngle"/>) are expected to be made by MilitaryManager.OnMainVisualUpdate
+        /// while it still holds the same _stateLock during snapshot construction (the Dictionary itself is
+        /// not thread-safe, so thread safety is guaranteed by the callers' convention).
         /// </summary>
         private static readonly Dictionary<ushort, float> _baseAngles = new Dictionary<ushort, float>();
 
         /// <summary>
-        /// Task74: 基地登録時（ProcessCreated）に確定した建物の<see cref="BuildingInfo"/>.nameのキャッシュ。
-        /// ReconcileBasesの「幽霊基地」判定を、建物実体の消失／id使い回しの検知だけに絞り込むために使う
-        /// （以前はOptionsの現在の指定(BaseBuildingDesignation)とInfo.nameを比較しており、登録後に
-        /// プレイヤーが指定を変更/解除しただけで、生きている基地がゴースト扱いされ削除される不具合が
-        /// あった）。書き込みは常にこのクラスのsimスレッド専用メソッド（ProcessCreated、呼び出し元
-        /// MilitaryManager.OnSimTick が既に_stateLockを保持している）から行う——_baseAnglesと同じ箇所・
-        /// 同じタイミングで書く（Task82で電力タブの複製プレハブ経由の判定は撤去し、Options指定建物
-        /// （BaseBuildingDesignation）経由の一本のmatch判定のみになった）。
-        /// 読み取り（ReconcileBases）は同じ_stateLockを保持したまま呼ぶ想定（Dictionary自体はスレッド
-        /// セーフではないため、呼び出し側の規約でスレッド安全性を担保する）。
-        /// セッション限定キャッシュであり、セーブファイルには含まれない点に注意（セーブロード直後は
-        /// 該当基地のエントリが無い＝「まだ一度もProcessCreatedを通っていない」状態になる。この場合の
-        /// 扱いはReconcileBasesのコメントを参照）。
+        /// Task74: cache of each building's <see cref="BuildingInfo"/>.name captured at base registration
+        /// time (ProcessCreated). Used to narrow ReconcileBases' "ghost base" detection down to only
+        /// detecting building-entity disappearance / id reuse (previously it compared Info.name against
+        /// the current Options designation (BaseBuildingDesignation), so merely changing/clearing the
+        /// designation after registration caused live bases to be treated as ghosts and deleted — a bug).
+        /// Writes always happen from this class's sim-thread-only method (ProcessCreated, whose caller
+        /// MilitaryManager.OnSimTick already holds _stateLock) — written at the same place and time as
+        /// _baseAngles (Task82 removed the power-tab cloned-prefab match path, leaving the single match
+        /// path via Options-designated buildings (BaseBuildingDesignation)).
+        /// Reads (ReconcileBases) are expected to be made while holding the same _stateLock (the
+        /// Dictionary itself is not thread-safe, so thread safety is guaranteed by the callers' convention).
+        /// Note this is a session-only cache and is not part of the save file (right after a save load,
+        /// the affected bases have no entry = "ProcessCreated has never run for them yet"; see the
+        /// comments in ReconcileBases for how that case is handled).
         /// </summary>
         private static readonly Dictionary<ushort, string> _baseInfoNames = new Dictionary<ushort, string>();
 
-        /// <summary>冪等。OnLevelLoaded から呼ばれる想定。</summary>
+        /// <summary>Idempotent. Expected to be called from OnLevelLoaded.</summary>
         public static void Subscribe()
         {
             if (_subscribed) return;
@@ -73,7 +76,7 @@ namespace CSWarfront.Game
             catch (Exception e) { ModConfig.LogError("BasePlacementWatcher.Subscribe exception: " + e); }
         }
 
-        /// <summary>冪等。OnLevelUnloading から呼ばれる想定。</summary>
+        /// <summary>Idempotent. Expected to be called from OnLevelUnloading.</summary>
         public static void Unsubscribe()
         {
             if (!_subscribed) return;
@@ -90,7 +93,7 @@ namespace CSWarfront.Game
             finally { _subscribed = false; }
         }
 
-        /// <summary>セッション終了時（MilitaryManager.Reset経由）に持ち越しを防ぐ。</summary>
+        /// <summary>Prevents carry-over at session end (via MilitaryManager.Reset).</summary>
         public static void ClearPending()
         {
             lock (_pendingLock)
@@ -98,23 +101,23 @@ namespace CSWarfront.Game
                 _pendingCreated.Clear();
                 _pendingReleased.Clear();
             }
-            // Task60: 呼び出し元（MilitaryManager.Reset）は既に_stateLockを保持しているため、
-            // ここで追加のロックは不要（_baseAnglesの書き込みは常にそのロック内、ProcessCreated経由）。
+            // Task60: the caller (MilitaryManager.Reset) already holds _stateLock, so no additional
+            // lock is needed here (_baseAngles writes always happen inside that lock, via ProcessCreated).
             _baseAngles.Clear();
-            // Task74: _baseInfoNamesも同じ規約（_stateLock保持済み、ProcessCreated経由でのみ書き込み）。
+            // Task74: _baseInfoNames follows the same convention (_stateLock held, written only via ProcessCreated).
             _baseInfoNames.Clear();
         }
 
-        /// <summary>Task60: 指定基地の向き（ラジアン）を返す。呼び出し元は_stateLockを保持していること
-        /// （クラス冒頭の<see cref="_baseAngles"/>コメント参照）。まだ一度もProcessCreatedで観測されて
-        /// いない基地（理論上は無いはずだが、防御的に）はfalseを返し、呼び出し側は既定角度(0)へ
-        /// フォールバックすること。</summary>
+        /// <summary>Task60: returns the orientation (radians) of the given base. The caller must hold
+        /// _stateLock (see the <see cref="_baseAngles"/> comment at the top of the class). For a base
+        /// that has never been observed by ProcessCreated (theoretically impossible, but defensively)
+        /// this returns false, and the caller should fall back to the default angle (0).</summary>
         internal static bool TryGetAngle(ushort baseId, out float angleRadians)
         {
             return _baseAngles.TryGetValue(baseId, out angleRadians);
         }
 
-        // CSのイベントハンドラ本体。呼び出しスレッド不明のため、idの記録のみ（例外は必ず握る）。
+        // The actual CS event handlers. Calling thread unknown, so only record the id (always swallow exceptions).
         private static void OnBuildingCreated(ushort id)
         {
             try { lock (_pendingLock) { _pendingCreated.Add(id); } }
@@ -128,8 +131,8 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// simスレッド（MilitaryManager.OnSimTick、呼び出し元が既に _stateLock 保持済み）から呼ぶ。
-        /// pending リストを排出し、CS建物バッファを読んで WarState.Bases を更新する。
+        /// Called from the sim thread (MilitaryManager.OnSimTick, whose caller already holds _stateLock).
+        /// Drains the pending lists, reads the CS building buffer, and updates WarState.Bases.
         /// </summary>
         public static void ProcessPending(WarState state)
         {
@@ -143,29 +146,32 @@ namespace CSWarfront.Game
                 if (_pendingReleased.Count > 0) { released = new List<ushort>(_pendingReleased); _pendingReleased.Clear(); }
             }
 
-            // デバッグ計装（一時的）: 基地登録が一度も走らない不具合の原因切り分けのため、
-            // drain 結果があれば件数をログする。恒久ログにはしない想定。
+            // Debug instrumentation (temporary): to isolate the cause of a bug where base registration
+            // never ran, log the counts whenever the drain produced anything. Not intended as a permanent log.
             if (created != null || released != null)
             {
                 ModConfig.Log("BasePlacementWatcher: ProcessPending: drained created=" +
                     (created != null ? created.Count : 0) + " released=" + (released != null ? released.Count : 0));
             }
 
-            // 解放を先に処理する（重要）: CSは建物IDを再利用するため、プレイヤーが解体→同じIDで
-            // 再建築した場合、両イベントが同一バッチに入りうる。作成を先に処理すると、まだ残っている
-            // 古い基地との重複判定で新しい基地の登録がスキップされ、その直後に古い基地が削除されて
-            // 「建物はあるが論理基地が無い」状態（以後どのイベントでも復旧しない）になる。
+            // Process releases first (important): CS reuses building IDs, so if the player demolishes
+            // and then rebuilds with the same ID, both events can land in the same batch. Processing
+            // creations first would skip registering the new base because the duplicate check still
+            // sees the lingering old base, and the old base would be removed right afterwards, leaving
+            // a "building exists but no logical base" state (which no subsequent event ever repairs).
             if (released != null) ProcessReleased(state, released);
             if (created != null) ProcessCreated(state, created);
         }
 
         private static void ProcessCreated(WarState state, List<ushort> ids)
         {
-            // デバッグ計装（一時的）: 早期returnも含め、なぜ基地が登録されないかを追えるようにする。
-            // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab）を完全撤去したため、マッチ対象は
-            // Optionsで指定した建物アセット(BaseBuildingDesignation)のみになった。指定が1件も無ければ
-            // どの建物も基地になり得ないため早期returnする（唯一の回復策はOptionsで基地種別ごとに
-            // 建物を指定すること）。
+            // Debug instrumentation (temporary): make it traceable why a base was not registered,
+            // including the early returns.
+            // Task82: the power-tab cloned-prefab mechanism (WarfrontBasePrefab) was fully removed, so
+            // the only match targets are the building assets designated in Options
+            // (BaseBuildingDesignation). If there is not a single designation, no building can ever
+            // become a base, so return early (the only recovery is to designate a building per base
+            // type in Options).
             if (!BaseBuildingDesignation.HasAny)
             {
                 ModConfig.Log("BasePlacementWatcher: ProcessCreated: no designated buildings; " +
@@ -192,9 +198,10 @@ namespace CSWarfront.Game
                 bool flagsCreated = (b.m_flags & Building.Flags.Created) != 0;
                 string infoName = b.Info != null ? b.Info.name : null;
 
-                // Task82: どの基地種別（Army/Navy/AirForce/MissileBase）に一致するかは、Optionsで指定した
-                // 建物アセット名（BaseBuildingDesignation）とInfo.nameの一致のみで判定する（電力タブの
-                // 複製プレハブとの参照/名前一致判定=WarfrontBasePrefab.TryMatchは撤去済み）。
+                // Task82: which base type (Army/Navy/AirForce/MissileBase) a building matches is decided
+                // solely by comparing Info.name against the building asset names designated in Options
+                // (BaseBuildingDesignation) (the reference/name matching against the power-tab cloned
+                // prefab = WarfrontBasePrefab.TryMatch has been removed).
                 BaseType matchedType = default(BaseType);
                 bool match = infoName != null && BaseBuildingDesignation.TryMatch(infoName, out matchedType);
 
@@ -211,18 +218,21 @@ namespace CSWarfront.Game
                     continue;
                 }
 
-                // Task60: この時点でCS建物バッファ（Building構造体、既にbとして読み込み済み）から
-                // 基地の向きを取得できる。新規登録・復元済み（existing、下のチェック）のどちらでも
-                // 常に更新する——復元時（セーブロード後にEventBuildingCreatedが再発火するケース）は
-                // これを existing チェックより前で行わないと、プロセス起動直後は BaseVisuals が
-                // 向きを一切知らないままになってしまうため。
+                // Task60: at this point we can take the base's orientation from the CS building buffer
+                // (the Building struct, already read into b). Always update it, for both fresh
+                // registration and already-restored (existing, checked below) bases — for the restore
+                // case (EventBuildingCreated re-firing after a save load), this must happen before the
+                // existing check, or BaseVisuals would know nothing about orientations right after
+                // process startup.
                 _baseAngles[id] = b.m_angle;
-                // Task74: 登録が確定した時点（クローンプレハブ経由・指定建物経由のいずれでもmatch==true）
-                // でInfo.nameをキャッシュする。以後のReconcileBasesはこの名前とだけ比較し、Optionsの
-                // 現在の指定がどう変わっても影響を受けない（idが同じ建物実体である限り基地は維持される）。
+                // Task74: cache Info.name at the moment registration is confirmed (match==true, whether
+                // via the cloned prefab or via a designated building). From then on ReconcileBases
+                // compares only against this name and is unaffected by however the current Options
+                // designation changes (as long as the id refers to the same building entity, the base
+                // is kept).
                 _baseInfoNames[id] = infoName;
 
-                bool existing = FindBase(state, id) != null; // 冪等: セーブロード直後や重複イベント対策
+                bool existing = FindBase(state, id) != null; // Idempotency: guards against post-save-load and duplicate events
                 if (existing)
                 {
                     ModConfig.Log("BasePlacementWatcher: id=" + id + " flags-created=True info='" + infoName +
@@ -234,18 +244,21 @@ namespace CSWarfront.Game
                     "' match=True(" + matchedType + ") existing=False -> REGISTERING");
 
                 Vector3 pos = b.m_position;
-                // Task61: 陸軍/海軍/航空、TryMatchが特定した種別でMilitaryBaseを作る（従来は常にArmy固定だった）。
+                // Task61: create the MilitaryBase with the type identified by TryMatch — Army/Navy/AirForce
+                // (previously it was always hard-coded to Army).
                 var mb = new MilitaryBase(id, matchedType, new WorldPos(pos.x, pos.y, pos.z));
                 mb.OwnerFactionId = WarfrontSettings.BuildFactionId;
-                // Task101（ユーザー要望「塹壕は勢力関係なく使える」）: 塹壕は完全に無所属の地形として
-                // 登録する（建設先勢力ドロップダウンの選択も無視。守備ボーナス・歩兵の陣地志向は
-                // 元々所有不問で、所有記録だけが残っていたのを廃止）。
+                // Task101 (user request "trenches should be usable regardless of faction"): register
+                // trenches as fully unowned terrain (the build-faction dropdown selection is ignored too.
+                // The defensive bonus and the infantry's preference for positions were owner-agnostic
+                // all along; only the ownership record remained, and that is now abolished).
                 if (matchedType == BaseType.Trench) mb.OwnerFactionId = null;
-                // Task101: 種別ごとの既定HP（通常基地500/築城は各種の値、FortificationRules参照）。
+                // Task101: default HP per type (regular bases 500 / fortifications use their per-type
+                // values, see FortificationRules).
                 mb.MaxHP = FortificationRules.DefaultMaxHP(matchedType);
                 mb.CurrentHP = mb.MaxHP;
-                // 新設基地は一定期間占領されない（Task24）：プレイヤーが両陣営の基地を配置し終える前に
-                // 一方的に占領されてしまう不具合の対策。
+                // Newly built bases cannot be captured for a while (Task24): fixes a bug where a base
+                // was captured one-sidedly before the player finished placing bases for both sides.
                 mb.CaptureGraceHours = MilitaryBase.NewBaseGraceHours;
                 state.Bases.Add(mb);
 
@@ -253,8 +266,8 @@ namespace CSWarfront.Game
                 bool isHq = false;
                 if (f != null)
                 {
-                    // Task101: 築城（塹壕・掩蔽壕等）は本拠地(HQ)にしない（HQ=勢力の存続を賭ける
-                    // 軍事基地という意味付けを保つ）。
+                    // Task101: fortifications (trenches, bunkers, etc.) never become the headquarters (HQ)
+                    // (preserving the meaning of HQ = the military base the faction's survival hinges on).
                     if (f.HomeBaseId == null && !FortificationRules.IsFortification(matchedType))
                     {
                         f.HomeBaseId = id;
@@ -286,8 +299,8 @@ namespace CSWarfront.Game
                 bool wasHq = mb.IsHeadquarters;
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
-                _baseAngles.Remove(id); // Task60: 解体済みidの向きキャッシュを持ち越さない
-                _baseInfoNames.Remove(id); // Task74: 解体済みidのInfo名キャッシュも持ち越さない
+                _baseAngles.Remove(id); // Task60: do not carry over the angle cache for demolished ids
+                _baseInfoNames.Remove(id); // Task74: do not carry over the Info-name cache for demolished ids either
 
                 ModConfig.Log("BasePlacementWatcher: base removed id=" + id +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
@@ -295,24 +308,26 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// ロジック基地の建物（BuildingManagerが管理するCS建物実体）が既に存在しない「幽霊基地」を
-        /// 掃除する（Task24）。建物が過去に検知されないまま解体された場合や、古いセーブ由来のケースで、
-        /// 論理基地だけがWarState.Basesに残り続け、生産/攻撃対象であり続けてしまう不具合の対策。
-        /// simスレッド（MilitaryManager.OnSimTick、呼び出し元が既に_stateLock保持済み）から
-        /// スロットル付きで呼ばれる想定。
+        /// Cleans up "ghost bases" whose logical base's building (the CS building entity managed by
+        /// BuildingManager) no longer exists (Task24). Fixes a bug where, if a building was demolished
+        /// without ever being detected, or in cases originating from old saves, the logical base kept
+        /// lingering in WarState.Bases and remained a production/attack target.
+        /// Expected to be called with throttling from the sim thread (MilitaryManager.OnSimTick, whose
+        /// caller already holds _stateLock).
         /// </summary>
         public static void ReconcileBases(WarState state)
         {
             if (state == null) return;
-            // Task82: ProcessCreatedと同じ理由で、Options指定建物(BaseBuildingDesignation)に比較対象が
-            // 1件も無ければ続ける意味が無い（電力タブの複製プレハブ経由の判定=WarfrontBasePrefab.
-            // IsAnyRegisteredは撤去済み）。
+            // Task82: for the same reason as ProcessCreated, if the Options-designated buildings
+            // (BaseBuildingDesignation) contain nothing to compare against, there is no point in
+            // continuing (the check via the power-tab cloned prefab = WarfrontBasePrefab.
+            // IsAnyRegistered has been removed).
             if (!BaseBuildingDesignation.HasAny) return;
             if (!Singleton<BuildingManager>.exists) return;
 
             Building[] buf = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
 
-            // 削除対象を先に集めてから削除する（列挙中にstate.Basesを変更しないため）。
+            // Collect deletion candidates first, then delete (to avoid modifying state.Bases while enumerating).
             List<MilitaryBase> ghosts = null;
             for (int i = 0; i < state.Bases.Count; i++)
             {
@@ -329,36 +344,40 @@ namespace CSWarfront.Game
 
                     if (!flagsCreated || b.Info == null)
                     {
-                        // 建物実体が既に無い（解体済み／未生成）→ 幽霊基地として削除（変更なし）。
+                        // The building entity no longer exists (demolished / never created) -> delete
+                        // as a ghost base (unchanged behavior).
                         isGhost = true;
                     }
                     else
                     {
-                        // Task74: ReconcileBasesの本来の役目は「建物が既に無い」「idが無関係な建物に
-                        // 再利用された」の2つだけを捕まえること。Optionsの現在の指定
-                        // （BaseBuildingDesignation）とここで比較するのは誤り——プレイヤーが登録後に
-                        // 指定を変更/解除しただけで、生きている基地が幽霊扱いされ削除されてしまう
-                        // （Task74で報告された不具合）。よって現在の指定は一切見ない。
+                        // Task74: ReconcileBases' real job is to catch exactly two things: "the building
+                        // no longer exists" and "the id was reused for an unrelated building". Comparing
+                        // here against the current Options designation (BaseBuildingDesignation) is
+                        // wrong — merely changing/clearing the designation after registration would get
+                        // live bases treated as ghosts and deleted (the bug reported in Task74). So the
+                        // current designation is never consulted.
                         string cachedName;
                         if (_baseInfoNames.TryGetValue(mb.BaseId, out cachedName))
                         {
-                            // 登録時（ProcessCreated）に記録したInfo.nameと現在のInfo.nameを比較する
-                            // ことで、真のid使い回し（このidが解体後に別の建物種別へ再割当てされた）
-                            // だけを検知する。現在の指定がどうであろうと、登録時と同じ建物である限り
-                            // ゴースト扱いしない。
+                            // By comparing the Info.name recorded at registration (ProcessCreated)
+                            // against the current Info.name, we detect only genuine id reuse (this id
+                            // was reassigned to a different building type after demolition). Whatever
+                            // the current designation is, the base is not treated as a ghost as long
+                            // as it is the same building as at registration.
                             isGhost = b.Info.name != cachedName;
                         }
                         else
                         {
-                            // キャッシュに無い＝このセッションでProcessCreatedを一度も通っていない基地
-                            // （典型的にはセーブから復元した直後：_baseInfoNamesはセッション限定キャッシュ
-                            // であり、セーブデータには含まれない）。この場合は寛容に扱う：建物実体が
-                            // 生きている（flagsCreated && Info!=nullを上で確認済み）こと自体を信頼して
-                            // 基地を維持する——セーブされた時点でこの基地は有効だったはずであり、id使い
-                            // 回しはCS自身がそのidを一度解放してから再割当てするまで起こり得ない
-                            // （flagsCreatedがtrueのまま保たれている限り、このidは解体されていない）。
-                            // ここで現在のInfo.nameをキャッシュに補完し、以後は通常のid使い回し検知
-                            // （上のブランチ）に合流させる。
+                            // Not in the cache = a base ProcessCreated has never run for in this session
+                            // (typically right after restoring from a save: _baseInfoNames is a
+                            // session-only cache and not part of the save data). Treat this case
+                            // leniently: trust the mere fact that the building entity is alive
+                            // (flagsCreated && Info!=null was verified above) and keep the base — the
+                            // base must have been valid at the moment it was saved, and id reuse cannot
+                            // happen until CS itself releases the id once and then reassigns it (as long
+                            // as flagsCreated has stayed true, this id has never been demolished).
+                            // Backfill the current Info.name into the cache here, so it joins the normal
+                            // id-reuse detection (the branch above) from then on.
                             isGhost = false;
                             _baseInfoNames[mb.BaseId] = b.Info.name;
                         }
@@ -378,17 +397,19 @@ namespace CSWarfront.Game
                 bool wasHq = mb.IsHeadquarters;
                 byte? owner = mb.OwnerFactionId;
                 RemoveBaseAndReassignHq(state, mb);
-                _baseAngles.Remove(mb.BaseId); // Task60: 幽霊基地の向きキャッシュを持ち越さない
-                _baseInfoNames.Remove(mb.BaseId); // Task74: 幽霊基地のInfo名キャッシュも持ち越さない
+                _baseAngles.Remove(mb.BaseId); // Task60: do not carry over the angle cache for ghost bases
+                _baseInfoNames.Remove(mb.BaseId); // Task74: do not carry over the Info-name cache for ghost bases either
                 ModConfig.Log("BasePlacementWatcher: ReconcileBases: removed ghost base id=" + mb.BaseId +
                     " (was HQ=" + wasHq + ", faction=" + owner + ")");
             }
         }
 
         /// <summary>
-        /// 基地を論理状態から取り除き、それが所属勢力のHQだった場合はHomeBaseIdをクリアして
-        /// 残る所有基地があれば先頭を昇格する（解体経路・幽霊基地掃除経路の共通処理）。
-        /// Eliminatedはここでは設定しない（勢力消滅はCoreのOccupationが決める戦闘結果のため）。
+        /// Removes a base from the logical state, and if it was its owning faction's HQ, clears
+        /// HomeBaseId and promotes the first remaining owned base, if any (logic shared by the
+        /// demolition path and the ghost-base cleanup path).
+        /// Eliminated is not set here (faction elimination is a combat outcome decided by Core's
+        /// Occupation).
         /// </summary>
         private static void RemoveBaseAndReassignHq(WarState state, MilitaryBase mb)
         {
@@ -399,13 +420,14 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// factionId の HomeBaseId が baseId を指している場合にそれをクリアし、その勢力がまだ
-        /// 所有する他の基地があれば先頭を新HQへ昇格する。指していなければ何もしない（no-op）。
-        /// 基地の削除（RemoveBaseAndReassignHq）・所属変更（MilitaryManager.TrySetBaseOwner）の
-        /// 両方から共有される、HQ整合性維持の唯一の実装（Task25：ロジック重複を避けるため internal 公開）。
-        /// 昇格そのものは Core.FactionStatus.PromoteFirstOwnedBaseToHq を呼ぶ（Task46：
-        /// 「所有基地の先頭を新HQにする」ルールを FactionStatus.Refresh と重複させないため）。
-        /// 呼び出し元が _stateLock を保持していること。
+        /// If factionId's HomeBaseId points at baseId, clears it and, if the faction still owns other
+        /// bases, promotes the first one to the new HQ. Does nothing if it does not point there (no-op).
+        /// This is the single implementation of HQ-consistency maintenance, shared by both base removal
+        /// (RemoveBaseAndReassignHq) and ownership changes (MilitaryManager.TrySetBaseOwner) (Task25:
+        /// exposed as internal to avoid duplicating the logic).
+        /// The promotion itself calls Core.FactionStatus.PromoteFirstOwnedBaseToHq (Task46: to avoid
+        /// duplicating the "promote the first owned base to the new HQ" rule with FactionStatus.Refresh).
+        /// The caller must hold _stateLock.
         /// </summary>
         internal static void ReassignHqIfCleared(WarState state, byte factionId, ushort baseId)
         {
@@ -413,9 +435,9 @@ namespace CSWarfront.Game
             if (f == null || !f.HomeBaseId.HasValue || f.HomeBaseId.Value != baseId) return;
 
             f.HomeBaseId = null;
-            // この時点で baseId の基地は既に削除済み（RemoveBaseAndReassignHq経由）か、既に
-            // factionId以外の所有へ切り替わっている（TrySetBaseOwner経由）ため、
-            // PromoteFirstOwnedBaseToHq の所有権チェックが自然にbaseIdを除外する。
+            // At this point the base for baseId has either already been removed (via
+            // RemoveBaseAndReassignHq) or has already switched to an owner other than factionId (via
+            // TrySetBaseOwner), so PromoteFirstOwnedBaseToHq's ownership check naturally excludes baseId.
             FactionStatus.PromoteFirstOwnedBaseToHq(state, factionId);
         }
 

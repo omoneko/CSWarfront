@@ -7,28 +7,35 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// CombatFx（発砲/撃破の見た目エフェクト）に対応する「音」側（Task51、兵科別射撃音・撃破音）。
-    /// CombatFx.cs と同じ partial class の別ファイル分割（1ファイルが肥大化しすぎないための整理のみで、
-    /// 挙動・スレッド境界はCombatFx本体と完全に同一＝メインスレッド専用、例外は握ってログのみ）。
+    /// The "sound" side that accompanies CombatFx (the visual firing/kill effects) (Task51,
+    /// per-category shot sounds and kill sounds). A separate-file split of the same partial class as
+    /// CombatFx.cs (purely organizational, to keep any single file from growing too large; behavior
+    /// and the thread boundary are exactly identical to the CombatFx core = main thread only,
+    /// exceptions are swallowed and only logged).
     ///
-    /// PlayShotSound は CombatFx.SpawnOne から発射位置(from)・カメラ位置とともに呼ばれる。
-    /// SpawnKillSounds は MilitaryManager.OnMainVisualUpdate から State.RecentKills のスナップショットを
-    /// 受け取って呼ばれる（Spawn(shots)と対になる、視覚エフェクトを伴わない「音だけ」のエントリポイント）。
+    /// PlayShotSound is called from CombatFx.SpawnOne together with the firing position (from) and the
+    /// camera position.
+    /// SpawnKillSounds is called from MilitaryManager.OnMainVisualUpdate with a snapshot of
+    /// State.RecentKills (the counterpart of Spawn(shots): a "sound-only" entry point with no visual
+    /// effect attached).
     /// </summary>
     internal static partial class CombatFx
     {
-        // Task51: 銃撃バーストのうちどれくらいの頻度で跳弾音(WarfrontSounds.Ricochet)を混ぜるか。
-        // 毎発鳴らすとうるさいだけなので、演出のスパイス程度に間引く（銃撃15発につき1回程度）。
+        // Task51: how often a ricochet sound (WarfrontSounds.Ricochet) is mixed into gunfire bursts.
+        // Playing it on every round would just be noisy, so it is thinned out to a light garnish
+        // (roughly once per 15 gunfire rounds).
         private const int RicochetEveryNGunfireShots = 15;
         private static int _gunfireSoundCounter;
 
-        /// <summary>発砲した兵科に応じた音を発射位置(from)で再生する。視覚エフェクトの距離カリング
-        /// (MaxSpawnDistanceFromCamera)を通過した後に呼ばれるが、WarfrontSoundPlayer側でさらに独立した
-        /// （より近い）距離カリングと同時再生数の上限を適用するため、視覚とは別に静かに間引かれ得る。
-        /// 銃撃(Gunfire)はまれに跳弾音(Ricochet)も重ねる（演出のスパイス、鳴らしすぎない）。</summary>
+        /// <summary>Plays the sound matching the firing unit's category at the firing position (from).
+        /// Called after passing the visual effects' distance culling (MaxSpawnDistanceFromCamera), but
+        /// WarfrontSoundPlayer applies its own independent (tighter) distance culling and a cap on
+        /// simultaneous playbacks, so sounds may be silently thinned out separately from the visuals.
+        /// Gunfire occasionally also layers a ricochet sound (Ricochet) on top (a light garnish, not
+        /// overplayed).</summary>
         private static void PlayShotSound(ShotEvent e, Vector3 from, Vector3? cameraPos)
         {
-            string clipName = WarfrontSounds.ShotSoundFor(e.Category, e.Kind); // Task90: 対空の撃ち分け対応
+            string clipName = WarfrontSounds.ShotSoundFor(e.Category, e.Kind); // Task90: supports distinct anti-air sounds
             if (clipName != null) WarfrontSoundPlayer.PlayShot(clipName, from, cameraPos);
 
             if (e.Kind == ShotKind.Gunfire)
@@ -43,8 +50,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 撃破音(車両撃破時)をキル位置で再生する（メインスレッド専用）。KillEventには視覚エフェクトを
-        /// 付けない（音のみ）。Spawn(shots)と同じ「カメラ位置を1回だけ取得してから全件処理する」パターン。
+        /// Plays the kill sound (on vehicle destruction) at the kill position (main thread only).
+        /// KillEvents get no visual effect attached (sound only). Same pattern as Spawn(shots):
+        /// "fetch the camera position once, then process all entries".
         /// </summary>
         public static void SpawnKillSounds(List<KillEvent> kills)
         {
@@ -58,9 +66,10 @@ namespace CSWarfront.Game
                 for (int i = 0; i < kills.Count; i++)
                 {
                     KillEvent k = kills[i];
-                    // Task53: 歩兵・ドローン兵の撃破では「車両撃破時」の爆発音をオミットする
-                    // （生身の歩兵が爆発するのは演出として不自然なため）。MechInfantryは車両に
-                    // 乗った機械化歩兵なので対象外＝従来どおり爆発音を鳴らす（あえて含めない）。
+                    // Task53: omit the "vehicle destruction" explosion sound for infantry and drone
+                    // infantry kills (flesh-and-blood infantry exploding is unnatural as a presentation).
+                    // MechInfantry is mechanized infantry riding vehicles, so it is not excluded = the
+                    // explosion sound plays as before (deliberately not included here).
                     if (!IsVehicleDestructionCategory(k.Category)) continue;
 
                     Vector3 pos = new Vector3(k.Position.X, k.Position.Y, k.Position.Z);
@@ -73,11 +82,13 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>撃破カテゴリが「車両撃破時」の演出（爆発音＝この直上のSpawnKillSounds、
-        /// および爆発エフェクト＝Task65のKillFx.Spawn）の対象かどうか。両者が全く同じ基準を
-        /// 使う必要がある（Task65仕様：音とエフェクトで判定がズレると「爆発音は鳴るのに火柱が
-        /// 出ない」ような不整合が生まれる）ため、判定ロジックをここ1箇所に集約して共有する。
-        /// 歩兵・ドローン兵（生身）はfalse、それ以外（MechInfantryを含む全車両系）はtrue。</summary>
+        /// <summary>Whether the killed category is subject to the "vehicle destruction" presentation
+        /// (the explosion sound = SpawnKillSounds directly above, and the explosion effect = Task65's
+        /// KillFx.Spawn). Both must use exactly the same criterion (per the Task65 spec: if the sound
+        /// and the effect judged differently, inconsistencies like "the explosion sound plays but no
+        /// fireball appears" would arise), so the decision logic is consolidated and shared in this one
+        /// place. Infantry and drone infantry (flesh-and-blood) are false; everything else (all vehicle
+        /// types including MechInfantry) is true.</summary>
         internal static bool IsVehicleDestructionCategory(UnitCategory category)
         {
             return category != UnitCategory.Infantry && category != UnitCategory.DroneInfantry;

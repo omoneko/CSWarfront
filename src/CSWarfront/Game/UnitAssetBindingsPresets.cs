@@ -6,28 +6,33 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task70: UnitAssetBindings のうち、「全て初期化」（<see cref="ClearAll"/>）と「セット登録（1-3）」
-    /// （<see cref="SaveToSlot"/>/<see cref="LoadFromSlot"/>/<see cref="SlotExists"/>）だけを分離した
-    /// partial class（UnitAssetBindings.cs 側の500行制限のため。UnitAssetBindingsBaseTypesと同じ方針）。
-    /// フィールド（_bindings/_anyFactionBindings/_filePath/_modDirectory）とファイルIOヘルパー
-    /// （ParseFileInto/WriteBindingsToFile/Save）は全て UnitAssetBindings.cs 側で宣言されているが、
-    /// partial class は private メンバーも全パーツで共有するためそのまま使える。
+    /// Task70: The portion of UnitAssetBindings split out to hold only "reset all"
+    /// (<see cref="ClearAll"/>) and "preset registration (1-3)"
+    /// (<see cref="SaveToSlot"/>/<see cref="LoadFromSlot"/>/<see cref="SlotExists"/>), as a partial
+    /// class (due to the 500-line limit on UnitAssetBindings.cs; same policy as
+    /// UnitAssetBindingsBaseTypes).
+    /// The fields (_bindings/_anyFactionBindings/_filePath/_modDirectory) and file I/O helpers
+    /// (ParseFileInto/WriteBindingsToFile/Save) are all declared on the UnitAssetBindings.cs side,
+    /// but a partial class shares even private members across all parts, so they can be used as-is.
     ///
-    /// セットスロットのファイル: modDirectory 直下に "unit-assets-set&lt;slot&gt;.txt"（slot=1..3）として、
-    /// メインファイル（unit-assets.txt）と全く同じ行フォーマットで保存する（別形式は発明しない。
-    /// パース/シリアライズは ParseFileInto/WriteBindingsToFile を共有する）。
+    /// Preset slot files: saved directly under modDirectory as "unit-assets-set&lt;slot&gt;.txt"
+    /// (slot=1..3), in exactly the same line format as the main file (unit-assets.txt) (no separate
+    /// format is invented; parsing/serialization share ParseFileInto/WriteBindingsToFile).
     ///
-    /// 読込（LoadFromSlot）はテーブル全体を置き換える（REPLACE semantics）: 現在の割り当て（勢力別+
-    /// 全勢力共通(レガシー)の両方）を全て破棄し、スロットファイルの内容だけに差し替える。マージ
-    /// （既存の割り当てにスロットの内容を上書き加算していく方式）ではない。置き換え後は
-    /// unit-assets.txt にも即座に反映する（Save()を呼ぶ）ため、次回レベルロード時もこの状態を維持する。
+    /// Loading (LoadFromSlot) replaces the entire table (REPLACE semantics): all current assignments
+    /// (both per-faction and all-factions-common (legacy)) are discarded and replaced with only the
+    /// slot file's contents. It is not a merge (i.e. not a scheme where the slot's contents are
+    /// overwritten/added on top of the existing assignments). After replacement, unit-assets.txt is
+    /// also updated immediately (Save() is called), so this state persists across the next level load.
     ///
-    /// スロットファイルが存在しない、または壊れている（パース時に例外）場合は false を返し、現在の
-    /// メモリ内状態・unit-assets.txt はどちらも一切変更しない（先に一時辞書へパースしてから成功時のみ
-    /// _bindings/_anyFactionBindingsへ反映する二段構えのため、パース失敗時に中途半端な状態にはならない）。
+    /// If the slot file does not exist or is corrupted (exception during parsing), false is returned
+    /// and neither the current in-memory state nor unit-assets.txt is modified in any way (the
+    /// two-stage approach — parse into temporary dictionaries first and apply to
+    /// _bindings/_anyFactionBindings only on success — means a parse failure never leaves a
+    /// half-updated state).
     ///
-    /// 全メソッドは例外を外へ投げない（呼び出し元はUI＝メインスレッドのイベントハンドラのため、
-    /// ここでの失敗がゲームループを止めてはならない）。
+    /// No method throws exceptions outward (callers are UI = main-thread event handlers, so a failure
+    /// here must not stop the game loop).
     /// </summary>
     internal static partial class UnitAssetBindings
     {
@@ -36,9 +41,11 @@ namespace CSWarfront.Game
         private const string SlotFileNamePrefix = "unit-assets-set";
         private const string SlotFileNameSuffix = ".txt";
 
-        /// <summary>全ての割り当て（勢力別・全勢力共通(レガシー)・基地種別キーを含む全キー）を消去し、
-        /// 既定モデルへ戻す（個別の「既定に戻す」＝<see cref="Clear"/>の一括版）。直ちに保存する。</summary>
-        /// <returns>実際に削除した件数（勢力別+全勢力共通の合計）。元々0件だった場合は保存をスキップして0を返す。</returns>
+        /// <summary>Clears all assignments (all keys, including per-faction, all-factions-common
+        /// (legacy), and base-type keys) and reverts to the default models (the bulk version of the
+        /// individual "reset to default" = <see cref="Clear"/>). Saves immediately.</summary>
+        /// <returns>The number of entries actually removed (per-faction + all-factions-common total).
+        /// If there were originally 0 entries, saving is skipped and 0 is returned.</returns>
         public static int ClearAll()
         {
             try
@@ -60,10 +67,12 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>現在の割り当てテーブル全体を、指定スロット(1..3)のファイルへ保存する（既存の
-        /// unit-assets.txtとは別ファイル、"ギア設定"のように後で<see cref="LoadFromSlot"/>で戻せる）。</summary>
-        /// <returns>成功したか。slotが範囲外、modDirectory未解決、またはIOエラーの場合はfalse
-        /// （現在の割り当てには一切影響しない）。</returns>
+        /// <summary>Saves the entire current assignment table to the file of the given slot (1..3)
+        /// (a separate file from the existing unit-assets.txt; like a "gear loadout", it can be
+        /// restored later with <see cref="LoadFromSlot"/>).</summary>
+        /// <returns>Whether it succeeded. Returns false if slot is out of range, modDirectory is
+        /// unresolved, or an I/O error occurs (the current assignments are not affected at
+        /// all).</returns>
         public static bool SaveToSlot(int slot)
         {
             try
@@ -93,10 +102,12 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>指定スロット(1..3)のファイルから割り当てテーブル全体を読み込み、現在のテーブルを
-        /// まるごと置き換える（REPLACE。マージではない）。置き換え後は unit-assets.txt にも反映する。</summary>
-        /// <returns>成功したか。slotが範囲外、modDirectory未解決、スロットファイルが存在しない、または
-        /// 壊れている（パース時に例外）場合はfalseを返し、現在の割り当ては一切変更しない。</returns>
+        /// <summary>Loads the entire assignment table from the file of the given slot (1..3) and
+        /// replaces the current table wholesale (REPLACE, not a merge). After replacement,
+        /// unit-assets.txt is updated as well.</summary>
+        /// <returns>Whether it succeeded. Returns false — and leaves the current assignments entirely
+        /// unchanged — if slot is out of range, modDirectory is unresolved, the slot file does not
+        /// exist, or it is corrupted (exception during parsing).</returns>
         public static bool LoadFromSlot(int slot)
         {
             try
@@ -119,9 +130,10 @@ namespace CSWarfront.Game
                     return false;
                 }
 
-                // 先に一時辞書へパースし、成功した場合のみ本体へ反映する（壊れたファイルで現在の状態を
-                // 巻き込まないため。ParseFileIntoはFile.ReadAllLines等の例外をそのまま呼び出し元へ
-                // 伝播させる想定のため、ここでcatchして安全側に倒す）。
+                // Parse into temporary dictionaries first, and apply to the real tables only on
+                // success (so a corrupted file cannot drag down the current state. ParseFileInto is
+                // expected to propagate exceptions from File.ReadAllLines etc. straight to the caller,
+                // so we catch here and fail safe).
                 Dictionary<string, Binding> newBindings = new Dictionary<string, Binding>();
                 Dictionary<string, Binding> newAnyFactionBindings = new Dictionary<string, Binding>();
                 int parsed;
@@ -135,13 +147,13 @@ namespace CSWarfront.Game
                     return false;
                 }
 
-                // ここまで来て初めてテーブル全体を置き換える（REPLACE semantics）。
+                // Only once we get here is the entire table replaced (REPLACE semantics).
                 _bindings.Clear();
                 _anyFactionBindings.Clear();
                 foreach (KeyValuePair<string, Binding> kv in newBindings) _bindings[kv.Key] = kv.Value;
                 foreach (KeyValuePair<string, Binding> kv in newAnyFactionBindings) _anyFactionBindings[kv.Key] = kv.Value;
 
-                Save(); // unit-assets.txt にも反映（次回レベルロード時もこのセットの内容を維持するため）
+                Save(); // also update unit-assets.txt (so this preset's contents persist across the next level load)
 
                 ModConfig.Log("UnitAssetBindings.LoadFromSlot: loaded " + parsed + " entries from preset " + slot +
                     " ('" + path + "') and replaced the entire binding table");
@@ -154,8 +166,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>指定スロット(1..3)のファイルが存在するか（UIのドロップダウンラベルに「（空）」を
-        /// 添えるかどうかの判定に使う、Task70）。slot範囲外・modDirectory未解決の場合もfalse。</summary>
+        /// <summary>Whether the file of the given slot (1..3) exists (used to decide whether to append
+        /// "(empty)" to the UI dropdown label, Task70). Also returns false if slot is out of range or
+        /// modDirectory is unresolved.</summary>
         public static bool SlotExists(int slot)
         {
             try
