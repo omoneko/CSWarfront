@@ -6,25 +6,28 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// ユニットのクリック選択（Task31）。メインスレッド専用。マウス左クリックの立ち上がりフレーム
-    /// （Input.GetMouseButtonDown(0)）のみraycastを行い、毎フレームのraycastは行わない（コスト最小化）。
+    /// Click-selection of units (Task31). Main thread only. A raycast is performed only on the
+    /// frame where the left mouse button goes down (Input.GetMouseButtonDown(0)); no per-frame
+    /// raycasting (cost minimization).
     ///
-    /// UI上のクリックは無視する: ColossalFramework.UI.UIInput.hoveredComponent
-    /// （ColossalManaged.dll をリフレクションで確認済み。public static プロパティ、戻り値型
-    /// ColossalFramework.UI.UIComponent。裏付けフィールドは private static UIComponent m_HoveredComponent）
-    /// がnullでない＝カーソルが何らかのUIコンポーネント上にある、と判定しraycast自体をスキップする。
-    /// これにより自パネルはもちろん、バニラの全UI（電力タブ、建物パネル等）の上のクリックも
-    /// 3D世界へは一切透過しない。
+    /// Clicks on UI are ignored: when ColossalFramework.UI.UIInput.hoveredComponent
+    /// (verified via reflection over ColossalManaged.dll; a public static property with return type
+    /// ColossalFramework.UI.UIComponent, backed by private static UIComponent m_HoveredComponent)
+    /// is non-null — i.e. the cursor is over some UI component — the raycast itself is skipped.
+    /// This ensures clicks over our own panels as well as over all vanilla UI (electricity tab,
+    /// building panels, etc.) never pass through into the 3D world.
     ///
-    /// バニラ入力との共存: ヒットしたGameObjectが本MODのユニット表現（UnitVisuals.TryGetInstanceId
-    /// 経由）であると判定できた場合にのみ選択状態を更新する。それ以外（建物・地形・道路・何もない場所
-    /// へのクリック、あるいはraycast自体が何もヒットしない場合）は一切何もしない
-    /// （選択解除もInput消費もしない）。Physics.Raycastは判定のみに使い、イベントを消費（Input無効化等）
-    /// する操作は行っていないため、バニラの建物選択・ツール操作は完全にそのまま動作し続ける。
+    /// Coexistence with vanilla input: the selection state is updated only when the hit GameObject
+    /// can be identified as one of this mod's unit representations (via
+    /// UnitVisuals.TryGetInstanceId). Otherwise (clicks on buildings, terrain, roads, empty ground,
+    /// or when the raycast hits nothing at all) nothing whatsoever is done (no deselection and no
+    /// Input consumption). Physics.Raycast is used purely as a test, and no event-consuming
+    /// operations (Input disabling etc.) are performed, so vanilla building selection and tool
+    /// operations continue to work completely unchanged.
     /// </summary>
     public static class UnitSelection
     {
-        // マップ全域をカバーするのに十分な距離（CSのマップは概ね数kmオーダー）。
+        // Distance sufficient to cover the entire map (CS maps are roughly on the order of a few km).
         private const float MaxRaycastDistance = 10000f;
 
         public static uint SelectedInstanceId { get; private set; }
@@ -34,27 +37,27 @@ namespace CSWarfront.Game.UI
             SelectedInstanceId = 0;
         }
 
-        /// <summary>Task48: Game/UI/UnitBoxSelection が範囲選択の結果（先頭の1件、無ければ0）で
-        /// 上書きするための公開セッター。通常の単発クリック（下のUpdate）はこれを使わず自分で直接
-        /// 代入する。0を渡すとClear()と同じ意味になる。</summary>
+        /// <summary>Task48: Public setter so Game/UI/UnitBoxSelection can overwrite with the box
+        /// selection result (the first entry, or 0 if none). Ordinary single clicks (Update below)
+        /// do not use this and assign directly themselves. Passing 0 means the same as Clear().</summary>
         public static void Set(uint instanceId)
         {
             SelectedInstanceId = instanceId;
         }
 
-        /// <summary>毎メインスレッドフレーム呼ぶ。左クリックの立ち上がりフレームのみ処理する。</summary>
+        /// <summary>Called every main-thread frame. Processes only the frame where the left button goes down.</summary>
         public static void Update()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (!Input.GetMouseButtonDown(0)) return;
 
-                // カーソルがUI上にあるクリックは3D世界のraycastへ渡さない。
+                // Clicks while the cursor is over UI are not passed to the 3D-world raycast.
                 if (UIInput.hoveredComponent != null) return;
 
                 Camera cam = Camera.main;
-                if (cam == null) return; // カメラ未準備（レベルロード中等）。次回クリックで再試行。
+                if (cam == null) return; // camera not ready (level loading etc.). Retry on the next click.
 
                 Ray ray = cam.ScreenPointToRay(Input.mousePosition);
                 RaycastHit hit;
@@ -66,8 +69,8 @@ namespace CSWarfront.Game.UI
                 {
                     SelectedInstanceId = instanceId;
                 }
-                // ヒットが本MODユニットでなければ何もしない＝現在の選択を維持し、
-                // バニラのクリック処理（建物選択等）へそのまま委ねる。
+                // If the hit is not one of this mod's units, do nothing = keep the current
+                // selection and defer to vanilla click handling (building selection etc.) as-is.
             }
             catch (Exception e)
             {

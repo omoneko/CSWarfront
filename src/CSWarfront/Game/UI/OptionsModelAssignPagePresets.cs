@@ -7,19 +7,21 @@ using ICities;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// OptionsModelAssignPage のうち、Task70で新設した「全て初期化」ボタンと「セット」プリセット行
-    /// （スロット1-3の保存/読込）だけを分離した partial class（OptionsModelAssignPage.cs 側が既に
-    /// 500行制限に達しているため、新規追加分は最初からこちらへ置く。AssetAssignPanelPresets.csと
-    /// 同じ役割を Options サブページ側に持たせたもの）。実際の永続化処理は UnitAssetBindings.ClearAll/
-    /// SaveToSlot/LoadFromSlot（Game/UnitAssetBindingsPresets.cs）が一元的に担い、このファイルはUI
-    /// （ボタン/ドロップダウンの構築・クリックハンドラ・フィードバック表示）のみを持つ。フローティング
-    /// パネル側（AssetAssignPanelPresets.cs）と完全に同じAPIを呼ぶため、永続化ロジック自体は二重実装
-    /// しない。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class that splits out from OptionsModelAssignPage only the "Reset All" button and the
+    /// "Set" preset row (save/load for slots 1-3) newly added in Task70 (the OptionsModelAssignPage.cs
+    /// side has already reached the 500-line limit, so the new additions are placed here from the
+    /// start; this gives the Options subpage the same role as AssetAssignPanelPresets.cs). The actual
+    /// persistence work is centrally handled by UnitAssetBindings.ClearAll/
+    /// SaveToSlot/LoadFromSlot (Game/UnitAssetBindingsPresets.cs); this file only holds the UI
+    /// (button/dropdown construction, click handlers, feedback display). Because it calls exactly the
+    /// same API as the floating-panel side (AssetAssignPanelPresets.cs), the persistence logic itself
+    /// is not implemented twice. All methods are main-thread only (they call Unity UI APIs).
     ///
-    /// ICities.UIHelperBaseにはUIListBox相当が無いため、フローティングパネルと同じ構成（ドロップダウン
-    /// +保存/読込ボタン）を素直にAddDropdown/AddButtonで構築する。「現在の割り当て」プレビュー
-    /// （OptionsModelAssignPage.BuildBindingPreview）と同じ手法で、ボタンの後ろへ生のUILabelを
-    /// 直接追加してフィードバックメッセージ表示に使う（CreateNoteLabelを再利用）。
+    /// ICities.UIHelperBase has no UIListBox equivalent, so the same composition as the floating panel
+    /// (dropdown + save/load buttons) is built plainly with AddDropdown/AddButton. Using the same
+    /// technique as the "current assignment" preview (OptionsModelAssignPage.BuildBindingPreview),
+    /// a raw UILabel is added directly after the buttons and used to show feedback messages
+    /// (reusing CreateNoteLabel).
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
@@ -29,14 +31,15 @@ namespace CSWarfront.Game.UI
         private static UIButton _presetLoadButton;
         private static UILabel _presetMessageLabel;
 
-        /// <summary>ドロップダウンの選択インデックス(0..2)からスロット番号(1..3)へ変換する。</summary>
+        /// <summary>Converts the dropdown's selected index (0..2) to a slot number (1..3).</summary>
         private static int SelectedPresetSlot
         {
             get { return _presetSlotDropdown != null ? _presetSlotDropdown.selectedIndex + 1 : 1; }
         }
 
-        /// <summary>Build()から呼ぶ。「全て初期化」ボタン、「セット」ドロップダウン+保存/読込ボタン、
-        /// フィードバック用ラベルを、渡された group（モデル割り当てグループ）の末尾に追加する。</summary>
+        /// <summary>Called from Build(). Appends the "Reset All" button, the "Set" dropdown +
+        /// save/load buttons, and the feedback label to the end of the given group (the model
+        /// assignment group).</summary>
         internal static void BuildPresetsSection(UIHelperBase group)
         {
             _clearAllButton = group.AddButton("Reset All", OnClearAllClick) as UIButton;
@@ -50,9 +53,9 @@ namespace CSWarfront.Game.UI
             _presetMessageLabel = CreateNoteLabel(loadButtonObj);
         }
 
-        /// <summary>「1」「2（空）」のように、UnitAssetBindings.SlotExists（安価なFile.Existsのみ）で
-        /// 存在しないスロットへ「（空）」を付与したラベルを構築する（AssetAssignPanelPresets.
-        /// BuildPresetSlotLabelsと同じ内容）。</summary>
+        /// <summary>Builds labels like "1", "2 (empty)" — appending "(empty)" for slots that do not
+        /// exist per UnitAssetBindings.SlotExists (a cheap File.Exists only) (same content as
+        /// AssetAssignPanelPresets.BuildPresetSlotLabels).</summary>
         private static string[] BuildPresetSlotLabels()
         {
             string[] labels = new string[3];
@@ -64,8 +67,9 @@ namespace CSWarfront.Game.UI
             return labels;
         }
 
-        /// <summary>スロットドロップダウンのラベルだけを、選択位置を保ったまま再構築する。
-        /// RefreshFromState()（Options内でこのMODのタブが選択されるたび）、および保存/読込直後に呼ぶ。</summary>
+        /// <summary>Rebuilds only the labels of the slot dropdown while preserving the selection.
+        /// Called from RefreshFromState() (every time this mod's tab is selected inside Options), and
+        /// immediately after save/load.</summary>
         private static void RefreshPresetSlotLabels()
         {
             if (_presetSlotDropdown == null) return;
@@ -83,8 +87,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>AddDropdownのeventCallback用no-op（保存/読込ボタンが押された時点でselectedIndexを
-        /// 読むだけで足りるため、OnCopyScopeChangedと同じ方針）。</summary>
+        /// <summary>No-op for AddDropdown's eventCallback (reading selectedIndex at the moment the
+        /// save/load button is pressed is sufficient, same policy as OnCopyScopeChanged).</summary>
         private static void OnPresetSlotChanged(int value)
         {
         }
@@ -94,10 +98,11 @@ namespace CSWarfront.Game.UI
             if (_presetMessageLabel != null) _presetMessageLabel.text = text;
         }
 
-        /// <summary>「全て初期化」ボタン。UnitAssetBindings.ClearAllで全割り当てを既定へ戻し、
-        /// 削除件数をメッセージ表示する。1件以上削除した場合のみ既存のApply/Reset/CopyApplyと同じ
-        /// 反映処理（ラベル再構築＋見た目破棄）を行う（typeIdx固有のWarnIfNoOwnedBaseForKeyは
-        /// 一括操作には該当しないため呼ばない）。</summary>
+        /// <summary>"Reset All" button. Resets all assignments to the defaults via
+        /// UnitAssetBindings.ClearAll and shows the removal count as a message. Only when 1 or more
+        /// entries were removed does it perform the same reflection routine as the existing
+        /// Apply/Reset/CopyApply (label rebuild + visual destruction) (WarnIfNoOwnedBaseForKey is
+        /// typeIdx-specific and does not apply to a bulk operation, so it is not called).</summary>
         private static void OnClearAllClick()
         {
             try
@@ -130,8 +135,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>読込はテーブル全体を置き換える（UnitAssetBindings.LoadFromSlotのREPLACEセマンティクス）
-        /// ため、成功時は勢力/種別ドロップダウンのラベル・現在の割り当て表示・見た目を全て再同期する。</summary>
+        /// <summary>Loading replaces the whole table (the REPLACE semantics of
+        /// UnitAssetBindings.LoadFromSlot), so on success re-syncs everything: the faction/type
+        /// dropdown labels, the current-assignment display, and the visuals.</summary>
         private static void OnLoadSlotClick()
         {
             try
@@ -152,8 +158,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>全て初期化/セット読込 共通の反映処理（ApplyBindingChangeの一括操作版。単一typeIdxに
-        /// 紐づくWarnIfNoOwnedBaseForKeyは呼ばない＝複数キーが変わりうるため個別警告は意味を成さない）。</summary>
+        /// <summary>Reflection routine shared by "Reset All" and preset load (the bulk-operation
+        /// version of ApplyBindingChange. WarnIfNoOwnedBaseForKey, which is tied to a single typeIdx,
+        /// is not called = multiple keys may change, so a per-key warning would be meaningless).</summary>
         private static void RefreshAfterBulkChange()
         {
             RefreshTypeKeyLabels(_typeKeyDropdown != null ? _typeKeyDropdown.selectedIndex : 0);

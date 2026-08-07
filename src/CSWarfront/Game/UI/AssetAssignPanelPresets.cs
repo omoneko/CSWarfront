@@ -5,13 +5,14 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、Task70で新設した「全て初期化」ボタンと「セット」プリセット行
-    /// （スロット1-3の保存/読込）だけを分離した partial class（AssetAssignPanel.cs 側の500行制限の
-    /// ため。AssetAssignPanelCopy.cs と同じ方針）。実際の永続化処理は UnitAssetBindings.ClearAll/
-    /// SaveToSlot/LoadFromSlot（Game/UnitAssetBindingsPresets.cs）が一元的に担い、このファイルはUI
-    /// （ボタン/ドロップダウンの構築・クリックハンドラ・フィードバック表示）のみを持つ。Options
-    /// サブページ（Game/UI/OptionsModelAssignPagePresets.cs）も同じAPIを呼ぶため、永続化ロジック
-    /// 自体は二重実装しない。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class of AssetAssignPanel that isolates only the "Reset All" button and the "preset" row
+    /// (save/load for slots 1-3) added in Task70 (split off because of the 500-line limit on the
+    /// AssetAssignPanel.cs side; same policy as AssetAssignPanelCopy.cs). The actual persistence is
+    /// handled centrally by UnitAssetBindings.ClearAll/SaveToSlot/LoadFromSlot
+    /// (Game/UnitAssetBindingsPresets.cs); this file holds only the UI (button/dropdown construction,
+    /// click handlers, feedback display). The Options subpage
+    /// (Game/UI/OptionsModelAssignPagePresets.cs) calls the same APIs, so the persistence logic itself
+    /// is not implemented twice. All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class AssetAssignPanel
     {
@@ -22,7 +23,7 @@ namespace CSWarfront.Game.UI
         private static UIButton _presetLoadButton;
         private static UILabel _presetMessageLabel;
 
-        /// <summary>ドロップダウンの選択インデックス(0..2)からスロット番号(1..3)へ変換する。</summary>
+        /// <summary>Converts the dropdown's selection index (0..2) to a slot number (1..3).</summary>
         private static int SelectedPresetSlot
         {
             get { return _presetSlotDropdown != null ? _presetSlotDropdown.selectedIndex + 1 : 1; }
@@ -34,8 +35,9 @@ namespace CSWarfront.Game.UI
             return _clearAllButton;
         }
 
-        /// <summary>「セット」行: スロット選択ドロップダウン(1/2/3、空スロットには「（空）」を付す) +
-        /// 保存/読込ボタン。dropdownは行幅の約1/3、残りを保存/読込ボタンで等分する。</summary>
+        /// <summary>The "preset" row: a slot-selection dropdown (1/2/3, with "(empty)" appended to empty
+        /// slots) + Save/Load buttons. The dropdown takes about 1/3 of the row width; the remainder is
+        /// split evenly between the Save/Load buttons.</summary>
         private static void BuildPresetRow(float x, float y, float width)
         {
             float dropdownWidth = width * 0.34f;
@@ -61,7 +63,7 @@ namespace CSWarfront.Game.UI
             dd.listWidth = (int)width;
             dd.listHeight = 90;
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.75f; // 他パネルと統一
+            dd.textScale = 0.75f; // unified with the other panels
             dd.textFieldPadding = new RectOffset(12, 12, 9, 0);
             dd.itemPadding = new RectOffset(12, 0, 5, 0);
             dd.popupColor = new Color32(45, 52, 61, 255);
@@ -86,8 +88,8 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        /// <summary>「1」「2（空）」のように、UnitAssetBindings.SlotExists（安価なFile.Existsのみ）で
-        /// 存在しないスロットへ「（空）」を付与したラベルを構築する。</summary>
+        /// <summary>Builds labels like "1", "2 (empty)": "(empty)" is appended to slots that do not
+        /// exist per UnitAssetBindings.SlotExists (a cheap File.Exists only).</summary>
         private static string[] BuildPresetSlotLabels()
         {
             string[] labels = new string[3];
@@ -99,8 +101,8 @@ namespace CSWarfront.Game.UI
             return labels;
         }
 
-        /// <summary>スロットドロップダウンのラベルだけを、選択位置を保ったまま再構築する。Show()、
-        /// および保存/読込直後（内容が変わりうるため）に呼ぶ。</summary>
+        /// <summary>Rebuilds only the slot dropdown's labels while preserving the selection. Called from
+        /// Show() and right after save/load (since the contents may have changed).</summary>
         private static void RefreshPresetSlotLabels()
         {
             if (_presetSlotDropdown == null) return;
@@ -118,9 +120,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「全て初期化」ボタン。UnitAssetBindings.ClearAllで全割り当てを既定へ戻し、
-        /// 削除件数をメッセージ表示する。1件以上削除した場合のみ、既存のApply/Reset/CopyApplyと
-        /// 同じ反映処理（ラベル再構築＋見た目破棄）を行う。</summary>
+        /// <summary>The "Reset All" button. Resets all bindings to default via
+        /// UnitAssetBindings.ClearAll and shows the number of removed entries as a message. Only when
+        /// at least one entry was removed does it run the same apply processing as the existing
+        /// Apply/Reset/CopyApply (label rebuild + visual destruction).</summary>
         private static void OnClearAllClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -160,9 +163,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>読込はテーブル全体を置き換える（UnitAssetBindings.LoadFromSlotのREPLACEセマンティクス、
-        /// クラス冒頭コメント参照）ため、成功時は勢力/種別ドロップダウンのラベル・現在の割り当て表示・
-        /// 見た目を全て再同期する（Apply/Reset/CopyApplyと同じ反映処理）。</summary>
+        /// <summary>Loading replaces the whole table (the REPLACE semantics of
+        /// UnitAssetBindings.LoadFromSlot; see the comment at the top of that class), so on success the
+        /// faction/type dropdown labels, the current-binding display, and the visuals are all
+        /// resynchronized (same apply processing as Apply/Reset/CopyApply).</summary>
         private static void OnLoadSlotClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -192,8 +196,8 @@ namespace CSWarfront.Game.UI
             if (_presetMessageLabel != null) _presetMessageLabel.text = text;
         }
 
-        /// <summary>Destroy()から呼ばれる。イベント購読解除とフィールドリセットのみ
-        /// （AssetAssignPanelFaction.DestroyFactionSectionと同じ方針）。</summary>
+        /// <summary>Called from Destroy(). Only unsubscribes events and resets fields
+        /// (same policy as AssetAssignPanelFaction.DestroyFactionSection).</summary>
         private static void DestroyPresetsSection()
         {
             if (_clearAllButton != null) _clearAllButton.eventClick -= OnClearAllClick;

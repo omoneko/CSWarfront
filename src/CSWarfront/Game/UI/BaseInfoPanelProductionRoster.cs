@@ -8,10 +8,11 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// BaseInfoPanelProduction のうち、ユニット選択ドロップダウンの構築/内容更新とキュー表示文字列の
-    /// 組み立てだけを分離した partial class（BaseInfoPanelProduction.cs 側の500行制限のため分離。
-    /// Task34のBaseInfoPanelProduction.cs分離、Task63のBaseInfoPanelMissile.cs分離と同じ方針）。
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class splitting out of BaseInfoPanelProduction only the construction/content updating of
+    /// the unit selection dropdown and the assembly of the queue display string (split off because of
+    /// the 500-line limit on BaseInfoPanelProduction.cs; same policy as the Task34
+    /// BaseInfoPanelProduction.cs split and the Task63 BaseInfoPanelMissile.cs split).
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
@@ -55,23 +56,25 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        /// <summary>選択中の基地が生産できる領域（Task61: spawnableDomains、MilitaryBase.SpawnableDomains
-        /// の写し）のロスターから、ドロップダウンの表示テキストと発注用TypeKeyの対応配列を構築する
-        /// （陸軍基地はLandUnitRoster、海軍基地はNavalUnitRoster、航空基地はAirUnitRoster。
-        /// 未所属の基地等でどれとも一致しない場合はLandUnitRosterへフォールバックする）。
-        /// unlockedTierを超えるTierの項目には末尾に " [未解禁]" を付ける（Task35：選択自体は可能なままにして、
-        /// 生産ボタンがTierLockedを報告する。何が研究で解禁されるか一目で分かるようにするため選択肢からは
-        /// 外さない）。unlockedTier・spawnableDomainsのどちらも前回と同じであれば何もしない
-        /// （毎フレーム呼ばれてもリストを再構築しない）。</summary>
+        /// <summary>Builds the paired arrays of dropdown display texts and TypeKeys for ordering, from
+        /// the roster of domains the selected base can produce (Task61: spawnableDomains, a copy of
+        /// MilitaryBase.SpawnableDomains) (army bases use LandUnitRoster, naval bases NavalUnitRoster,
+        /// air bases AirUnitRoster; if none matches, e.g. an unaffiliated base, fall back to
+        /// LandUnitRoster). Entries whose tier exceeds unlockedTier get " [Locked]" appended (Task35:
+        /// they remain selectable and the produce button reports TierLocked; they are not removed from
+        /// the choices so it is obvious at a glance what research will unlock). If both unlockedTier and
+        /// spawnableDomains are the same as last time, do nothing (the list is not rebuilt even though
+        /// this is called every frame).</summary>
         private static void EnsureUnitDropdownItemsBuilt(byte unlockedTier, DomainMask spawnableDomains,
             BaseType baseType = BaseType.Army)
         {
             if (_unitDropdownItems != null && _lastUnitDropdownUnlockedTier == unlockedTier &&
                 _lastUnitDropdownDomains == spawnableDomains && _lastUnitDropdownBaseType == baseType) return;
 
-            // Task61: ロスターの切り替え時（陸軍→海軍基地など）は選択インデックスを維持する意味が
-            // 無い（全く別の兵科リストになるため）ので先頭へ戻す。Tierのみが変わった場合は従来通り
-            // 選択位置を維持する。上書き前の値をここで捕まえておく。
+            // Task61: on a roster switch (e.g. army -> naval base) there is no point in preserving the
+            // selection index (the unit-branch list is completely different), so reset to the head. If
+            // only the tier changed, keep the selection position as before. Capture the pre-overwrite
+            // value here.
             bool rosterChanged = _lastUnitDropdownDomains != spawnableDomains;
 
             IEnumerable<UnitType> roster;
@@ -83,8 +86,9 @@ namespace CSWarfront.Game.UI
             var keys = new List<string>();
             foreach (UnitType t in roster)
             {
-                // Task103: 兵科単位の生産可否（軍用列車は貨物駅のみ・貨物駅は列車のみ。
-                // 軍事拠点のメニューに列車を出さない）。
+                // Task103: per-branch production eligibility (military trains only at cargo stations,
+                // and cargo stations only produce trains. Do not list trains in a military strongpoint's
+                // menu).
                 if (!FortificationRules.CanProduceUnit(baseType, t.Category)) continue;
 
                 string label = t.TypeKey + "  (¥" + t.Cost.ToString("0") + ")";
@@ -109,8 +113,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>"キュー: Tank_T3(生産中) → Infantry_T2 → …" 形式の1行を組み立てる。
-        /// index 0 は常に生産中（先頭）で "(生産中)" を付ける。QueueDisplayMax件を超える分は "…" で省略する。</summary>
+        /// <summary>Assembles one line in the "Queue: Tank_T3(producing) -> Infantry_T2 -> …" format.
+        /// Index 0 is always in production (the head) and gets "(producing)" appended. Entries beyond
+        /// QueueDisplayMax are elided with "…".</summary>
         private static string BuildQueueDisplayText(string[] queuedTypeKeys)
         {
             if (queuedTypeKeys == null || queuedTypeKeys.Length == 0) return "Queue: none";

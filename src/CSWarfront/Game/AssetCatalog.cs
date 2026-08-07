@@ -6,32 +6,35 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// ロード済みアセット（プロップ・建物・車両・樹木。Workshopのサブスクライブ済みアセット含む）を
-    /// 種類(<see cref="AssetKind"/>)×名前で列挙・解決するヘルパー（Task36でPropCatalogとして導入、
-    /// Task41で建物/車両/樹木にも対応するため AssetCatalog へ一般化）。
+    /// Helper that enumerates/resolves loaded assets (props, buildings, vehicles, trees; including
+    /// subscribed Workshop assets) by kind (<see cref="AssetKind"/>) x name (introduced as
+    /// PropCatalog in Task36, generalized to AssetCatalog in Task41 to also cover
+    /// buildings/vehicles/trees).
     ///
-    /// 借用するのは常に m_mesh（描画）と m_material.mainTexture（テクスチャ、UnitMaterialFactory経由）
-    /// のみで、AIやCS側のMaterialオブジェクトそのものは一切借用しない（UnitMeshSource/UnitMaterialFactory
-    /// と同じ方針）。これは4種類とも共通の安全性保証であり、種類を問わず安全にユニットモデルとして
-    /// 使える理由でもある: AIをインスタンス化しない（メッシュしか読まない）ため、
-    /// 建物AI/車両AI/樹木の成長ロジック等の副作用・クラッシュが原理的に起こらない。
+    /// Only m_mesh (rendering) and m_material.mainTexture (texture, via UnitMaterialFactory) are
+    /// ever borrowed; AIs and the CS-side Material objects themselves are never borrowed (same
+    /// policy as UnitMeshSource/UnitMaterialFactory). This is a safety guarantee shared by all 4
+    /// kinds, and also the reason any kind can safely be used as a unit model: since no AI is
+    /// instantiated (only the mesh is read), side effects and crashes from building AI / vehicle AI
+    /// / tree growth logic etc. are impossible by construction.
     ///
-    /// PropInfo/BuildingInfo/VehicleInfo/TreeInfo の m_mesh は共通の基底クラス(PrefabInfo)には無く
-    /// 型ごとに別々に宣言されているため、走査・単発解決とも Scan&lt;T&gt;/TryGetField&lt;T,TResult&gt;
-    /// という小さなジェネリックヘルパーに種類ごとのセレクタ(Func&lt;T,TResult&gt;)を渡す形で共通化した
-    /// （4種類分の重複コードを避けつつ、リフレクションは使わない＝実行時コストなし）。
-    /// m_isCustomContent/m_Atlas/m_Thumbnail は全種類とも PrefabInfo 基底で共通のため、サムネイル解決
-    /// (TryGetThumbnail)は種類に依らず共通コード1本で済む。
+    /// m_mesh of PropInfo/BuildingInfo/VehicleInfo/TreeInfo is not on the common base class
+    /// (PrefabInfo) but declared separately per type, so both the sweep and one-shot resolution are
+    /// unified through small generic helpers, Scan&lt;T&gt;/TryGetField&lt;T,TResult&gt;, that take
+    /// a per-kind selector (Func&lt;T,TResult&gt;) (avoiding 4 copies of duplicated code without
+    /// using reflection = zero runtime cost).
+    /// m_isCustomContent/m_Atlas/m_Thumbnail are shared on the PrefabInfo base across all kinds, so
+    /// thumbnail resolution (TryGetThumbnail) needs just one kind-independent code path.
     ///
-    /// Assembly-CSharp.dll をリフレクションで検証済み（.superpowers/sdd/task-41-report.md 参照）:
-    ///   PropInfo.m_mesh/m_material                      … 直接宣言
-    ///   BuildingInfo.m_mesh/m_material                   … BuildingInfoBase（基底）で宣言
-    ///   VehicleInfo.m_mesh/m_material                    … VehicleInfoBase（基底）で宣言
-    ///   TreeInfo.m_mesh/m_material                       … 直接宣言（m_lodMeshは無いため使わない）
-    ///   PrefabInfo.m_isCustomContent/m_Atlas/m_Thumbnail … 4種類共通の基底
-    ///   PrefabCollection&lt;T&gt;.LoadedCount()/GetLoaded(uint)/FindLoaded(string) … 4種類とも同一シグネチャ
+    /// Verified against Assembly-CSharp.dll via reflection (see .superpowers/sdd/task-41-report.md):
+    ///   PropInfo.m_mesh/m_material                      ... declared directly
+    ///   BuildingInfo.m_mesh/m_material                   ... declared on BuildingInfoBase (base)
+    ///   VehicleInfo.m_mesh/m_material                    ... declared on VehicleInfoBase (base)
+    ///   TreeInfo.m_mesh/m_material                       ... declared directly (has no m_lodMesh, so it is not used)
+    ///   PrefabInfo.m_isCustomContent/m_Atlas/m_Thumbnail ... base shared by all 4 kinds
+    ///   PrefabCollection&lt;T&gt;.LoadedCount()/GetLoaded(uint)/FindLoaded(string) ... identical signatures for all 4 kinds
     ///
-    /// メインスレッド専用（PrefabCollectionアクセスを伴う）。
+    /// Main thread only (involves PrefabCollection access).
     /// </summary>
     internal static class AssetCatalog
     {
@@ -43,23 +46,26 @@ namespace CSWarfront.Game
 
         private const int KindCount = 4; // AssetKind.Prop/Building/Vehicle/Tree
 
-        // 種類ごとの全プレハブ走査結果キャッシュ。null は「未スキャン」を表すセンチネル。
-        // 走査は高コストなため、Rescan() が明示的に呼ばれたとき（＝UIパネルを開いたとき）だけ行う。
-        // 建物/車両の総数はプロップより桁違いに多いことがあるため、種類ごとに個別キャッシュし
-        // 実際に一覧表示された種類だけを都度スキャンする（4種類まとめての一括スキャンはしない）。
+        // Per-kind cache of the full prefab sweep results. null is the sentinel for "not scanned
+        // yet". Scanning is expensive, so it only happens when Rescan() is explicitly called
+        // (= when the UI panel is opened). The total number of buildings/vehicles can be orders of
+        // magnitude larger than props, so each kind is cached separately and only the kind actually
+        // shown in the list is scanned on demand (no bulk scan of all 4 kinds at once).
         private static readonly List<Entry>[] _all = new List<Entry>[KindCount];
 
-        /// <summary>全種類の走査結果を破棄し、次回 GetNames 呼び出し時に再走査させる。
-        /// AssetAssignPanel が開かれるたびに呼ぶことで「今サブスクライブしているアセット」を反映する。</summary>
+        /// <summary>Discards the sweep results for all kinds so the next GetNames call re-scans.
+        /// Called every time AssetAssignPanel is opened, so the list reflects "the assets currently
+        /// subscribed".</summary>
         public static void Rescan()
         {
             for (int i = 0; i < KindCount; i++) _all[i] = null;
         }
 
         /// <summary>
-        /// 使えるメッシュ(m_mesh)を持つ、指定種類のアセット名一覧を返す（名前昇順ソート）。
-        /// customOnly=true の場合 m_isCustomContent==true（Workshop/カスタムコンテンツ）のみに絞る。
-        /// filter が非空の場合、大文字小文字を無視した部分一致でさらに絞る。
+        /// Returns the list of asset names of the given kind that have a usable mesh (m_mesh),
+        /// sorted by name ascending.
+        /// If customOnly=true, narrows to m_isCustomContent==true (Workshop/custom content) only.
+        /// If filter is non-empty, further narrows by case-insensitive substring match.
         /// </summary>
         public static List<string> GetNames(AssetKind kind, bool customOnly, string filter)
         {
@@ -82,10 +88,10 @@ namespace CSWarfront.Game
             return result;
         }
 
-        /// <summary>名前からメッシュを直接解決する（走査キャッシュに依存しない、都度FindLoadedする単発の
-        /// 名前引き。UnitMeshSourceがユニットのビジュアル生成時に呼ぶ経路で、キャッシュの有無で
-        /// バインディング変更が隠れることを避けるため意図的にキャッシュしない。PropCatalog時代からの
-        /// 方針を踏襲）。</summary>
+        /// <summary>Resolves a mesh directly from a name (a one-shot name lookup that calls
+        /// FindLoaded each time, independent of the sweep cache. This is the path UnitMeshSource
+        /// calls when creating a unit's visual; it is intentionally uncached so that binding changes
+        /// can never be hidden by cache state. Keeps the policy from the PropCatalog era).</summary>
         public static bool TryGetMesh(AssetKind kind, string name, out Mesh mesh)
         {
             mesh = null;
@@ -110,9 +116,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>名前からメインテクスチャ（m_material.mainTexture）を直接解決する（TryGetMeshと同じく
-        /// 都度FindLoadedする単発ルックアップ、キャッシュしない）。UnitMaterialFactory がマテリアル生成の
-        /// テクスチャ元として呼ぶ。CS側のMaterialオブジェクトそのものは一切返さない（テクスチャのみ）。</summary>
+        /// <summary>Resolves the main texture (m_material.mainTexture) directly from a name (like
+        /// TryGetMesh, a one-shot lookup that calls FindLoaded each time, uncached).
+        /// UnitMaterialFactory calls this as the texture source for material creation. The CS-side
+        /// Material object itself is never returned (texture only).</summary>
         public static bool TryGetTexture(AssetKind kind, string name, out Texture texture)
         {
             texture = null;
@@ -138,10 +145,11 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 指定種類・名前のアセットのサムネイル（PrefabInfo.m_Atlas / m_Thumbnail、4種類共通の基底で
-        /// 宣言されているため種類分岐は FindLoadedByKind の中だけで完結する）を解決する。
-        /// 多くのアセットはサムネイルを持たない（m_Atlas==null または m_Thumbnail が空）ため、その場合は
-        /// false を返す。呼び出し側（AssetAssignPanel）はfalse時にサムネイル用UISpriteを隠すこと。
+        /// Resolves the thumbnail of the asset with the given kind and name (PrefabInfo.m_Atlas /
+        /// m_Thumbnail; declared on the base shared by all 4 kinds, so the kind branching is fully
+        /// contained inside FindLoadedByKind).
+        /// Many assets have no thumbnail (m_Atlas==null or m_Thumbnail empty), in which case this
+        /// returns false. The caller (AssetAssignPanel) must hide the thumbnail UISprite on false.
         /// </summary>
         public static bool TryGetThumbnail(AssetKind kind, string name, out UITextureAtlas atlas, out string spriteName)
         {
@@ -179,9 +187,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>PrefabCollection&lt;T&gt;.FindLoaded(name) で見つけたインスタンスから、selector で
-        /// 指定したフィールド（m_mesh または m_material.mainTexture）を読み取る共通ヘルパー。
-        /// selector が null を返した場合（メッシュ/テクスチャ無し）は false を返す。</summary>
+        /// <summary>Common helper that reads the field designated by selector (m_mesh or
+        /// m_material.mainTexture) from the instance found via PrefabCollection&lt;T&gt;.FindLoaded(name).
+        /// Returns false when selector returns null (no mesh/texture).</summary>
         private static bool TryGetField<T, TResult>(string name, Func<T, TResult> selector, out TResult result)
             where T : PrefabInfo
             where TResult : class
@@ -213,18 +221,20 @@ namespace CSWarfront.Game
                 default: list = new List<Entry>(); break;
             }
 
-            // Task66バグ調査で判明: 以前はプロセス内で種類ごとに1回しかログしなかった（_loggedScanOnce
-            // ガード）ため、メインメニュー時点（0件）の走査だけが記録され、都市ロード後にRescan()経由で
-            // 再走査され直しても件数が更新されたことがログから追えなかった（「割り当てたアセットが反映
-            // されない」調査を著しく困難にした）。Rescan()はUIパネルを開いた時だけ呼ばれる低頻度パス
-            // （毎フレームではない）なので、常にログしてもスパムにならない。
+            // Found during the Task66 bug investigation: previously this logged only once per kind
+            // per process (a _loggedScanOnce guard), so only the main-menu-time sweep (0 entries)
+            // was recorded, and even after Rescan() triggered a re-scan post city load, the updated
+            // count could not be traced from the log (which made the "assigned asset does not take
+            // effect" investigation extremely difficult). Rescan() is only called when the UI panel
+            // is opened, a low-frequency path (not every frame), so always logging never becomes spam.
             ModConfig.Log("AssetCatalog: " + kind + " scan complete, " + list.Count + " with mesh");
 
             _all[idx] = list;
         }
 
-        /// <summary>PrefabCollection&lt;T&gt; を全走査し、meshSelector が非nullを返すエントリだけを
-        /// 候補化する共通実装（種類ごとの差分は meshSelector デリゲートだけ）。</summary>
+        /// <summary>Common implementation that sweeps the whole PrefabCollection&lt;T&gt; and keeps
+        /// only entries for which meshSelector returns non-null as candidates (the only per-kind
+        /// difference is the meshSelector delegate).</summary>
         private static List<Entry> Scan<T>(Func<T, Mesh> meshSelector) where T : PrefabInfo
         {
             List<Entry> list = new List<Entry>();
@@ -237,7 +247,7 @@ namespace CSWarfront.Game
                     if (info == null) continue;
 
                     Mesh mesh = meshSelector(info);
-                    if (mesh == null) continue; // 使えるメッシュを持つ物だけを候補にする
+                    if (mesh == null) continue; // only things with a usable mesh become candidates
 
                     string name = info.name;
                     if (string.IsNullOrEmpty(name)) continue;

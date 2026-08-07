@@ -4,35 +4,36 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// ユニット描画用マテリアルを自前生成する小さなヘルパー。
-    /// CS車両のマテリアル（VehicleInfo.m_material / m_lodMaterial）は専用シェーダーが
-    /// 前提とし、そのシェーダーはCSのカスタムレンダラーが供給するper-instanceデータ
-    /// （カラー配列・変換行列・ライティング状態）を要求する。素の MeshRenderer に割り当てると
-    /// 不可視/黒でレンダリングされる（実際に発生していたバグ）ため、CS由来マテリアルは一切借用しない。
-    /// 代わりに標準シェーダーで自前の Material を作り、勢力ごとに色分けする。
-    /// マテリアルは勢力id単位（最大 <see cref="WarfrontSettings.MaxFactions"/> 種）でキャッシュ・共有し、
-    /// sharedMaterial として割り当てる（per-instance化してリークさせない）。
-    /// メインスレッド専用（Material/Shader生成を伴う）。
+    /// Small helper that generates unit-rendering materials in-house.
+    /// CS vehicle materials (VehicleInfo.m_material / m_lodMaterial) assume dedicated shaders, and
+    /// those shaders require per-instance data (color arrays, transform matrices, lighting state)
+    /// supplied by CS's custom renderer. Assigned to a plain MeshRenderer they render
+    /// invisible/black (a bug that actually occurred), so CS-derived materials are never borrowed.
+    /// Instead we create our own Material with a standard shader and color-code it per faction.
+    /// Materials are cached and shared per faction id (up to <see cref="WarfrontSettings.MaxFactions"/>
+    /// kinds) and assigned as sharedMaterial (never instantiated per-instance, so nothing leaks).
+    /// Main thread only (involves Material/Shader creation).
     ///
-    /// Task37: 割り当て済みアセットについては勢力色で塗らず、アセット自身の見た目
-    /// （テクスチャ）を維持する。ただしCS側の Material オブジェクトそのものは
-    /// （上記と同じ理由で）借用しない。<see cref="TryGetAssetMaterial"/> は
-    /// AssetCatalog.TryGetTexture（内部で PropInfo/BuildingInfo/VehicleInfo/TreeInfo の
-    /// m_material.mainTexture を読む）だけを使い、自前の標準シェーダーMaterialに貼り直す
-    /// （Material.mainTexture / Material(Shader) は UnityEngine.dll をリフレクションで
-    /// 検証済み。各アセット型の m_material は Assembly-CSharp.dll をリフレクションで検証済み、
-    /// Task36 task-36-report.md / Task41 task-41-report.md 参照）。
+    /// Task37: bound assets are not tinted with the faction color; the asset's own look
+    /// (texture) is preserved. However, the CS-side Material object itself is still not
+    /// borrowed (for the same reason as above). <see cref="TryGetAssetMaterial"/> uses only
+    /// AssetCatalog.TryGetTexture (which internally reads m_material.mainTexture of
+    /// PropInfo/BuildingInfo/VehicleInfo/TreeInfo) and re-applies it to our own standard-shader
+    /// Material (Material.mainTexture / Material(Shader) were verified via reflection against
+    /// UnityEngine.dll. Each asset type's m_material was verified via reflection against
+    /// Assembly-CSharp.dll; see Task36 task-36-report.md / Task41 task-41-report.md).
     ///
-    /// Task41: マテリアルキャッシュのキーを名前(string)単独から (AssetKind, name) の組へ拡張した。
-    /// 名前だけをキーにすると、例えば同名の建物とプロップが両方ロードされている場合に片方の
-    /// テクスチャがもう片方へ誤って使い回されてしまう（PrefabCollectionは種類ごとに独立した名前空間の
-    /// ため、名前の一致は種類をまたいでは何も保証しない）。AssetKey で種類込みの複合キーにすることで
-    /// これを防ぐ。
+    /// Task41: extended the material cache key from name (string) alone to the (AssetKind, name)
+    /// pair. With a name-only key, if for example a building and a prop with the same name are both
+    /// loaded, one's texture would be incorrectly reused for the other (PrefabCollection keeps an
+    /// independent namespace per kind, so a name match guarantees nothing across kinds). Using
+    /// AssetKey as a composite key that includes the kind prevents this.
     /// </summary>
     internal static class UnitMaterialFactory
     {
-        // 勢力id 0..5 に対応する識別色。0=赤, 1=青, 2=緑, 3=黄, 4=マゼンタ,
-        // 5=モスグリーン（Task95: 外部襲来のInvader勢力。純緑のGreenと見分けがつくよう暗くくすんだ苔色）。
+        // Identification colors for faction ids 0..5: 0=red, 1=blue, 2=green, 3=yellow, 4=magenta,
+        // 5=moss green (Task95: the external-assault Invader faction; a dark, muted moss color so it
+        // is distinguishable from pure-green Green).
         private static readonly Color[] FactionColors =
         {
             Color.red, Color.blue, Color.green, Color.yellow, Color.magenta,
@@ -43,7 +44,8 @@ namespace CSWarfront.Game
 
         private static readonly Dictionary<byte, Material> _cache = new Dictionary<byte, Material>();
 
-        /// <summary>Task41: (種類, 名前) の複合キー。同名でも種類が違えば別エントリとして扱う。</summary>
+        /// <summary>Task41: composite (kind, name) key. Same name with different kinds counts as
+        /// separate entries.</summary>
         private struct AssetKey : IEquatable<AssetKey>
         {
             public AssetKind Kind;
@@ -67,8 +69,8 @@ namespace CSWarfront.Game
             }
         }
 
-        // (種類, 名前) 単位のマテリアルキャッシュ（Task37で導入、Task41で種類込みのキーへ拡張）。
-        // TryGetAssetMaterial専用。
+        // Per (kind, name) material cache (introduced in Task37, key extended to include the kind
+        // in Task41). Used exclusively by TryGetAssetMaterial.
         private static readonly Dictionary<AssetKey, Material> _assetCache = new Dictionary<AssetKey, Material>();
 
         private static Shader _shader;
@@ -76,8 +78,8 @@ namespace CSWarfront.Game
         private static bool _loggedShaderFailure;
 
         /// <summary>
-        /// 勢力idに対応するマテリアルを取得する（無ければ生成してキャッシュ）。
-        /// シェーダーが一切見つからない環境（理論上のみ）では false を返す。
+        /// Gets the material for a faction id (creating and caching it if absent).
+        /// Returns false in environments where no shader can be found at all (theoretical only).
         /// </summary>
         public static bool TryGetFactionMaterial(byte factionId, out Material material)
         {
@@ -112,13 +114,15 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task37: 割り当て済みアセット用のマテリアルを取得する（無ければ生成してキャッシュ）。
-        /// Task41: 対象をプロップ以外（建物/車両/樹木）にも拡張し、キャッシュキーを (kind, name) にした。
-        /// 自前の標準シェーダーMaterialを作り、色は白（tintしない＝勢力色で塗らない）のまま、
-        /// mainTextureだけアセット自身のマテリアル（AssetCatalog.TryGetTexture経由）から借用する。
-        /// CSの Material オブジェクトそのものは一切割り当てない（TryGetFactionMaterialと同じ理由）。
-        /// テクスチャが取得できない場合は白一色の標準マテリアルへフォールバックする
-        /// （勢力色にはフォールバックしない＝要件2「勢力色で塗るのをやめる」を守る）。
+        /// Task37: gets the material for a bound asset (creating and caching it if absent).
+        /// Task41: extended coverage beyond props (buildings/vehicles/trees) and changed the cache
+        /// key to (kind, name).
+        /// Creates our own standard-shader Material, keeps the color white (no tint = no faction
+        /// coloring), and borrows only the mainTexture from the asset's own material (via
+        /// AssetCatalog.TryGetTexture).
+        /// The CS Material object itself is never assigned (same reason as TryGetFactionMaterial).
+        /// If no texture can be obtained, we fall back to a plain white standard material
+        /// (never to the faction color — honoring requirement 2, "stop tinting with faction colors").
         /// </summary>
         public static bool TryGetAssetMaterial(AssetKind kind, string assetName, out Material material)
         {
@@ -150,7 +154,7 @@ namespace CSWarfront.Game
                 AssetCatalog.TryGetTexture(kind, assetName, out mainTexture);
 
                 Material mat = new Material(shader);
-                mat.color = Color.white; // tintしない。アセット自身の見た目を維持する。
+                mat.color = Color.white; // no tint; preserve the asset's own look.
                 if (mainTexture != null) mat.mainTexture = mainTexture;
 
                 _assetCache[key] = mat;
@@ -165,9 +169,10 @@ namespace CSWarfront.Game
             }
         }
 
-        // Task57で追加した TryGetSolidColorMaterial（軍事基地プレハブ=WarfrontBasePrefabの既定モデル
-        // 専用の固定色マテリアル生成）は、Task82で電力タブの複製プレハブ機構自体を完全撤去したため
-        // 呼び出し元が無くなり削除した。
+        // TryGetSolidColorMaterial, added in Task57 (fixed-color material generation dedicated to
+        // the default model of the military base prefab = WarfrontBasePrefab), was deleted because
+        // Task82 completely removed the electricity-tab cloned-prefab mechanism itself, leaving no
+        // callers.
 
         private static Color ColorForFaction(byte factionId)
         {

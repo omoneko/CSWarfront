@@ -7,30 +7,35 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task74: 「Optionで指定した建物アセットを建てると、その建物がその種別の基地として機能する」方式の
-    /// 割り当てストア。基地種別（<see cref="BaseType"/>、Army/Navy/AirForce/MissileBase）ごとに、
-    /// プレイヤーがOptionsで指定した「基地として機能させたい既存の建物アセット名」を1件だけ保持する。
+    /// Task74: designation store for the "build the building asset specified in Options and that
+    /// building functions as a base of that type" scheme. For each base type (<see cref="BaseType"/>,
+    /// Army/Navy/AirForce/MissileBase) it holds exactly one entry: the name of the existing building
+    /// asset the player designated in Options as "the one that should function as this base".
     ///
-    /// UnitAssetBindings（勢力別・ユニット/基地の見た目モデル割り当て。ファイル: unit-assets.txt）とは
-    /// 完全に独立した専用ファイル（&lt;modDir&gt;\base-buildings.txt）に保存する。理由: こちらは
-    /// 「見た目の割り当て」ではなく「どのアセットを建てればそれ自体が基地になるか」という配置認識の
-    /// ルールであり、勢力別に分ける概念も無い（電力タブの複製プレハブと同じく、常に
-    /// WarfrontSettings.BuildFactionId所属の基地として登録される。BasePlacementWatcher.ProcessCreated
-    /// 参照）。UnitAssetBindingsの複雑なTier/勢力/複製フォールバックの仕組みを持ち込む必要が無いため、
-    /// あえて独立させ、シンプルな1種別=1アセット名のみのフォーマットにした。
+    /// Saved to its own dedicated file (&lt;modDir&gt;\base-buildings.txt), fully independent from
+    /// UnitAssetBindings (per-faction visual model bindings for units/bases; file: unit-assets.txt).
+    /// Reason: this is not a "visual binding" but a placement-recognition rule — "which asset, when
+    /// built, becomes a base by itself" — and there is no concept of splitting it per faction
+    /// (just like the electricity-tab cloned prefabs, it is always registered as a base belonging to
+    /// WarfrontSettings.BuildFactionId; see BasePlacementWatcher.ProcessCreated). There is no need
+    /// to drag in UnitAssetBindings' complex Tier/faction/clone fallback machinery, so it was kept
+    /// deliberately independent with a simple format of one asset name per type only.
     ///
-    /// ファイル形式（1行、UTF-8）: "baseType=assetName"（baseTypeはCSWarfront.Core.BaseTypeのenum名、
-    /// 例: "Army=Some Custom Building"）。4種別のうち、実際に指定されているものだけが行として存在する
-    /// （未指定の種別は行自体が無く、その種別は従来どおり電力タブの複製建物でのみ配置できる＝
-    /// coexistence: 本クラスの指定はあくまで追加の配置経路であり、電力タブの複製プレハブ登録・機能を
-    /// 一切変更しない）。
+    /// File format (one line each, UTF-8): "baseType=assetName" (baseType is the enum name of
+    /// CSWarfront.Core.BaseType, e.g. "Army=Some Custom Building"). Of the 4 types, only those
+    /// actually designated exist as lines (undesignated types have no line at all, and such a type
+    /// can still only be placed via the electricity-tab cloned building as before =
+    /// coexistence: designations in this class are strictly an additional placement path and do not
+    /// change the electricity-tab cloned prefab registration/behavior in any way).
     ///
-    /// 壊れている/存在しないファイルは常に「割り当て無し」として扱い、例外を外へ投げない
-    /// （ここでの失敗がロード自体を止めてはならない、UnitAssetBindingsと同じ方針）。
-    /// メインスレッド専用という制約は無いが、呼び出しは全てメインスレッド（Options UI/ロード処理）から
-    /// 行われる想定。BasePlacementWatcher（simスレッド）からは<see cref="TryGet"/>/<see cref="TryMatch"/>
-    /// という読み取り専用メソッドのみを呼ぶ（Dictionaryへの書き込みはOptions UI操作時のみ、メインスレッド
-    /// 限定で発生し、simスレッドとの同時書き込みは無い前提。UnitAssetBindingsも同じ前提で運用されている）。
+    /// A corrupt/missing file is always treated as "no designations" and no exception escapes
+    /// (a failure here must never stop the load itself; same policy as UnitAssetBindings).
+    /// There is no main-thread-only constraint, but all calls are expected to come from the main
+    /// thread (Options UI / load processing). BasePlacementWatcher (sim thread) calls only the
+    /// read-only methods <see cref="TryGet"/>/<see cref="TryMatch"/> (writes to the Dictionary occur
+    /// only during Options UI interaction, restricted to the main thread, with the assumption that
+    /// no concurrent writes with the sim thread happen. UnitAssetBindings operates under the same
+    /// assumption).
     /// </summary>
     internal static class BaseBuildingDesignation
     {
@@ -38,20 +43,23 @@ namespace CSWarfront.Game
 
         private static readonly Dictionary<BaseType, string> _designations = new Dictionary<BaseType, string>();
 
-        /// <summary>Task109: 自動割り当て（サブスクライブ済みのCS:WARFRONT用建物アセットを名前で検出した
-        /// もの、<see cref="BaseBuildingAutoAssign"/>）。手動指定(_designations)が常に優先され、
-        /// 未指定の種別だけこちらが既定値として使われる。ファイルには保存しない——毎回検出し直すので、
-        /// アセットを購読解除/差し替えしても勝手に古い名前を掴み続けることがない。</summary>
+        /// <summary>Task109: automatic designations (subscribed CS:WARFRONT building assets detected
+        /// by name, <see cref="BaseBuildingAutoAssign"/>). Manual designations (_designations)
+        /// always take precedence; this is used as the default only for types with no manual entry.
+        /// Not saved to file — it is re-detected every time, so unsubscribing/replacing an asset can
+        /// never leave a stale name silently held on to.</summary>
         private static readonly Dictionary<BaseType, string> _auto = new Dictionary<BaseType, string>();
 
         private static string _filePath;
 
-        /// <summary>いずれかの基地種別に指定が1件でもあるか。BasePlacementWatcherが「指定建物が
-        /// 1件も無ければ何もできない」早期returnの判定に使う（Task82で電力タブの複製プレハブ機構を
-        /// 撤去した現在、基地配置経路はこの指定建物のみ）。</summary>
+        /// <summary>Whether any base type has at least one designation. Used by
+        /// BasePlacementWatcher for its early-return check "nothing can be done if there is not a
+        /// single designated building" (now that Task82 removed the electricity-tab cloned prefab
+        /// mechanism, designated buildings are the only base placement path).</summary>
         public static bool HasAny { get { return _designations.Count > 0 || _auto.Count > 0; } }
 
-        /// <summary>Task109: 自動検出結果を差し替える（レベルロード時にプレハブが揃ってから1回）。</summary>
+        /// <summary>Task109: replaces the auto-detection results (once at level load, after prefabs
+        /// are available).</summary>
         public static void ApplyAutoDetected(Dictionary<BaseType, string> detected)
         {
             _auto.Clear();
@@ -59,15 +67,15 @@ namespace CSWarfront.Game
             foreach (KeyValuePair<BaseType, string> kv in detected) _auto[kv.Key] = kv.Value;
         }
 
-        /// <summary>Task109: この種別の値が自動割り当て由来か（手動指定が無く、自動検出だけがある）。
-        /// Options UIが「自動」と表示するために使う。</summary>
+        /// <summary>Task109: whether this type's value comes from auto-assignment (no manual
+        /// designation, only an auto-detected one). Used by the Options UI to display "auto".</summary>
         public static bool IsAutoAssigned(BaseType type)
         {
             return !_designations.ContainsKey(type) && _auto.ContainsKey(type);
         }
 
-        /// <summary>起動時（WarfrontLoadingExtension.LoadModAssets、UnitAssetBindings.Loadと同じ箇所）に
-        /// 一度呼ぶ。冪等ではない（毎回ファイルから読み直す）。</summary>
+        /// <summary>Called once at startup (WarfrontLoadingExtension.LoadModAssets, same spot as
+        /// UnitAssetBindings.Load). Not idempotent (re-reads from the file every time).</summary>
         public static void Load(string modDirectory)
         {
             _designations.Clear();
@@ -96,14 +104,14 @@ namespace CSWarfront.Game
                     if (string.IsNullOrEmpty(line)) continue;
 
                     int eq = line.IndexOf('=');
-                    if (eq <= 0 || eq >= line.Length - 1) continue; // キー/値どちらかが空なら無視
+                    if (eq <= 0 || eq >= line.Length - 1) continue; // ignore if either key or value is empty
 
                     string key = line.Substring(0, eq);
                     string value = line.Substring(eq + 1);
                     if (string.IsNullOrEmpty(value)) continue;
 
                     BaseType type;
-                    if (!TryParseBaseType(key, out type)) continue; // 未知のキーは無視（将来の互換性）
+                    if (!TryParseBaseType(key, out type)) continue; // ignore unknown keys (forward compatibility)
 
                     _designations[type] = value;
                     parsed++;
@@ -113,22 +121,22 @@ namespace CSWarfront.Game
             }
             catch (Exception e)
             {
-                // 壊れたファイル・アクセス権限エラー等は「割り当て無し」として継続する（ロードを止めない）。
+                // Corrupt files, access permission errors, etc. continue as "no designations" (never stop the load).
                 ModConfig.LogError("BaseBuildingDesignation.Load error (continuing with no designations): " + e);
                 _designations.Clear();
             }
         }
 
-        /// <summary>指定<paramref name="type"/>の指定建物アセット名を返す。未指定ならfalse。
-        /// Task109: 手動指定が無い種別は、自動検出（サブスクライブ済みのCS:WARFRONT用アセット）の
-        /// 既定値へフォールバックする。</summary>
+        /// <summary>Returns the designated building asset name for <paramref name="type"/>; false if
+        /// undesignated. Task109: types with no manual designation fall back to the auto-detected
+        /// default (a subscribed CS:WARFRONT asset).</summary>
         public static bool TryGet(BaseType type, out string assetName)
         {
             if (_designations.TryGetValue(type, out assetName)) return true;
             return _auto.TryGetValue(type, out assetName);
         }
 
-        /// <summary>指定<paramref name="type"/>へ指定建物アセットを設定し、直ちに保存する。</summary>
+        /// <summary>Sets the designated building asset for <paramref name="type"/> and saves immediately.</summary>
         public static void Set(BaseType type, string assetName)
         {
             if (string.IsNullOrEmpty(assetName)) return;
@@ -137,8 +145,9 @@ namespace CSWarfront.Game
             Save();
         }
 
-        /// <summary>指定<paramref name="type"/>の指定を解除し（既定＝電力タブの複製建物のみへ戻す）、
-        /// 直ちに保存する。指定が無ければ何もしない（no-op、Save呼び出しも省略）。</summary>
+        /// <summary>Clears the designation for <paramref name="type"/> (reverting to the default =
+        /// electricity-tab cloned building only) and saves immediately. Does nothing if no
+        /// designation exists (no-op, the Save call is skipped too).</summary>
         public static void Clear(BaseType type)
         {
             if (_designations.Remove(type))
@@ -149,12 +158,15 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 建物のInfo.name（<paramref name="assetName"/>）が、いずれかの基地種別の指定建物と一致するか。
-        /// 一致すればそのBaseTypeを返す。BasePlacementWatcher.ProcessCreated/ReconcileBases、
-        /// BaseHiddenSync.ApplyPending、CoverMapBuilder.Buildが基地判定の唯一の経路として使う
-        /// （Task82: 電力タブの複製プレハブとの一致判定=WarfrontBasePrefab.TryMatchは撤去済み）。
-        /// 4種別のうち複数が同じアセット名を指定することは無い想定だが（UIは1アセット=1種別のみ許容）、
-        /// 万一重複していても最初に見つかった種別を返すだけで例外にはならない。
+        /// Whether a building's Info.name (<paramref name="assetName"/>) matches the designated
+        /// building of any base type. Returns that BaseType on a match. Used by
+        /// BasePlacementWatcher.ProcessCreated/ReconcileBases, BaseHiddenSync.ApplyPending, and
+        /// CoverMapBuilder.Build as the sole path for base identification
+        /// (Task82: matching against the electricity-tab cloned prefab = WarfrontBasePrefab.TryMatch
+        /// has been removed).
+        /// Multiple of the 4 types designating the same asset name is not expected (the UI allows
+        /// one asset = one type only), but even if duplicated it merely returns the first type found
+        /// rather than throwing.
         /// </summary>
         public static bool TryMatch(string assetName, out BaseType type)
         {
@@ -165,8 +177,8 @@ namespace CSWarfront.Game
             {
                 if (kv.Value == assetName) { type = kv.Key; return true; }
             }
-            // Task109: 自動割り当ての建物も配置認識の対象にする（手動指定で上書きされている種別は
-            // 上のループで先に一致するため、優先順位は保たれる）。
+            // Task109: auto-assigned buildings are also recognized for placement (types overridden
+            // by a manual designation match first in the loop above, so precedence is preserved).
             foreach (KeyValuePair<BaseType, string> kv in _auto)
             {
                 if (_designations.ContainsKey(kv.Key)) continue;
@@ -175,10 +187,11 @@ namespace CSWarfront.Game
             return false;
         }
 
-        /// <summary>Task109: 従来はArmy/Navy/AirForce/MissileBaseの4種別しか解釈しておらず、築城系
-        /// （Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）の指定はSaveでファイルに書かれても
-        /// 次回のLoadで捨てられていた（＝再起動のたびに指定し直しが必要だった）。BaseTypeのenum名を
-        /// そのまま解釈するようにして全種別を復元できるようにする。</summary>
+        /// <summary>Task109: previously only the 4 types Army/Navy/AirForce/MissileBase were
+        /// interpreted, so fortification designations (Bunker/ArtilleryPost/SupplyDepot/Trench/
+        /// CargoStation), even when written to the file by Save, were discarded on the next Load
+        /// (= they had to be re-designated after every restart). Interpret BaseType enum names
+        /// directly so all types can be restored.</summary>
         private static bool TryParseBaseType(string key, out BaseType type)
         {
             type = default(BaseType);
@@ -198,8 +211,9 @@ namespace CSWarfront.Game
                     return;
                 }
 
-                // File.WriteAllLines(path, lines, encoding) はTargetFrameworkVersion v3.5環境では確実に
-                // 存在するとは限らないため、UnitAssetBindings.WriteBindingsToFileと同じくStreamWriterを使う。
+                // File.WriteAllLines(path, lines, encoding) is not guaranteed to exist in a
+                // TargetFrameworkVersion v3.5 environment, so use StreamWriter just like
+                // UnitAssetBindings.WriteBindingsToFile.
                 using (StreamWriter writer = new StreamWriter(_filePath, false, Encoding.UTF8))
                 {
                     foreach (KeyValuePair<BaseType, string> kv in _designations)

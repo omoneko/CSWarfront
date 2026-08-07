@@ -4,12 +4,14 @@ using CSWarfront.Game;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// OptionsModelAssignPage のうち、勢力/ユニット種別/アセット種別/検索欄/複製範囲/アセット選択の
-    /// 各コントロールの変更通知ハンドラだけを分離した partial class（OptionsModelAssignPage.cs 側が
-    /// 500行制限に達したため、Task70で新設。純粋なコード移動のみでロジックの変更は無い）。
-    /// フィールド（_suppressEvents/_customOnly/_filteredAssetNames等）は全て OptionsModelAssignPage.cs
-    /// 側で宣言されている（partial class は private メンバーも全パーツで共有するため問題ない）。
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class that splits out from OptionsModelAssignPage only the change-notification
+    /// handlers of the faction / unit type / asset kind / search field / copy scope / asset selection
+    /// controls (newly created in Task70 because the OptionsModelAssignPage.cs side reached the
+    /// 500-line limit; pure code move only, no logic changes).
+    /// The fields (_suppressEvents/_customOnly/_filteredAssetNames etc.) are all declared on the
+    /// OptionsModelAssignPage.cs side (fine, since a partial class shares private members across all
+    /// parts).
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
@@ -79,14 +81,14 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>AddTextfieldのOnTextSubmitted用no-op（Enter確定時の追加処理は不要。OnTextChangedで
-        /// 都度絞り込み済みのため）。</summary>
+        /// <summary>No-op for AddTextfield's OnTextSubmitted (no extra handling is needed on Enter
+        /// confirmation; OnTextChanged already filters on every change).</summary>
         private static void OnSearchTextSubmitted(string value)
         {
         }
 
-        /// <summary>AddDropdownのeventCallback用no-op（複製先スコープはOnCopyApplyClickが押された
-        /// 時点でselectedIndexを読むだけで足りるため）。</summary>
+        /// <summary>No-op for AddDropdown's eventCallback (for the copy-target scope it is sufficient
+        /// to read selectedIndex at the moment OnCopyApplyClick is pressed).</summary>
         private static void OnCopyScopeChanged(int value)
         {
         }

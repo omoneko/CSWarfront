@@ -5,39 +5,43 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task62（Mount&amp;Blade風の指示フィードバック 2/2）: 部隊コマンドが発行される/変化するたびに、
-    /// 画面中央上部へ短時間だけ表示する簡易トースト。UnitCommandInput の各コマンド発行箇所
-    /// （自由進撃/停止/集結待機の武装/集結地点確定/集結キャンセル）から Show(message) を呼ぶだけの
-    /// 一方向API。表示内容の意味づけ（「×12」等の対象数を含めるか）は呼び出し側の責務。
+    /// Task62 (Mount&amp;Blade-style order feedback 2/2): a simple toast shown briefly at the top
+    /// center of the screen every time a unit command is issued or changes. A one-way API where
+    /// each command-issuing site in UnitCommandInput (free advance / halt / arming rally-wait /
+    /// rally-point confirmation / rally cancel) merely calls Show(message). Giving the content its
+    /// meaning (e.g. whether to include a target count such as "x12") is the caller's
+    /// responsibility.
     ///
-    /// 生成/表示更新はUnitBoxSelectionの矩形パネル（EnsureCreated冪等生成＋毎フレームUpdate）と
-    /// 同じ方式: UIView直下に1つだけUILabelを生成し使い回す。Show()が呼ばれるたびに文字列と
-    /// 消去タイマー(Time.realtimeSinceStartup基準、ポーズ中でも進む)をリセットする。Update()は
-    /// 毎フレーム呼ばれ、残り時間がFadeDurationSeconds未満になったら不透明度を線形に落とし、
-    /// 0になったら非表示にする。
+    /// Creation/display updates follow the same scheme as UnitBoxSelection's rectangle panel
+    /// (idempotent EnsureCreated + per-frame Update): a single UILabel is created directly under
+    /// the UIView and reused. Every Show() call resets the string and the dismissal timer (based on
+    /// Time.realtimeSinceStartup, which advances even while paused). Update() is called every
+    /// frame; once the remaining time drops below FadeDurationSeconds it fades the opacity
+    /// linearly, and hides the label when it reaches 0.
     ///
-    /// メインスレッド専用（Unity/ColossalFramework UI API呼び出しのため）。WarfrontThreadingExtension.
-    /// OnUpdate から、他のUI更新と同様に毎フレーム EnsureCreated()→Update() の順で呼ぶこと。
+    /// Main thread only (because it calls Unity/ColossalFramework UI APIs). Call
+    /// EnsureCreated()→Update() in that order every frame from WarfrontThreadingExtension.OnUpdate,
+    /// like the other UI updates.
     /// </summary>
     public static class CommandToast
     {
         private const string LabelName = "CSWarfrontCommandToast";
 
         private const float DisplaySeconds = 2.5f;
-        private const float FadeDurationSeconds = 0.5f; // 消える直前にこの秒数だけ不透明度を線形フェードする
-        private const float TopOffset = 70f; // 画面上端からの距離（バニラの上部ツールバーと被らない程度）
+        private const float FadeDurationSeconds = 0.5f; // linearly fade the opacity for this many seconds just before disappearing
+        private const float TopOffset = 70f; // distance from the top edge of the screen (enough not to overlap the vanilla top toolbar)
         private const float LabelTextScale = 1.3f;
 
         private static UILabel _label;
         private static float _hideAtRealtime;
         private static bool _visible;
 
-        /// <summary>冪等。ラベルをUIViewが準備できた時点で一度だけ生成する（他パネルと同じ方式）。</summary>
+        /// <summary>Idempotent. Creates the label exactly once as soon as the UIView is ready (same scheme as the other panels).</summary>
         public static void EnsureCreated()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (_label != null) return;
                 UIView view = PanelChrome.GetCachedView();
                 if (view == null) return;
@@ -54,7 +58,7 @@ namespace CSWarfront.Game.UI
                 label.textColor = new Color32(255, 235, 180, 255);
                 label.textAlignment = UIHorizontalAlignment.Center;
                 label.autoSize = true;
-                label.isInteractive = false; // クリック/ドラッグを横取りしない
+                label.isInteractive = false; // do not intercept clicks/drags
                 label.isVisible = false;
                 label.opacity = 1f;
                 _label = label;
@@ -65,13 +69,14 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>コマンドイベントを表示する。既に表示中でも上書きし、消去タイマーをリセットする
-        /// （連続してコマンドを出した場合は常に最新のメッセージを表示し続ける）。</summary>
+        /// <summary>Displays a command event. Overwrites even if already showing and resets the
+        /// dismissal timer (when commands are issued in quick succession, the newest message always
+        /// stays displayed).</summary>
         public static void Show(string message)
         {
             try
             {
-                if (_label == null) return; // 未生成（ロード中等）。このイベントは静かに捨てる。
+                if (_label == null) return; // not created yet (loading etc.). Silently drop this event.
                 _label.text = message ?? "";
                 _label.opacity = 1f;
                 CenterLabel();
@@ -86,7 +91,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>毎メインスレッドフレーム呼ぶ。フェード/非表示の時間経過管理のみを行う。</summary>
+        /// <summary>Called every main-thread frame. Only handles the time-based fade/hide bookkeeping.</summary>
         public static void Update()
         {
             try
@@ -95,9 +100,10 @@ namespace CSWarfront.Game.UI
 
                 if (!PanelChrome.IsGameReadyForUi() || PanelChrome.IsGameMenuOpen())
                 {
-                    // Task62: ロード中・Escメニュー表示中は一時的に隠す（トグル状態は保持しない、
-                    // 単に見た目を消すだけ。閉じた後にまだ猶予が残っていれば自動的に再度見えるようにはせず、
-                    // 単純化のためここで表示自体を終了する）。
+                    // Task62: temporarily hide while loading or while the Esc menu is shown (no
+                    // toggle state is kept — it just visually disappears. It is NOT automatically
+                    // shown again if grace time still remains after closing the menu; for
+                    // simplicity the display simply ends here).
                     HideNow();
                     return;
                 }
@@ -117,7 +123,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。ラベルを破棄し静的状態を残さない。</summary>
+        /// <summary>Called on level unload (via MilitaryManager.Reset). Destroys the label so no static state lingers.</summary>
         public static void Destroy()
         {
             try

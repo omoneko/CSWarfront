@@ -7,20 +7,23 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、ユニット種別ドロップダウンと適用・既定に戻す・閉じるボタンの構築と
-    /// イベントハンドラだけを分離した partial class（AssetAssignPanel.cs 側の500行制限のため。
-    /// BaseInfoPanel/BaseInfoPanelProduction と同じ方針）。検索欄・アセット種別ドロップダウン・
-    /// サブスク済みトグル・一覧は Task41 で AssetAssignPanelAssetList.cs へ分離した。
-    /// フィールドは全て AssetAssignPanel.cs 側で宣言されている（partial class は private メンバーも
-    /// 全パーツで共有するため問題ない）。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class of AssetAssignPanel that isolates only the construction of the unit-type dropdown
+    /// and the Apply / Reset-to-Default / Close buttons plus their event handlers (split off because of
+    /// the 500-line limit on the AssetAssignPanel.cs side; same policy as
+    /// BaseInfoPanel/BaseInfoPanelProduction). The search field, asset-kind dropdown, subscribed-only
+    /// toggle, and list were moved to AssetAssignPanelAssetList.cs in Task41.
+    /// All fields are declared on the AssetAssignPanel.cs side (fine because a partial class shares
+    /// private members across all parts). All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class AssetAssignPanel
     {
-        /// <summary>Task66: 先頭に基地種別ごとの4キー（陸軍/海軍/空軍/ミサイル、UnitAssetBindings.
-        /// ArmyBaseTypeKey等）を追加した上で、LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件の
-        /// TypeKeyを構築する（計39件）。拠点はユニット種別ではない（LandUnitRoster.All()には含まれない）が、
-        /// モデル割り当てUIの対象としては同列に選べるようにする、という要件のため先頭に手動で挿入する
-        /// （Task60時点は単一キーだったが、基地種別ごとの割り当てを可能にするため4キーへ分割した）。</summary>
+        /// <summary>Task66: Builds the TypeKey list by first prepending the 4 per-base-type keys
+        /// (army/navy/air/missile; UnitAssetBindings.ArmyBaseTypeKey etc.) and then adding the 35
+        /// TypeKeys from LandUnitRoster.All() (category declaration order -> Tier1-5), for a total of 39.
+        /// Bases are not unit types (they are not included in LandUnitRoster.All()), but the requirement
+        /// is that they be selectable on equal footing as targets of the model-assignment UI, so they are
+        /// manually inserted at the top (at Task60 there was a single key, but it was split into 4 keys to
+        /// allow per-base-type assignment).</summary>
         private static void BuildTypeKeys()
         {
             List<string> keys = new List<string>
@@ -43,15 +46,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 26; // 文字等倍・行間は少し広め
+            dd.itemHeight = 26; // text at 1x; line spacing slightly wider
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
-            dd.listHeight = 300; // 旧200 ×1.5
+            dd.listHeight = 300; // old 200 x1.5
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.75f; // 他パネルと統一
-            dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // 旧(8,8,6,0) ×1.5
-            dd.itemPadding = new RectOffset(12, 0, 5, 0); // 旧(8,0,3,0) ×1.5
+            dd.textScale = 0.75f; // unified with the other panels
+            dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // old (8,8,6,0) x1.5
+            dd.itemPadding = new RectOffset(12, 0, 5, 0); // old (8,0,3,0) x1.5
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -63,8 +66,8 @@ namespace CSWarfront.Game.UI
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 0.7f; // 他パネルと統一
-            trigger.size = new Vector2(36f, DropdownHeight); // 旧24f ×1.5
+            trigger.textScale = 0.7f; // unified with the other panels
+            trigger.size = new Vector2(36f, DropdownHeight); // old 24f x1.5
             trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
             trigger.hoveredBgSprite = "ButtonMenuHovered";
@@ -75,8 +78,9 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        /// <summary>"TypeKey → 現在の割り当て（無ければ (既定)）" の35件ラベルを再構築し、選択位置を
-        /// selectedIndexへ復元する（Apply/Reset直後の一覧更新、およびShow()での毎回の再表示用）。</summary>
+        /// <summary>Rebuilds the 35 labels of the form "TypeKey → current binding (or (default) if none)"
+        /// and restores the selection to selectedIndex (used for refreshing the list right after
+        /// Apply/Reset, and for the redisplay on every Show()).</summary>
         private static void RefreshDropdownLabels(int selectedIndex)
         {
             if (_typeKeyDropdown == null || _typeKeys == null) return;
@@ -96,14 +100,16 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: ラベルは現在選択中の勢力(SelectedFactionId)の割り当てを表示する
-        /// （勢力ドロップダウンを切り替えるたびに OnFactionChanged 経由で再構築される）。
-        /// Task41: プロップ以外の種類が割り当てられている場合は "[建物]MyBuilding" のように種類タグを
-        /// 付ける（AssetKindUtil.Describe）。
-        /// Task66: 基地種別キー（陸軍/海軍/空軍/ミサイル）は生のキー文字列ではなく
-        /// UnitAssetBindings.DisplayNameForBaseKeyの日本語ラベルを表示し、ユニットの1つと誤解されない
-        /// ようにする。割り当ての解決も種別別キー→旧統合キーの順（UnitAssetBindings.TryGetEffective）で
-        /// 行い、旧統合キーからのフォールバックが効いている場合もそれを「現在の割り当て」として表示する。</summary>
+        /// <summary>Task40: The labels show the bindings of the currently selected faction
+        /// (SelectedFactionId) (they are rebuilt via OnFactionChanged every time the faction dropdown
+        /// changes).
+        /// Task41: When a kind other than prop is bound, a kind tag is prefixed, e.g.
+        /// "[Building]MyBuilding" (AssetKindUtil.Describe).
+        /// Task66: For the base-type keys (army/navy/air/missile), the Japanese label from
+        /// UnitAssetBindings.DisplayNameForBaseKey is shown instead of the raw key string, so they are
+        /// not mistaken for one of the units. Binding resolution also proceeds in the order per-type key
+        /// -> old unified key (UnitAssetBindings.TryGetEffective), and when the fallback from the old
+        /// unified key is in effect, that too is shown as the "current binding".</summary>
         private static string[] BuildDropdownLabels()
         {
             if (_typeKeys == null) return new string[0];
@@ -136,9 +142,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: 現在選択中の(勢力, TypeKey)の割り当てを表示し、サムネイルもそれに合わせて
-        /// 更新する（一覧選択とは独立: ここは「今適用されている」アセットのプレビュー）。
-        /// Task41: 割り当ての種類(AssetKind)もあわせて解決し、サムネイル・ラベル表示に使う。</summary>
+        /// <summary>Task40: Shows the binding of the currently selected (faction, TypeKey) and updates
+        /// the thumbnail to match (independent of the list selection: this is a preview of the asset
+        /// "currently applied").
+        /// Task41: Also resolves the kind (AssetKind) of the binding and uses it for the thumbnail and
+        /// label display.</summary>
         private static void RefreshCurrentBindingLabel()
         {
             if (_currentBindingLabel == null || _typeKeyDropdown == null || _typeKeys == null) return;
@@ -205,25 +213,27 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>割り当て変更（Apply/Reset共通）の反映処理。ドロップダウンのラベルと現在割り当て表示を
-        /// 更新した上で、既存の見た目を全破棄する（Task36要件: 即座に反映、次回SyncでCreateVisualが
-        /// UnitMeshSource経由の新しい割り当て(種類込み、Task41)を解決し直す）。</summary>
+        /// <summary>Processing to reflect a binding change (shared by Apply/Reset). After updating the
+        /// dropdown labels and the current-binding display, destroys all existing visuals (Task36
+        /// requirement: reflect immediately; on the next Sync, CreateVisual re-resolves the new binding
+        /// (kind included, Task41) via UnitMeshSource).</summary>
         private static void ApplyBindingChange(int typeIdx)
         {
             RefreshDropdownLabels(typeIdx);
             RefreshCurrentBindingLabel();
 
             UnitVisuals.DestroyAll();
-            BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
+            BaseVisuals.DestroyAll(); // Task60: also destroy the per-faction base overlays so the next Sync re-resolves them
             ModConfig.Log("AssetAssignPanel: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the binding change");
 
             WarnIfNoOwnedBaseForKey(typeIdx);
         }
 
-        /// <summary>Task66バグ調査対応: 適用先が基地種別キーで、かつ選択中の勢力がその種別の拠点を
-        /// 1つも所有していない場合、割り当て自体は正しく保存されるが見た目には何も反映されないため
-        /// （反映先の拠点が存在しない）、ユーザーが「反映されていない＝不具合」と誤解しないよう
-        /// ログへ明示的な案内を残す（現在の割り当てラベルにも同じ文言を追記する）。</summary>
+        /// <summary>Response to the Task66 bug investigation: when the target is a base-type key and the
+        /// selected faction owns no base of that type, the binding itself is saved correctly but nothing
+        /// changes visually (there is no base to apply it to), so to keep the user from misreading
+        /// "nothing changed = a bug", an explicit notice is written to the log (the same wording is also
+        /// appended to the current-binding label).</summary>
         private static void WarnIfNoOwnedBaseForKey(int typeIdx)
         {
             if (_typeKeys == null || typeIdx < 0 || typeIdx >= _typeKeys.Length) return;

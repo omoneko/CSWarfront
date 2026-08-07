@@ -6,27 +6,32 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、アセット種別（プロップ/建物/車両/樹木）ドロップダウン・検索欄・
-    /// サブスク済みトグル・一覧の構築とイベントハンドラだけを分離した partial class（Task41で新設、
-    /// 500行制限のため。旧AssetAssignPanelControls.csに同居していたが、Task41で検索欄の可読性修正と
-    /// アセット種別ドロップダウンを追加した際に分離した）。
-    /// フィールドは全て AssetAssignPanel.cs 側で宣言されている（partial class は private メンバーも
-    /// 全パーツで共有するため問題ない）。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class of AssetAssignPanel that isolates only the construction of the asset-kind
+    /// (prop/building/vehicle/tree) dropdown, search field, subscribed-only toggle, and list, plus
+    /// their event handlers (new in Task41, because of the 500-line limit. It used to live in the old
+    /// AssetAssignPanelControls.cs but was split off in Task41 when the search-field readability fix
+    /// and the asset-kind dropdown were added).
+    /// All fields are declared on the AssetAssignPanel.cs side (fine because a partial class shares
+    /// private members across all parts). All methods are main-thread only (they call Unity UI APIs).
     ///
-    /// 検索欄(UITextField)の可読性修正: 旧実装は textColor を黒(0,0,0)のまま normalBgSprite="TextFieldPanel"
-    /// （CS既定の暗色パネルスプライト）に重ねていたため、黒文字が暗い背景に沈んで読めなかった。
-    /// ColossalManaged.dllをリフレクションで確認したUITextFieldの全プロパティ（Task41 task-41-report.md
-    /// 参照）のうち、以下を明示設定して修正する: textColor(Color32、ほぼ白へ)、color(Color32、白のまま＝
-    /// スプライトを暗くtintしない)、selectionBackgroundColor(Color32、選択範囲の可視化)、
-    /// padding(RectOffset、2倍スケール)、horizontalAlignment/verticalAlignment(左/中央)、
-    /// textScale(1.5倍スケール)、cursorWidth(Int32)。normalBgSprite/hoveredBgSprite/
-    /// focusedBgSprite/disabledBgSprite/selectionSprite は既存のまま（"TextFieldPanel"系は実際に
-    /// このプロジェクトで使用実績のあるスプライト名のため、未検証の別名への変更はしない）。
+    /// Search field (UITextField) readability fix: the old implementation layered textColor left at
+    /// black (0,0,0) over normalBgSprite="TextFieldPanel" (the CS default dark panel sprite), so the
+    /// black text sank into the dark background and was unreadable.
+    /// Of all UITextField properties confirmed via reflection against ColossalManaged.dll (see the
+    /// Task41 task-41-report.md), the following are set explicitly to fix this: textColor (Color32, to
+    /// near-white), color (Color32, kept white = do not darken-tint the sprite),
+    /// selectionBackgroundColor (Color32, makes the selection visible),
+    /// padding (RectOffset, 2x scale), horizontalAlignment/verticalAlignment (left/middle),
+    /// textScale (1.5x scale), cursorWidth (Int32). normalBgSprite/hoveredBgSprite/
+    /// focusedBgSprite/disabledBgSprite/selectionSprite stay as-is (the "TextFieldPanel" family are
+    /// sprite names with an actual usage track record in this project, so they are not changed to
+    /// unverified alternatives).
     /// </summary>
     internal static partial class AssetAssignPanel
     {
-        /// <summary>現在選択中のアセット種別。ドロップダウン未生成の間は既定のProp(0)を返す
-        /// （ドロップダウンの選択インデックス0..3が AssetKindUtil.All と同じ並びであることに依存）。</summary>
+        /// <summary>The currently selected asset kind. Returns the default Prop (0) while the dropdown
+        /// has not been created yet (relies on the dropdown's selection indices 0..3 having the same
+        /// order as AssetKindUtil.All).</summary>
         internal static AssetKind SelectedAssetKind
         {
             get { return _assetKindDropdown != null ? (AssetKind)_assetKindDropdown.selectedIndex : AssetKind.Prop; }
@@ -37,32 +42,32 @@ namespace CSWarfront.Game.UI
             UITextField tf = _panel.AddUIComponent<UITextField>();
             tf.size = new Vector2(width, RowHeight);
             tf.relativePosition = new Vector3(x, y);
-            tf.padding = new RectOffset(9, 9, 9, 9); // 旧(6,6,6,6) ×1.5
+            tf.padding = new RectOffset(9, 9, 9, 9); // old (6,6,6,6) x1.5
             tf.builtinKeyNavigation = true;
             tf.isInteractive = true;
             tf.readOnly = false;
             tf.selectOnFocus = true;
             tf.horizontalAlignment = UIHorizontalAlignment.Left;
-            tf.verticalAlignment = UIVerticalAlignment.Middle; // 検証済み、新規設定（縦中央で読みやすく）
+            tf.verticalAlignment = UIVerticalAlignment.Middle; // verified, newly set (vertically centered for readability)
             tf.normalBgSprite = "TextFieldPanel";
             tf.hoveredBgSprite = "TextFieldPanelHovered";
             tf.focusedBgSprite = "TextFieldPanelFocused";
             tf.disabledBgSprite = "TextFieldPanel";
-            tf.color = Color.white; // 検証済み、新規設定。スプライトを暗くtintしない（白のまま表示）。
-            tf.textColor = new Color32(240, 240, 240, 255); // 旧(0,0,0)＝黒 → ほぼ白に変更（可読性修正の本体）
-            tf.disabledTextColor = new Color32(150, 150, 150, 255); // 検証済み、新規設定
-            tf.textScale = 0.8f; // 他パネルと統一
-            tf.cursorWidth = 2; // 旧1
+            tf.color = Color.white; // verified, newly set. Do not darken-tint the sprite (display it as-is, white).
+            tf.textColor = new Color32(240, 240, 240, 255); // old (0,0,0) = black -> changed to near-white (the core of the readability fix)
+            tf.disabledTextColor = new Color32(150, 150, 150, 255); // verified, newly set
+            tf.textScale = 0.8f; // unified with the other panels
+            tf.cursorWidth = 2; // old 1
             tf.cursorBlinkTime = 0.45f;
             tf.selectionSprite = "EmptySprite";
-            tf.selectionBackgroundColor = new Color32(70, 130, 200, 160); // 検証済み、新規設定（選択範囲の可視化）
+            tf.selectionBackgroundColor = new Color32(70, 130, 200, 160); // verified, newly set (makes the selection visible)
             tf.text = "";
             tf.eventTextChanged += OnSearchTextChanged;
             return tf;
         }
 
-        /// <summary>Task41: プロップ/建物/車両/樹木を切り替えるドロップダウン。既定インデックス0(プロップ)。
-        /// 選択インデックスは AssetKindUtil.All / AssetKind の並びと一致させている。</summary>
+        /// <summary>Task41: Dropdown that switches between prop/building/vehicle/tree. Default index 0
+        /// (prop). The selection indices are kept aligned with the order of AssetKindUtil.All / AssetKind.</summary>
         private static UIDropDown BuildAssetKindDropdown(float x, float y, float width)
         {
             UIDropDown dd = _panel.AddUIComponent<UIDropDown>();
@@ -90,7 +95,7 @@ namespace CSWarfront.Game.UI
             string[] labels = new string[AssetKindUtil.All.Length];
             for (int i = 0; i < AssetKindUtil.All.Length; i++) labels[i] = AssetKindUtil.DisplayNameJa(AssetKindUtil.All[i]);
             dd.items = labels;
-            dd.selectedIndex = 0; // 既定 プロップ
+            dd.selectedIndex = 0; // default: prop
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
@@ -154,10 +159,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: 一覧選択が変わるたびにサムネイルを更新する（要件3）。選択解除（-1、
-        /// RefreshAssetListによるリセット等）の場合は、現在適用中のアセットのサムネイルへ戻す。
-        /// Task41: サムネイル解決には現在の種類ドロップダウン選択(SelectedAssetKind)を使う
-        /// （一覧はその種類のアセットしか含まないため）。</summary>
+        /// <summary>Task40: Updates the thumbnail every time the list selection changes (requirement 3).
+        /// On deselection (-1, e.g. the reset done by RefreshAssetList), reverts to the thumbnail of the
+        /// currently applied asset.
+        /// Task41: Thumbnail resolution uses the current kind-dropdown selection (SelectedAssetKind)
+        /// (because the list only contains assets of that kind).</summary>
         private static void OnAssetSelected(UIComponent component, int value)
         {
             try
@@ -170,7 +176,7 @@ namespace CSWarfront.Game.UI
                 }
                 else
                 {
-                    RefreshCurrentBindingLabel(); // 内部でRefreshThumbnail(既定/現在の割り当て)も更新する
+                    RefreshCurrentBindingLabel(); // internally also updates RefreshThumbnail (default/current binding)
                 }
             }
             catch (Exception e)
@@ -179,8 +185,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>検索文字列・サブスクライブ済みのみトグル・アセット種別に基づき一覧を再構築する。
-        /// MaxListItems件を超える場合は打ち切り、その旨を _truncatedLabel に表示する。</summary>
+        /// <summary>Rebuilds the list based on the search string, the subscribed-only toggle, and the
+        /// asset kind. If more than MaxListItems match, the list is truncated and a notice to that
+        /// effect is shown in _truncatedLabel.</summary>
         private static void RefreshAssetList()
         {
             if (_propListBox == null) return;

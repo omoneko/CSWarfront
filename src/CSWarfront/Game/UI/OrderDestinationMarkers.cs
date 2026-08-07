@@ -4,12 +4,13 @@ using UnityEngine;
 
 namespace CSWarfront.Game.UI
 {
-    /// <summary>どの種類の命令に紐づく目的地か（Task62）。見た目の色分けにのみ使う。</summary>
+    /// <summary>Which kind of order this destination belongs to (Task62). Used only for visual color coding.</summary>
     public enum OrderMarkerKind { Advance, Rally }
 
-    /// <summary>メインスレッド専用スナップショット1件＝選択中の1ユニットぶんの目的地
-    /// （自由進撃/AI委任中ならOrderTargetPos、集結待機ならRallyPoint）。Hold中や目的地未設定の
-    /// ユニットはそもそも生成しない（呼び出し側＝MilitaryManager.OnMainVisualUpdateが除外する）。</summary>
+    /// <summary>One main-thread-only snapshot entry = the destination for one selected unit
+    /// (OrderTargetPos during free advance/AI delegation, RallyPoint while waiting to rally).
+    /// Units that are on Hold or have no destination set are simply never generated (the caller,
+    /// MilitaryManager.OnMainVisualUpdate, filters them out).</summary>
     public struct OrderDestinationState
     {
         public Vector3 Position;
@@ -17,35 +18,40 @@ namespace CSWarfront.Game.UI
     }
 
     /// <summary>
-    /// Task62（Mount&amp;Blade風の指示フィードバック 1/2）: 選択中の部隊の進撃/集結の目的地に、
-    /// 「〇＋短い棒」の即席マーカーを世界空間に表示する。UnitVisuals/BaseVisualsと同じ宣言的reconcile
-    /// パターン（create/move/destroy）で、Sync(list)に渡したスナップショットに存在しないマーカーは
-    /// 自動的に破棄される。
+    /// Task62 (Mount&amp;Blade-style order feedback 1/2): displays an improvised "circle + short pole"
+    /// marker in world space at the advance/rally destinations of the selected units. Uses the same
+    /// declarative reconcile pattern (create/move/destroy) as UnitVisuals/BaseVisuals: any marker
+    /// not present in the snapshot passed to Sync(list) is destroyed automatically.
     ///
-    /// マージ: 同じ命令種別で概ね10ユニット以内に集まる目的地は1個のマーカーへまとめる。実装は
-    /// MergeRadiusを一辺とする単純な格子(floor(x/r), floor(z/r))へバケット分けするだけの近似
-    /// （四捨五入境界をまたぐ僅かなケースで別マーカーになることはあるが、視覚的なヒント用途としては
-    /// 十分）。この格子キー自体を辞書のキーとして使い回すことで、同じ目的地クラスタが毎フレーム
-    /// 同じキーへ解決される＝UnitVisualsのInstanceIdと同じ役割を果たし、フレームをまたいで
-    /// 「同じマーカーを動かす」reconcileが素直に書ける。
+    /// Merging: destinations of the same order kind that cluster within roughly 10 units are merged
+    /// into a single marker. The implementation is a simple approximation that buckets into a grid
+    /// (floor(x/r), floor(z/r)) with MergeRadius as the cell edge (in rare cases straddling a
+    /// rounding boundary two markers may appear, but that is sufficient for a visual-hint purpose).
+    /// By reusing this grid key itself as the dictionary key, the same destination cluster resolves
+    /// to the same key every frame — playing the same role as UnitVisuals' InstanceId — so a
+    /// cross-frame "move the same marker" reconcile can be written straightforwardly.
     ///
-    /// 見た目: 地面のリング（薄い円柱で近似、UnitBoxSelectionのハイライトマーカーと同じ手法）＋
-    /// 短い棒（縦長の細い円柱）。マテリアルはCS車両/建物のものを一切借用せず、Shader.Find("Standard")
-    /// による自前マテリアルを命令種別ごとに1つだけ生成し使い回す（UnitBoxSelection._highlightMaterialと
-    /// 同じ方針）。プリミティブ生成時に付くColliderは全て破棄する（Physics.Raycastによるユニット選択・
-    /// 集結地点指定のクリック判定を邪魔しないため、Task31/Task48の既存raycast経路を汚染しない）。
+    /// Appearance: a ground ring (approximated by a thin cylinder, same technique as
+    /// UnitBoxSelection's highlight marker) plus a short pole (a tall thin cylinder). Materials
+    /// borrow nothing from CS vehicles/buildings; exactly one home-made material per order kind is
+    /// created via Shader.Find("Standard") and reused (same policy as
+    /// UnitBoxSelection._highlightMaterial). All Colliders attached at primitive creation are
+    /// destroyed (so they do not interfere with the Physics.Raycast click tests for unit selection
+    /// and rally-point designation, keeping the existing Task31/Task48 raycast paths uncontaminated).
     ///
-    /// 表示条件: PanelChrome.IsGameReadyForUi()==false、またはPanelChrome.IsGameMenuOpen()==true の間は
-    /// 全マーカーを非表示にする（破棄はしない＝再表示時に作り直すコストを避ける）。選択が0件（スナップ
-    /// ショットが空）ならSyncが自然に全マーカーを破棄する（宣言的reconcileそのもの、特別扱い不要）。
+    /// Visibility conditions: while PanelChrome.IsGameReadyForUi()==false or
+    /// PanelChrome.IsGameMenuOpen()==true, all markers are hidden (not destroyed — avoiding the
+    /// cost of recreating them on re-show). If the selection is empty (empty snapshot), Sync
+    /// naturally destroys all markers (that is declarative reconcile itself; no special-casing needed).
     ///
-    /// スレッド境界: 全メソッドがメインスレッド専用（Unity API呼び出しのため）。呼び出し元
-    /// （MilitaryManager.OnMainVisualUpdate）が_stateLock内でOrderDestinationStateのリストを構築し、
-    /// ロック解放後にSync()へ渡す（UnitVisuals.Syncと全く同じ規約）。
+    /// Thread boundary: all methods are main-thread only (because they call Unity APIs). The caller
+    /// (MilitaryManager.OnMainVisualUpdate) builds the list of OrderDestinationState inside
+    /// _stateLock and passes it to Sync() after releasing the lock (exactly the same contract as
+    /// UnitVisuals.Sync).
     /// </summary>
     public static class OrderDestinationMarkers
     {
-        /// <summary>同じ命令種別でこの一辺（マップ単位）の格子に入る目的地を1個のマーカーへまとめる。</summary>
+        /// <summary>Destinations of the same order kind that fall into a grid cell of this edge length (map units) are merged into one marker.</summary>
         private const float MergeRadius = 10f;
 
         private const float RingDiameter = 7f;
@@ -92,16 +98,16 @@ namespace CSWarfront.Game.UI
 
         private static readonly Dictionary<MarkerKey, MarkerEntry> _markers = new Dictionary<MarkerKey, MarkerEntry>();
 
-        // Sync() 実行毎に使い回すワーク領域（GC回避、UnitVisuals.Syncと同じ方針）。
+        // Work areas reused on every Sync() run (GC avoidance, same policy as UnitVisuals.Sync).
         private static readonly Dictionary<MarkerKey, Vector3> _sums = new Dictionary<MarkerKey, Vector3>();
         private static readonly Dictionary<MarkerKey, int> _counts = new Dictionary<MarkerKey, int>();
         private static readonly List<MarkerKey> _staleKeys = new List<MarkerKey>();
 
         private static Material _advanceMaterial;
         private static Material _rallyMaterial;
-        private static bool _hiddenLastSync; // 直前のSyncで「メニュー中/未準備につき非表示」だったか（復帰時の再表示制御に使用）
+        private static bool _hiddenLastSync; // whether the previous Sync was "hidden due to menu open / not ready" (used to control re-showing on recovery)
 
-        /// <summary>スナップショットに基づき、生成/移動/破棄を宣言的に反映する（メインスレッド専用）。</summary>
+        /// <summary>Declaratively applies create/move/destroy based on the snapshot (main thread only).</summary>
         public static void Sync(List<OrderDestinationState> snapshot)
         {
             try
@@ -120,7 +126,7 @@ namespace CSWarfront.Game.UI
 
                 if (snapshot == null) snapshot = _emptySnapshot;
 
-                // 1st pass: 格子キーごとに座標を合算する（マージ）。
+                // 1st pass: sum positions per grid key (merging).
                 _sums.Clear();
                 _counts.Clear();
                 for (int i = 0; i < snapshot.Count; i++)
@@ -139,7 +145,7 @@ namespace CSWarfront.Game.UI
                     _counts[key] = count + 1;
                 }
 
-                // 2nd pass: 平均座標でreconcile（create/move）。
+                // 2nd pass: reconcile (create/move) at the averaged position.
                 foreach (var kv in _sums)
                 {
                     MarkerKey key = kv.Key;
@@ -149,7 +155,7 @@ namespace CSWarfront.Game.UI
                     if (!_markers.TryGetValue(key, out entry) || entry.Root == null)
                     {
                         entry = CreateMarker(key.Kind, avg);
-                        if (entry == null) continue; // CreateMarker内でログ済み
+                        if (entry == null) continue; // already logged inside CreateMarker
                         _markers[key] = entry;
                     }
                     else if ((entry.LastPosition - avg).sqrMagnitude > 0.0001f)
@@ -159,7 +165,7 @@ namespace CSWarfront.Game.UI
                     }
                 }
 
-                // 3rd pass: スナップショットに無いキーを破棄。
+                // 3rd pass: destroy keys absent from the snapshot.
                 _staleKeys.Clear();
                 foreach (var kv in _markers)
                 {
@@ -178,7 +184,7 @@ namespace CSWarfront.Game.UI
 
         private static readonly List<OrderDestinationState> _emptySnapshot = new List<OrderDestinationState>();
 
-        /// <summary>追跡中の全マーカーを破棄する（レベルアンロード時、メインスレッド専用）。</summary>
+        /// <summary>Destroys all tracked markers (on level unload, main thread only).</summary>
         public static void DestroyAll()
         {
             try
@@ -269,11 +275,11 @@ namespace CSWarfront.Game.UI
         {
             if (kind == OrderMarkerKind.Rally)
             {
-                if (_rallyMaterial == null) _rallyMaterial = CreateMaterial(new Color(0.25f, 0.9f, 0.95f, 1f)); // シアン寄り
+                if (_rallyMaterial == null) _rallyMaterial = CreateMaterial(new Color(0.25f, 0.9f, 0.95f, 1f)); // cyan-ish
                 return _rallyMaterial;
             }
 
-            if (_advanceMaterial == null) _advanceMaterial = CreateMaterial(new Color(0.95f, 0.25f, 0.2f, 1f)); // 赤寄り
+            if (_advanceMaterial == null) _advanceMaterial = CreateMaterial(new Color(0.95f, 0.25f, 0.2f, 1f)); // red-ish
             return _advanceMaterial;
         }
 

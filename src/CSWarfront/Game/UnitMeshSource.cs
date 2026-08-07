@@ -6,15 +6,18 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// ユニットの見た目に使うメッシュを「名前」で解決する小さなヘルパー。
-    /// VehicleInfo からは m_mesh（無ければ m_lodMesh）だけを借用し、AI（VehicleAI派生）には一切触れない。
-    /// これにより借用元は素の乗用車からWorkshopの改造車両まで、どんなAIを積んでいても安全
-    /// （AIが一切インスタンス化されないため、車両AI由来の副作用・クラッシュが原理的に起こらない）。
-    /// マテリアルはCS車両のものを借用しない（CS車両マテリアルは専用シェーダーが独自レンダラー由来の
-    /// per-instanceデータを要求するため、素のMeshRendererに割り当てると不可視/黒になる）。
-    /// マテリアルは <see cref="UnitMaterialFactory"/> が自前で生成する。
-    /// 解決結果はプレハブ名単位でキャッシュし、スキャン（全プレハブ走査）は最初の1回だけ発生する。
-    /// メインスレッド専用（PrefabCollectionアクセスを伴う）。
+    /// Small helper that resolves the mesh used for a unit's visual by "name".
+    /// From VehicleInfo it borrows only m_mesh (or m_lodMesh if absent) and never touches the AI
+    /// (VehicleAI-derived). This makes any borrow source safe — from plain passenger cars to modded
+    /// Workshop vehicles — regardless of what AI it carries (since no AI is ever instantiated,
+    /// side effects and crashes originating from vehicle AI are impossible by construction).
+    /// Materials are NOT borrowed from CS vehicles (CS vehicle materials use dedicated shaders that
+    /// require per-instance data supplied by CS's own renderer, so assigning them to a plain
+    /// MeshRenderer renders invisible/black). Materials are generated in-house by
+    /// <see cref="UnitMaterialFactory"/>.
+    /// Resolution results are cached per prefab name, so the scan (full prefab sweep) happens only
+    /// once, on the first call.
+    /// Main thread only (involves PrefabCollection access).
     /// </summary>
     internal static class UnitMeshSource
     {
@@ -24,72 +27,82 @@ namespace CSWarfront.Game
             public bool Ok;
         }
 
-        // 既定（AssetPrefabName未指定）時に試す既知の乗り物名。見つからなければ全プレハブ走査へ。
+        // Known vehicle names tried by default (when AssetPrefabName is unspecified). If none is
+        // found, we fall through to the full prefab sweep.
         private static readonly string[] DefaultCandidateNames =
         {
             "Fire Truck", "Police Car", "Ambulance", "Garbage Truck", "Bus"
         };
 
-        private const string DefaultCacheKey = ""; // AssetPrefabName が空の全ユニット共通キー
+        private const string DefaultCacheKey = ""; // shared key for all units with empty AssetPrefabName
 
         private static readonly Dictionary<string, Resolved> _cache = new Dictionary<string, Resolved>();
-        // FindLoaded(name) が見つからず既定へフォールバックした名前を、警告ログの重複を避けるためだけに記録する
-        // （キャッシュには入れない＝次回呼び出しで必ず FindLoaded を再試行させる。詳細は TryResolve 参照）。
+        // Records names for which FindLoaded(name) missed and we fell back to the default, solely to
+        // avoid duplicate warning logs (NOT added to the cache — so every future call retries
+        // FindLoaded; see TryResolve for details).
         private static readonly HashSet<string> _warnedMissingNames = new HashSet<string>();
-        // Task36: バインド済みだがそのアセットがまだ見つからない（未ロード等）警告の重複防止専用
-        // （"faction|typeKey=kind:assetName" 単位、Task41で種類も含めた。UnitAssetBindings/AssetCatalog
-        // 由来の結果は下記TryResolveの通り意図的にキャッシュしないため、この集合は毎回のFindLoaded
-        // 再試行そのものは妨げない）。
+        // Task36: dedicated to de-duplicating the "bound but asset not found yet (not loaded, etc.)"
+        // warning (keyed by "faction|typeKey=kind:assetName"; Task41 added the kind to the key.
+        // Results coming from UnitAssetBindings/AssetCatalog are intentionally not cached, as
+        // explained in TryResolve below, so this set never blocks the FindLoaded retry that happens
+        // on every call).
         private static readonly HashSet<string> _warnedMissingBindings = new HashSet<string>();
         private static bool _loggedSourceOnce;
         private static bool _loggedFailureOnce;
         private static Mesh _fallbackCubeMesh;
 
         /// <summary>
-        /// Task36: typeKey（空可）とassetPrefabName（空可）からメッシュを解決する。
-        /// Task40: 割り当ての解決を勢力別（factionId）にした。
-        /// Task41: 割り当て済みアセットの種類（プロップ以外に建物/車両/樹木も）に対応した。
-        /// 解決順: (a) (factionId, typeKey) に対する UnitAssetBindings の割り当て（勢力別 → 全勢力共通の順、
-        ///        UnitAssetBindings.TryGet内部で解決、種類(AssetKind)込みで返る）
-        ///        → AssetCatalog でそのアセットのメッシュを解決
-        ///        → (b) assetPrefabName で FindLoaded → 既定候補名 → 全VehicleInfo走査
-        ///        → (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
+        /// Task36: resolves a mesh from typeKey (may be empty) and assetPrefabName (may be empty).
+        /// Task40: made binding resolution per-faction (factionId).
+        /// Task41: added support for bound asset kinds beyond props (buildings/vehicles/trees).
+        /// Resolution order: (a) the UnitAssetBindings binding for (factionId, typeKey)
+        ///        (per-faction first, then all-factions shared; resolved inside
+        ///        UnitAssetBindings.TryGet, returned together with its kind (AssetKind))
+        ///        → resolve that asset's mesh via AssetCatalog
+        ///        → (b) FindLoaded by assetPrefabName → default candidate names → full VehicleInfo sweep
+        ///        → (c) primitive (Cube) fallback. Returns false only when everything fails.
         ///
-        /// (a) の結果は意図的にキャッシュしない（AssetCatalog.TryGetMeshも同様、PropCatalog時代からの
-        /// 方針を踏襲）。UnitAssetBindings.Set/Clear による割り当て変更は UnitVisuals.DestroyAll() で
-        /// 既存の見た目を破棄させることで反映される（破棄された見た目は次回Syncで必ずCreateVisual→
-        /// この解決を再実行する）ため、ここで名前単位キャッシュを持つと変更が反映されない/古い結果が
-        /// 残るリスクの方が大きい。キャッシュが無いため「(勢力ID, 種類, 名前) をキャッシュキーに含める」
-        /// 問題はそもそも発生しない（Task40/Task41要件: 勢力間・種類間でキャッシュが漏れないこと）。
-        /// (b)/(c) の既存キャッシュ（下記オーバーロード）は assetPrefabName 単位のみで勢力にも種類にも
-        /// 依存しない（このパスは常にVehicleInfoのみを扱う既定フォールバックであり、AssetKindの概念自体が
-        /// 関与しないため）。
+        /// Results from (a) are intentionally not cached (same for AssetCatalog.TryGetMesh, keeping
+        /// the policy from the PropCatalog era). Binding changes made through
+        /// UnitAssetBindings.Set/Clear take effect by having UnitVisuals.DestroyAll() discard the
+        /// existing visuals (destroyed visuals always go through CreateVisual on the next Sync →
+        /// this resolution runs again), so holding a per-name cache here would carry the greater
+        /// risk of changes not taking effect / stale results lingering. With no cache, the question
+        /// of "including (faction id, kind, name) in the cache key" never arises in the first place
+        /// (Task40/Task41 requirement: caches must not leak across factions or kinds).
+        /// The existing cache for (b)/(c) (the overload below) is keyed by assetPrefabName only and
+        /// depends on neither faction nor kind (that path is the default fallback that always deals
+        /// with VehicleInfo only, so the concept of AssetKind is simply not involved).
         ///
-        /// 一方 <see cref="UnitMaterialFactory"/> はテクスチャを (kind, name) 単位で永続キャッシュする
-        /// （マテリアルはユニットのビジュアル破棄・再生成のたびに毎回生成し直すのはコストが大きいため）。
-        /// キャッシュキーに種類を含めることで、例えば同名の建物とプロップが両方存在しても互いの
-        /// テクスチャを取り違えない（Task41要件）。
+        /// By contrast, <see cref="UnitMaterialFactory"/> caches textures persistently per
+        /// (kind, name) (regenerating materials on every unit visual destroy/recreate cycle would be
+        /// too costly). Including the kind in the cache key ensures that, e.g., a building and a
+        /// prop sharing the same name never get each other's textures (Task41 requirement).
         ///
-        /// Task37: メッシュが (a) の「割り当て済みアセット」経由で解決できたかどうかを
-        /// <paramref name="fromAssignedProp"/> で報告する。呼び出し側（UnitVisuals）はこれを使って、
-        /// 割り当て済みアセットがある場合は可視性マーカー立方体や勢力色を出さない判断をする。
-        /// <paramref name="resolvedKind"/>/<paramref name="resolvedAssetName"/> は fromAssignedProp=true
-        /// の時のみ意味のある値を返す（UnitMaterialFactory.TryGetAssetMaterial に渡すため）。
+        /// Task37: reports via <paramref name="fromAssignedProp"/> whether the mesh was resolved
+        /// through path (a), the "bound asset". The caller (UnitVisuals) uses this to decide not to
+        /// show the visibility marker cube or faction color when a bound asset exists.
+        /// <paramref name="resolvedKind"/>/<paramref name="resolvedAssetName"/> carry meaningful
+        /// values only when fromAssignedProp=true (they are passed to
+        /// UnitMaterialFactory.TryGetAssetMaterial).
         ///
-        /// Task57: (a)と(c)の間に (b) 「ユニットのUnitCategoryに対応する既定(built-in)モデル」を
-        /// 挿入した。typeKeyを Core.TypeKeyParser で解析し（Tierフォールバック探索と同じ手法）、
-        /// カテゴリに対応する src/CSWarfront/Models/Unit_*.obj があれば
-        /// <see cref="Models.WarfrontModelProvider"/> 経由でそのメッシュを返す。この経路で解決できたかは
-        /// <paramref name="fromBuiltInModel"/> で報告する。fromAssignedProp と違いこちらはアセット固有の
-        /// テクスチャを持たないため、呼び出し側は fromAssignedProp と同様「可視性マーカーを出さない」
-        /// 判断に使う。対象外のカテゴリ（Task69時点で全カテゴリ対応済み）は素通りして (c) へ進む。
+        /// Task57: inserted (b) "the built-in default model for the unit's UnitCategory" between
+        /// (a) and (c). The typeKey is parsed with Core.TypeKeyParser (same technique as the Tier
+        /// fallback search), and if a src/CSWarfront/Models/Unit_*.obj exists for the category, its
+        /// mesh is returned via <see cref="Models.WarfrontModelProvider"/>. Whether this path
+        /// resolved is reported via <paramref name="fromBuiltInModel"/>. Unlike fromAssignedProp,
+        /// this path has no asset-specific texture, but the caller uses it the same way as
+        /// fromAssignedProp for the "do not show the visibility marker" decision. Categories not
+        /// covered (all categories are covered as of Task69) pass through to (c).
         ///
-        /// Task69: 既定モデルのマテリアルを <see cref="Models.WarfrontModelProvider.TryGetModel"/>
-        /// （.obj の usemtl ブロックごとにサブメッシュ+専用マテリアルを持つマルチマテリアル版）から
-        /// 取得し、<paramref name="builtInMaterials"/> として返すよう変更した。Blender製モデル
-        /// （tools/export_builtin_obj.py 由来）はモデル自身の実際の色を持つため、これ以降 fromBuiltInModel
-        /// の場合は（勢力色ティントではなく）常にこの配列を使って描画する（UnitVisuals.CreateVisual
-        /// 側で分岐。勢力の識別は既存の勢力アイコンに一本化した）。
+        /// Task69: changed the built-in model's materials to come from
+        /// <see cref="Models.WarfrontModelProvider.TryGetModel"/> (the multi-material variant that
+        /// carries one submesh + dedicated material per usemtl block in the .obj), returned as
+        /// <paramref name="builtInMaterials"/>. Blender-made models (from
+        /// tools/export_builtin_obj.py) carry the model's own actual colors, so from this point on,
+        /// whenever fromBuiltInModel is true this array is always used for rendering (instead of a
+        /// faction-color tint; the branch lives in UnitVisuals.CreateVisual. Faction identification
+        /// was consolidated onto the existing faction icons).
         /// </summary>
         public static bool TryResolve(byte factionId, string typeKey, string assetPrefabName, out Mesh mesh, out Material[] builtInMaterials, out bool fromAssignedProp, out bool fromBuiltInModel, out AssetKind resolvedKind, out string resolvedAssetName)
         {
@@ -159,10 +172,11 @@ namespace CSWarfront.Game
             return TryResolve(assetPrefabName, out mesh);
         }
 
-        /// <summary>Task57/Task61: UnitCategory -&gt; src/CSWarfront/Models/Unit_*.obj のファイル名
-        /// （拡張子無し）への対応表。陸上7兵種に加え、Task61で海上2種(Destroyer/Carrier)・
-        /// 航空3種(AirSuperiority/TacticalBomber/SuicideDrone)を追加した。他の未実装カテゴリは
-        /// false を返し、呼び出し側は (c) の車両借用/プリミティブへフォールバックする。</summary>
+        /// <summary>Task57/Task61: mapping table from UnitCategory -&gt; the file name (without
+        /// extension) of src/CSWarfront/Models/Unit_*.obj. Beyond the 7 land branches, Task61 added
+        /// 2 naval kinds (Destroyer/Carrier) and 3 air kinds (AirSuperiority/TacticalBomber/
+        /// SuicideDrone). Other not-yet-implemented categories return false, and the caller falls
+        /// back to (c) vehicle borrowing / primitive.</summary>
         private static bool TryGetBuiltInModelName(UnitCategory category, out string modelName)
         {
             switch (category)
@@ -179,10 +193,11 @@ namespace CSWarfront.Game
                 case UnitCategory.AirSuperiority: modelName = "Unit_Fighter"; return true;
                 case UnitCategory.TacticalBomber: modelName = "Unit_Bomber"; return true;
                 case UnitCategory.SuicideDrone: modelName = "Unit_SuicideDrone"; return true;
-                // Task99: 補給トラック専用モデル（models.blend 20_Supply_Truck、2026-08-03ユーザー作成の
-                // 6×6幌付きトラック 7.77×2.78×2.91m。当初のAPCモデル代用を置き換えた）。
+                // Task99: dedicated supply truck model (models.blend 20_Supply_Truck, a 6x6 canvas-
+                // covered truck 7.77x2.78x2.91m created by the user on 2026-08-03; replaces the
+                // initial stand-in that reused the APC model).
                 case UnitCategory.SupplyTruck: modelName = "Unit_SupplyTruck"; return true;
-                // Task101: Update3の新兵科（models.blend 25_Transport_Helo/26_Attack_Helo/28_Freight_Train）。
+                // Task101: new Update3 branches (models.blend 25_Transport_Helo/26_Attack_Helo/28_Freight_Train).
                 case UnitCategory.TransportHelicopter: modelName = "Unit_TransportHeli"; return true;
                 case UnitCategory.AttackHelicopter: modelName = "Unit_AttackHeli"; return true;
                 case UnitCategory.MilitaryTrain: modelName = "Unit_MilitaryTrain"; return true;
@@ -191,16 +206,18 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// assetPrefabName（空可）からメッシュを解決する。
-        /// 解決順: (a) assetPrefabName で FindLoaded → (b) 既定候補名 → 全VehicleInfo走査 →
-        /// (c) プリミティブ（Cube）フォールバック。全滅時のみ false を返す。
+        /// Resolves a mesh from assetPrefabName (may be empty).
+        /// Resolution order: (a) FindLoaded by assetPrefabName → (b) default candidate names → full
+        /// VehicleInfo sweep → (c) primitive (Cube) fallback. Returns false only when everything fails.
         ///
-        /// キャッシュ方針: assetPrefabName 指定時、直接の FindLoaded(name) が「成功」した結果のみを
-        /// そのキーで永続キャッシュする。直接ヒットせず既定プレハブへフォールバックした場合は、
-        /// その回の呼び出し結果としては既定を返すが named-key ではキャッシュしない。
-        /// こうしないと、Workshopアセットがまだロードされていない一瞬に呼ばれただけで「そのアセット名は
-        /// 永久に解決不能」という誤ったキャッシュが焼き付いてしまい、後でアセットがロードされても
-        /// 二度と正しく解決されなくなる（実際に起きていたバグ）。
+        /// Caching policy: when assetPrefabName is given, only a result where the direct
+        /// FindLoaded(name) "succeeded" is cached persistently under that key. If the direct lookup
+        /// misses and we fall back to a default prefab, that call returns the default, but nothing
+        /// is cached under the named key.
+        /// Otherwise, being called just once during the brief window before a Workshop asset has
+        /// loaded would burn in the incorrect cache entry "this asset name can never be resolved",
+        /// and the asset would never resolve correctly even after it loads later (a bug that
+        /// actually happened).
         /// </summary>
         public static bool TryResolve(string assetPrefabName, out Mesh mesh)
         {
@@ -216,8 +233,9 @@ namespace CSWarfront.Game
             bool namedLookupSucceeded;
             Resolved result = Resolve(key, out namedLookupSucceeded);
 
-            // 既定キー（名前未指定）は常にキャッシュ。名前指定キーは直接ヒット時のみキャッシュし、
-            // ミス時は毎回 FindLoaded を再試行できるようにキャッシュへ書き込まない。
+            // The default key (no name given) is always cached. Named keys are cached only on a
+            // direct hit; on a miss nothing is written to the cache so FindLoaded can be retried on
+            // every call.
             if (string.IsNullOrEmpty(key) || namedLookupSucceeded)
             {
                 _cache[key] = result;
@@ -263,7 +281,7 @@ namespace CSWarfront.Game
                     return new Resolved { Mesh = mesh, Ok = true };
                 }
 
-                // (c) プリミティブフォールバック。
+                // (c) Primitive fallback.
                 if (TryGetPrimitiveFallback(out mesh))
                 {
                     if (!_loggedSourceOnce)
@@ -288,7 +306,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>既定候補名を順に試し、全滅なら全VehicleInfoを走査して mesh を持つ最初の1つを返す。</summary>
+        /// <summary>Tries the default candidate names in order; if all miss, sweeps every VehicleInfo
+        /// and returns the first one that has a mesh.</summary>
         private static VehicleInfo FindDefaultPrefab()
         {
             for (int i = 0; i < DefaultCandidateNames.Length; i++)
@@ -315,7 +334,7 @@ namespace CSWarfront.Game
                     GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cube);
                     MeshFilter filter = temp.GetComponent<MeshFilter>();
                     _fallbackCubeMesh = filter != null ? filter.sharedMesh : null;
-                    UnityEngine.Object.Destroy(temp); // メッシュ自体はUnity組込共有アセットのため破棄されない
+                    UnityEngine.Object.Destroy(temp); // the mesh itself is a built-in shared Unity asset, so it is not destroyed
                 }
 
                 mesh = _fallbackCubeMesh;

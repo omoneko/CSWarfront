@@ -3,11 +3,12 @@ using System;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task41: ユニットの見た目モデルとして割り当てられるアセットの種類。プロップに加え、建物/車両/樹木の
-    /// Workshopアセットも借用できるようにするための識別子（<see cref="AssetCatalog"/> がこの種類ごとに
-    /// PrefabCollection&lt;T&gt; を使い分けて列挙・解決する）。
-    /// 数値はファイル保存形式（UnitAssetBindings）やUIドロップダウンの選択インデックスと結びつくため、
-    /// 既存の並び順を変更しないこと（末尾への追加のみ許容）。
+    /// Task41: the kind of asset that can be assigned as a unit's visual model. An identifier that
+    /// allows borrowing not only props but also building/vehicle/tree Workshop assets
+    /// (<see cref="AssetCatalog"/> switches between PrefabCollection&lt;T&gt; per kind for
+    /// enumeration and resolution).
+    /// The numeric values are tied to the file save format (UnitAssetBindings) and to the selection
+    /// indices of the UI dropdown, so never reorder the existing entries (appending at the end only).
     /// </summary>
     internal enum AssetKind : byte
     {
@@ -18,16 +19,16 @@ namespace CSWarfront.Game
     }
 
     /// <summary>
-    /// AssetKind ⇔ 文字列（保存用プレフィックス／UI表示ラベル）の変換をまとめた小さなヘルパー。
-    /// UnitAssetBindings（ファイル形式のkindプレフィックス）と AssetAssignPanel（種別ドロップダウンの
-    /// ラベル・現在の割り当て表示）の両方から使う。
+    /// Small helper bundling the AssetKind &lt;-&gt; string conversions (save-format prefix / UI
+    /// display label). Used both by UnitAssetBindings (the kind prefix of the file format) and by
+    /// AssetAssignPanel (kind-dropdown labels and current-binding display).
     /// </summary>
     internal static class AssetKindUtil
     {
-        /// <summary>種別ドロップダウンの選択インデックス0..3の並びと完全に一致させること。</summary>
+        /// <summary>Must match the order of kind-dropdown selection indices 0..3 exactly.</summary>
         public static readonly AssetKind[] All = { AssetKind.Prop, AssetKind.Building, AssetKind.Vehicle, AssetKind.Tree };
 
-        /// <summary>UnitAssetBindingsのファイル保存形式で使う小文字プレフィックス（"kind:assetName"）。</summary>
+        /// <summary>Lowercase prefix used in the UnitAssetBindings file save format ("kind:assetName").</summary>
         public static string ToPrefix(AssetKind kind)
         {
             switch (kind)
@@ -39,9 +40,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>保存形式のプレフィックス文字列（大文字小文字無視）をAssetKindへ解決する。
-        /// 未知のプレフィックスの場合はfalseを返す（呼び出し側はkindプレフィックス無しの
-        /// レガシー行として扱うこと）。</summary>
+        /// <summary>Resolves a save-format prefix string (case-insensitive) to an AssetKind.
+        /// Returns false for an unknown prefix (the caller must treat it as a legacy line without a
+        /// kind prefix).</summary>
         public static bool TryParsePrefix(string prefix, out AssetKind kind)
         {
             if (!string.IsNullOrEmpty(prefix))
@@ -55,7 +56,7 @@ namespace CSWarfront.Game
             return false;
         }
 
-        /// <summary>UI（種別ドロップダウン、現在の割り当て表示）向けの日本語ラベル。</summary>
+        /// <summary>Japanese label for the UI (kind dropdown, current-binding display).</summary>
         public static string DisplayNameJa(AssetKind kind)
         {
             switch (kind)
@@ -67,8 +68,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>「現在の割り当て」表示用のラベルを組み立てる。プロップは従来通り名前のみ、
-        /// それ以外の種別は名前の前に "[建物]" 等の種別タグを付けて区別できるようにする。</summary>
+        /// <summary>Builds the label for the "current binding" display. Props keep the name-only
+        /// form as before; every other kind gets a kind tag like "[Building]" prepended to the name
+        /// so it can be told apart.</summary>
         public static string Describe(AssetKind kind, string assetName)
         {
             if (string.IsNullOrEmpty(assetName)) return assetName;

@@ -5,29 +5,31 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、Task40で新設した「勢力」ドロップダウンとサムネイル表示だけを分離した
-    /// partial class（AssetAssignPanel.cs 側の500行制限のため。BaseInfoPanel/BaseInfoPanelProduction と
-    /// 同じ方針）。フィールドは全て AssetAssignPanel.cs 側で使う想定だが、宣言はここに置く（partial class は
-    /// private メンバーも全パーツで共有するため問題ない）。全メソッドはメインスレッド専用
-    /// （Unity UI API呼び出しのため）。
+    /// Partial class of AssetAssignPanel that isolates only the "Faction" dropdown and thumbnail display
+    /// added in Task40 (split off because of the 500-line limit on the AssetAssignPanel.cs side; same
+    /// policy as BaseInfoPanel/BaseInfoPanelProduction). All fields are intended for use on the
+    /// AssetAssignPanel.cs side, but the declarations live here (fine because a partial class shares
+    /// private members across all parts). All methods are main-thread only
+    /// (they call Unity UI APIs).
     /// </summary>
     internal static partial class AssetAssignPanel
     {
         private static UILabel _factionSectionLabel;
         private static UIDropDown _factionDropdown;
 
-        /// <summary>現在選択中の勢力ID（0..WarfrontSettings.MaxFactions-1）。ドロップダウンが未生成の間は
-        /// 既定の0(Red)を返す。UnitAssetBindings.TryGet/Set/Clearへ渡す。</summary>
+        /// <summary>The currently selected faction ID (0..WarfrontSettings.MaxFactions-1). Returns the
+        /// default 0 (Red) while the dropdown has not been created yet. Passed to
+        /// UnitAssetBindings.TryGet/Set/Clear.</summary>
         internal static byte SelectedFactionId
         {
             get { return _factionDropdown != null ? (byte)_factionDropdown.selectedIndex : (byte)0; }
         }
 
-        /// <summary>Task40: 現在ロードされているアセットが1件以上あるか（4種類全てを対象、走査は
-        /// 強制的にRescan()する）。Mod Options（Game/Mod.cs）がメインメニュー等で機能が実質使えない
-        /// 状況を検出するために使う。Task41: プロップだけでなく建物/車両/樹木も対象に含めた
-        /// （例えばメインメニューでは4種類とも0件のはずだが、レベルロード後はどれか1種類でも
-        /// 1件あれば「使える」と判定してよいため）。</summary>
+        /// <summary>Task40: Whether at least one asset is currently loaded (all 4 kinds are considered;
+        /// the scan is a forced Rescan()). Used by Mod Options (Game/Mod.cs) to detect situations where
+        /// the feature is effectively unusable, e.g. on the main menu. Task41: Now covers not only props
+        /// but also buildings/vehicles/trees (for example, on the main menu all 4 kinds should be 0, but
+        /// after a level load it is fine to judge "usable" if even one kind has at least 1 asset).</summary>
         internal static bool HasAnyProps()
         {
             try
@@ -55,15 +57,15 @@ namespace CSWarfront.Game.UI
             dd.hoveredBgSprite = "ButtonMenuHovered";
             dd.disabledBgSprite = "ButtonMenuDisabled";
             dd.listBackground = "GenericPanelLight";
-            dd.itemHeight = 26; // 文字等倍・行間は少し広め
+            dd.itemHeight = 26; // text at 1x; line spacing slightly wider
             dd.itemHover = "ListItemHover";
             dd.itemHighlight = "ListItemHighlight";
             dd.listWidth = (int)width;
-            dd.listHeight = 300; // 旧200 ×1.5
+            dd.listHeight = 300; // old 200 x1.5
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.8f; // 他パネルと統一
-            dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // 旧(8,8,6,0) ×1.5
-            dd.itemPadding = new RectOffset(12, 0, 5, 0); // 旧(8,0,3,0) ×1.5
+            dd.textScale = 0.8f; // unified with the other panels
+            dd.textFieldPadding = new RectOffset(12, 12, 9, 0); // old (8,8,6,0) x1.5
+            dd.itemPadding = new RectOffset(12, 0, 5, 0); // old (8,0,3,0) x1.5
             dd.popupColor = new Color32(45, 52, 61, 255);
             dd.popupTextColor = new Color32(230, 230, 230, 255);
             dd.foregroundSpriteMode = UIForegroundSpriteMode.Stretch;
@@ -71,12 +73,12 @@ namespace CSWarfront.Game.UI
             dd.horizontalAlignment = UIHorizontalAlignment.Left;
 
             dd.items = WarfrontSettings.FactionNames;
-            dd.selectedIndex = 0; // 既定 Red。BaseInfoPanel.BuildFactionDropdownと同じ既定値。
+            dd.selectedIndex = 0; // default Red. Same default as BaseInfoPanel.BuildFactionDropdown.
 
             UIButton trigger = dd.AddUIComponent<UIButton>();
             trigger.text = "▼";
-            trigger.textScale = 0.7f; // 他パネルと統一
-            trigger.size = new Vector2(36f, DropdownHeight); // 旧24f ×1.5
+            trigger.textScale = 0.7f; // unified with the other panels
+            trigger.size = new Vector2(36f, DropdownHeight); // old 24f x1.5
             trigger.relativePosition = new Vector3(width - 48f, 0f);
             trigger.normalBgSprite = "ButtonMenu";
             trigger.hoveredBgSprite = "ButtonMenuHovered";
@@ -87,8 +89,9 @@ namespace CSWarfront.Game.UI
             _factionDropdown = dd;
         }
 
-        /// <summary>勢力選択が変わったら、ユニット種別ドロップダウンのラベル（"TypeKey → propName"）を
-        /// その勢力の割り当てで再構築し、現在の割り当て表示・サムネイルも合わせて更新する。</summary>
+        /// <summary>When the faction selection changes, rebuilds the unit-type dropdown labels
+        /// ("TypeKey → propName") with that faction's bindings, and also updates the current-binding
+        /// display and thumbnail accordingly.</summary>
         private static void OnFactionChanged(UIComponent component, int value)
         {
             try
@@ -103,11 +106,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task40: 「現在の割り当て」ラベルの右にサムネイル画像を表示するための128x128
-        /// （旧64x64、Task41で1.5倍化＝96x96） UISprite。UISprite.atlas(UITextureAtlas)/spriteName(String) と
-        /// PrefabInfo.m_Atlas/m_Thumbnail は Assembly-CSharp.dll/ColossalManaged.dllをリフレクションで
-        /// 検証済み（両方public、フィールド/プロパティ）。既定では非表示（有効なサムネイルが見つかった時
-        /// だけ RefreshThumbnail が表示する）。</summary>
+        /// <summary>Task40: A 128x128 (old 64x64; scaled by 1.5x in Task41 = 96x96) UISprite for showing
+        /// a thumbnail image to the right of the "current binding" label. UISprite.atlas(UITextureAtlas)/
+        /// spriteName(String) and PrefabInfo.m_Atlas/m_Thumbnail were verified via reflection against
+        /// Assembly-CSharp.dll/ColossalManaged.dll (both public, field/property). Hidden by default
+        /// (RefreshThumbnail shows it only when a valid thumbnail is found).</summary>
         private static void BuildThumbnailSprite(float x, float y)
         {
             UISprite sprite = _panel.AddUIComponent<UISprite>();
@@ -117,12 +120,13 @@ namespace CSWarfront.Game.UI
             _thumbnailSprite = sprite;
         }
 
-        /// <summary>指定種類・名前のアセットのサムネイルを解決してUISpriteへ反映する。多くのアセットは
-        /// サムネイルを持たない（AssetCatalog.TryGetThumbnailがfalseを返す）ため、その場合はスプライトを
-        /// 隠す（要件: サムネイル無し/未選択時はサムネイル領域を非表示にする）。呼び出し元:
-        /// OnAssetSelected（一覧選択変更時）、RefreshCurrentBindingLabel（勢力/種別切り替え時、
-        /// 現在の割り当て済みアセットのプレビューとして）。Task41: 種類(AssetKind)を引数に追加した
-        /// （建物/車両/樹木のサムネイルもプロップと同じ経路で解決できる、AssetCatalog.TryGetThumbnail参照）。</summary>
+        /// <summary>Resolves the thumbnail of the asset with the given kind and name and applies it to
+        /// the UISprite. Many assets have no thumbnail (AssetCatalog.TryGetThumbnail returns false), in
+        /// which case the sprite is hidden (requirement: hide the thumbnail area when there is no
+        /// thumbnail / nothing selected). Callers: OnAssetSelected (when the list selection changes),
+        /// RefreshCurrentBindingLabel (when the faction/type changes, as a preview of the currently
+        /// bound asset). Task41: added the kind (AssetKind) argument (building/vehicle/tree thumbnails
+        /// can be resolved via the same path as props; see AssetCatalog.TryGetThumbnail).</summary>
         private static void RefreshThumbnail(AssetKind kind, string assetName)
         {
             if (_thumbnailSprite == null) return;
@@ -143,8 +147,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Destroy()から呼ばれる。イベント購読解除とフィールドリセットのみ
-        /// （BaseInfoPanelModelButton.DestroyModelButtonSectionと同じ方針）。</summary>
+        /// <summary>Called from Destroy(). Only unsubscribes events and resets fields
+        /// (same policy as BaseInfoPanelModelButton.DestroyModelButtonSection).</summary>
         private static void DestroyFactionSection()
         {
             if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionChanged;

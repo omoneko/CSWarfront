@@ -9,55 +9,62 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task47: Mod Options（Game/Mod.cs、OnSettingsUI）内に直接構築する「モデル割り当て」サブページ。
-    /// Task40〜41までは「モデル割り当てを開く」ボタンを押すと独立したフローティングパネル
-    /// （AssetAssignPanel）を開いていたが、ユーザー要望によりOptions画面のグループ内にコントロール
-    /// 一式を直接並べる方式（サブページ）へ変更した。
+    /// Task47: "Model Assignment" subpage built directly inside Mod Options (Game/Mod.cs,
+    /// OnSettingsUI). Up through Task40-41, pressing the "Open model assignment" button opened an
+    /// independent floating panel (AssetAssignPanel), but per user request this was changed to a
+    /// scheme (subpage) that lays out the full set of controls directly inside a group on the
+    /// Options screen.
     ///
-    /// ICities.UIHelperBase は AddGroup/AddDropdown/AddCheckbox/AddTextfield/AddButton/AddSpace の
-    /// 6メソッドしか持たない（スクロール可能な一覧＝AssetAssignPanelのUIListBox相当が無い）ため、
-    /// アセット一覧は「検索欄で絞り込んでからドロップダウンで選ぶ」方式に縮退している（要件で明示された
-    /// 「対応する制御が無ければドロップダウンで代替する」方針）。件数表示ラベルで、ドロップダウンに
-    /// 入り切らなかった件数（AssetAssignPanel.MaxListItems=300件超）をユーザーに伝える。
+    /// ICities.UIHelperBase only has 6 methods (AddGroup/AddDropdown/AddCheckbox/AddTextfield/
+    /// AddButton/AddSpace) and offers no scrollable list (the equivalent of AssetAssignPanel's
+    /// UIListBox), so the asset list degrades to a "narrow down with the search field, then pick
+    /// from a dropdown" scheme (the policy explicitly stated in the requirements: "if no matching
+    /// control exists, substitute a dropdown"). A count label tells the user how many entries did
+    /// not fit into the dropdown (beyond AssetAssignPanel.MaxListItems=300).
     ///
-    /// UIHelperBase実装の実体はAssembly-CSharpのグローバル名前空間クラス「UIHelper」で、
-    /// `object AddXxx(...)` の戻り値は実際には生成したUIコンポーネント自身（UIDropDown/UITextField等）
-    /// であり、`public object self { get; }` は AddGroup が返す子ヘルパーが包む「グループの中身パネル」
-    /// （UIComponent）を返す（いずれもColossalManaged.dll/Assembly-CSharp.dllのILを
-    /// PowerShellリフレクションで逆アセンブルし、newobj/callvirt命令の対象型を確認済み）。
-    /// これにより、ドロップダウン等の戻り値をキャストしてitems/selectedIndexを後から書き換えたり、
-    /// group.selfを起点にUILabel/UISpriteのような「現在の割り当て」プレビュー表示をヘルパーの外側から
-    /// 直接子として追加できる（Mod.cs Task40時点のCreateHintLabelと同じ手法の一般化）。
-    /// raw UIComponentをAddUIComponentする呼び出しを他のAdd*呼び出しの間に挟むと、同じ親パネルの
-    /// 子として「呼んだ順」に並ぶため、この方式のままレイアウト順を制御できる。
+    /// The concrete UIHelperBase implementation is the global-namespace class "UIHelper" in
+    /// Assembly-CSharp; the return value of `object AddXxx(...)` is in fact the created UI
+    /// component itself (UIDropDown/UITextField etc.), and `public object self { get; }` returns
+    /// the "group content panel" (UIComponent) wrapped by the child helper that AddGroup returns
+    /// (both verified by disassembling the IL of ColossalManaged.dll/Assembly-CSharp.dll via
+    /// PowerShell reflection and checking the target types of the newobj/callvirt instructions).
+    /// This lets us cast the dropdown return values and rewrite items/selectedIndex later, and add
+    /// a "current assignment" preview display such as UILabel/UISprite as direct children starting
+    /// from group.self, outside the helper (a generalization of the same technique as
+    /// CreateHintLabel in Mod.cs as of Task40). If a call that AddUIComponents a raw UIComponent is
+    /// interleaved between other Add* calls, the children line up on the same parent panel "in call
+    /// order", so layout order can still be controlled with this scheme.
     ///
-    /// このページ自体はマップ未ロード（メインメニュー）から開かれる可能性があり、その場合
-    /// PrefabCollection&lt;PropInfo/BuildingInfo/VehicleInfo/TreeInfo&gt; がまだpopulateされていない
-    /// ため一覧は0件になる。AssetAssignPanel.HasAnyProps()（Rescan込みの4種類横断チェック）を再利用して
-    /// その旨をヒントラベルに表示する（Task40時点のMod.csの挙動を踏襲）。
+    /// This page itself may be opened with no map loaded (main menu), in which case
+    /// PrefabCollection&lt;PropInfo/BuildingInfo/VehicleInfo/TreeInfo&gt; is not yet populated and
+    /// the list has 0 entries. AssetAssignPanel.HasAnyProps() (the 4-kind cross-check including a
+    /// Rescan) is reused to show that fact on the hint label (following the Mod.cs behavior as of
+    /// Task40).
     ///
-    /// 実際の複製ロジック（Task47「複製適用」）は UnitAssetBindings.CopyTo が一元的に持ち、このクラスは
-    /// スコープドロップダウンの選択値を渡すだけ（AssetAssignPanelCopy.cs のフローティングパネル側と
-    /// 完全に同じ呼び出し方）。
+    /// The actual copy logic (Task47 "apply copy") is centrally owned by UnitAssetBindings.CopyTo;
+    /// this class merely passes the selected value of the scope dropdown (exactly the same call
+    /// pattern as the floating panel side in AssetAssignPanelCopy.cs).
     ///
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// All methods are main-thread only (they call Unity UI APIs).
     ///
-    /// Task52バグ修正: 上の段落は「OnSettingsUIはOptions画面を開くたびに再実行されうる」という
-    /// 誤った前提で書かれていた。実際にはCSのOptionsMainPanel（Assembly-CSharp.dll、ILSpyで逆コンパイル
-    /// して確認済み。詳細はOptionsRelationsPage.csのクラス冒頭コメント参照）は各MODのOnSettingsUIを
-    /// OptionsMainPanel.Awake()（通常は都市読み込み前のメインメニューの時点）でただ一度だけ呼び、
-    /// 以後はロケール変更かMOD有効/無効の変更の時だけ再構築する。つまりBuild()はAssetCatalogが空
-    /// （都市未読み込み）の状態で一度だけ実行され、以後どれだけ都市を読み込み直してOptions画面を開き
-    /// 直しても、Build()自体は二度と呼ばれない。
+    /// Task52 bug fix: the paragraph above was written under the incorrect assumption that
+    /// "OnSettingsUI may be re-run every time the Options screen is opened". In reality, CS's
+    /// OptionsMainPanel (Assembly-CSharp.dll, verified by decompiling with ILSpy; see the
+    /// class-header comment of OptionsRelationsPage.cs for details) calls each mod's OnSettingsUI
+    /// exactly once in OptionsMainPanel.Awake() (normally at the main menu, before a city is
+    /// loaded), and afterwards rebuilds only on a locale change or a mod enable/disable change.
+    /// In other words, Build() runs exactly once while AssetCatalog is empty (no city loaded), and
+    /// no matter how many times a city is reloaded and the Options screen reopened afterwards,
+    /// Build() itself is never called again.
     ///
-    /// 修正はOptionsRelationsPageと同じパターン: グループパネルのeventVisibilityChangedを購読し
-    /// （Options画面でこのMODのタブが選択されるたびに、配下の全コンポーネントへ伝播する形で発火する。
-    /// UIComponent、ColossalManaged.dllを逆コンパイルして確認済み）、発火のたびに
-    /// RefreshFromState()で（1)AssetCatalogを再走査した上で都市読み込み状況を判定し、
-    /// (2)ユニット種別/アセットのドロップダウン内容と「現在の割り当て」表示を再構築し、
-    /// (3)全コントロールのisEnabledを判定結果へ同期し、(4)ヒントラベルを更新する。
-    /// 新しいコントロールは一切生成しない（Build()で一度だけ生成した既存のフィールドを更新するのみ、
-    /// 二重生成防止）。
+    /// The fix follows the same pattern as OptionsRelationsPage: subscribe to the group panel's
+    /// eventVisibilityChanged (it fires every time this mod's tab is selected on the Options
+    /// screen, propagated to all descendant components; UIComponent, verified by decompiling
+    /// ColossalManaged.dll), and on each firing RefreshFromState() (1) re-scans AssetCatalog and
+    /// determines whether a city is loaded, (2) rebuilds the unit-type/asset dropdown contents and
+    /// the "current assignment" display, (3) syncs isEnabled of all controls to the determination
+    /// result, and (4) updates the hint label. No new controls are ever created (only the existing
+    /// fields created once in Build() are updated; prevents double creation).
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
@@ -94,7 +101,7 @@ namespace CSWarfront.Game.UI
             get { return _assetKindDropdown != null ? (AssetKind)_assetKindDropdown.selectedIndex : AssetKind.Prop; }
         }
 
-        /// <summary>Mod.OnSettingsUIから呼ぶ。渡された helper 配下に「モデル割り当て」グループを構築する。</summary>
+        /// <summary>Called from Mod.OnSettingsUI. Builds the "Model Assignment" group under the given helper.</summary>
         public static void Build(UIHelperBase helper)
         {
             try
@@ -118,9 +125,10 @@ namespace CSWarfront.Game.UI
                 _assetKindDropdown = group.AddDropdown("Asset Type", kindLabels, 0, OnAssetKindChanged) as UIDropDown;
 
                 _customOnlyCheckbox = group.AddCheckbox("Subscribed only", _customOnly, OnCustomOnlyChanged) as UICheckBox;
-                // Task47: AddTextfieldのOnTextSubmittedは未使用（OnTextChangedだけで十分）だが、
-                // UIHelper実装がコールバックのnullガードを持つか未検証のため、nullは渡さずno-opを渡す
-                // （IL上はeventTextSubmitted購読が無条件に見えたため、安全側に倒す）。
+                // Task47: AddTextfield's OnTextSubmitted is unused (OnTextChanged alone is enough), but it is
+                // unverified whether the UIHelper implementation null-guards the callback, so pass a no-op
+                // instead of null (in the IL the eventTextSubmitted subscription looked unconditional, so err
+                // on the safe side).
                 _searchField = group.AddTextfield("Search (partial match)", "", OnSearchTextChanged, OnSearchTextSubmitted) as UITextField;
                 _assetDropdown = group.AddDropdown("Asset", new[] { NoSelectionLabel }, 0, OnAssetSelected) as UIDropDown;
 
@@ -134,8 +142,8 @@ namespace CSWarfront.Game.UI
 
                 string[] copyLabels = new string[CopyScopeUtil.All.Length];
                 for (int i = 0; i < CopyScopeUtil.All.Length; i++) copyLabels[i] = CopyScopeUtil.DisplayNameJa(CopyScopeUtil.All[i]);
-                // OnCopyApplyClickが押された時点でselectedIndexを読むだけなので変更通知は不要だが、
-                // 上記と同じ理由でnullではなくno-opコールバックを渡す。
+                // Only the selectedIndex is read at the moment OnCopyApplyClick is pressed, so no change
+                // notification is needed, but for the same reason as above pass a no-op callback rather than null.
                 _copyScopeDropdown = group.AddDropdown("Apply to Multiple - Scope", copyLabels, 0, OnCopyScopeChanged) as UIDropDown;
 
                 _applyButton = group.AddButton("Apply", OnApplyClick) as UIButton;
@@ -145,15 +153,17 @@ namespace CSWarfront.Game.UI
 
                 _hintLabel = CreateNoteLabel(copyButtonObj);
 
-                // Task70: 「全て初期化」ボタンと「セット」プリセット行（実体はOptionsModelAssignPagePresets.cs、
-                // 500行制限のため新規追加分は最初からそちらへ置いた）。
+                // Task70: the "clear all" button and the "set" preset row (implemented in
+                // OptionsModelAssignPagePresets.cs; the newly added part was placed there from the start
+                // because of the 500-line limit).
                 BuildPresetsSection(group);
 
-                // Task52バグ修正: このMODのOptionsタブが選択される（＝祖先コンポーネントのisVisibleが
-                // trueへ変わり、それがこのグループパネルまで伝播する）たびに発火するeventVisibilityChanged
-                // を購読し、その時点の状態でRefreshFromStateを呼ぶ（クラス冒頭のコメント参照）。
-                // Build()自体はOptionsMainPanel.Awake()等で一度しか呼ばれないため、これが無いと
-                // メインメニューで一度だけ構築された無効化済みのUIが都市読み込み後も更新されない。
+                // Task52 bug fix: subscribe to eventVisibilityChanged, which fires every time this mod's
+                // Options tab is selected (i.e. an ancestor component's isVisible flips to true and that
+                // propagates down to this group panel), and call RefreshFromState with the state at that
+                // moment (see the class-header comment). Build() itself is only called once, in
+                // OptionsMainPanel.Awake() etc., so without this the disabled UI built once at the main menu
+                // would never be updated after a city is loaded.
                 if (groupPanel != null) groupPanel.eventVisibilityChanged += OnGroupVisibilityChanged;
 
                 RefreshFromState();
@@ -164,11 +174,12 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        // Task70: BuildBindingPreview/RefreshAssetDropdown/RefreshCurrentBinding/RefreshThumbnail は
-        // 500行制限のため OptionsModelAssignPageBinding.cs（同じpartial class）へ分離した。
+        // Task70: BuildBindingPreview/RefreshAssetDropdown/RefreshCurrentBinding/RefreshThumbnail were
+        // split out into OptionsModelAssignPageBinding.cs (same partial class) due to the 500-line limit.
 
-        /// <summary>ボタンの親パネルへ状態表示用のUILabelを追加する（Task40時点のMod.CreateHintLabelと
-        /// 同じ手法）。取得に失敗しても致命的ではない（ログのみ表示できなくなるだけ）。</summary>
+        /// <summary>Adds a UILabel for status display to the button's parent panel (same technique as
+        /// Mod.CreateHintLabel as of Task40). Failure to obtain it is not fatal (it merely becomes
+        /// log-only display).</summary>
         private static UILabel CreateNoteLabel(object afterObj)
         {
             try
@@ -192,10 +203,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task66: 先頭に基地種別ごとの4キー（陸軍/海軍/空軍/ミサイル、UnitAssetBindings.
-        /// ArmyBaseTypeKey等）を追加した上で、LandUnitRoster.All()（カテゴリ宣言順→Tier1〜5）から35件の
-        /// TypeKeyを構築する（計39件）。AssetAssignPanelControls.BuildTypeKeysと同じ方針（フローティング
-        /// パネル/Optionsサブページの両方に同じ4エントリを表示する。Task60時点は単一キーだった）。</summary>
+        /// <summary>Task66: prepends the 4 per-base-type keys (army/navy/air/missile,
+        /// UnitAssetBindings.ArmyBaseTypeKey etc.) and then builds the 35 TypeKeys from
+        /// LandUnitRoster.All() (category declaration order, then Tier1-5), for 39 entries total. Same
+        /// policy as AssetAssignPanelControls.BuildTypeKeys (both the floating panel and the Options
+        /// subpage show the same 4 entries; as of Task60 there was a single key).</summary>
         private static void BuildTypeKeys()
         {
             List<string> keys = new List<string>
@@ -209,10 +221,10 @@ namespace CSWarfront.Game.UI
             _typeKeys = keys.ToArray();
         }
 
-        /// <summary>Task66: 基地種別キー（陸軍/海軍/空軍/ミサイル）は生のキー文字列ではなく
-        /// UnitAssetBindings.DisplayNameForBaseKeyの日本語ラベルを表示する
-        /// （AssetAssignPanelControls.BuildDropdownLabelsと同じ方針）。割り当ての解決も種別別キー→
-        /// 旧統合キーの順（UnitAssetBindings.TryGetEffective）で行う。</summary>
+        /// <summary>Task66: for the base-type keys (army/navy/air/missile), display the Japanese label
+        /// from UnitAssetBindings.DisplayNameForBaseKey instead of the raw key string (same policy as
+        /// AssetAssignPanelControls.BuildDropdownLabels). Assignment resolution also goes per-type key
+        /// first, then the legacy unified key (UnitAssetBindings.TryGetEffective).</summary>
         private static string[] BuildTypeKeyLabels()
         {
             if (_typeKeys == null) return new string[0];
@@ -249,11 +261,12 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>マップ未ロード（メインメニュー等）でアセットが1件も無い状況をヒントラベルへ表示する。
-        /// stateReadyはAssetAssignPanel.HasAnyProps()（Rescan込みの4種類横断チェック、Task40の挙動を踏襲）
-        /// の結果を呼び出し元（RefreshFromState）から受け取る。ここで再度HasAnyProps()を呼ぶと
-        /// AssetCatalog.Rescan()が二重に走ってしまうため（Rescanはキャッシュを空にするだけで、直後の
-        /// GetNamesが4種類とも再走査し直すことになり無駄）、呼び出し元で1回だけ判定させる。</summary>
+        /// <summary>Shows on the hint label the situation where no assets exist at all because no map is
+        /// loaded (main menu etc.). stateReady is received from the caller (RefreshFromState) as the
+        /// result of AssetAssignPanel.HasAnyProps() (the 4-kind cross-check including a Rescan, following
+        /// the Task40 behavior). Calling HasAnyProps() again here would run AssetCatalog.Rescan() twice
+        /// (Rescan merely empties the cache, so the subsequent GetNames would re-scan all 4 kinds again,
+        /// which is wasteful), so the caller performs the check exactly once.</summary>
         private static void RefreshHint(bool stateReady)
         {
             if (_hintLabel == null) return;
@@ -262,23 +275,25 @@ namespace CSWarfront.Game.UI
                 : "No assets are currently available (props/buildings/vehicles/trees), e.g. opened from the main menu. Open this again after loading a city to see subscribed assets in the list.";
         }
 
-        /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正）。
-        /// isVisible==trueの時だけ（＝Options内でこのMODのタブが選択された/表示された時だけ）
-        /// RefreshFromStateを呼ぶ。非表示化(false)の際は何もしない
-        /// （OptionsRelationsPage.OnGroupVisibilityChangedと同じ方針）。</summary>
+        /// <summary>eventVisibilityChanged handler for the group panel (Task52 bug fix).
+        /// Calls RefreshFromState only when isVisible==true (i.e. only when this mod's tab is
+        /// selected/shown inside Options). Does nothing on hiding (false)
+        /// (same policy as OptionsRelationsPage.OnGroupVisibilityChanged).</summary>
         private static void OnGroupVisibilityChanged(UIComponent component, bool isVisible)
         {
             if (!isVisible) return;
             RefreshFromState();
         }
 
-        /// <summary>Task52バグ修正: Build()での初回構築時、および以後Options内でこのMODのタブが
-        /// 選択されるたびに呼ぶ共通の再同期処理。AssetAssignPanel.HasAnyProps()（内部でAssetCatalog.Rescan()
-        /// を行った上で4種類横断チェックする、Task40から使っている既存メソッド）で現在都市が読み込まれて
-        /// いるかを判定し、ユニット種別/アセットのドロップダウン内容・現在の割り当て表示・ヒントラベルを
-        /// 最新化した上で、全コントロールのisEnabledを判定結果へ同期する。新しいコントロールは一切
-        /// 生成しない（Build()で一度だけ生成した既存フィールドを更新するのみ＝二重生成防止）。
-        /// 例外はここで握りつぶし、UIコールバックからゲームループへ例外を伝播させない。</summary>
+        /// <summary>Task52 bug fix: common re-sync routine called on initial construction in Build() and
+        /// thereafter every time this mod's tab is selected inside Options. Uses
+        /// AssetAssignPanel.HasAnyProps() (the existing method used since Task40 that runs
+        /// AssetCatalog.Rescan() internally and then cross-checks all 4 kinds) to determine whether a city
+        /// is currently loaded, brings the unit-type/asset dropdown contents, the current-assignment
+        /// display, and the hint label up to date, then syncs isEnabled of all controls to the
+        /// determination result. No new controls are ever created (only the existing fields created once
+        /// in Build() are updated = prevents double creation).
+        /// Exceptions are swallowed here so they never propagate from a UI callback into the game loop.</summary>
         private static void RefreshFromState()
         {
             try
@@ -289,7 +304,7 @@ namespace CSWarfront.Game.UI
                 RefreshAssetDropdown();
                 RefreshCurrentBinding();
                 RefreshHint(stateReady);
-                RefreshPresetSlotLabels(); // Task70: タブ表示のたびに空スロット表示を最新化
+                RefreshPresetSlotLabels(); // Task70: refresh the empty-slot display each time the tab is shown
 
                 SetControlsEnabled(stateReady);
             }
@@ -299,10 +314,11 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>都市読み込み状況（stateReady）に応じて、全コントロールのisEnabledを一括同期する
-        /// （OptionsRelationsPage.RefreshFromStateのisEnabled同期と同じ考え方をコントロール一式へ拡張した
-        /// もの）。stateReady==falseの間（メインメニュー等でアセットが1件も無い）はユーザーが操作しても
-        /// 意味のある結果にならないため、無効化した上でヒントラベル（RefreshHint）で理由を説明する。</summary>
+        /// <summary>Syncs isEnabled of all controls in one batch according to the city-loaded state
+        /// (stateReady) (the same idea as the isEnabled sync in OptionsRelationsPage.RefreshFromState,
+        /// extended to the full set of controls). While stateReady==false (no assets at all, e.g. main
+        /// menu), user interaction would produce no meaningful result, so the controls are disabled and
+        /// the hint label (RefreshHint) explains why.</summary>
         private static void SetControlsEnabled(bool enabled)
         {
             if (_factionDropdown != null) _factionDropdown.isEnabled = enabled;
@@ -322,8 +338,8 @@ namespace CSWarfront.Game.UI
         }
 
         // Task70: OnFactionChanged/OnTypeKeyChanged/OnAssetKindChanged/OnCustomOnlyChanged/
-        // OnSearchTextChanged/OnSearchTextSubmitted/OnCopyScopeChanged/OnAssetSelected は
-        // 500行制限のため OptionsModelAssignPageEvents.cs（同じpartial class）へ分離した。
+        // OnSearchTextChanged/OnSearchTextSubmitted/OnCopyScopeChanged/OnAssetSelected were split out
+        // into OptionsModelAssignPageEvents.cs (same partial class) due to the 500-line limit.
 
         private static void OnApplyClick()
         {
@@ -372,8 +388,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「複製適用」ボタン。現在選択中(勢力,ユニット種別)の割り当てを、選択中スコープの
-        /// 全(勢力,種別)へ複製する（UnitAssetBindings.CopyTo、AssetAssignPanelCopy.csと同じ呼び出し方）。</summary>
+        /// <summary>"Apply to Multiple" button. Copies the assignment of the currently selected
+        /// (faction, unit type) to all (faction, type) pairs in the selected scope
+        /// (UnitAssetBindings.CopyTo, same call pattern as AssetAssignPanelCopy.cs).</summary>
         private static void OnCopyApplyClick()
         {
             try
@@ -396,24 +413,26 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>割り当て変更（適用/既定に戻す/複製適用 共通）の反映処理。ラベル再構築と現在の割り当て
-        /// 表示更新の上で、既存の見た目を全破棄する（AssetAssignPanelControls.ApplyBindingChangeと同じ方針:
-        /// 次回SyncでUnitMeshSource経由の新しい割り当てが解決し直される）。</summary>
+        /// <summary>Reflection routine shared by binding changes (apply / reset to default / apply copy).
+        /// After rebuilding the labels and updating the current-assignment display, destroys all existing
+        /// visuals (same policy as AssetAssignPanelControls.ApplyBindingChange: the next Sync re-resolves
+        /// the new assignment via UnitMeshSource).</summary>
         private static void ApplyBindingChange(int typeIdx)
         {
             RefreshTypeKeyLabels(typeIdx);
             RefreshCurrentBinding();
 
             UnitVisuals.DestroyAll();
-            BaseVisuals.DestroyAll(); // Task60: 拠点の勢力別オーバーレイも破棄し、次回Syncで再解決させる
+            BaseVisuals.DestroyAll(); // Task60: also destroy the per-faction base overlays so the next Sync re-resolves them
             ModConfig.Log("OptionsModelAssignPage: ran UnitVisuals.DestroyAll()/BaseVisuals.DestroyAll() to apply the binding change");
 
             WarnIfNoOwnedBaseForKey(typeIdx);
         }
 
-        /// <summary>Task66バグ調査対応: AssetAssignPanelControls.WarnIfNoOwnedBaseForKeyと同じ目的
-        /// （適用先が基地種別キーで、選択中の勢力がその種別の拠点を1つも所有していない場合、割り当ては
-        /// 保存されるが見た目には何も反映されないため、ユーザーへ明示的に案内する）。</summary>
+        /// <summary>Task66 bug-investigation follow-up: same purpose as
+        /// AssetAssignPanelControls.WarnIfNoOwnedBaseForKey (when the target is a base-type key and the
+        /// selected faction owns no base of that type, the assignment is saved but nothing changes
+        /// visually, so notify the user explicitly).</summary>
         private static void WarnIfNoOwnedBaseForKey(int typeIdx)
         {
             if (_typeKeys == null || typeIdx < 0 || typeIdx >= _typeKeys.Length) return;

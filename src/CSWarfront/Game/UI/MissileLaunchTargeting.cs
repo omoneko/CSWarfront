@@ -6,33 +6,34 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// プレイヤーによる弾道ミサイルの発射地点指定（Task63）。UnitCommandInputの集結地点指定
-    /// （HandleRallyTargeting）と全く同じ「押し下げ位置を記録し、離した位置がしきい値以内なら
-    /// クリックとして確定、それ以外はカメラ回転ドラッグとみなして無視する」パターンを1基地専用に
-    /// 縮小移植したもの。
+    /// Player designation of a ballistic missile launch target (Task63). A single-base scaled-down
+    /// port of exactly the same pattern as UnitCommandInput's rally-point targeting
+    /// (HandleRallyTargeting): "record the press position; if the release position is within a
+    /// threshold, commit it as a click, otherwise treat it as a camera-rotation drag and ignore it".
     ///
-    /// BaseInfoPanel の「発射地点を指定」ボタンが Arm(baseId) を呼んでターゲティングモードへ入る。
-    /// 以後の右クリックで地点を確定するまで（またはEscでキャンセルするまで）他の操作を妨げない
-    /// （UnitCommandInputとは独立した状態を持つため、部隊コマンドのターゲティングと同時に排他制御は
-    /// しない——同時に両方を武装する操作自体をUIが提供しないため実害は無い）。
+    /// The "designate launch target" button on BaseInfoPanel calls Arm(baseId) to enter targeting
+    /// mode. Until a subsequent right click confirms the point (or Esc cancels), other operations
+    /// are not obstructed (it holds state independent of UnitCommandInput, so there is no mutual
+    /// exclusion with unit-command targeting — the UI itself offers no way to arm both at once, so
+    /// there is no practical harm).
     ///
-    /// メインスレッド専用。WarfrontThreadingExtension.OnUpdate から、UnitCommandInput.Update の後に
-    /// 呼ぶこと。
+    /// Main thread only. Call it from WarfrontThreadingExtension.OnUpdate, after
+    /// UnitCommandInput.Update.
     /// </summary>
     internal static class MissileLaunchTargeting
     {
-        private const float ClickMoveThresholdPixels = 10f; // UnitCommandInputと同じ値
+        private const float ClickMoveThresholdPixels = 10f; // same value as UnitCommandInput
 
         private static bool _awaiting;
         private static ushort _armedBaseId;
         private static bool _rightMouseDownPending;
         private static Vector2 _rightMouseDownScreen;
 
-        /// <summary>発射地点のターゲティング中か（将来のヒント表示用、Task63時点は未使用）。</summary>
+        /// <summary>Whether launch-point targeting is in progress (for a future hint display; unused as of Task63).</summary>
         public static bool IsAwaiting { get { return _awaiting; } }
 
-        /// <summary>基地情報パネルの「発射地点を指定」ボタンから呼ばれる。次の有効な右クリックで
-        /// その地点へ発射する（CommandToastで武装通知を出す）。</summary>
+        /// <summary>Called from the "designate launch target" button on the base info panel. The
+        /// next valid right click launches at that point (an arming notice is shown via CommandToast).</summary>
         public static void Arm(ushort baseId)
         {
             _awaiting = true;
@@ -42,7 +43,7 @@ namespace CSWarfront.Game.UI
             CommandToast.Show("Please set a missile launch target");
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。ターゲティング状態を残さない。</summary>
+        /// <summary>Called on level unload (via MilitaryManager.Reset). Leaves no targeting state behind.</summary>
         public static void Reset()
         {
             _awaiting = false;
@@ -56,9 +57,9 @@ namespace CSWarfront.Game.UI
             {
                 if (!_awaiting) return;
 
-                if (!PanelChrome.IsGameReadyForUi()) { Reset(); return; } // Task56: ロード/アンロード中はUIライブラリに触れない
-                if (PanelChrome.IsGameMenuOpen()) { Reset(); return; } // メニューが開いたらターゲティングは打ち切る
-                if (UIView.HasInputFocus()) return; // テキスト入力欄にフォーカスがある間は無視
+                if (!PanelChrome.IsGameReadyForUi()) { Reset(); return; } // Task56: do not touch the UI library while loading/unloading
+                if (PanelChrome.IsGameMenuOpen()) { Reset(); return; } // abort targeting once the menu opens
+                if (UIView.HasInputFocus()) return; // ignore while a text input field has focus
 
                 if (Input.GetKeyDown(KeyCode.Escape))
                 {
@@ -72,7 +73,7 @@ namespace CSWarfront.Game.UI
                 {
                     if (UIInput.hoveredComponent != null)
                     {
-                        _rightMouseDownPending = false; // UI上で押し下げたクリックは対象外
+                        _rightMouseDownPending = false; // clicks pressed down over UI do not count
                     }
                     else
                     {
@@ -82,7 +83,7 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                if (!Input.GetMouseButtonUp(1)) return; // 右ボタンが離されるまで待つ
+                if (!Input.GetMouseButtonUp(1)) return; // wait until the right button is released
 
                 bool wasPending = _rightMouseDownPending;
                 _rightMouseDownPending = false;
@@ -90,17 +91,18 @@ namespace CSWarfront.Game.UI
 
                 if (Vector2.Distance(Input.mousePosition, _rightMouseDownScreen) > ClickMoveThresholdPixels)
                 {
-                    return; // カメラ回転ドラッグとみなす。ターゲティングは継続し、次のクリックを待つ。
+                    return; // treated as a camera-rotation drag. Targeting continues; wait for the next click.
                 }
                 if (UIInput.hoveredComponent != null) return;
 
-                // Task77: 地点の解決はGroundClickRaycastへ委譲（Physics.Raycast→地形交差フォールバック）。
+                // Task77: point resolution is delegated to GroundClickRaycast (Physics.Raycast →
+                // terrain-intersection fallback).
                 Vector3 clicked;
                 string reason;
                 if (!GroundClickRaycast.TryGetPoint(out clicked, out reason))
                 {
                     ModConfig.Log("MissileLaunchTargeting: click rejected - " + reason);
-                    return; // ターゲティング継続。次のクリックで再試行。
+                    return; // targeting continues. Retry on the next click.
                 }
 
                 LaunchResult result = MilitaryManager.TryLaunchMissile(_armedBaseId, clicked);
@@ -115,8 +117,9 @@ namespace CSWarfront.Game.UI
                 {
                     ModConfig.Log("MissileLaunchTargeting: launch failed base=" + _armedBaseId + " result=" + result);
                     CommandToast.Show(FailMessage(result));
-                    // 失敗（射程外/備蓄なし等）した場合も武装は解除しない: プレイヤーが射程内の別地点へ
-                    // 指定し直せるようにする（Escで明示的にキャンセルするまで継続）。
+                    // Even on failure (out of range / no stockpile etc.), arming is NOT cleared:
+                    // this lets the player re-designate a different point within range (targeting
+                    // continues until explicitly cancelled with Esc).
                 }
             }
             catch (Exception e)

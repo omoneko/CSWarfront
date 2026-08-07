@@ -5,79 +5,89 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 戦闘域（State.CombatZones）に応じて道路セグメントを一時封鎖し、民間の車両/歩行者を迂回させる
-    /// （Task54）。simスレッド専用（MilitaryManager.OnSimTickから呼ばれる想定、RoadGraphBuilderと同じ
-    /// スレッド境界）。
+    /// Temporarily blocks road segments according to the combat zones (State.CombatZones) so that
+    /// civilian vehicles/pedestrians detour around them (Task54). Sim-thread only (expected to be
+    /// called from MilitaryManager.OnSimTick, same thread boundary as RoadGraphBuilder).
     ///
-    /// Part 0で検証した内容（Assembly-CSharp.dllをilspycmdで逆コンパイルして確認）:
-    ///  - 当初案の NetSegment.Flags.Blocked は使わない。理由:
-    ///     (a) PathFind.ProcessItemCosts（1087行）では Blocked は「車線がVehicle/TransportVehicleの
-    ///         場合にのみ comparisonValue へ+0.1する弱いペナルティ」でしかなく、ハード除外ではない。
-    ///         しかも歩行者/自転車の経路探索（ProcessItemPedBicycle）はBlockedを一切参照しないため、
-    ///         歩行者はまったく迂回しない。
-    ///     (b) RoadBaseAI.SimulationStep（1411〜1421行）が、そのセグメントの m_trafficBuffer が
-    ///         ushort.MaxValue（＝実際の渋滞で身動きが取れない状態）でない限り、Blockedフラグを
-    ///         毎回自動でクリアする。この処理はセグメントごとに約256フレーム＝約0.094ゲーム内時間に
-    ///         一度走る（NetManager.SimulationStepImplの `m_currentFrameIndex & 0xFF` によるグループ
-    ///         分割）。つまり外部からBlockedを立てても、ゲームが渋滞と判断しない限りすぐ消される。
-    ///  - 代わりに NetSegment.Flags.PathFailed を使う。理由:
-    ///     (a) PathFind.m_disableMask = Collapsed | PathFailed。ProcessItemCosts冒頭（916行）・
-    ///         ProcessItemPedBicycle冒頭（1133行）の両方で「このマスクのビットが立っていたら
-    ///         そのセグメントを一切候補にしない」というハード除外。車・歩行者の両方に効く。
-    ///     (b) NetSegment/NetAI/RoadBaseAI/NetTool/NetManager/PathManager/PathFindの逆コンパイル結果
-    ///         全体を検索したが、PathFailedへ書き込む箇所は一切見つからなかった（enum宣言と
-    ///         disableMaskでの参照のみ）。Blocked/Floodedのように毎tick自動で上書きされる競合が無い
-    ///         （＝ただし全アセンブリを網羅したわけではないため「見つからなかった」までの保証。
-    ///         念のため後述の毎tick再アサートで防御する）。
-    ///     (c) PassengerCarAI/CitizenAI（民間車両・市民）はどちらもCreatePathを
-    ///         ignoreClosed: false（EventClosed考慮）・既定の各種ignore*: falseで呼ぶため、
-    ///         disableMaskの除外を回避する経路（ignoreClosedはEventClosed専用でPathFailedには無関係）
-    ///         は無い。
-    ///  - 既知の限界（要件通り、危険とは判断しないため採用）: 既にそのセグメントを走行中/横断中の
-    ///     車両・歩行者は、PathManagerに「既存の経路を再検証して未実行分を破棄する」仕組みが
-    ///     見当たらないため、フラグが立った瞬間に強制で引き返すことはない（次にそのユニットが
-    ///     新しい経路計算をする時点から効く）。現実の一時封鎖でも「今渡っている途中の車はそのまま
-    ///     渡り切る」のと同じ挙動であり、ZoneLingerHours=2hという十分長い封鎖時間を考えれば
-    ///     実用上は迂回として機能する。
-    ///  - フラグ変更後は NetManager.UpdateSegment(segmentID) を呼ぶ（NetToolが同種のフラグコピー後に
-    ///     採用しているのと同じ慣習。PathFindはNetManagerの生バッファを直接読むためパス探索自体には
-    ///     必須ではないが、隣接ノードの更新マーカー等を一貫させるため踏襲する）。
+    /// Findings verified in Part 0 (confirmed by decompiling Assembly-CSharp.dll with ilspycmd):
+    ///  - The originally proposed NetSegment.Flags.Blocked is NOT used. Reasons:
+    ///     (a) In PathFind.ProcessItemCosts (line 1087), Blocked is only a weak penalty ("+0.1 to
+    ///         comparisonValue, and only when the lane is Vehicle/TransportVehicle"), not a hard
+    ///         exclusion. Moreover, pedestrian/bicycle pathfinding (ProcessItemPedBicycle) never
+    ///         reads Blocked at all, so pedestrians would not detour whatsoever.
+    ///     (b) RoadBaseAI.SimulationStep (lines 1411-1421) automatically clears the Blocked flag on
+    ///         every pass unless the segment's m_trafficBuffer is ushort.MaxValue (i.e. it is truly
+    ///         gridlocked by actual congestion). That pass runs roughly every 256 frames per segment,
+    ///         about once every 0.094 in-game hours (segments are group-partitioned by
+    ///         `m_currentFrameIndex & 0xFF` in NetManager.SimulationStepImpl). So even if we set
+    ///         Blocked externally, the game clears it right away unless it judges the segment congested.
+    ///  - NetSegment.Flags.PathFailed is used instead. Reasons:
+    ///     (a) PathFind.m_disableMask = Collapsed | PathFailed. At the top of both ProcessItemCosts
+    ///         (line 916) and ProcessItemPedBicycle (line 1133) there is a hard exclusion: "if any bit
+    ///         of this mask is set, the segment is never considered as a candidate". This affects both
+    ///         vehicles and pedestrians.
+    ///     (b) A search across the full decompilation of NetSegment/NetAI/RoadBaseAI/NetTool/
+    ///         NetManager/PathManager/PathFind found no code that ever writes PathFailed (only the
+    ///         enum declaration and the disableMask reference). Unlike Blocked/Flooded there is no
+    ///         per-tick auto-overwrite competing with us (caveat: not every assembly was exhaustively
+    ///         checked, so this is only a "none found" guarantee. As a precaution we defend with the
+    ///         per-tick re-assert described below).
+    ///     (c) PassengerCarAI/CitizenAI (civilian vehicles and citizens) both call CreatePath with
+    ///         ignoreClosed: false (EventClosed is honored) and all other ignore* left at their
+    ///         defaults of false, so there is no path that bypasses the disableMask exclusion
+    ///         (ignoreClosed is specific to EventClosed and unrelated to PathFailed).
+    ///  - Known limitation (per requirements, accepted because it is not judged dangerous): vehicles
+    ///     and pedestrians already traveling on/crossing a segment do not turn back the instant the
+    ///     flag is set, because PathManager has no visible mechanism to "re-validate an existing path
+    ///     and discard the unexecuted remainder" (the flag takes effect the next time that unit
+    ///     computes a new path). This matches real-world temporary closures where "a car already
+    ///     mid-crossing finishes crossing", and given the generous ZoneLingerHours=2h closure duration
+    ///     it works as an effective detour in practice.
+    ///  - After changing the flag, NetManager.UpdateSegment(segmentID) is called (the same convention
+    ///     NetTool adopts after copying similar flags. PathFind reads NetManager's raw buffers
+    ///     directly, so this is not strictly required for pathfinding itself, but we follow it to keep
+    ///     adjacent-node update markers etc. consistent).
     /// </summary>
     internal static class CombatRoadBlocker
     {
-        /// <summary>このMODが道路封鎖に使うフラグ。他Mod/vanilla由来の既存Blockedを一切いじらないため、
-        /// 自分が立てたPathFailedビットだけを対象にする（「既にこのビットが立っているセグメントは
-        /// 触らない」という所有権チェックと組み合わせて安全側に倒す）。</summary>
+        /// <summary>The flag this mod uses to block roads. To avoid ever touching pre-existing
+        /// Blocked bits from other mods/vanilla, only the PathFailed bit we set ourselves is targeted
+        /// (combined with the ownership check "never touch a segment that already has this bit set"
+        /// to err on the safe side).</summary>
         private const NetSegment.Flags BlockFlag = NetSegment.Flags.PathFailed;
 
-        /// <summary>戦闘域の再スキャン間隔（ゲーム内時間）。全セグメントを線形走査するため、
-        /// RoadGraphBuilder/CoverMapBuilderの定期再構築と同じ「間引く」パターンを踏襲する。</summary>
+        /// <summary>Combat-zone rescan interval (in-game hours). Since we linearly scan all segments,
+        /// we follow the same "throttle" pattern as the periodic rebuilds of RoadGraphBuilder/
+        /// CoverMapBuilder.</summary>
         public const float BlockUpdateIntervalHours = 0.25f;
 
-        /// <summary>同時に封鎖するセグメント数の上限（安全弁）。巨大な戦闘域が広大な道路網に
-        /// 重なっても、1tickあたりの走査・反映コストとログ量を一定に保つ。</summary>
+        /// <summary>Upper bound on the number of simultaneously blocked segments (safety valve).
+        /// Even if a huge combat zone overlaps a vast road network, this keeps the per-tick scan/apply
+        /// cost and log volume constant.</summary>
         public const int MaxBlockedSegments = 400;
 
-        // このMODが現在「自分が封鎖した」と認識しているセグメントID集合（simスレッド専用、ロック不要
-        // ＝MilitaryManager.OnSimTickの_stateLock内からのみ触られる）。既にBlockedFlagが立っていた
-        // セグメント（＝他Mod/vanilla由来）は絶対にここへ入れない＝絶対に触らない。
+        // Set of segment IDs this mod currently considers "blocked by us" (sim-thread only, no lock
+        // needed = only touched from inside MilitaryManager.OnSimTick's _stateLock). Segments that
+        // already had BlockedFlag set (i.e. originating from another mod/vanilla) are NEVER added
+        // here = never touched.
         private static readonly HashSet<ushort> _owned = new HashSet<ushort>();
 
         private static float _accum;
 
-        // 失敗ログの間引き（RoadGraphBuilderと同じパターン）。
+        // Failure-log throttling (same pattern as RoadGraphBuilder).
         private static bool _failureAlreadyLogged;
 
-        /// <summary>現在このMODが封鎖しているセグメント数（診断・テスト用）。</summary>
+        /// <summary>Number of segments currently blocked by this mod (for diagnostics/tests).</summary>
         public static int OwnedCount => _owned.Count;
 
         /// <summary>
-        /// MilitaryManager.OnSimTickから毎tick呼ばれる。
-        ///  1) 毎tick: 現在所有している封鎖セグメントへBlockFlagを再アサートする（vanilla側に
-        ///     見つけられなかった書き込み元がもし存在してもすぐ上書きされるようにするための防御。
-        ///     所有セグメントはMaxBlockedSegments以下に抑えられているため毎tickでも軽い）。
-        ///  2) BlockUpdateIntervalHoursごと: 全道路セグメントを線形走査して「今あるべき封鎖集合」を
-        ///     求め、差分（追加/解除）だけを適用する。
+        /// Called every tick from MilitaryManager.OnSimTick.
+        ///  1) Every tick: re-assert BlockFlag on the blocked segments we currently own (defense so
+        ///     that even if some vanilla-side writer we failed to find does exist, it gets overwritten
+        ///     immediately. Owned segments are capped at MaxBlockedSegments, so doing this every tick
+        ///     is cheap).
+        ///  2) Every BlockUpdateIntervalHours: linearly scan all road segments to compute the "set of
+        ///     segments that should currently be blocked" and apply only the delta (additions/removals).
         /// </summary>
         public static void Advance(WarState state, float dt)
         {
@@ -85,7 +95,7 @@ namespace CSWarfront.Game
             {
                 if (!Singleton<NetManager>.exists)
                 {
-                    return; // NetManager未準備。_ownedが空ならここまでで何もしていないので安全。
+                    return; // NetManager not ready. If _owned is empty nothing has been done yet, so this is safe.
                 }
 
                 NetManager nm = Singleton<NetManager>.instance;
@@ -98,7 +108,7 @@ namespace CSWarfront.Game
                 _accum -= BlockUpdateIntervalHours;
                 if (_accum < 0f) _accum = 0f;
 
-                if (state.CombatZones.Zones.Count == 0 && _owned.Count == 0) return; // 何もすることが無い
+                if (state.CombatZones.Zones.Count == 0 && _owned.Count == 0) return; // nothing to do
 
                 NetNode[] nodes = nm.m_nodes.m_buffer;
                 HashSet<ushort> desired = ComputeDesired(state, segments, nodes);
@@ -116,8 +126,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>現在の所有セグメントへBlockFlagを毎tick立て直す。既にCreatedでなくなっている
-        /// （破壊/削除済みの）セグメントは所有集合から静かに落とす。</summary>
+        /// <summary>Re-sets BlockFlag on the currently owned segments every tick. Segments that are
+        /// no longer Created (destroyed/deleted) are silently dropped from the owned set.</summary>
         private static void ReassertOwned(NetManager nm, NetSegment[] segments)
         {
             if (_owned.Count == 0) return;
@@ -139,9 +149,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>道路セグメント（RoadGraphBuilderと同じ Service.Road && Created フィルタ）のうち、
-        /// 中点（始点/終点ノード位置の平均）がいずれかの戦闘域の半径内に入るものの集合を求める。
-        /// MaxBlockedSegmentsに達したら以降は無視する（走査自体は最後まで続けてログの整合を保つ）。</summary>
+        /// <summary>Computes the set of road segments (same Service.Road && Created filter as
+        /// RoadGraphBuilder) whose midpoint (average of start/end node positions) falls within the
+        /// radius of any combat zone. Once MaxBlockedSegments is reached the rest are ignored (the
+        /// scan itself still runs to the end so the logging stays consistent).</summary>
         private static HashSet<ushort> ComputeDesired(WarState state, NetSegment[] segments, NetNode[] nodes)
         {
             var desired = new HashSet<ushort>();
@@ -179,22 +190,23 @@ namespace CSWarfront.Game
             return desired;
         }
 
-        /// <summary>所有集合(_owned)を desired へ近づける: 追加が必要なものだけ封鎖し、不要になった
-        /// ものだけ解除する。他者が既に立てているPathFailedは絶対に触らない（所有していないビットへは
-        /// 書き込まない＝奪わない・消さない）。変化があった時だけ1行サマリをログする。</summary>
+        /// <summary>Moves the owned set (_owned) toward desired: blocks only what needs to be added
+        /// and unblocks only what is no longer needed. PathFailed bits already set by someone else are
+        /// never touched (we never write to bits we do not own = never steal, never clear). Logs a
+        /// one-line summary only when something changed.</summary>
         private static void ApplyDelta(NetManager nm, NetSegment[] segments, HashSet<ushort> desired)
         {
             int added = 0;
             int removed = 0;
 
-            // 追加: desiredにあって_ownedに無いもの。
+            // Additions: in desired but not in _owned.
             foreach (ushort id in desired)
             {
                 if (_owned.Contains(id)) continue;
                 if (id >= segments.Length) continue;
                 if ((segments[id].m_flags & BlockFlag) != NetSegment.Flags.None)
                 {
-                    // 既に(他Mod/vanilla/このMODの前回残骸ではない何かによって)立っている＝所有権を主張しない。
+                    // Already set (by another mod/vanilla/something that is not leftover from our previous run) = do not claim ownership.
                     continue;
                 }
                 segments[id].m_flags |= BlockFlag;
@@ -203,7 +215,7 @@ namespace CSWarfront.Game
                 added++;
             }
 
-            // 解除: _ownedにあってdesiredに無いもの。
+            // Removals: in _owned but not in desired.
             List<ushort> toRemove = null;
             foreach (ushort id in _owned)
             {
@@ -232,10 +244,11 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// セーブ直前に呼ぶ（Task54）。このMODが立てたPathFailedビットをセーブデータへ焼き込まないよう
-        /// 一時的に全部クリアする。所有集合(_owned)自体はメモリ上に保持したままにし、
-        /// ReblockAfterSaveで同じ集合へ立て直す。呼び出し元（MilitaryManager.SerializeLocked）が
-        /// _stateLockを保持したまま呼ぶため、simスレッドとの競合は無い。
+        /// Called right before saving (Task54). Temporarily clears all PathFailed bits this mod has
+        /// set so they are not baked into the save data. The owned set (_owned) itself is kept in
+        /// memory, and ReblockAfterSave re-sets the same set. The caller
+        /// (MilitaryManager.SerializeLocked) invokes this while holding _stateLock, so there is no
+        /// race with the sim thread.
         /// </summary>
         public static void UnblockAllForSave()
         {
@@ -256,28 +269,30 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// UnblockAllForSaveで外したPathFailedビットを立て直す。_owned集合をそのまま使って封鎖を
-        /// 立て直す（セーブは論理状態を変えない一時的な処理として扱う）。
+        /// Re-sets the PathFailed bits removed by UnblockAllForSave. The _owned set is used as-is to
+        /// re-establish the blocks (saving is treated as a temporary operation that does not change
+        /// logical state).
         ///
-        /// Task72で判明・修正した重要な契約: 呼び出し元は「WarStateSerializer.Serializeが返った直後」
-        /// に同期的にこれを呼んではならない。ilspycmdで
-        /// SimulationManager.Data.Serialize/LoadingManager.SaveSimulationData/AsyncTask.Executeを
-        /// 逆コンパイルして確認した結果、バニラの保存順序は
-        /// 「①全MODのISerializableDataExtension.OnSaveData()（＝WarStateDataExtension.OnSaveData、
-        /// このメソッドの旧呼び出し元を含む）を呼ぶ → ②その後で初めてBuildingManager.Data/
-        /// NetManager.Data等バニラの各マネージャのSerialize（実際にNetSegment.m_flags/
-        /// Building.m_flagsをストリームへ書く箇所）を呼ぶ」であり、しかもこの①②は同一の
-        /// AsyncTask.Execute()（seg内で完全に同期実行、yieldなし）の中で連続して起きる。
-        /// つまり「OnSaveData()の中でクリア→OnSaveData()の中のfinallyで即座に戻す」設計（旧実装）は、
-        /// バニラが②でNetSegment.m_flagsを読み取るより前に戻してしまうため、実際には
-        /// セーブファイルへPathFailedビットが焼き込まれ続けていた（無意味な対策だった）。
-        /// 正しい呼び出し方は、MilitaryManagerPersistence.SerializeLockedが
-        /// Singleton&lt;SimulationManager&gt;.instance.AddActionで「今のSaving AsyncTaskが完全に
-        /// 完了した後の次のアクション」としてこれを積むこと。SimulationManager.SimulationStep先頭の
-        /// `while(m_hasActions){...}`ループは、実行中のActionの中で新たにAddActionが呼ばれると
-        /// m_hasActionsが再びtrueになり、同フレーム内・かつ通常のOnSimTickより前に続けてそのActionも
-        /// 実行するため、バニラのNetSegment.m_flags書き込みが完全に終わった直後というタイミングを
-        /// 確実に取れる。
+        /// Important contract discovered and fixed in Task72: the caller must NOT invoke this
+        /// synchronously "right after WarStateSerializer.Serialize returns". Decompiling
+        /// SimulationManager.Data.Serialize/LoadingManager.SaveSimulationData/AsyncTask.Execute with
+        /// ilspycmd confirmed that vanilla's save order is:
+        /// "(1) call every mod's ISerializableDataExtension.OnSaveData() (= WarStateDataExtension.
+        /// OnSaveData, which included the old call site of this method) -> (2) only afterwards call
+        /// the Serialize of each vanilla manager such as BuildingManager.Data/NetManager.Data (the
+        /// code that actually writes NetSegment.m_flags/Building.m_flags to the stream)", and both
+        /// (1) and (2) happen back-to-back inside the same AsyncTask.Execute() (fully synchronous
+        /// within the seg, no yields). In other words, the old design of "clear inside OnSaveData() ->
+        /// restore immediately in a finally inside OnSaveData()" restored the bits BEFORE vanilla read
+        /// NetSegment.m_flags in (2), so the PathFailed bits were in fact still being baked into the
+        /// save file (the countermeasure was meaningless). The correct way to call this is for
+        /// MilitaryManagerPersistence.SerializeLocked to enqueue it via
+        /// Singleton&lt;SimulationManager&gt;.instance.AddAction as "the next action after the current
+        /// Saving AsyncTask has fully completed". The `while(m_hasActions){...}` loop at the top of
+        /// SimulationManager.SimulationStep sets m_hasActions back to true when AddAction is called
+        /// from within a running action, and continues executing that action in the same frame and
+        /// before the regular OnSimTick, so we reliably get the timing of "immediately after vanilla
+        /// has completely finished writing NetSegment.m_flags".
         /// </summary>
         public static void ReblockAfterSave()
         {
@@ -296,11 +311,11 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// レベルアンロード時（MilitaryManager.Reset()から呼ばれる）：所有している封鎖を全部解除してから
-        /// 内部状態をクリアする。レベルがティアダウン中でNetManagerが既に無効化されているケースもあり
-        /// うるため、解除に失敗しても（ログするだけで）例外を外へ伝播しない
-        /// （アンロード中の解除失敗自体は実害が無い＝これから読み込まれるレベルにこのMODのフラグは
-        /// 存在しないため）。
+        /// On level unload (called from MilitaryManager.Reset()): releases all owned blocks, then
+        /// clears internal state. Since the level may be mid-teardown with NetManager already
+        /// invalidated, a failed unblock is not propagated as an exception (it is only logged).
+        /// (A failed unblock during unload is itself harmless = the level about to be loaded contains
+        /// none of this mod's flags.)
         /// </summary>
         public static void Reset()
         {

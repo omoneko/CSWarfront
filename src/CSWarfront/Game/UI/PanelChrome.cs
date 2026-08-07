@@ -7,71 +7,85 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task40: BaseInfoPanel/UnitInfoPanel/AssetAssignPanel の3パネルに共通する「タイトル行の最小化トグル」
-    /// と「ドラッグ移動」を構築する小さな共有ヘルパー。各パネルの個別ロジック（何を畳む/どこに追従するか等）
-    /// には一切関与せず、UIコンポーネントの生成と最小限の見た目定数だけを提供する。
+    /// Task40: Small shared helper that builds the "title-row minimize toggle" and "drag-to-move"
+    /// behavior common to the three panels BaseInfoPanel/UnitInfoPanel/AssetAssignPanel. It stays
+    /// completely out of each panel's individual logic (what to collapse, what to track, etc.) and
+    /// only provides UI component creation plus a minimal set of visual constants.
     ///
-    /// ドラッグ移動: <see cref="ColossalFramework.UI.UIDragHandle"/>（`target`(UIComponent), `size`(Vector2),
-    /// `relativePosition`(Vector3) をリフレクションで存在確認済み。ColossalManaged.dll）をタイトル行全体
-    /// （パネル幅×TitleRowHeight）を覆う透明な子コンポーネントとして先に追加し、`target` にパネル自身を
-    /// 設定する。タイトルラベル（非対話的、既定でクリックを素通しする）と最小化ボタン（対話的、後から
-    /// 追加してドラッグハンドルの上に重ねる）は呼び出し側が生成するため、このヘルパーが返した
-    /// ドラッグハンドルより後にラベル/ボタンを追加すること（UIコンポーネントは追加順で前面に来るため、
-    /// ボタンのクリックがドラッグハンドルに横取りされない）。
+    /// Drag-to-move: a <see cref="ColossalFramework.UI.UIDragHandle"/> (`target` (UIComponent),
+    /// `size` (Vector2), `relativePosition` (Vector3) verified to exist via reflection;
+    /// ColossalManaged.dll) is added first as a transparent child component covering the entire
+    /// title row (panel width x TitleRowHeight), with `target` set to the panel itself. The title
+    /// label (non-interactive, passes clicks through by default) and the minimize button
+    /// (interactive, added later so it stacks on top of the drag handle) are created by the caller,
+    /// so add the label/button AFTER the drag handle returned by this helper (UI components are
+    /// layered front-most in addition order, so the button's clicks are not intercepted by the
+    /// drag handle).
     ///
-    /// 最小化トグル: グリフ文字列だけを提供する（"–"=展開中/畳むと–→+、"+"=折りたたみ中）。実際の
-    /// 折りたたみ対象（どのコンポーネントを隠すか、パネルの高さをどう戻すか）はパネルごとに大きく異なる
-    /// ため、ボタンの生成とクリックハンドラの購読だけをこのヘルパーで行い、ApplyCollapsedState相当の
-    /// ロジックは呼び出し側（各パネル）に残す。
+    /// Minimize toggle: only the glyph strings are provided ("–" = expanded / collapsing turns
+    /// –→+, "+" = collapsed). The actual collapse targets (which components to hide, how to restore
+    /// the panel height) differ greatly per panel, so this helper only creates the button and
+    /// subscribes the click handler; the ApplyCollapsedState-equivalent logic stays in the caller
+    /// (each panel).
     /// </summary>
     internal static class PanelChrome
     {
         public const float TitleRowHeight = 22f;
         public const float CollapseButtonSize = 20f;
 
-        private const string CollapseGlyphExpanded = "–"; // – (最小化する = クリックすると畳む)
-        private const string CollapseGlyphCollapsed = "+";     // + (展開する = クリックすると開く)
+        private const string CollapseGlyphExpanded = "–"; // – (minimize = clicking collapses)
+        private const string CollapseGlyphCollapsed = "+";     // + (expand = clicking opens)
 
-        // Task47: バニラの一時停止/ESCメニュー（PauseMenu、Escで開く「終了」「オプション」等の一覧画面）の
-        // コンポーネント名。UIView.library.Get&lt;T&gt;(name) 経由での取得は、BaseInfoPanel が
-        // CityServiceWorldInfoPanel を取得する際と全く同じ確立済みパターン（型名=登録名）を踏襲する。
-        // 検証方法と選定理由（PowerShellでColossalManaged.dll/Assembly-CSharp.dllをリフレクションし確認）:
-        //   - PauseMenu : MenuPanel : ColossalFramework.UI.UICustomControl。UICustomControlは
-        //     `UIComponent component { get; }` を公開しており、そのisVisibleがバニラの「Escで開く
-        //     一時停止/オプション選択メニュー」の表示状態そのもの（このパネル自体がEscトグルの実体）。
-        //   - 候補として検討したが不採用の他API:
-        //     ・Singleton&lt;SimulationManager&gt;.instance.SimulationPaused … ユーザーが手動で「一時停止」
-        //       ボタンを押した場合も true になり、Escメニューを開いていない場合と区別できない
-        //       （タスク要件が明示的に「不十分」と指定）。
-        //     ・UIView.HasModalInput() … PushModalスタックに何か積まれていれば真になる、より広い概念。
-        //       UIDropDown（本MOD含め多用）のポップアップはUIDropDown.OpenPopup等の実装
-        //       （リフレクションでPushModal呼び出しの痕跡なしを確認）でモーダルスタックを使わないため
-        //       直ちに競合するわけではないが、バニラの他のモーダルUI（保存/読み込みダイアログ等）でも
-        //       true になり「Escメニューが開いている」より意味が広すぎる。本タスクは「Escメニュー」に
-        //       限定した挙動を要求しているため、より的を絞ったPauseMenu.component.isVisibleを採用する。
+        // Task47: Component name of the vanilla pause/ESC menu (PauseMenu, the list screen with
+        // "Quit", "Options" etc. opened by Esc). Retrieval via UIView.library.Get&lt;T&gt;(name) follows
+        // exactly the same established pattern (type name = registered name) BaseInfoPanel uses to
+        // obtain CityServiceWorldInfoPanel.
+        // Verification method and selection rationale (confirmed by reflecting over
+        // ColossalManaged.dll/Assembly-CSharp.dll in PowerShell):
+        //   - PauseMenu : MenuPanel : ColossalFramework.UI.UICustomControl. UICustomControl exposes
+        //     `UIComponent component { get; }`, whose isVisible is exactly the visibility state of
+        //     the vanilla "pause/options menu opened by Esc" (this panel itself is what the Esc
+        //     toggle drives).
+        //   - Other APIs considered as candidates but rejected:
+        //     - Singleton&lt;SimulationManager&gt;.instance.SimulationPaused ... also becomes true when
+        //       the user manually presses the "pause" button, so it cannot be distinguished from
+        //       the case where the Esc menu is not open (the task requirements explicitly labeled
+        //       this "insufficient").
+        //     - UIView.HasModalInput() ... a broader concept that is true whenever anything is on
+        //       the PushModal stack. UIDropDown popups (used heavily, including by this mod) do not
+        //       use the modal stack per the implementation of UIDropDown.OpenPopup etc. (verified
+        //       via reflection that there is no trace of a PushModal call), so it would not
+        //       immediately conflict, but it also becomes true for other vanilla modal UI
+        //       (save/load dialogs etc.) and thus means far more than "the Esc menu is open".
+        //       Since this task requires behavior limited to "the Esc menu", we adopt the more
+        //       narrowly targeted PauseMenu.component.isVisible.
         private const string PauseMenuName = "PauseMenu";
 
-        // Task56: クラッシュ後調査で、UIView.library.Get&lt;T&gt;（実体は ColossalFramework.UI.UIDynamicPanels.Get,
-        // ilspycmdでColossalManaged.dllを逆コンパイルし確認）自体は m_CachedPanels（Dictionary）へのルックアップ
-        // だけで、呼ぶたびにプレハブをインスタンス化することは無いと判明した（単一インスタンスパネルは全て
-        // UIView.Awake→m_PanelsLibrary.Init(this)で起動時に一括生成済み、Getはキャッシュ済みインスタンスを
-        // 返すだけ）。とはいえ「毎フレーム・複数パネルから」ライブラリ経由の型解決を行うこと自体は無駄な
-        // GetComponent呼び出しを繰り返すだけでなく、UIView自体が未登録（ロード中等）だと
-        // UIView.library がnullを返し UIDynamicPanels.Get の呼び出しがNullReferenceExceptionになる
-        // （try/catchで既に握ってはいるが、ロード中は毎フレーム例外→ログの温床になる）。防御的に一度だけ
-        // 解決してキャッシュし、以後は使い回す。Unity側でこのインスタンスが破棄された場合はUnityEngine.Object
-        // のoperator==オーバーロードにより自動的に「null相当」に戻るが、念のためMilitaryManager.Reset()
-        // （レベルアンロード時）からも明示的に ResetCache() で null 化する。
+        // Task56: Post-crash investigation revealed that UIView.library.Get&lt;T&gt; (actually
+        // ColossalFramework.UI.UIDynamicPanels.Get, confirmed by decompiling ColossalManaged.dll
+        // with ilspycmd) is itself just a lookup into m_CachedPanels (Dictionary) and never
+        // instantiates a prefab per call (all single-instance panels are created in bulk at startup
+        // via UIView.Awake→m_PanelsLibrary.Init(this); Get merely returns the cached instance).
+        // That said, performing library-based type resolution "every frame from multiple panels"
+        // not only repeats wasteful GetComponent calls, but while the UIView itself is unregistered
+        // (e.g. during loading) UIView.library returns null and the UIDynamicPanels.Get call throws
+        // a NullReferenceException (already swallowed by try/catch, but during loading it becomes a
+        // breeding ground for per-frame exceptions and log spam). Defensively resolve once, cache,
+        // and reuse thereafter. If Unity destroys this instance, the UnityEngine.Object operator==
+        // overload automatically makes it "null-equivalent" again, but just in case we also
+        // explicitly null it via ResetCache() from MilitaryManager.Reset() (on level unload).
         private static PauseMenu _cachedPauseMenu;
 
-        // Task56: UIView.GetAView()（static Dictionary&lt;string,UIView&gt;.Values.FirstOrDefault()、
-        // ilspycmdで確認済み・こちらもインスタンス化はしない）を複数箇所が毎フレーム呼んでいたため、
-        // 同じ考え方でキャッシュを共有する（BaseInfoPanelDrag.PositionNextToVanilla / UnitInfoPanel.
-        // UpdateTrackingPosition / UnitBoxSelection.UpdateRectVisual が使用）。
+        // Task56: UIView.GetAView() (static Dictionary&lt;string,UIView&gt;.Values.FirstOrDefault(),
+        // also confirmed via ilspycmd; it does not instantiate either) was being called every frame
+        // from multiple places, so we share a cache using the same reasoning (used by
+        // BaseInfoPanelDrag.PositionNextToVanilla / UnitInfoPanel.UpdateTrackingPosition /
+        // UnitBoxSelection.UpdateRectVisual).
         private static UIView _cachedView;
 
-        /// <summary>タイトル行の構築結果。各パネルはこれをフィールドに保持し、Destroy時に
-        /// CollapseButton.eventClick の購読解除に使う（DragHandleは自前イベントを持たないため解除不要）。</summary>
+        /// <summary>Result of building the title row. Each panel keeps this in a field and uses it
+        /// on Destroy to unsubscribe from CollapseButton.eventClick (the DragHandle has no events of
+        /// its own, so no unsubscription is needed).</summary>
         public sealed class Handles
         {
             public UIDragHandle DragHandle;
@@ -79,10 +93,11 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// パネル直下に、タイトル行全体(x=0..panelWidth, y=titleRowY..+TitleRowHeight)を覆う
-        /// UIDragHandle（target=panel、パネル全体をドラッグ移動可能にする）と、その右端に重ねる
-        /// 最小化トグルボタンを追加する。ボタンのクリックハンドラは呼び出し側が渡す
-        /// （各パネルの _collapsed フィールドをトグルし ApplyCollapsedState 相当を呼ぶだけの薄い処理を想定）。
+        /// Adds, directly under the panel, a UIDragHandle covering the whole title row
+        /// (x=0..panelWidth, y=titleRowY..+TitleRowHeight) (target=panel, making the entire panel
+        /// draggable), plus a minimize toggle button overlaid at its right edge. The button's click
+        /// handler is supplied by the caller (expected to be a thin handler that just toggles each
+        /// panel's _collapsed field and calls its ApplyCollapsedState equivalent).
         /// </summary>
         public static Handles AddTitleBarChrome(UIPanel panel, float panelWidth, float titleRowY, float pad, MouseEventHandler onCollapseClick)
         {
@@ -108,16 +123,16 @@ namespace CSWarfront.Game.UI
             return h;
         }
 
-        /// <summary>指定した折りたたみ状態に対応するボタングリフを返す（呼び出し側の
-        /// ApplyCollapsedState相当が _collapseButton.text へ設定するだけでよいようにする）。</summary>
+        /// <summary>Returns the button glyph corresponding to the given collapsed state (so the
+        /// caller's ApplyCollapsedState equivalent only needs to assign it to _collapseButton.text).</summary>
         public static string CollapseGlyph(bool collapsed)
         {
             return collapsed ? CollapseGlyphCollapsed : CollapseGlyphExpanded;
         }
 
-        /// <summary>Destroy()から呼ぶ。CollapseButtonのイベント購読を解除する
-        /// （DragHandleは呼び出し側でイベントを購読していない前提のため対象外。パネル自体の破棄で
-        /// GameObjectごと消える）。</summary>
+        /// <summary>Called from Destroy(). Unsubscribes the CollapseButton event subscription
+        /// (the DragHandle is out of scope on the assumption the caller subscribed no events on it;
+        /// it disappears along with the GameObject when the panel itself is destroyed).</summary>
         public static void Unsubscribe(Handles h, MouseEventHandler onCollapseClick)
         {
             if (h == null) return;
@@ -125,20 +140,22 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// Task47: バニラのEsc（一時停止/オプション選択）メニューが開いているか。BaseInfoPanel/
-        /// UnitInfoPanel/AssetAssignPanel の毎フレーム更新から呼ばれ、trueの間は各パネルを
-        /// （内部の「選択中の基地/ユニット」等のロジック状態には触れず）見た目だけ隠すために使う。
-        /// UIView.library.Get&lt;T&gt; は未登録/未生成の場合nullを返す（例外ではない）ため、
-        /// ゲーム起動直後でPauseMenuがまだ無い状況は「メニューは開いていない」として扱う
-        /// （BaseInfoPanel.TryGetVanillaPanelと同じ「未準備は通常経路」という方針）。
+        /// Task47: Whether the vanilla Esc (pause/options selection) menu is open. Called from the
+        /// per-frame updates of BaseInfoPanel/UnitInfoPanel/AssetAssignPanel; while true, it is used
+        /// to hide each panel visually only (without touching internal logic state such as the
+        /// "currently selected base/unit"). UIView.library.Get&lt;T&gt; returns null (not an exception)
+        /// when unregistered/not yet created, so the situation right after game start where
+        /// PauseMenu does not exist yet is treated as "the menu is not open" (same
+        /// "not-ready-is-the-normal-path" policy as BaseInfoPanel.TryGetVanillaPanel).
         /// </summary>
         public static bool IsGameMenuOpen()
         {
             try
             {
-                // Task56: 毎フレームUIView.library.Get&lt;T&gt;を呼び直すのではなく、一度解決できたら
-                // キャッシュを使い回す（上のフィールドコメント参照。Get自体は非破壊なルックアップだが、
-                // ロード中はUIView.libraryがnullになりうるため、キャッシュ済みなら再解決自体を省略できる）。
+                // Task56: Instead of re-calling UIView.library.Get&lt;T&gt; every frame, reuse the cache
+                // once resolved (see the field comment above. Get itself is a non-destructive
+                // lookup, but UIView.library can be null during loading, so having a cache lets us
+                // skip re-resolution entirely).
                 if (_cachedPauseMenu == null)
                 {
                     UIDynamicPanels lib = UIView.library;
@@ -153,8 +170,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task56: UIView.GetAView()のキャッシュ済みアクセサ（上のフィールドコメント参照）。
-        /// 毎フレーム呼ぶ複数箇所（BaseInfoPanelDrag/UnitInfoPanel/UnitBoxSelection）はこちらを使う。</summary>
+        /// <summary>Task56: Cached accessor for UIView.GetAView() (see the field comment above).
+        /// The multiple per-frame callers (BaseInfoPanelDrag/UnitInfoPanel/UnitBoxSelection) use this.</summary>
         public static UIView GetCachedView()
         {
             if (_cachedView == null)
@@ -165,22 +182,26 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// Task56: ゲームがUIライブラリ（バニラUI・自パネル問わず）に触れてよい状態か。
-        /// レベルロード中/アンロード中は false を返し、呼び出し側（各パネルのEnsureCreated/
-        /// UpdateVisibility、UnitSelection/UnitBoxSelection/UnitCommandInput等の毎フレームUI入口）は
-        /// このフレームの処理を丸ごとスキップする（MilitaryManager.OnMainVisualUpdateのユニット見た目
-        /// 同期＝Unity GameObjectのみを触る処理は対象外。UIライブラリに触れないため継続してよい）。
+        /// Task56: Whether the game is in a state where the UI library (vanilla UI and our own
+        /// panels alike) may be touched. Returns false while a level is loading/unloading, and the
+        /// callers (each panel's EnsureCreated/UpdateVisibility, and per-frame UI entry points such
+        /// as UnitSelection/UnitBoxSelection/UnitCommandInput) skip this frame's processing
+        /// entirely (MilitaryManager.OnMainVisualUpdate's unit visual sync — which only touches
+        /// Unity GameObjects — is exempt; it does not touch the UI library and may continue).
         ///
-        /// 判定に使うシグナル（ilspycmdでAssembly-CSharp.dllのLoadingManagerを逆コンパイルし確認済み）:
-        ///   - public volatile bool LoadingManager.m_loadingComplete: レベルロードのコルーチンが
-        ///     全工程を終えた最後（OnLevelLoadedをMOD拡張へ配信する直前）にtrueへセットされる
-        ///     （LoadingManager.cs 1813行目）。ロード開始時・アンロード開始時にはfalseへ戻す
-        ///     （391/401, 429/439, 467/477行目）。
-        ///   - public volatile bool LoadingManager.m_applicationQuitting: アプリ終了シーケンス開始でtrue。
-        ///   - 存在確認は Singleton&lt;LoadingManager&gt;.exists（ = 内部static fieldのnullチェックのみ、
-        ///     .instance と違いオブジェクトを新規生成しない）を先に見る。これはLoadingManager自身が
-        ///     AutoSaveTimer内で使っている既存パターン（LoadingManager.cs 52行目）と同じ。
-        /// いずれもvolatile boolの読み取りのみでアロケーションなし。
+        /// Signals used for the decision (confirmed by decompiling LoadingManager in
+        /// Assembly-CSharp.dll with ilspycmd):
+        ///   - public volatile bool LoadingManager.m_loadingComplete: set to true at the very end of
+        ///     the level-load coroutine after all steps finish (right before dispatching
+        ///     OnLevelLoaded to mod extensions) (LoadingManager.cs line 1813). Reset to false when
+        ///     loading starts and when unloading starts (lines 391/401, 429/439, 467/477).
+        ///   - public volatile bool LoadingManager.m_applicationQuitting: true once the application
+        ///     shutdown sequence begins.
+        ///   - Existence is checked first via Singleton&lt;LoadingManager&gt;.exists ( = only a null check
+        ///     of the internal static field; unlike .instance it does not create a new object).
+        ///     This is the same existing pattern LoadingManager itself uses inside AutoSaveTimer
+        ///     (LoadingManager.cs line 52).
+        /// All of these are just volatile bool reads with no allocation.
         /// </summary>
         public static bool IsGameReadyForUi()
         {
@@ -197,9 +218,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task56: MilitaryManager.Reset()（レベルアンロード時）から呼ぶ。キャッシュ済みの
-        /// PauseMenu/UIView参照を破棄し、次セッションで改めて解決させる（テアダウン中にUnity側で
-        /// 実際に破棄されるかどうかに関わらず、古い参照を持ち越さないための明示的なクリア）。</summary>
+        /// <summary>Task56: Called from MilitaryManager.Reset() (on level unload). Discards the
+        /// cached PauseMenu/UIView references so the next session resolves them anew (an explicit
+        /// clear so stale references are not carried over, regardless of whether Unity actually
+        /// destroys these instances during teardown).</summary>
         public static void ResetCache()
         {
             _cachedPauseMenu = null;

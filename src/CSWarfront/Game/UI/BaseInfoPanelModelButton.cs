@@ -5,10 +5,10 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// BaseInfoPanel のうち「モデル設定」ボタン（サブスクライブ済みプロップのユニットモデル割り当てUIを開く、
-    /// Task36）だけを分離した partial class。BaseInfoPanel.cs 側の500行制限のため分離した
-    /// （BaseInfoPanelProduction.cs と同じ方針）。
-    /// このボタン自体はMilitaryManager/WarStateへ一切触れない（AssetAssignPanel.Toggleを呼ぶだけ）。
+    /// Partial class splitting out of BaseInfoPanel only the "Model Settings" button (opens the
+    /// unit-model assignment UI for subscribed props, Task36). Split off because of the 500-line limit
+    /// on BaseInfoPanel.cs (same policy as BaseInfoPanelProduction.cs).
+    /// The button itself never touches MilitaryManager/WarState (it only calls AssetAssignPanel.Toggle).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
@@ -16,8 +16,8 @@ namespace CSWarfront.Game.UI
 
         private static UIButton _modelButton;
 
-        /// <summary>「所属勢力」ドロップダウンの下にボタンを1つ追加する（Build()から一度だけ呼ばれる）。
-        /// 戻り値は次のコントロール（ステータスラベル）を配置するための更新済みY座標。</summary>
+        /// <summary>Adds one button below the "Faction" dropdown (called once from Build()).
+        /// Returns the updated Y coordinate for placing the next control (the status label).</summary>
         private static float BuildModelButtonSection(float x, float y, float width)
         {
             if (_panel == null) return y;
@@ -47,14 +47,14 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>_collapsed の反映（BaseInfoPanel.ApplyCollapsedStateから呼ばれる）。</summary>
+        /// <summary>Applies _collapsed (called from BaseInfoPanel.ApplyCollapsedState).</summary>
         private static void ApplyModelButtonCollapsedState(bool collapsed)
         {
             if (_modelButton != null) _modelButton.isVisible = !collapsed;
         }
 
-        /// <summary>Destroy()から呼ばれる。イベント購読解除とフィールドリセットのみ
-        /// （Task34のDestroyProductionSectionと同じ方針）。</summary>
+        /// <summary>Called from Destroy(). Only unsubscribes events and resets fields
+        /// (same policy as Task34's DestroyProductionSection).</summary>
         private static void DestroyModelButtonSection()
         {
             if (_modelButton != null) _modelButton.eventClick -= OnModelButtonClick;

@@ -6,19 +6,20 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// OptionsModelAssignPage のうち、「現在の割り当て」プレビュー（ラベル+サムネイル）の構築と、
-    /// アセットドロップダウン・現在の割り当て表示・サムネイルの再構築だけを分離した partial class
-    /// （OptionsModelAssignPage.cs 側が500行制限に達したため、Task70で新設。純粋なコード移動のみで
-    /// ロジックの変更は無い）。フィールド（_currentBindingLabel/_thumbnailSprite/_assetDropdown/
-    /// _countLabel/_filteredAssetNames等）は全て OptionsModelAssignPage.cs 側で宣言されている
-    /// （partial class は private メンバーも全パーツで共有するため問題ない）。
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class that splits out from OptionsModelAssignPage only the construction of the
+    /// "current assignment" preview (label + thumbnail) and the rebuilding of the asset dropdown,
+    /// the current-assignment display, and the thumbnail (newly created in Task70 because the
+    /// OptionsModelAssignPage.cs side reached the 500-line limit; pure code move only, no logic
+    /// changes). The fields (_currentBindingLabel/_thumbnailSprite/_assetDropdown/
+    /// _countLabel/_filteredAssetNames etc.) are all declared on the OptionsModelAssignPage.cs side
+    /// (fine, since a partial class shares private members across all parts).
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class OptionsModelAssignPage
     {
-        /// <summary>「現在の割り当て」ラベルとサムネイルをグループパネルへ直接追加する（AddDropdown等の
-        /// 後に呼ぶことで、その直後に表示される位置に並ぶ。AssetAssignPanelFaction.BuildThumbnailSpriteと
-        /// 同じ寸法・考え方）。</summary>
+        /// <summary>Adds the "current assignment" label and thumbnail directly to the group panel
+        /// (calling this after AddDropdown etc. places them in the position shown right after those;
+        /// same dimensions and idea as AssetAssignPanelFaction.BuildThumbnailSprite).</summary>
         private static void BuildBindingPreview(UIComponent groupPanel)
         {
             _currentBindingLabel = groupPanel.AddUIComponent<UILabel>();

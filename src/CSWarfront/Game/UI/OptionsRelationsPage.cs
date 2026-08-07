@@ -8,71 +8,81 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task49: Mod Options（Game/Mod.cs、OnSettingsUI）内に直接構築する「勢力の関係」サブページ。
-    /// 5勢力の全ての異なるペア（0-1, 0-2, 0-3, 0-4, 1-2, 1-3, 1-4, 2-3, 2-4, 3-4 の10組）について、
-    /// 敵対/中立/同盟のドロップダウンを1行ずつ並べる。値は MilitaryManager.TryGetRelation/TrySetRelation
-    /// 経由で Core.WarState.Relations を直接読み書きする（Relations は既存のシリアライザ（format v4）で
-    /// 25ペア全て永続化済みのため、ここでの変更はセーブと一緒にそのまま永続化される。データ形式の変更は無い）。
+    /// Task49: "Faction Relations" subpage built directly inside Mod Options (Game/Mod.cs,
+    /// OnSettingsUI). For every distinct pair of the 5 factions (the 10 combinations
+    /// 0-1, 0-2, 0-3, 0-4, 1-2, 1-3, 1-4, 2-3, 2-4, 3-4), one row of hostile/neutral/allied
+    /// dropdowns is laid out. Values read/write Core.WarState.Relations directly via
+    /// MilitaryManager.TryGetRelation/TrySetRelation (Relations is already persisted for all 25
+    /// pairs by the existing serializer (format v4), so changes made here are persisted with the
+    /// save as-is. There is no data-format change).
     ///
-    /// このページはメインメニュー（MilitaryManager.State が null、まだ都市が読み込まれていない）からも
-    /// 開かれ得る。その場合 TryGetRelation/TrySetRelation は false を返す（読み書きできる WarState が
-    /// 存在しない）ため、ここでは例外を投げず、ドロップダウンを「敵対」表示のまま isEnabled=false で
-    /// 無効化し、その旨を説明する注記ラベルを表示するに留める。
+    /// This page can also be opened from the main menu (MilitaryManager.State is null, no city
+    /// loaded yet). In that case TryGetRelation/TrySetRelation return false (there is no WarState
+    /// to read or write), so no exception is thrown here; the dropdowns are simply disabled with
+    /// isEnabled=false while still displaying "Hostile", and a note label explaining the situation
+    /// is shown.
     ///
-    /// OptionsModelAssignPage と同じ規約: 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Same convention as OptionsModelAssignPage: all methods are main-thread only (they call
+    /// Unity UI APIs).
     ///
-    /// Task52バグ修正: 「勢力の関係がOptionsから変更できない」不具合の根本原因は、CSの
-    /// OptionsMainPanel（Assembly-CSharp.dll、ILSpyで逆コンパイルして確認済み）が各MODの
-    /// OnSettingsUI を「Options画面を開くたび」ではなく、OptionsMainPanel.Awake()（＝Options画面の
-    /// プレハブが最初にインスタンス化された、通常は都市読み込み前のメインメニューの時点）で
-    /// ただ一度だけ呼び、以後はロケール変更(OnLocaleChanged)かMOD有効/無効の変更
-    /// (RefreshPlugins、eventPluginsChanged/eventPluginsStateChanged)の時だけ再構築する、という
-    /// 実装だったこと。つまりBuild()（＝このOnSettingsUI呼び出し）はMilitaryManager.Stateがまだnull
-    /// （都市未読み込み）の状態で一度だけ実行され、10個のドロップダウンはそのタイミングの
-    /// stateReady(false)を元にisEnabled=falseへ固定される。その後、都市を読み込んでStateが
-    /// 用意されても、Options画面を開き直すだけではBuild()は二度と呼ばれない（前述の通り
-    /// Awake/ロケール変更/MOD有効化変更でしか再実行されない）ため、ドロップダウンは
-    /// 無効化されたまま＝ユーザーからは「敵対から変更できない」ように見え続ける。
-    /// このコメント自体も含め、旧実装は「Build()はOptions画面を開くたびに再実行されうる」という
-    /// 誤った前提で書かれていた（OptionsModelAssignPage.csにも同じ誤った前提のコメントがあるが、
-    /// そちらは本タスクのスコープ外）。
+    /// Task52 bug fix: the root cause of the "faction relations cannot be changed from Options"
+    /// defect was that CS's OptionsMainPanel (Assembly-CSharp.dll, verified by decompiling with
+    /// ILSpy) calls each mod's OnSettingsUI not "every time the Options screen is opened" but
+    /// exactly once in OptionsMainPanel.Awake() (= when the Options screen prefab is first
+    /// instantiated, normally at the main menu before a city is loaded), and afterwards rebuilds
+    /// only on a locale change (OnLocaleChanged) or a mod enable/disable change (RefreshPlugins,
+    /// eventPluginsChanged/eventPluginsStateChanged). In other words, Build() (= this OnSettingsUI
+    /// call) runs exactly once while MilitaryManager.State is still null (no city loaded), and the
+    /// 10 dropdowns get pinned to isEnabled=false based on stateReady(false) at that moment.
+    /// Afterwards, even once a city is loaded and State becomes available, merely reopening the
+    /// Options screen never calls Build() again (as stated above, it is only re-run on
+    /// Awake/locale change/mod enable-disable change), so the dropdowns stay disabled = to the
+    /// user it keeps looking as if "they cannot be changed from Hostile".
+    /// The old implementation, including this very comment, was written under the incorrect
+    /// assumption that "Build() may be re-run every time the Options screen is opened"
+    /// (OptionsModelAssignPage.cs had a comment with the same incorrect assumption, but that one
+    /// is out of scope for this task).
     ///
-    /// 修正: Unity/CSのUIComponentは、祖先のisVisibleが変化すると子孫までOnVisibilityChanged()を
-    /// 再帰的に伝播し、各階層でeventVisibilityChangedを発火する（UIComponent、ColossalManaged.dllを
-    /// 逆コンパイルして確認済み）。Options画面でタブを切り替える際、UITabContainer.SelectPageByIndex
-    /// は選択された1個の子（＝このMODの全グループを内包する単一のUIComponent）のisVisibleを
-    /// true/falseへ切り替えるだけだが、それが配下の「勢力の関係」グループのパネルまで伝播するため、
-    /// グループパネル自身のeventVisibilityChangedを購読すれば「このMODのOptionsタブが選択される
-    /// たび」に確実にフックできる（Build()自体が再実行されるかどうかに依存しない）。
-    /// RefreshFromState() がこのイベントで毎回、(1) 現在のStateから10個のドロップダウンの選択値を
-    /// 読み直し、(2) isEnabledをstateReadyへ同期し、(3) 注記ラベルを更新する。これにより
-    /// 「都市未読み込みで一度だけ構築された古いUI」が残っていても、次に都市を読み込んでOptionsの
-    /// このタブを開いた瞬間に正しい状態へ更新される。
+    /// Fix: Unity/CS UIComponent recursively propagates OnVisibilityChanged() down to descendants
+    /// when an ancestor's isVisible changes, firing eventVisibilityChanged at each level
+    /// (UIComponent, verified by decompiling ColossalManaged.dll). When switching tabs on the
+    /// Options screen, UITabContainer.SelectPageByIndex merely toggles isVisible true/false on the
+    /// single selected child (= the single UIComponent containing all of this mod's groups), but
+    /// that propagates down to the "Faction Relations" group's panel, so subscribing to the group
+    /// panel's own eventVisibilityChanged reliably hooks "every time this mod's Options tab is
+    /// selected" (independent of whether Build() itself is re-run).
+    /// On each such event, RefreshFromState() (1) re-reads the selected values of the 10 dropdowns
+    /// from the current State, (2) syncs isEnabled to stateReady, and (3) updates the note label.
+    /// As a result, even if "the stale UI built once with no city loaded" remains, it is updated
+    /// to the correct state the moment this Options tab is next opened after loading a city.
     /// </summary>
     internal static class OptionsRelationsPage
     {
         private const string GroupTitle = "Faction Relations";
-        // Task59: 宿敵(Nemesis)を末尾に追加。Relation enumの宣言順（Hostile, Neutral, Allied, Nemesis）と一致させる。
+        // Task59: appended Nemesis at the end. Kept consistent with the declaration order of the Relation enum (Hostile, Neutral, Allied, Nemesis).
         private static readonly string[] RelationLabels = { "Hostile", "Neutral", "Allied", "Nemesis" };
         private static readonly Relation[] RelationValues = { Relation.Hostile, Relation.Neutral, Relation.Allied, Relation.Nemesis };
 
-        // Build() 実行中に生成した10行分のドロップダウンと、対応する (a,b) ペア。
-        // 「全て敵対に戻す」ボタン(OnResetAllClick)が押された際に選択値を再同期するために保持する。
+        // The 10 rows of dropdowns created during Build() and their corresponding (a,b) pairs.
+        // Kept so the selected values can be re-synced when the "Reset All to Hostile" button
+        // (OnResetAllClick) is pressed.
         private static readonly List<UIDropDown> _dropdowns = new List<UIDropDown>();
         private static readonly List<byte> _pairA = new List<byte>();
         private static readonly List<byte> _pairB = new List<byte>();
 
-        // Task59: KAIJU/Alienとの関係ドロップダウン。ゴジラ災害/エイリアン侵略MODが実際に導入されている
-        // 場合のみ、それぞれ最大5行（勢力ごと）構築する（ExternalThreatBridge.IsGodzillaModPresent /
-        // IsAlienModPresentで判定、Build()時点で1回だけ確認すれば十分＝MOD導入状態はゲーム再起動なしに
-        // 変わらないため、勢力関係(State)のような「都市未読み込みでは無効」という時間的な変化は無い）。
+        // Task59: relation dropdowns for KAIJU/Alien. Only when the Godzilla Disaster / Alien
+        // Invasion mods are actually installed, up to 5 rows each (one per faction) are built
+        // (determined via ExternalThreatBridge.IsGodzillaModPresent / IsAlienModPresent; checking
+        // once at Build() time is sufficient = the mod installation state cannot change without a
+        // game restart, so there is no temporal change like faction relations (State) being
+        // "disabled while no city is loaded").
         private static readonly List<UIDropDown> _threatDropdowns = new List<UIDropDown>();
         private static readonly List<byte> _threatFactionId = new List<byte>();
         private static readonly List<ThreatKind> _threatKind = new List<ThreatKind>();
 
         private static UILabel _noteLabel;
 
-        /// <summary>Mod.OnSettingsUIから呼ぶ。渡された helper 配下に「勢力の関係」グループを構築する。</summary>
+        /// <summary>Called from Mod.OnSettingsUI. Builds the "Faction Relations" group under the given helper.</summary>
         public static void Build(UIHelperBase helper)
         {
             try
@@ -94,7 +104,7 @@ namespace CSWarfront.Game.UI
                 {
                     for (byte b = (byte)(a + 1); b < WarfrontSettings.MaxFactions; b++)
                     {
-                        byte pairA = a; // ループ変数のクロージャ捕獲対策（forは1変数を使い回すため、必ずローカルへコピーする）
+                        byte pairA = a; // guard against closure capture of the loop variable (for reuses one variable, so always copy to a local)
                         byte pairB = b;
 
                         Relation current;
@@ -114,7 +124,7 @@ namespace CSWarfront.Game.UI
                     }
                 }
 
-                // Task59: KAIJU/Alienとの関係。導入されているMODのぶんだけ（0/1/2個）行を追加する。
+                // Task59: relations with KAIJU/Alien. Adds rows only for the installed mods (0/1/2 of them).
                 bool godzillaPresent = ExternalThreatBridge.IsGodzillaModPresent;
                 bool alienPresent = ExternalThreatBridge.IsAlienModPresent;
 
@@ -135,13 +145,14 @@ namespace CSWarfront.Game.UI
                         ? ""
                         : "No city is loaded, so faction relations cannot be edited. Please open this again after loading a city.";
 
-                    // Task52バグ修正: CSはこのMOD全体のOnSettingsUIをOptions画面を開くたびには
-                    // 再実行しない（クラス冒頭のコメント参照）。代わりに、Options内でこのMODのタブが
-                    // 選択される（＝祖先コンポーネントのisVisibleがtrueへ変わり、それがこの
-                    // グループパネルまで伝播する）たびに発火するeventVisibilityChangedを購読し、
-                    // その時点のMilitaryManager.Stateを元にドロップダウンの選択値・有効/無効・
-                    // 注記ラベルを再同期する。これにより「都市未読み込み時に一度だけ無効化された
-                    // まま固定される」不具合を、Build()自体の再実行に頼らずに解消する。
+                    // Task52 bug fix: CS does not re-run this whole mod's OnSettingsUI every time the
+                    // Options screen is opened (see the class-header comment). Instead, subscribe to
+                    // eventVisibilityChanged, which fires every time this mod's tab is selected inside
+                    // Options (= an ancestor component's isVisible flips to true and that propagates
+                    // down to this group panel), and re-sync the dropdowns' selected values,
+                    // enabled/disabled state, and the note label based on MilitaryManager.State at
+                    // that moment. This resolves the "disabled once with no city loaded and pinned
+                    // that way" defect without relying on Build() itself being re-run.
                     groupPanel.eventVisibilityChanged += OnGroupVisibilityChanged;
                 }
             }
@@ -151,13 +162,14 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task59: 指定したThreatKindについて、勢力の数(WarfrontSettings.MaxFactions)ぶんの
-        /// 「勢力名 ↔ 表示名」行を1本ずつ構築する。呼び出し元(Build)がMODの導入を確認済みの場合のみ呼ぶ。</summary>
+        /// <summary>Task59: for the given ThreatKind, builds one "faction name ↔ display name" row per
+        /// faction (WarfrontSettings.MaxFactions rows). Only called when the caller (Build) has already
+        /// confirmed the mod is installed.</summary>
         private static void BuildThreatRows(UIHelperBase group, string[] names, ThreatKind kind, string displayName, bool stateReady)
         {
             for (byte f = 0; f < WarfrontSettings.MaxFactions; f++)
             {
-                byte factionId = f; // クロージャ捕獲対策
+                byte factionId = f; // guard against closure capture
                 ThreatKind capturedKind = kind;
 
                 Relation current;
@@ -210,19 +222,20 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正）。
-        /// isVisible==trueの時だけ（＝Options内でこのMODのタブが選択された/表示された時だけ）
-        /// RefreshFromStateを呼ぶ。非表示化(false)の際は何もしない。</summary>
+        /// <summary>eventVisibilityChanged handler for the group panel (Task52 bug fix).
+        /// Calls RefreshFromState only when isVisible==true (i.e. only when this mod's tab is
+        /// selected/shown inside Options). Does nothing on hiding (false).</summary>
         private static void OnGroupVisibilityChanged(UIComponent component, bool isVisible)
         {
             if (!isVisible) return;
             RefreshFromState();
         }
 
-        /// <summary>現在のMilitaryManager.Stateを元に、10行のドロップダウンの選択値・isEnabled、
-        /// および注記ラベルを再同期する（Task52バグ修正）。都市を読み込んだ後にOptionsのこのタブを
-        /// 開き直した時、あるいは「全て敵対に戻す」ボタンを押した後の再同期の両方で使う共通処理。
-        /// 例外はここで握りつぶし、UIコールバックからゲームループへ例外を伝播させない。</summary>
+        /// <summary>Re-syncs the selected values and isEnabled of the 10 dropdown rows plus the note
+        /// label based on the current MilitaryManager.State (Task52 bug fix). Shared routine used both
+        /// when this Options tab is reopened after loading a city, and for the re-sync after the
+        /// "Reset All to Hostile" button is pressed.
+        /// Exceptions are swallowed here so they never propagate from a UI callback into the game loop.</summary>
         private static void RefreshFromState()
         {
             try
@@ -239,13 +252,15 @@ namespace CSWarfront.Game.UI
                     Relation current;
                     if (!MilitaryManager.TryGetRelation(_pairA[i], _pairB[i], out current)) current = Relation.Hostile;
                     int idx = IndexOfRelation(current);
-                    // 値が変わっていない時にselectedIndexへ書き戻すとeventSelectedIndexChanged経由で
-                    // OnRelationChangedが不要に再発火する（ログが増えるだけで実害は無いが避ける）。
+                    // Writing back to selectedIndex when the value has not changed would needlessly
+                    // re-fire OnRelationChanged via eventSelectedIndexChanged (only extra log noise,
+                    // no real harm, but avoid it).
                     if (dd.selectedIndex != idx) dd.selectedIndex = idx;
                 }
 
-                // Task59: KAIJU/Alien行も同じ規約で再同期する（構築済みの行のみ＝MOD導入判定はBuild()時点で
-                // 固定されているため、ここではドロップダウンの個数自体は増減しない）。
+                // Task59: re-sync the KAIJU/Alien rows under the same convention (only the rows already
+                // built = the mod-presence determination is fixed at Build() time, so the number of
+                // dropdowns itself never grows or shrinks here).
                 for (int i = 0; i < _threatDropdowns.Count; i++)
                 {
                     UIDropDown dd = _threatDropdowns[i];
@@ -272,10 +287,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「全て敵対に戻す」ボタン。MilitaryManager.TryResetRelationsToAllHostile
-        /// （Core.RelationPresets.ApplyAllHostileへの薄いラッパー）を呼んでから、RefreshFromStateで
-        /// 10行のドロップダウンの選択表示を（すべて敵対になったはずの）現在値へ再同期する。
-        /// State未初期化なら何もしない（ラッパーがfalseを返すのみ）。</summary>
+        /// <summary>"Reset All to Hostile" button. Calls MilitaryManager.TryResetRelationsToAllHostile
+        /// (a thin wrapper over Core.RelationPresets.ApplyAllHostile) and then re-syncs the selection
+        /// display of the 10 dropdown rows via RefreshFromState to the current values (which should now
+        /// all be Hostile). If State is uninitialized, does nothing (the wrapper just returns false).</summary>
         private static void OnResetAllClick()
         {
             try

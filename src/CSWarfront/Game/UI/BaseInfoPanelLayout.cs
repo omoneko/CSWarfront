@@ -4,14 +4,15 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// BaseInfoPanel のうち、表示用ラベル整形とパネル高さの再計算だけを分離した partial class
-    /// （BaseInfoPanel.cs 側の500行制限のため分離。Task34のBaseInfoPanelProduction.cs分離、
-    /// Task63のBaseInfoPanelMissile.cs分離と同じ方針）。
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class splitting out of BaseInfoPanel only the formatting of display labels and the
+    /// recomputation of the panel height (split off because of the 500-line limit on BaseInfoPanel.cs;
+    /// same policy as the Task34 BaseInfoPanelProduction.cs split and the Task63
+    /// BaseInfoPanelMissile.cs split).
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
-        /// <summary>Task61: BaseType→日本語ラベル（パネル表示用）。</summary>
+        /// <summary>Task61: BaseType -&gt; display label (for the panel).</summary>
         private static string BaseTypeLabel(BaseType type)
         {
             switch (type)
@@ -24,7 +25,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>Task61: DomainMask→日本語ラベル（パネル表示用、"陸上"/"海上"/"航空"をビットごとに列挙）。</summary>
+        /// <summary>Task61: DomainMask -&gt; display label (for the panel; lists "Land"/"Sea"/"Air" per bit).</summary>
         private static string SpawnableDomainsLabel(DomainMask mask)
         {
             var parts = new System.Collections.Generic.List<string>(3);
@@ -35,27 +36,32 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// Task33: ステータスラベル（autoHeight有効）の実際の高さから展開時の全体パネル高さを算出し、
-        /// _expandedHeight キャッシュを更新する。折りたたみ→再展開時にここで求めた最新値へ正確に戻せる
-        /// よう、ハードコードされた定数ではなくこの計算を毎回の内容更新のたびにやり直す。
-        /// 値が変化した場合のみ _panel.height / _expandedHeight を書き換える（毎フレームの無駄な
-        /// レイアウト再計算・スレッド跨ぎではないが不要な再描画コストを避けるため）。
+        /// Task33: derives the total expanded panel height from the actual height of the status label
+        /// (autoHeight enabled) and updates the _expandedHeight cache. So that collapse -&gt; re-expand
+        /// can restore exactly to the latest value computed here, this calculation is redone on every
+        /// content update rather than using a hard-coded constant.
+        /// _panel.height / _expandedHeight are rewritten only when the value changed (to avoid wasteful
+        /// per-frame layout recomputation — not a cross-thread issue, but an unnecessary redraw cost).
         /// </summary>
         private static void RecomputeExpandedHeight()
         {
             if (_statusLabel == null || _panel == null) return;
 
-            // Task34: 生産セクションが構築済みなら、その最下端（_productionBottomY、
-            // RefreshProductionSection/BuildProductionSectionが更新）を基準にする。
-            // Task63: ミサイル基地専用セクション（_missileSectionBottomY）とは互いに排他表示なので、
-            // 選択中の基地種別に応じて常に片方だけが非0になる（Math.Maxで単純に大きい方を採る）。
-            // どちらも未構築（理論上は起きないが防御的に）ならステータスラベルの下端にフォールバックする。
+            // Task34: if the production section has been built, use its bottom edge
+            // (_productionBottomY, updated by RefreshProductionSection/BuildProductionSection) as the
+            // reference.
+            // Task63: the missile-base-only section (_missileSectionBottomY) is mutually exclusive with
+            // it, so depending on the selected base type exactly one of them is nonzero at any time
+            // (simply take the larger with Math.Max).
+            // If neither is built (theoretically impossible, but defensively) fall back to the bottom
+            // edge of the status label.
             float sectionBottom = Mathf.Max(_productionBottomY, _missileSectionBottomY);
             float contentBottom = sectionBottom > 0f
                 ? sectionBottom
                 : _statusLabel.relativePosition.y + _statusLabel.height;
-            // 内容の実寸に対して縦方向へ余裕を持たせる（ユーザー要望: 建物ウィンドウは「大きさだけ縦に1.5倍」）。
-            // 文字サイズ・幅は変えず、パネルの高さのみ VerticalScale 倍にして窮屈さを解消する。
+            // Give vertical headroom beyond the content's actual size (user request: the building window
+            // should be "1.5x taller in size only"). Text size and width are unchanged; only the panel
+            // height is multiplied by VerticalScale to relieve the cramped look.
             float newExpandedHeight = (contentBottom + Pad) * VerticalScale;
             if (Mathf.Abs(newExpandedHeight - _expandedHeight) > 0.01f)
             {

@@ -6,17 +6,19 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// BaseInfoPanel のうち、弾道ミサイル基地（BaseType.MissileBase）専用のセクション（Task63）だけを
-    /// 分離した partial class。BaseInfoPanel.cs / BaseInfoPanelProduction.cs の500行制限のため分離した
-    /// （Task34のBaseInfoPanelProduction.cs分離と同じ方針）。
+    /// Partial class splitting out only the section of BaseInfoPanel dedicated to ballistic missile
+    /// bases (BaseType.MissileBase) (Task63). Split off because of the 500-line limit on
+    /// BaseInfoPanel.cs / BaseInfoPanelProduction.cs (same policy as the Task34
+    /// BaseInfoPanelProduction.cs split).
     ///
-    /// このセクションと BaseInfoPanelProduction.cs のユニット生産セクションは排他表示: 選択中の基地が
-    /// MissileBaseならこちらを表示しユニット生産セクションを隠す（逆も同様）。どちらの
-    /// Refresh*Section も毎フレーム（折りたたみ中を除く）呼ばれ、snapshot.Type を見て自分自身の
-    /// 表示/非表示を都度判定する（ApplyProductionCollapsedState/ApplyMissileSectionCollapsedState、
-    /// 選択基地が入れ替わったフレームでも正しく追従する）。
+    /// This section and the unit production section in BaseInfoPanelProduction.cs are mutually
+    /// exclusive: if the selected base is a MissileBase, show this one and hide the unit production
+    /// section (and vice versa). Both Refresh*Section methods are called every frame (except while
+    /// collapsed) and decide their own visibility each time by looking at snapshot.Type
+    /// (ApplyProductionCollapsedState/ApplyMissileSectionCollapsedState; they track correctly even on
+    /// the frame where the selected base was swapped).
     ///
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
@@ -30,17 +32,18 @@ namespace CSWarfront.Game.UI
         private static UIButton _missileAutoLaunchButton;
         private static UILabel _missileMessageLabel;
 
-        /// <summary>直近スナップショットのAutoProduce/AutoLaunchMissiles（クリック時の反転計算用、
-        /// BaseInfoPanelProduction._lastAutoProduceと同じパターン）。</summary>
+        /// <summary>AutoProduce/AutoLaunchMissiles from the most recent snapshot (used to compute the
+        /// inverted value on click, same pattern as BaseInfoPanelProduction._lastAutoProduce).</summary>
         private static bool _lastMissileAutoProduce = true;
         private static bool _lastMissileAutoLaunch = true;
 
-        /// <summary>ミサイルセクションの最下端Y（0なら非表示中＝RecomputeExpandedHeightが無視する）。</summary>
+        /// <summary>Bottom Y of the missile section (0 means it is hidden = RecomputeExpandedHeight ignores it).</summary>
         private static float _missileSectionBottomY;
 
-        /// <summary>直近のRefreshContentsで選択中の基地がMissileBaseだったか。ApplyCollapsedState
-        /// （トグルクリック時）がユニット生産/ミサイルのどちらのセクションを表示すべきか判断するために
-        /// 覚えておく（Task34のBuildProductionSectionと同じ「セクション横断の状態」の扱い）。</summary>
+        /// <summary>Whether the selected base was a MissileBase in the most recent RefreshContents.
+        /// Remembered so ApplyCollapsedState (on toggle click) can decide which section — unit
+        /// production or missile — should be shown (the same handling of "cross-section state" as
+        /// Task34's BuildProductionSection).</summary>
         private static bool _lastIsMissileBase;
 
         private static void BuildMissileSection(float width)
@@ -79,8 +82,9 @@ namespace CSWarfront.Game.UI
             _launchMissileButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, 0f);
             _launchMissileButton.eventClick += OnLaunchMissileClick;
 
-            // Task90: 生産/発射の自動・手動切替（自動生産は既存のMilitaryBase.AutoProduceを流用、
-            // 自動発射は新設のAutoLaunchMissiles。どちらもトグルボタン）。
+            // Task90: auto/manual toggles for production/launch (auto-production reuses the existing
+            // MilitaryBase.AutoProduce; auto-launch is the newly added AutoLaunchMissiles. Both are
+            // toggle buttons).
             _missileAutoProduceButton = _panel.AddUIComponent<UIButton>();
             _missileAutoProduceButton.text = "Auto-build: ON";
             _missileAutoProduceButton.textScale = 0.75f;
@@ -111,9 +115,10 @@ namespace CSWarfront.Game.UI
             _missileMessageLabel.relativePosition = new Vector3(Pad, 0f);
         }
 
-        /// <summary>毎フレーム（折りたたみ中を除く）呼ばれる。snapshot.Typeを見て、選択中の基地が
-        /// MissileBaseの間だけこのセクションを表示・再配置する。それ以外は非表示にし
-        /// _missileSectionBottomY を0へ戻す（RecomputeExpandedHeightが高さ計算から除外するため）。</summary>
+        /// <summary>Called every frame (except while collapsed). Looks at snapshot.Type and shows and
+        /// re-places this section only while the selected base is a MissileBase. Otherwise hides it and
+        /// resets _missileSectionBottomY to 0 (so RecomputeExpandedHeight excludes it from the height
+        /// calculation).</summary>
         private static void RefreshMissileSection(BaseUiSnapshot snapshot, float y)
         {
             _lastIsMissileBase = snapshot.Type == BaseType.MissileBase;
@@ -150,8 +155,9 @@ namespace CSWarfront.Game.UI
             if (_launchMissileButton != null) _launchMissileButton.relativePosition = new Vector3(Pad + halfWidth + MissileRowGap, y);
             y += MissileButtonHeight + MissileRowGap;
 
-            // Task90: 自動生産/自動発射トグル行。表示テキストは毎フレームsnapshotへ追従させる
-            // （他プレイヤー操作は無いが、AI側から値が変わる将来拡張・ロード直後の整合のため）。
+            // Task90: the auto-build/auto-launch toggle row. The display text tracks the snapshot every
+            // frame (there is no other-player input, but this keeps consistency for future extensions
+            // where the AI side changes the values, and right after loading).
             _lastMissileAutoProduce = snapshot.AutoProduce;
             _lastMissileAutoLaunch = snapshot.AutoLaunchMissiles;
             if (_missileAutoProduceButton != null)
@@ -266,7 +272,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>BaseInfoPanel.Destroyから呼ばれる。イベント購読解除とフィールドのリセットのみ行う。</summary>
+        /// <summary>Called from BaseInfoPanel.Destroy. Only unsubscribes events and resets fields.</summary>
         private static void DestroyMissileSection()
         {
             if (_buildMissileButton != null) _buildMissileButton.eventClick -= OnBuildMissileClick;

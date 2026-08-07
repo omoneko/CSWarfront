@@ -5,13 +5,15 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// AssetAssignPanel のうち、Task47で新設した「複製適用」（現在選択中の(勢力,ユニット種別)の割り当てを
-    /// 他の(勢力,種別)へまとめて複製する）専用の範囲ドロップダウンとボタンだけを分離した partial class
-    /// （AssetAssignPanel.cs 側の500行制限のため。AssetAssignPanelFaction.cs と同じ方針で、フィールドも
-    /// ここで宣言する）。実際の複製処理は UnitAssetBindings.CopyTo（Game/UnitAssetBindings.cs）が担い、
-    /// このファイルはUI（ドロップダウン構築・クリックハンドラ）のみを持つ。Options サブページ
-    /// （Game/UI/OptionsModelAssignPage.cs）も同じ UnitAssetBindings.CopyTo を呼ぶため、複製ロジック自体は
-    /// 二重実装しない。全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// Partial class of AssetAssignPanel that isolates only the scope dropdown and button dedicated to
+    /// "Apply to Multiple" (copying the currently selected (faction, unit type) assignment to other
+    /// (faction, type) pairs in one operation), added in Task47 (split off because of the 500-line limit
+    /// on the AssetAssignPanel.cs side; same policy as AssetAssignPanelFaction.cs, with the fields also
+    /// declared here). The actual copy processing is handled by UnitAssetBindings.CopyTo
+    /// (Game/UnitAssetBindings.cs); this file holds only the UI (dropdown construction, click handler).
+    /// The Options subpage (Game/UI/OptionsModelAssignPage.cs) calls the same UnitAssetBindings.CopyTo,
+    /// so the copy logic itself is not implemented twice. All methods are main-thread only
+    /// (they call Unity UI APIs).
     /// </summary>
     internal static partial class AssetAssignPanel
     {
@@ -34,7 +36,7 @@ namespace CSWarfront.Game.UI
             dd.listWidth = (int)width;
             dd.listHeight = 200;
             dd.listPosition = UIDropDown.PopupListPosition.Below;
-            dd.textScale = 0.7f; // 他パネルと統一（やや小さめ、ラベルが長いため）
+            dd.textScale = 0.7f; // unified with the other panels (slightly smaller because the labels are long)
             dd.textFieldPadding = new RectOffset(10, 10, 9, 0);
             dd.itemPadding = new RectOffset(10, 0, 5, 0);
             dd.popupColor = new Color32(45, 52, 61, 255);
@@ -61,9 +63,10 @@ namespace CSWarfront.Game.UI
             return dd;
         }
 
-        /// <summary>「複製適用」ボタンのクリックハンドラ。現在の(勢力,ユニット種別)の割り当てを
-        /// 選択中スコープへ複製し、UnitAssetBindings.CopyTo と同じ「反映」処理（ラベル再構築＋見た目破棄）
-        /// を通す。コピー元に割り当てが無い場合（既定のまま）は CopyTo が0件でスキップしログを残すのみ。</summary>
+        /// <summary>Click handler of the "Apply to Multiple" button. Copies the current (faction, unit
+        /// type) assignment to the selected scope, then runs the same "apply" processing as
+        /// UnitAssetBindings.CopyTo (label rebuild + visual destruction). If the copy source has no
+        /// assignment (still at default), CopyTo skips with 0 entries and only leaves a log entry.</summary>
         private static void OnCopyApplyClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -80,7 +83,7 @@ namespace CSWarfront.Game.UI
                 int written = UnitAssetBindings.CopyTo(SelectedFactionId, _typeKeys[typeIdx], scope);
                 if (written > 0)
                 {
-                    ApplyBindingChange(typeIdx); // 既存のApply/Reset共通反映処理（ラベル再構築＋UnitVisuals.DestroyAll）
+                    ApplyBindingChange(typeIdx); // the shared Apply/Reset apply processing (label rebuild + UnitVisuals.DestroyAll)
                 }
             }
             catch (Exception e)

@@ -6,52 +6,59 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task58: 他MOD（ゴジラ災害＝GodzillaDisaster、エイリアン侵略＝AlienInvasion。同一作者の別MODで、
-    /// 導入されていない場合がある）が生成する怪獣・侵略者を、CSWarfrontの戦闘（Core/ThreatCombatStep）
-    /// に「外部脅威」(ExternalThreat)として橋渡しする。simスレッド専用（MilitaryManager.OnSimTickの
-    /// _stateLock内から呼ぶこと）。
+    /// Task58: Bridges monsters/invaders spawned by other mods (Godzilla disaster = GodzillaDisaster,
+    /// alien invasion = AlienInvasion; separate mods by the same author that may not be installed)
+    /// into CSWarfront's combat (Core/ThreatCombatStep) as "external threats" (ExternalThreat).
+    /// Sim-thread only (must be called from inside MilitaryManager.OnSimTick's _stateLock).
     ///
-    /// 設計方針:
-    ///  - 相手MODのアセンブリをビルド時参照しない（csprojに参照を追加しない）。ロード済みアセンブリ
-    ///    (AppDomain.CurrentDomain.GetAssemblies())から名前でリフレクション解決する。導入されていない
-    ///    環境ではアセンブリが見つからないだけで、エラーにはしない。
-    ///  - 型・メンバの解決はプロセス中1回だけ試み、結果（成功/失敗いずれも）をキャッシュする
-    ///    （「解決できなかった」事実も含めてキャッシュするため、未導入環境で毎tickリフレクションの
-    ///    コストを払わない）。
-    ///  - 相手MODはHP/被弾/撃破APIを公開していないため、HPはCSWarfront側(ExternalThreat)が独自に
-    ///    持つ。0まで削れたら、相手MODの「撃破/強制despawn」用メソッドを探して呼ぶ:
-    ///    Defeat または ForceDespawn（将来追加されるかもしれない、Task58時点では存在しない）を優先し、
-    ///    無ければ ResetForNewLevel（ForceCleanup相当）にフォールバックする。どちらが実際に見つかった
-    ///    かは解決時に1行だけログする。
-    ///  - 何が起きてもゲームループへ例外を投げない（try/catchで握りつぶし、1回だけログしてその
-    ///    MODとの橋渡しをセッション中無効化する）。
+    /// Design principles:
+    ///  - The other mods' assemblies are not referenced at build time (no references added to the
+    ///    csproj). They are resolved by name via reflection from the loaded assemblies
+    ///    (AppDomain.CurrentDomain.GetAssemblies()). In environments where they are not installed the
+    ///    assembly simply is not found; this is not treated as an error.
+    ///  - Type/member resolution is attempted only once per process and the result (whether success
+    ///    or failure) is cached (the fact that resolution failed is cached too, so environments
+    ///    without the mods never pay per-tick reflection costs).
+    ///  - The other mods expose no HP/damage/defeat API, so HP is owned independently by CSWarfront
+    ///    (ExternalThreat). When it is whittled down to 0, we look for the other mod's
+    ///    "defeat/force-despawn" method and call it: Defeat or ForceDespawn (which may be added in the
+    ///    future; neither exists as of Task58) is preferred, falling back to ResetForNewLevel
+    ///    (ForceCleanup equivalent) otherwise. Which one was actually found is logged once at
+    ///    resolution time.
+    ///  - No matter what happens, no exception is thrown into the game loop (swallowed via try/catch,
+    ///    logged once, and the bridge to that mod is disabled for the rest of the session).
     /// </summary>
     internal static class ExternalThreatBridge
     {
-        /// <summary>他MODの現在状態（生死・位置）をState.Threatsへ反映する間隔（ゲーム内時間）。
-        /// 毎tick問い合わせる必要はない＝巨大な怪獣がこの間隔の間だけ位置が古くなっても実害が無い
-        /// （RoadGraph/CoverMapの再構築間引きと同じ考え方）。</summary>
+        /// <summary>Interval (in-game hours) at which the other mods' current state (alive/position)
+        /// is reflected into State.Threats. There is no need to query every tick = a giant monster's
+        /// position being stale for the duration of this interval does no real harm (same reasoning
+        /// as the RoadGraph/CoverMap rebuild throttling).</summary>
         public const float ThreatSyncIntervalHours = 0.1f;
 
-        // HP/装甲テーブル（design指定値、Task58）。相手MODはHPを持たないため、ここがCSWarfront側の
-        // 唯一の真実源になる。Radiusは大型の当たり判定を確保するためThreatCombatStep.ThreatArmorと
-        // 合わせてチューニングした値（ユニットのRangeへ加算される、Core/ThreatCombatStep参照）。
+        // HP/armor table (values specified in the design, Task58). The other mods carry no HP, so
+        // this is CSWarfront's single source of truth. Radius is a value tuned together with
+        // ThreatCombatStep.ThreatArmor to give large targets a usable hitbox (it is added to a
+        // unit's Range, see Core/ThreatCombatStep).
         //
-        // Task64再調整（旧Godzilla20000/Alien8000→65000/26000）: Core/ThreatCombatStep.ThreatArmorを
-        // 20→45へ引き上げた上で、Tier5戦車50両編成（DamagePerHit(104,45)=59 * accuracy0.868 ≈ 51.2/h、
-        // 合計約2560/h）がおおよそゲーム内1日で仕留められる分量へHPを再設定した:
-        //   Godzilla 65000 / 2560 ≈ 25.4h（≈1日強）
-        //   Alien    26000 / 2560 ≈ 10.2h（Godzillaの約40%、より短時間で片付く「小型脅威」の位置づけ）
-        // 爆撃機・観測支援を受けた砲兵はこれより大幅に速く削れる（詳細はtask-64レポート参照）。
-        // 弾道ミサイル(BallisticMissiles.ImpactDamageThreat=2000)も同時に引き上げてあり、5発フル備蓄
-        // (10000)はGodzillaの約15%・Alienの約38%に相当する「戦力を補う一撃」に留まる（単発で解決しない）。
+        // Task64 re-tuning (old Godzilla20000/Alien8000 -> 65000/26000): after raising
+        // Core/ThreatCombatStep.ThreatArmor from 20 to 45, HP was re-set so that a formation of 50
+        // Tier5 tanks (DamagePerHit(104,45)=59 * accuracy0.868 ≈ 51.2/h, ~2560/h total) kills the
+        // threat in roughly one in-game day:
+        //   Godzilla 65000 / 2560 ≈ 25.4h (a bit over 1 day)
+        //   Alien    26000 / 2560 ≈ 10.2h (about 40% of Godzilla; positioned as a "smaller threat"
+        //   dispatched in less time)
+        // Bombers and observer-supported artillery whittle these down far faster (see the task-64
+        // report for details). Ballistic missiles (BallisticMissiles.ImpactDamageThreat=2000) were
+        // raised at the same time; a full stockpile of 5 (10000) amounts to about 15% of Godzilla /
+        // 38% of Alien — a "force-supplementing strike" that does not solve the fight by itself.
         private const float GodzillaMaxHP = 65000f;
         private const float GodzillaRadius = 45f;
         private const float AlienMaxHP = 26000f;
         private const float AlienRadius = 25f;
 
-        // 初期値をThreatSyncIntervalHoursにしておくことで、セッション開始後の最初のOnSimTick呼び出しで
-        // 即座に同期する（RoadGraphBuildRetryと同じ「初回は待たない」方針）。
+        // Initializing to ThreatSyncIntervalHours makes the very first OnSimTick call after session
+        // start sync immediately (same "don't wait on the first pass" policy as RoadGraphBuildRetry).
         private static float _accum = ThreatSyncIntervalHours;
 
         private static readonly MonsterModAdapter _godzilla = new MonsterModAdapter(
@@ -59,29 +66,33 @@ namespace CSWarfront.Game
         private static readonly MonsterModAdapter _alien = new MonsterModAdapter(
             "Alien", "AlienInvasion", "AlienInvasion.Game.InvasionManager", "TryGetAnyTripodPosition");
 
-        // Task83: 各MODのビーム発射記録（ゴジラ光線=RayStrikeLog、トライポッドレーザー=BeamStrikeLog、
-        // どちらも「単調増加ID + float[]スナップショット」形式の公開API）を読み、新着の発射1件につき
-        // Core/ThreatBeamStep.ApplyStrikeでユニットへの一撃ダメージを適用する。
+        // Task83: reads each mod's beam-firing log (Godzilla ray = RayStrikeLog, tripod laser =
+        // BeamStrikeLog; both are public APIs of the form "monotonically increasing ID + float[]
+        // snapshot") and, for each newly arrived firing, applies one-shot damage to units via
+        // Core/ThreatBeamStep.ApplyStrike.
         private static readonly BeamLogAdapter _godzillaBeams = new BeamLogAdapter(
             "Godzilla ray", "GodzillaDisaster", "GodzillaDisaster.Game.RayStrikeLog", ThreatKind.Kaiju);
         private static readonly BeamLogAdapter _alienBeams = new BeamLogAdapter(
             "Alien laser", "AlienInvasion", "AlienInvasion.Game.BeamStrikeLog", ThreatKind.Alien);
 
-        // このブリッジが State.Threats 内で管理しているエントリのId（Godzilla/Alienそれぞれ最大1体。
-        // 相手MOD自体がIsActive/TryGetPositionという単一体前提のAPIしか公開していないため、
-        // CSWarfront側もそれぞれ1体までしか追跡しない）。0は「現在エントリ無し」を表す。
+        // Ids of the entries this bridge manages inside State.Threats (at most one each for
+        // Godzilla/Alien. The other mods themselves only expose single-instance APIs
+        // (IsActive/TryGetPosition), so CSWarfront likewise tracks at most one of each).
+        // 0 means "no entry at present".
         private static uint _godzillaThreatId;
         private static uint _alienThreatId;
         private static uint _nextThreatId = 1;
 
-        /// <summary>simスレッド・_stateLock内から毎tick呼ぶ。内部で間引くため、呼び出し側は間隔を
-        /// 気にしなくてよい。</summary>
-        /// <summary>Task59: GodzillaDisasterが導入されている（アセンブリ+想定メンバが解決できた）か。
-        /// OptionsRelationsPageがKAIJU関係の行を表示するかどうかの判定に使う。初回アクセス時に
-        /// リフレクション解決を1回だけ行い（未導入なら失敗のみキャッシュ）、以後はその結果を返す。</summary>
+        /// <summary>Call every tick from the sim thread inside _stateLock. Throttling is internal, so
+        /// the caller does not need to care about the interval.</summary>
+        /// <summary>Task59: whether GodzillaDisaster is installed (assembly + expected members
+        /// resolved). Used by OptionsRelationsPage to decide whether to show the KAIJU relations rows.
+        /// Reflection resolution is performed exactly once on first access (only the failure is cached
+        /// if not installed) and the result is returned thereafter.</summary>
         public static bool IsGodzillaModPresent { get { return _godzilla.IsAvailable(); } }
 
-        /// <summary>Task59: 上と同じくAlienInvasionの導入判定（Options画面のAlien関係行の表示用）。</summary>
+        /// <summary>Task59: same as above but for AlienInvasion (used to show the Alien rows on the
+        /// Options screen).</summary>
         public static bool IsAlienModPresent { get { return _alien.IsAvailable(); } }
 
         public static void Advance(WarState state, float dt)
@@ -108,8 +119,9 @@ namespace CSWarfront.Game
                 ModConfig.LogError("ExternalThreatBridge: exception while syncing Alien: " + e);
             }
 
-            // Task83: ビーム発射記録の消費（新着があればユニットへダメージ適用）。同期と同じ0.1h間隔で
-            // 十分（実時間では約0.05秒間隔＝発射演出とほぼ同時にダメージが入る）。
+            // Task83: consume the beam-firing logs (apply damage to units if there are new entries).
+            // The same 0.1h interval as the sync is sufficient (in real time roughly every 0.05s =
+            // the damage lands practically simultaneously with the firing visual).
             try
             {
                 _godzillaBeams.Consume(state);
@@ -138,7 +150,8 @@ namespace CSWarfront.Game
 
             if (!resolved || !isActive)
             {
-                // 未導入/恒久エラー/現在非アクティブ：既存エントリがあれば「消えた」扱いで掃除する。
+                // Not installed / permanent error / currently inactive: if an entry exists, treat it
+                // as "gone" and clean it up.
                 RemoveThreat(state, ref threatId);
                 return;
             }
@@ -189,13 +202,13 @@ namespace CSWarfront.Game
             threatId = 0;
         }
 
-        /// <summary>1つの他MOD（Godzilla or Alien）に対するリフレクション橋渡し。型・メンバの解決は
-        /// 1回だけ試み、以後はキャッシュ結果を使い回す。</summary>
+        /// <summary>Reflection bridge to one other mod (Godzilla or Alien). Type/member resolution is
+        /// attempted only once; the cached result is reused thereafter.</summary>
         private sealed class MonsterModAdapter
         {
-            private readonly string _label;          // ログ用（"Godzilla" / "Alien"）
-            private readonly string _assemblyName;    // 例: "GodzillaDisaster"
-            private readonly string _typeName;        // 例: "GodzillaDisaster.Game.GodzillaManager"
+            private readonly string _label;          // for logging ("Godzilla" / "Alien")
+            private readonly string _assemblyName;    // e.g. "GodzillaDisaster"
+            private readonly string _typeName;        // e.g. "GodzillaDisaster.Game.GodzillaManager"
             private readonly string _positionMethodName; // "TryGetPosition" / "TryGetAnyTripodPosition"
 
             private bool _resolveAttempted;
@@ -213,16 +226,18 @@ namespace CSWarfront.Game
                 _positionMethodName = positionMethodName;
             }
 
-            /// <summary>Task59: このMODが導入されている（型・メンバの解決に成功した）かどうか。
-            /// EnsureResolvedは既に「1回だけ試みて以後はキャッシュを返す」実装のため、そのまま公開する。</summary>
+            /// <summary>Task59: whether this mod is installed (type/member resolution succeeded).
+            /// EnsureResolved already implements "attempt once, then return the cache", so it is
+            /// exposed as-is.</summary>
             public bool IsAvailable()
             {
                 return EnsureResolved();
             }
 
-            /// <summary>IsActive/位置を取得する。戻り値falseは「このMODとの橋渡しが使えない」
-            /// （未導入、または解決/呼び出しで恒久的に失敗した）ことを意味し、この場合isActive/positionは
-            /// 無視してよい。戻り値trueでもisActive=falseならそのMODは単に現在非アクティブ。</summary>
+            /// <summary>Gets IsActive/position. A return value of false means "the bridge to this mod
+            /// is unusable" (not installed, or resolution/invocation failed permanently); in that case
+            /// isActive/position may be ignored. A return value of true with isActive=false means the
+            /// mod is simply inactive at the moment.</summary>
             public bool TryGetState(out bool isActive, out Vector3 position)
             {
                 isActive = false;
@@ -243,7 +258,8 @@ namespace CSWarfront.Game
                     }
                     else
                     {
-                        // IsActiveなのに位置が取れない：この一瞬は「対象なし」として扱う（次回再試行）。
+                        // IsActive but no position available: treat this instant as "no target"
+                        // (retry next time).
                         isActive = false;
                     }
                     return true;
@@ -256,14 +272,15 @@ namespace CSWarfront.Game
                         ModConfig.LogError("ExternalThreatBridge: " + _label +
                             " state retrieval error, disabling the bridge for the rest of this session: " + e);
                     }
-                    _available = false; // 以後 EnsureResolved は再試行せずfalseを返す
+                    _available = false; // from now on EnsureResolved returns false without retrying
                     return false;
                 }
             }
 
-            /// <summary>撃破時のdespawn呼び出し（Defeat/ForceDespawnがあればそれ、無ければ
-            /// ResetForNewLevel）。橋渡しが無効なら何もしない。例外はログのみで飲み込む
-            /// （撃破ログ自体は先に出ているため、despawn呼び出し失敗でゲームを止める理由が無い）。</summary>
+            /// <summary>Despawn call on defeat (Defeat/ForceDespawn if present, ResetForNewLevel
+            /// otherwise). Does nothing if the bridge is disabled. Exceptions are swallowed with only
+            /// a log entry (the defeat log line has already been emitted, so there is no reason to
+            /// halt the game over a failed despawn call).</summary>
             public void Despawn()
             {
                 if (!_available || _despawnMethod == null) return;
@@ -288,7 +305,7 @@ namespace CSWarfront.Game
                     Assembly asm = FindAssembly(_assemblyName);
                     if (asm == null)
                     {
-                        // 未導入：エラーではない。DIAG同様、常時ログしない（規約）。
+                        // Not installed: not an error. As with DIAG, do not log routinely (convention).
                         _available = false;
                         return false;
                     }
@@ -314,9 +331,10 @@ namespace CSWarfront.Game
                         return false;
                     }
 
-                    // Defeat/ForceDespawn（将来追加されるかもしれない専用API）を優先し、無ければ
-                    // ResetForNewLevelへフォールバックする。ビルド時参照を持たないため、実際に
-                    // 何が見つかったかはこの1回のリフレクション解決でしか分からない＝ここで報告する。
+                    // Prefer Defeat/ForceDespawn (dedicated APIs that may be added in the future) and
+                    // fall back to ResetForNewLevel otherwise. Since there is no build-time reference,
+                    // the only way to know what was actually found is this one-time reflection
+                    // resolution = report it here.
                     MethodInfo despawn = type.GetMethod("Defeat", BindingFlags.Public | BindingFlags.Static)
                         ?? type.GetMethod("ForceDespawn", BindingFlags.Public | BindingFlags.Static)
                         ?? resetMethod;
@@ -348,10 +366,11 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task83: 1つの他MODのビーム発射記録（CurrentId(): long / Snapshot(): float[]、
-        /// 新しい順に {id, startX, startZ, endX, endZ} ×N）へのリフレクション橋渡し。
-        /// MonsterModAdapterと同じ「解決は1回だけ・恒久エラーでセッション中無効化・
-        /// ゲームループへ例外を投げない」方針。simスレッド・_stateLock内から呼ぶこと。</summary>
+        /// <summary>Task83: reflection bridge to one other mod's beam-firing log (CurrentId(): long /
+        /// Snapshot(): float[], newest first, {id, startX, startZ, endX, endZ} ×N).
+        /// Same policy as MonsterModAdapter: "resolve only once, disable for the rest of the session
+        /// on a permanent error, never throw into the game loop". Must be called from the sim thread
+        /// inside _stateLock.</summary>
         private sealed class BeamLogAdapter
         {
             private readonly string _label;
@@ -365,10 +384,11 @@ namespace CSWarfront.Game
             private MethodInfo _snapshotMethod;
             private bool _errorLogged;
 
-            /// <summary>既読の発射ID。-1は「未ベースライン」＝最初のConsumeで現在IDを既読に設定し、
-            /// それ以前の発射（前セッションの残骸等）へダメージを適用しない。相手MOD側のIDは
-            /// レベル再読込でも巻き戻らない（RayStrikeLog/BeamStrikeLogの契約）ため、この既読IDも
-            /// リセット不要。</summary>
+            /// <summary>Last consumed firing ID. -1 means "not yet baselined" = the first Consume sets
+            /// the current ID as consumed, so firings before it (leftovers from a previous session,
+            /// etc.) never deal damage. The other mod's IDs never roll back even across level reloads
+            /// (contract of RayStrikeLog/BeamStrikeLog), so this consumed ID also needs no
+            /// reset.</summary>
             private long _lastConsumedId = -1;
 
             public BeamLogAdapter(string label, string assemblyName, string typeName, ThreatKind kind)
@@ -388,7 +408,7 @@ namespace CSWarfront.Game
                     long current = (long)_currentIdMethod.Invoke(null, null);
                     if (_lastConsumedId < 0)
                     {
-                        _lastConsumedId = current; // ベースライン: 過去の発射は適用しない
+                        _lastConsumedId = current; // baseline: past firings are not applied
                         return;
                     }
                     if (current <= _lastConsumedId) return;
@@ -397,7 +417,7 @@ namespace CSWarfront.Game
                     for (int s = 0; s + 4 < snap.Length; s += 5)
                     {
                         long id = (long)snap[s];
-                        if (id <= _lastConsumedId) break; // 新しい順なので既読IDに達したら終了
+                        if (id <= _lastConsumedId) break; // newest first, so stop once we hit a consumed ID
 
                         int hits = ThreatBeamStep.ApplyStrike(state, _kind,
                             snap[s + 1], snap[s + 2], snap[s + 3], snap[s + 4]);
@@ -430,14 +450,15 @@ namespace CSWarfront.Game
                     Assembly asm = FindBeamAssembly(_assemblyName);
                     if (asm == null)
                     {
-                        _available = false; // 未導入: エラーではない
+                        _available = false; // not installed: not an error
                         return false;
                     }
 
                     Type type = asm.GetType(_typeName);
                     if (type == null)
                     {
-                        // 旧バージョンの相手MOD（発射記録APIがまだ無い）: エラーではなく単に機能無効。
+                        // Older version of the other mod (strike-log API not present yet): not an
+                        // error, the feature is simply disabled.
                         ModConfig.Log("ExternalThreatBridge: " + _label + " strike log not found (" + _typeName +
                             "); beam damage to units is disabled (older mod version?).");
                         _available = false;

@@ -9,52 +9,62 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task74: Mod Options（Game/Mod.cs、OnSettingsUI）内に直接構築する「基地に使う建物」サブページ。
+    /// Task74: "Base Buildings" subpage built directly inside Mod Options (Game/Mod.cs, OnSettingsUI).
     ///
-    /// 従来（Task18〜）は電力タブに複製した専用プレハブ（WarfrontBasePrefab、見た目はまだ風力タービンの
-    /// ままでツールバーのサムネイルも紛らわしい）を配置することでのみ基地を作れた。本ページはその代わりに
-    /// 「Optionで既存の建物アセットを基地種別ごとに1つ指定しておけば、その建物をプレイヤーが（その建物
-    /// 自身の通常のメニューから）どこにでも建てるだけで、それが自動的にその種別の基地として機能する」
-    /// 方式を追加する（見た目の差し替え・Hidden化トリックは一切無い。アセットは常にネイティブの見た目の
-    /// まま）。永続化は<see cref="BaseBuildingDesignation"/>（&lt;modDir&gt;\base-buildings.txt）が担当し、
-    /// 実際の認識（新規配置イベント→論理MilitaryBase登録）は BasePlacementWatcher.ProcessCreated が行う。
+    /// Previously (Task18 onward), bases could only be created by placing a dedicated prefab cloned
+    /// into the electricity tab (WarfrontBasePrefab, still visually a wind turbine with a confusing
+    /// toolbar thumbnail). This page instead adds a scheme where "if you designate one existing
+    /// building asset per base type in Options, then the player simply builds that building anywhere
+    /// (from that building's own normal menu) and it automatically functions as a base of that type"
+    /// (no visual swapping or Hidden-flag tricks at all; the asset always keeps its native
+    /// appearance). Persistence is handled by <see cref="BaseBuildingDesignation"/>
+    /// (&lt;modDir&gt;\base-buildings.txt), and the actual recognition (new-placement event ->
+    /// logical MilitaryBase registration) is done by BasePlacementWatcher.ProcessCreated.
     ///
-    /// Task81で電力タブのクローンプレハブ（WarfrontBasePrefab）はツールバーからのフォールバック配置
-    /// 経路として廃止し（m_availableIn = ItemClass.Availability.None）、Task82で複製プレハブ機構自体
-    /// （登録・実行時複製・見た目差し替え等一式）を完全撤去した。既存セーブに置かれていた旧クローン
-    /// プレハブの建物は、この撤去以降はもう論理基地として登録されない（この点はユーザーの明示的な
-    /// 判断により許容された、既存セーブ互換性の放棄）。基地配置は本ページでの指定
-    /// （BaseBuildingDesignation）が唯一の経路であり——未指定の基地種別は配置手段が無い状態になる
-    /// （本ページのヒントラベルで明示する）。
+    /// In Task81 the electricity-tab clone prefab (WarfrontBasePrefab) was retired as a fallback
+    /// placement path from the toolbar (m_availableIn = ItemClass.Availability.None), and in Task82
+    /// the clone-prefab machinery itself (registration, runtime cloning, visual swapping, the whole
+    /// set) was completely removed. Buildings of the old clone prefab placed in existing saves are no
+    /// longer registered as logical bases after this removal (this was accepted by the user's
+    /// explicit decision as an abandonment of existing-save compatibility). Base placement now goes
+    /// solely through the designation on this page (BaseBuildingDesignation) — base types with no
+    /// designation end up with no placement means at all (stated explicitly on this page's hint
+    /// label).
     ///
-    /// UI構成: OptionsModelAssignPageと同じ制約（ICities.UIHelperBase はスクロール一覧を持たないため、
-    /// 検索欄で絞り込んでからドロップダウンで選ぶ方式）に従う。検索欄・「サブスクライブ済みのみ」トグルは
-    /// 4行（陸軍/海軍/空軍/ミサイル）で共有し、各行は「種別ラベル付きドロップダウン」「現在の指定」表示
-    /// ラベル・「既定に戻す」ボタンの3点で構成する（複製適用・勢力別のような追加概念は無い＝基地種別ごとに
-    /// 単一のグローバルな指定のため、勢力ドロップダウンやTypeKeyコンセプトは持ち込まない）。
+    /// UI composition: follows the same constraint as OptionsModelAssignPage (ICities.UIHelperBase
+    /// has no scrollable list, so it is the "narrow down with the search field, then pick from a
+    /// dropdown" scheme). The search field and the "Subscribed only" toggle are shared by the 4 rows
+    /// (army/navy/air/missile), and each row consists of 3 parts: a "dropdown labeled with the type",
+    /// a "current designation" display label, and a "Reset to Default" button (no extra concepts like
+    /// apply-copy or per-faction settings = there is a single global designation per base type, so
+    /// neither the faction dropdown nor the TypeKey concept is brought in).
     ///
-    /// ドロップダウンの選択は即座に反映される（OptionsModelAssignPageの「適用」ボタンとは異なり、本ページ
-    /// では各行が独立した単一のドロップダウンのため、選ぶ操作自体が「この種別にはこのアセット」という
-    /// 唯一の意思表示になる。「（未選択）」を選ぶことは「既定に戻す」ボタンと同じ意味＝指定解除）。
+    /// The dropdown selection takes effect immediately (unlike OptionsModelAssignPage's "Apply"
+    /// button, each row on this page is a single independent dropdown, so the act of selecting is
+    /// itself the only expression of intent "this asset for this type". Selecting "(none selected)"
+    /// means the same as the "Reset to Default" button = clearing the designation).
     ///
-    /// Task52バグ修正と同じパターン: OptionsMainPanelはMODのOnSettingsUIをOptions画面を開くたびには
-    /// 再実行しない（詳細はOptionsRelationsPage.csのクラス冒頭コメント参照）ため、グループパネルの
-    /// eventVisibilityChangedを購読し、このMODのOptionsタブが選択されるたびにRefreshFromStateで
-    /// ドロップダウン内容・現在の指定表示・isEnabled・ヒントラベルを再同期する。
+    /// Same pattern as the Task52 bug fix: OptionsMainPanel does not re-run a mod's OnSettingsUI
+    /// every time the Options screen is opened (see the class-header comment of
+    /// OptionsRelationsPage.cs for details), so subscribe to the group panel's
+    /// eventVisibilityChanged and, every time this mod's Options tab is selected, re-sync the
+    /// dropdown contents, the current-designation display, isEnabled, and the hint label via
+    /// RefreshFromState.
     ///
-    /// 「既存の建物は対象外」: BasePlacementWatcher.ProcessCreatedはCSのEventBuildingCreatedイベント
-    /// （新規配置/道路移動含む再作成時にのみ発火）にのみ反応するため、指定した瞬間に既に建っている
-    /// 同名アセットの建物が遡って基地化することは無い（本ページのヒントラベルで明示する）。
+    /// "Existing buildings are not covered": BasePlacementWatcher.ProcessCreated reacts only to CS's
+    /// EventBuildingCreated event (fired only on new placement / re-creation including road moves),
+    /// so buildings of the same-named asset already standing at the moment of designation are never
+    /// retroactively converted into bases (stated explicitly on this page's hint label).
     ///
-    /// 全メソッドはメインスレッド専用（Unity UI API呼び出しのため）。
+    /// All methods are main-thread only (they call Unity UI APIs).
     /// </summary>
     internal static class OptionsBaseBuildingPage
     {
         private const string GroupTitle = "Base Buildings";
         private const string NoSelectionLabel = "(none selected)";
 
-        // 行の並び。UnitAssetBindingsBaseTypesの表示ラベル定数をそのまま流用する（UI文言の一元管理）。
-        // Task101: 野戦築城5種（Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation）の指定行を追加。
+        // Row order. Reuses the display-label constants of UnitAssetBindingsBaseTypes as-is (single source for UI wording).
+        // Task101: added designation rows for the 5 field-fortification types (Bunker/ArtilleryPost/SupplyDepot/Trench/CargoStation).
         private static readonly BaseType[] RowTypes =
         {
             BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase,
@@ -82,7 +92,7 @@ namespace CSWarfront.Game.UI
         private static bool _customOnly = true;
         private static bool _suppressEvents;
 
-        /// <summary>Mod.OnSettingsUIから呼ぶ。渡された helper 配下に「基地に使う建物」グループを構築する。</summary>
+        /// <summary>Called from Mod.OnSettingsUI. Builds the "Base Buildings" group under the given helper.</summary>
         public static void Build(UIHelperBase helper)
         {
             try
@@ -119,13 +129,14 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>1行分（種別ラベル付きドロップダウン＋現在の指定ラベル＋既定に戻すボタン）を構築する。
-        /// 戻り値は最後に生成したコントロール（ヒントラベルをその直後へ並べるためにBuildが使う）。</summary>
+        /// <summary>Builds one row (dropdown labeled with the type + current-designation label +
+        /// Reset to Default button). Returns the last control created (Build uses it to place the hint
+        /// label right after it).</summary>
         private static object BuildRow(UIHelperBase group, UIComponent groupPanel, int index)
         {
             BaseType type = RowTypes[index];
             string displayName = RowDisplayNames[index];
-            int rowIndex = index; // クロージャ捕獲用ローカルコピー
+            int rowIndex = index; // local copy for closure capture
 
             UIDropDown dd = group.AddDropdown(displayName, new[] { NoSelectionLabel }, 0,
                 i => OnAssetSelected(rowIndex, i)) as UIDropDown;
@@ -149,8 +160,8 @@ namespace CSWarfront.Game.UI
             return resetObj;
         }
 
-        /// <summary>ヒントラベルを最後のコントロールの直後（同じ親パネル内）に追加する
-        /// （OptionsModelAssignPage.CreateNoteLabelと同じ手法）。</summary>
+        /// <summary>Adds the hint label right after the last control (inside the same parent panel)
+        /// (same technique as OptionsModelAssignPage.CreateNoteLabel).</summary>
         private static UILabel CreateNoteLabel(object afterObj, UIComponent fallbackParent)
         {
             try
@@ -175,16 +186,17 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>グループパネルのeventVisibilityChangedハンドラ（Task52バグ修正と同じパターン）。
-        /// isVisible==trueの時だけRefreshFromStateを呼ぶ。</summary>
+        /// <summary>eventVisibilityChanged handler for the group panel (same pattern as the Task52
+        /// bug fix). Calls RefreshFromState only when isVisible==true.</summary>
         private static void OnGroupVisibilityChanged(UIComponent component, bool isVisible)
         {
             if (!isVisible) return;
             RefreshFromState();
         }
 
-        /// <summary>Build()での初回構築時、および以後Options内でこのMODのタブが選択されるたびに呼ぶ
-        /// 共通の再同期処理。新しいコントロールは一切生成しない。例外はここで握りつぶす。</summary>
+        /// <summary>Common re-sync routine called on initial construction in Build() and thereafter
+        /// every time this mod's tab is selected inside Options. No new controls are ever created.
+        /// Exceptions are swallowed here.</summary>
         private static void RefreshFromState()
         {
             try
@@ -215,9 +227,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>マップ未ロード（メインメニュー等）で建物アセットが1件も無い状況の案内。
-        /// Task93（ユーザー要望）: 常時表示だった使い方の注記（電力タブ云々の黄色文字）は撤去し、
-        /// アセット一覧が空のときの案内だけを残す。</summary>
+        /// <summary>Notice for the situation where no building assets exist at all because no map is
+        /// loaded (main menu etc.). Task93 (user request): the always-shown usage note (the yellow
+        /// text about the electricity tab etc.) was removed; only the notice for when the asset list
+        /// is empty remains.</summary>
         private static void RefreshHint(bool stateReady)
         {
             if (_hintLabel == null) return;
@@ -245,11 +258,12 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>4行すべてのドロップダウンのitems/selectedIndexを、現在のフィルタ結果＋各行の現在の
-        /// 指定（BaseBuildingDesignation.TryGet）に合わせて再構築する。_suppressEventsで囲むため、
-        /// 「検索/トグルの都合でフィルタから外れた指定」がここでOnAssetSelected経由で誤ってClearされる
-        /// ことは無い（実際の指定はBaseBuildingDesignation側の値のみを信頼し、ドロップダウンの見た目上の
-        /// selectedIndexとは独立に扱う）。</summary>
+        /// <summary>Rebuilds items/selectedIndex of all 4 row dropdowns to match the current filter
+        /// result plus each row's current designation (BaseBuildingDesignation.TryGet). Because this is
+        /// wrapped in _suppressEvents, "a designation dropped from the filter due to search/toggle
+        /// state" is never mistakenly Cleared here via OnAssetSelected (the actual designation trusts
+        /// only the value on the BaseBuildingDesignation side and is treated independently of the
+        /// dropdown's visual selectedIndex).</summary>
         private static void RefreshAllRowDropdownItems()
         {
             string[] items = new string[_filteredNames.Count + 1];
@@ -300,8 +314,9 @@ namespace CSWarfront.Game.UI
                 return;
             }
 
-            // Task109: 手動指定が無く、購読済みのCS:WARFRONT用アセットを自動検出して使っている場合は
-            // その旨を出す（このまま使えるが、ドロップダウンでいつでも別アセットへ切り替えられる）。
+            // Task109: when there is no manual designation and a subscribed CS:WARFRONT asset was
+            // auto-detected and is in use, say so (it works as-is, but the dropdown can switch to a
+            // different asset at any time).
             label.text = BaseBuildingDesignation.IsAutoAssigned(RowTypes[rowIndex])
                 ? "Current designation: " + current + "  (auto-detected)"
                 : "Current designation: " + current;
@@ -335,15 +350,16 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>AddTextfieldのOnTextSubmitted用no-op（OnTextChangedだけで絞り込み済みのため）。</summary>
+        /// <summary>No-op for AddTextfield's OnTextSubmitted (OnTextChanged alone already filters).</summary>
         private static void OnSearchTextSubmitted(string value)
         {
         }
 
-        /// <summary>行のドロップダウン選択が変わった時の処理。index0（未選択）を選ぶことは
-        /// 「既定に戻す」ボタンと同じ意味（指定解除）として扱う。それ以外はフィルタ後の一覧から
-        /// 該当アセット名を指定として直ちに保存する（このページには「適用」ボタンは無い＝選ぶ操作自体が
-        /// 唯一の意思表示のため）。</summary>
+        /// <summary>Handler for when a row's dropdown selection changes. Selecting index 0 (none
+        /// selected) is treated the same as the "Reset to Default" button (clearing the designation).
+        /// Otherwise the matching asset name from the filtered list is saved as the designation
+        /// immediately (this page has no "Apply" button = the act of selecting is itself the only
+        /// expression of intent).</summary>
         private static void OnAssetSelected(int rowIndex, int selectedIndex)
         {
             try
@@ -376,7 +392,7 @@ namespace CSWarfront.Game.UI
                 if (rowIndex < 0 || rowIndex >= RowTypes.Length) return;
 
                 BaseBuildingDesignation.Clear(RowTypes[rowIndex]);
-                RefreshAllRowDropdownItems(); // ドロップダウンの見た目上の選択も「（未選択）」へ戻す
+                RefreshAllRowDropdownItems(); // also revert the dropdown's visual selection to "(none selected)"
                 RefreshRowLabel(rowIndex);
             }
             catch (Exception e)

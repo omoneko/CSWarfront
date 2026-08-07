@@ -6,18 +6,22 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task102（ユーザー要望「軍事MOD関連の建物を一か所のタブにまとめたい。警察タブ・災害対策タブ・
-    /// 港タブから探すのが面倒」）: 軍事建設パネル。
+    /// Task102 (user request "I want the military mod's buildings gathered in one tab. Hunting for
+    /// them across the Police tab, Disaster Services tab, and Harbor tab is a pain"): the military
+    /// construction panel.
     ///
-    /// Optionsで指定済みの軍事建物9種（基地4＋築城5）をボタンとして1つのパネルに並べ、クリックすると
-    /// バニラのBuildingToolをそのアセットで起動する（＝どの建設タブにあるアセットかを気にせず、
-    /// このパネルが実質的な「軍事タブ」になる）。ツールバーへの本物のカスタムタブ注入は
-    /// バニラUI内部構造への依存が強く壊れやすいため採用しない（設計判断。ユーザー承認済み）。
+    /// Lines up the 9 military building kinds designated in Options (4 bases + 5 fortifications) as
+    /// buttons on a single panel; clicking one starts the vanilla BuildingTool with that asset
+    /// (i.e. this panel effectively becomes the "military tab" without caring which construction
+    /// tab an asset actually lives in). Injecting a real custom tab into the toolbar is not adopted
+    /// because it depends heavily on vanilla UI internals and is fragile (design decision, approved
+    /// by the user).
     ///
-    /// 開閉: ホットキー（WarfrontSettings.BuildPanelKey、既定Numpad4）と常駐の小ボタン
-    /// （ドラッグで移動可）。配置ツールの解除は通常のバニラ操作（Esc/右クリック）そのまま。
-    /// 未指定/未購読の種別はグレーアウト表示。パネルを開くたびに指定内容を再読込する。
-    /// 全メソッドはメインスレッド専用（WarfrontThreadingExtension.OnUpdateから駆動）。
+    /// Open/close: a hotkey (WarfrontSettings.BuildPanelKey, default Numpad4) and a small resident
+    /// button (movable by dragging). Cancelling the placement tool is the ordinary vanilla
+    /// operation (Esc/right click) unchanged. Kinds that are undesignated/unsubscribed are shown
+    /// grayed out. The designations are reloaded every time the panel opens.
+    /// All methods are main-thread only (driven from WarfrontThreadingExtension.OnUpdate).
     /// </summary>
     internal static class MilitaryBuildPanel
     {
@@ -40,41 +44,42 @@ namespace CSWarfront.Game.UI
         private static UIButton[] _rowButtons;
         private static UIButton _toggleButton;
 
-        /// <summary>このパネル経由で建設ツールを起動中か（Escキャンセル処理用）。</summary>
+        /// <summary>Whether the construction tool was started via this panel (for the Esc-cancel handling).</summary>
         private static bool _placementActive;
 
-        /// <summary>毎フレーム（メインスレッド）: 生成・ホットキー・メニュー連動・Escキャンセル。</summary>
+        /// <summary>Every frame (main thread): creation, hotkey, menu synchronization, Esc cancel.</summary>
         public static void Update()
         {
             if (!PanelChrome.IsGameReadyForUi()) return;
 
             EnsureCreated();
 
-            // 実機バグ修正（ユーザー報告「Escを押しても建築状態からキャンセルされない」）:
-            // バニラでは建設メニュー（GeneratedGroupPanel）がEscを受けてツールを解除するが、
-            // 本パネルはメニュー外からSetToolしているためその経路が無い。ここでEscを検知して
-            // 明示的にDefaultToolへ戻し、同フレームで開いてしまったポーズメニューは閉じる
-            // （＝バニラ同様「1回目のEscは配置キャンセル、2回目でメニュー」という体感にする）。
+            // Live-game bug fix (user report "pressing Esc does not cancel out of build mode"):
+            // in vanilla, the construction menu (GeneratedGroupPanel) receives Esc and clears the
+            // tool, but this panel calls SetTool from outside that menu, so that path does not
+            // exist. Detect Esc here, explicitly return to DefaultTool, and close the pause menu
+            // that opened in the same frame (i.e. reproduce the vanilla feel of "first Esc cancels
+            // placement, second Esc opens the menu").
             if (_placementActive)
             {
                 ToolBase current = ToolsModifierControl.toolController != null
                     ? ToolsModifierControl.toolController.CurrentTool : null;
                 if (!(current is BuildingTool))
                 {
-                    _placementActive = false; // 配置完了/他ツールへ切替済み
+                    _placementActive = false; // placement finished / already switched to another tool
                 }
                 else if (Input.GetKeyDown(KeyCode.Escape))
                 {
                     ToolsModifierControl.SetTool<DefaultTool>();
                     _placementActive = false;
-                    try { UIView.library.Hide("PauseMenu"); } catch (Exception) { /* 開いていなければ無視 */ }
+                    try { UIView.library.Hide("PauseMenu"); } catch (Exception) { /* ignore if not open */ }
                     return;
                 }
             }
 
             if (_panel != null && _panel.isVisible && PanelChrome.IsGameMenuOpen())
             {
-                _panel.Hide(); // ESCメニュー中は他パネルと同じく非表示
+                _panel.Hide(); // hidden while the ESC menu is open, same as the other panels
                 return;
             }
 
@@ -88,7 +93,7 @@ namespace CSWarfront.Game.UI
             if (_panel.isVisible) _panel.Hide();
             else
             {
-                RefreshRows(); // 開くたびに指定内容を再読込（Optionsで変更した直後も正しく反映）
+                RefreshRows(); // reload the designations every open (also reflects changes made in Options just now)
                 _panel.Show();
                 _panel.BringToFront();
             }
@@ -111,10 +116,12 @@ namespace CSWarfront.Game.UI
                 _toggleButton.normalBgSprite = "ButtonMenu";
                 _toggleButton.hoveredBgSprite = "ButtonMenuHovered";
                 _toggleButton.pressedBgSprite = "ButtonMenuPressed";
-                // Task110: 画面最上段のアイコンの並び（左上の丸ボタン2つの右隣）へ置く（ユーザー要望）。
+                // Task110: Place it in the top row of screen icons (to the right of the two round
+                // buttons at top-left) (user request).
                 _toggleButton.relativePosition = new Vector3(150f, 10f);
-                // 実機バグ修正: ボタン全面を覆うUIDragHandleがクリックを奪うことがあるため、
-                // 常駐ボタンはドラッグ不可の固定位置にする（クリックの確実性を優先）。
+                // Live-game bug fix: a UIDragHandle covering the whole button can steal clicks, so
+                // the resident button is made non-draggable at a fixed position (click reliability
+                // takes priority).
                 _toggleButton.eventClick += (c, e) => Toggle();
             }
 
@@ -125,11 +132,11 @@ namespace CSWarfront.Game.UI
                 _panel.backgroundSprite = "MenuPanel2";
                 _panel.width = PanelWidth;
                 _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f) + Pad;
-                _panel.relativePosition = new Vector3(150f, 55f); // Task110: 最上段のボタンの直下に開く
+                _panel.relativePosition = new Vector3(150f, 55f); // Task110: opens directly below the top-row button
                 _panel.isVisible = false;
 
-                // 実機バグ修正: ドラッグハンドルが×ボタンまで覆ってクリックを奪っていたため、
-                // ハンドル幅を×ボタンの手前までに縮める。
+                // Live-game bug fix: the drag handle used to cover even the x button and steal its
+                // clicks, so shrink the handle width to stop just short of the x button.
                 UIDragHandle drag = _panel.AddUIComponent<UIDragHandle>();
                 drag.target = _panel;
                 drag.size = new Vector2(PanelWidth - 34f, 28f);
@@ -164,7 +171,7 @@ namespace CSWarfront.Game.UI
                     b.pressedBgSprite = "ButtonMenuPressed";
                     b.disabledBgSprite = "ButtonMenuDisabled";
                     b.relativePosition = new Vector3(Pad, Pad + 28f + i * (RowHeight + 4f));
-                    int rowIndex = i; // クロージャ用コピー
+                    int rowIndex = i; // copy for the closure
                     b.eventClick += (c, e) => OnRowClick(rowIndex);
                     _rowButtons[i] = b;
                 }
@@ -192,7 +199,7 @@ namespace CSWarfront.Game.UI
                 }
                 else
                 {
-                    // 未指定（Optionsで建物を選んでいない）/ 指定アセットが未ロード。
+                    // Undesignated (no building chosen in Options) / designated asset not loaded.
                     b.text = RowDisplayNames[i] + (designated ? " (asset missing)" : " (not set)");
                     b.tooltip = "Assign a building in Options > Base Buildings";
                     b.isEnabled = false;
@@ -214,17 +221,20 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                // Task106: 塹壕はライン敷設モード（2点右クリックで連続配置。バニラ配置ツールを
-                // 使わないため「道路に接して配置」要件を受けない）。
+                // Task106: Trenches use line-laying mode (continuous placement between two
+                // right-clicked points. It does not use the vanilla placement tool, so it is not
+                // subject to the "must be placed adjacent to a road" requirement).
                 if (RowTypes[rowIndex] == BaseType.Trench)
                 {
                     TrenchLineTargeting.Begin();
-                    if (_panel != null) _panel.Hide(); // 地面クリックの邪魔にならないよう閉じる
+                    if (_panel != null) _panel.Hide(); // close so it does not get in the way of ground clicks
                     return;
                 }
 
-                // バニラの建設ツールを直接このプレハブで起動する（BuildingToolは常設のバニラツール
-                // なのでSetTool<T>の事前登録は不要）。以後の配置・回転・解除は通常の建設操作そのまま。
+                // Start the vanilla construction tool directly with this prefab (BuildingTool is a
+                // permanently-registered vanilla tool, so no pre-registration is needed for
+                // SetTool<T>). Placement, rotation, and cancellation afterwards are the ordinary
+                // construction operations unchanged.
                 BuildingTool tool = ToolsModifierControl.SetTool<BuildingTool>();
                 if (tool == null)
                 {
@@ -233,7 +243,7 @@ namespace CSWarfront.Game.UI
                 }
                 tool.m_prefab = info;
                 tool.m_relocate = 0;
-                _placementActive = true; // Escキャンセル処理（Update）の対象にする
+                _placementActive = true; // make it subject to the Esc-cancel handling (Update)
                 CommandToast.Show("Placing: " + RowDisplayNames[rowIndex] + "  (Esc to cancel)");
             }
             catch (Exception e)
@@ -242,7 +252,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（WarfrontLoadingExtension経由）: 参照を破棄して次のロードで再生成。</summary>
+        /// <summary>On level unload (via WarfrontLoadingExtension): discard references so the next load recreates them.</summary>
         public static void Reset()
         {
             _panel = null;

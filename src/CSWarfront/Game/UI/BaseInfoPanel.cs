@@ -8,23 +8,25 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// 軍事基地建物（Options指定建物、<see cref="BaseBuildingDesignation"/>）の情報パネル（Task25、
-    /// Task82で電力タブの複製プレハブ機構撤去に伴い名称・コメントを現行方式に合わせて更新）。
-    /// バニラの建物情報パネル（CityServiceWorldInfoPanel、指定建物自身のもの）が表示されている間、
-    /// 選択中の建物が登録済み論理基地（MilitaryManager.State.Bases）であれば、その隣に所属勢力
-    /// ドロップダウンとステータスを表示する自前の小さな UIPanel を出す。
+    /// Info panel for military base buildings (Options-designated buildings, <see cref="BaseBuildingDesignation"/>)
+    /// (Task25; names/comments updated to the current approach in Task82 when the duplicated
+    /// electricity-tab prefab mechanism was removed).
+    /// While the vanilla building info panel (CityServiceWorldInfoPanel, the designated building's own panel)
+    /// is shown, if the selected building is a registered logical base (MilitaryManager.State.Bases),
+    /// display our own small UIPanel next to it with an owning-faction dropdown and status.
     ///
-    /// バニラパネルの中へ直接 AddUIComponent するのではなく、独立した UIPanel を UIView 直下に
-    /// 生成してバニラパネルの右（画面外なら左）に追従させる方式を採る：バニラの
-    /// BuildingWorldInfoPanel 系は内部で自前の子要素レイアウトを RefreshData 等のたびに再計算しており、
-    /// 直接子として差し込むと将来のバニラ側リフレッシュで位置崩れ・消失（DisastersPanel の
-    /// RefreshPanel と同様の再生成）を起こすリスクがある。独立パネルなら影響を受けない
-    /// （MissileDisaster.Game.UI.MissilePanel と同じ「UIView直下の常設パネル」方式）。
+    /// Rather than AddUIComponent-ing directly into the vanilla panel, we create an independent UIPanel
+    /// directly under UIView and make it follow to the right of the vanilla panel (or left if off-screen):
+    /// the vanilla BuildingWorldInfoPanel family internally recomputes its own child layout on every
+    /// RefreshData etc., so inserting ourselves as a direct child risks position corruption/disappearance
+    /// on future vanilla-side refreshes (the same kind of regeneration as DisastersPanel's RefreshPanel).
+    /// An independent panel is unaffected (the same "permanent panel directly under UIView" approach as
+    /// MissileDisaster.Game.UI.MissilePanel).
     ///
-    /// スレッド注記: このクラスの public メソッドは全てメインスレッド専用（Unity UI API呼び出しのため）。
-    /// WarfrontThreadingExtension.OnUpdate から毎フレーム呼ばれる想定。WarState へは一切直接触れず、
-    /// MilitaryManager.TryGetBaseSnapshot / TrySetBaseOwner 経由でのみ読み書きする（_stateLock は
-    /// それらの内部で短時間だけ取られ、ここでは保持しない）。
+    /// Threading note: all public methods of this class are main-thread only (they call Unity UI APIs).
+    /// They are expected to be called every frame from WarfrontThreadingExtension.OnUpdate. They never
+    /// touch WarState directly; reads/writes go only through MilitaryManager.TryGetBaseSnapshot /
+    /// TrySetBaseOwner (_stateLock is taken only briefly inside those and is never held here).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
@@ -32,12 +34,14 @@ namespace CSWarfront.Game.UI
         private const string VanillaPanelName = "CityServiceWorldInfoPanel";
         private const string TitleText = "CSWarfront Military Base";
 
-        // Task33: 旧260pxではステータス行（特に「生産中: MechInfantry_T5  62%  (残り 3.0h)」のような
-        // 長い1行）が wordWrap 前提の幅に収まらず、実機で単語単位の折り返し→パネルからのはみ出しが
-        // 発生していた。ラベル側は wordWrap=false に固定して1行を必ず1行のまま描画する方針に変え、
-        // パネル側はその最長行がtextScale=0.75で収まる幅まで拡張する（文字幅は全角≈16px/半角≈9px @
-        // scale1.0 の概算に安全マージンを加えた見積り。最長行「生産中: ...」で概算約269px、
-        // 実測フォントとの誤差に備え340px（内側幅324px）を確保）。
+        // Task33: at the old 260px, status lines (especially long single lines like
+        // "Producing: MechInfantry_T5  62%  (3.0h left)") did not fit the wordWrap-oriented width,
+        // and on real hardware word-level wrapping caused overflow out of the panel. The policy was
+        // changed to pin the labels to wordWrap=false so one line is always rendered as one line, and
+        // widen the panel until the longest line fits at textScale=0.75 (character width estimated at
+        // full-width≈16px / half-width≈9px @ scale1.0 plus a safety margin; the longest line
+        // "Producing: ..." estimates to about 269px, and 340px (inner width 324px) is reserved to
+        // allow for deviation from the actual measured font).
         private const float PanelWidth = 340f;
         private const float Pad = 8f;
         private const float TitleRowHeight = 22f;
@@ -47,48 +51,50 @@ namespace CSWarfront.Game.UI
         private static UIPanel _panel;
         private static UILabel _titleLabel;
         private static UIButton _collapseButton;
-        private static PanelChrome.Handles _chrome; // Task40: タイトル行の最小化ボタン+ドラッグハンドル
+        private static PanelChrome.Handles _chrome; // Task40: collapse button + drag handle on the title row
         private static UILabel _factionSectionLabel;
         private static UIDropDown _factionDropdown;
         private static UILabel _statusLabel;
 
-        private static ushort _currentBaseId; // 0 = 未表示（CSの建物id 0 は「無し」を意味する）
+        private static ushort _currentBaseId; // 0 = not shown (CS building id 0 means "none")
         private static bool _suppressDropdownEvent;
         private static bool _loggedCreated;
 
-        /// <summary>Task40: ユーザーがタイトル行をドラッグした後は true になり、その間は
-        /// PositionNextToVanilla による毎フレームの自動追従を止める（ドラッグ位置を維持するため）。
-        /// パネルが「閉じる」（バニラパネルが閉じる/建物選択解除等、Hide()経由）と false に戻り、
-        /// 次に選択した基地には通常どおり追従する。</summary>
+        /// <summary>Task40: becomes true after the user drags the title row; while true, the per-frame
+        /// auto-follow via PositionNextToVanilla is stopped (to keep the dragged position).
+        /// When the panel "closes" (vanilla panel closes / building deselected etc., via Hide()) this
+        /// resets to false, and the next selected base follows the vanilla panel as usual.</summary>
         private static bool _detachedFromVanilla;
 
-        /// <summary>RefreshContents で毎フレーム再利用するバッファ（Task30: 文字列連結の毎フレーム
-        /// アロケーションを避けるため、StringBuilder.Clear() で使い回す）。</summary>
+        /// <summary>Buffer reused every frame by RefreshContents (Task30: reuse via
+        /// StringBuilder.Clear() to avoid per-frame allocations from string concatenation).</summary>
         private static readonly StringBuilder _statusBuilder = new StringBuilder(256);
 
-        /// <summary>パネル最小化トグルのUI設定（Task27）。セッション中は選択解除・再選択をまたいで保持する
-        /// （Hide/UpdateVisibilityでは変更しない。Destroy＝レベルアンロード時のみリセット）。</summary>
+        /// <summary>UI setting for the panel collapse toggle (Task27). Persists across deselect/reselect
+        /// within a session (not changed by Hide/UpdateVisibility; reset only on Destroy = level unload).</summary>
         private static bool _collapsed;
 
-        /// <summary>展開時の全体高さ。Build() で一度だけ確定させ、折りたたみ→復元の際にここから正確に戻す
-        /// （縮小後のサイズから再計算すると誤差が積み重なるため、必ずこのキャッシュ値を使う）。</summary>
+        /// <summary>Total height when expanded. Fixed once in Build(); restore exactly from this when
+        /// going collapsed -&gt; expanded (recomputing from the shrunken size would accumulate errors,
+        /// so always use this cached value).</summary>
         private static float _expandedHeight;
 
-        /// <summary>パネル高さに掛ける倍率。文字サイズと幅は据え置きで、縦方向だけ余裕を持たせる。</summary>
+        /// <summary>Multiplier applied to the panel height. Text size and width stay unchanged; only
+        /// vertical space gets extra room.</summary>
         private const float VerticalScale = 1.5f;
 
         /// <summary>
-        /// 冪等。まだ生成していなければ、バニラの建物情報パネル型がライブラリから取得できる状態に
-        /// なった時点で自前パネルを構築する（MissileDisasterButton.EnsureAttached と同じ
-        /// 「毎フレームポーリングして条件が揃ったら一度だけ作る」方式）。
+        /// Idempotent. If not yet created, build our panel once the vanilla building info panel type is
+        /// obtainable from the library (same "poll every frame and create exactly once when conditions
+        /// are met" approach as MissileDisasterButton.EnsureAttached).
         /// </summary>
         public static void EnsureCreated()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (_panel != null) return;
-                if (TryGetVanillaPanel() == null) return; // UI未初期化。次フレーム再試行。
+                if (TryGetVanillaPanel() == null) return; // UI not initialized yet. Retry next frame.
                 Build();
             }
             catch (Exception e)
@@ -98,21 +104,22 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// 毎メインスレッドフレーム呼ぶ。バニラ建物情報パネルが表示中かつ選択建物が登録済み論理基地の
-        /// 場合のみ自前パネルを表示・内容更新し、それ以外は隠す。
+        /// Call every main-thread frame. Show and refresh our panel only while the vanilla building info
+        /// panel is visible and the selected building is a registered logical base; otherwise hide it.
         /// </summary>
         public static void UpdateVisibility()
         {
             try
             {
-                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: ロード/アンロード中はUIライブラリに触れない
-                if (_panel == null) return; // EnsureCreated 待ち
+                if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
+                if (_panel == null) return; // waiting for EnsureCreated
 
-                // Task47: バニラのEscメニューが開いている間はこのフレームの処理を丸ごとスキップし、
-                // 生のUIPanelだけを隠す（_currentBaseId/_detachedFromVanilla等のロジック状態には
-                // 一切触れない）。Hide()を経由しない理由: Hide()は「バニラパネルが閉じた/建物選択解除」
-                // という意味の強い操作で _currentBaseId=0・_detachedFromVanilla=false にリセットしてしまう
-                // ため、メニューを閉じた次のフレームで通常どおり同じ基地のパネルへ復帰できなくなる。
+                // Task47: while the vanilla Esc menu is open, skip this frame's processing entirely and
+                // hide only the raw UIPanel (never touching logic state such as
+                // _currentBaseId/_detachedFromVanilla). Why not go through Hide(): Hide() is a strong
+                // operation meaning "vanilla panel closed / building deselected" and resets
+                // _currentBaseId=0 and _detachedFromVanilla=false, which would prevent returning to the
+                // same base's panel normally on the frame after the menu closes.
                 if (PanelChrome.IsGameMenuOpen())
                 {
                     if (_panel.isVisible) _panel.Hide();
@@ -137,20 +144,22 @@ namespace CSWarfront.Game.UI
                 BaseUiSnapshot snapshot;
                 if (!MilitaryManager.TryGetBaseSnapshot(buildingId, out snapshot))
                 {
-                    Hide(); // バニラパネルは軍事基地以外の建物を表示中、または未登録
+                    Hide(); // vanilla panel is showing a non-military-base building, or it is unregistered
                     return;
                 }
 
                 _currentBaseId = buildingId;
-                // 折りたたみ中はタイトル行しか見えないため、ドロップダウン/ステータスの再構築は無駄
-                // （Task30: 毎フレーム呼ばれるのでここで確実にスキップする）。展開された瞬間に
-                // 正しい内容が出るよう、_currentBaseId とスナップショット自体は毎フレーム更新しておく。
+                // While collapsed only the title row is visible, so rebuilding the dropdown/status is
+                // wasted work (Task30: this runs every frame, so skip it reliably here). _currentBaseId
+                // and the snapshot itself are still updated every frame so the correct contents appear
+                // the instant the panel is expanded.
                 if (!_collapsed) RefreshContents(snapshot);
-                // Task33: 位置決め（画面下端クランプ含む）はこのフレームの高さ確定後に行う。
-                // 旧実装ではRefreshContentsより先に位置決めしていたため、内容が増えて高さが変わった
-                // フレームでは1フレーム古い高さでクランプされるズレがあった。
-                // Task40: ユーザーがドラッグ済み（_detachedFromVanilla）の間はここをスキップし、
-                // ドラッグ後の位置を維持する（毎フレームの自動追従とドラッグ操作が競合しないように）。
+                // Task33: positioning (including bottom-edge screen clamping) is done after this frame's
+                // height is finalized. The old implementation positioned before RefreshContents, so on
+                // frames where content grew and the height changed, clamping used a height one frame
+                // stale and the panel was misplaced.
+                // Task40: while the user has dragged the panel (_detachedFromVanilla), skip this and keep
+                // the post-drag position (so per-frame auto-follow does not fight the drag operation).
                 if (!_detachedFromVanilla) PositionNextToVanilla(vanilla);
                 if (!_panel.isVisible) _panel.Show();
                 _panel.BringToFront();
@@ -161,7 +170,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset経由）に呼ぶ。パネルを破棄し静的状態を残さない。</summary>
+        /// <summary>Call on level unload (via MilitaryManager.Reset). Destroys the panel leaving no static state.</summary>
         public static void Destroy()
         {
             try
@@ -169,9 +178,9 @@ namespace CSWarfront.Game.UI
                 if (_factionDropdown != null) _factionDropdown.eventSelectedIndexChanged -= OnFactionSelected;
                 PanelChrome.Unsubscribe(_chrome, OnCollapseClick); // Task40
                 if (_chrome != null && _chrome.DragHandle != null) _chrome.DragHandle.eventMouseDown -= OnTitleBarMouseDown;
-                DestroyModelButtonSection(); // Task36: イベント購読解除＋フィールドのリセット
-                DestroyProductionSection(); // Task34: イベント購読解除＋フィールドのリセット
-                DestroyMissileSection(); // Task63: イベント購読解除＋フィールドのリセット
+                DestroyModelButtonSection(); // Task36: unsubscribe events + reset fields
+                DestroyProductionSection(); // Task34: unsubscribe events + reset fields
+                DestroyMissileSection(); // Task63: unsubscribe events + reset fields
                 if (_panel != null) UnityEngine.Object.Destroy(_panel.gameObject);
             }
             catch (Exception e)
@@ -199,16 +208,18 @@ namespace CSWarfront.Game.UI
         {
             if (_panel != null && _panel.isVisible) _panel.Hide();
             _currentBaseId = 0;
-            // Task40: 「閉じる」（バニラパネルが閉じる/建物選択解除等）扱いのため、次回選択では
-            // 通常の自動追従へ戻す。UpdateTrackingPosition内の一時的な非表示経路はここを通らない
-            // （PositionNextToVanilla自体はHide()を呼ばないため、ドラッグ中に誤ってリセットされない）。
+            // Task40: this counts as a "close" (vanilla panel closed / building deselected etc.), so the
+            // next selection returns to normal auto-follow. The temporary hide path inside
+            // UpdateTrackingPosition does not pass through here (PositionNextToVanilla itself never calls
+            // Hide(), so this is not reset accidentally mid-drag).
             _detachedFromVanilla = false;
         }
 
         private static CityServiceWorldInfoPanel TryGetVanillaPanel()
         {
-            // UIView.library.Get<T> はまだ登録/生成されていない場合 null を返す（例外ではない）ため、
-            // ここは「未準備」を通常経路として扱う（毎フレームのログ連発を避ける）。
+            // UIView.library.Get<T> returns null (not an exception) when the panel is not yet
+            // registered/created, so "not ready" is treated as a normal path here (avoids log spam every
+            // frame).
             return UIView.library.Get<CityServiceWorldInfoPanel>(VanillaPanelName);
         }
 
@@ -216,7 +227,7 @@ namespace CSWarfront.Game.UI
         {
             UIView view = UIView.GetAView();
             if (view == null) return;
-            if (view.FindUIComponent<UIPanel>(PanelName) != null) return; // 二重生成防止
+            if (view.FindUIComponent<UIPanel>(PanelName) != null) return; // prevent double creation
 
             UIPanel panel = view.AddUIComponent(typeof(UIPanel)) as UIPanel;
             if (panel == null)
@@ -232,9 +243,10 @@ namespace CSWarfront.Game.UI
             float w = PanelWidth - Pad * 2f;
             float y = Pad;
 
-            // Task40: タイトル行全体を覆うドラッグハンドル(target=_panel)を先に追加し、その後に
-            // タイトルラベル(非対話的、クリックを素通しする)と最小化ボタン(対話的)を重ねる。
-            // ボタンが後から追加されるため、ボタンのクリックはドラッグハンドルに横取りされない。
+            // Task40: add the drag handle covering the whole title row (target=_panel) first, then layer
+            // the title label (non-interactive, lets clicks pass through) and the collapse button
+            // (interactive) on top. Because the button is added later, its clicks are not intercepted by
+            // the drag handle.
             _chrome = PanelChrome.AddTitleBarChrome(_panel, PanelWidth, y, Pad, OnCollapseClick);
             _chrome.DragHandle.eventMouseDown += OnTitleBarMouseDown;
             _collapseButton = _chrome.CollapseButton;
@@ -249,17 +261,18 @@ namespace CSWarfront.Game.UI
             _factionDropdown = BuildFactionDropdown(Pad, y, w);
             y += DropdownHeight + 8f;
 
-            y = BuildModelButtonSection(Pad, y, w); // Task36: サブスクライブ済みプロップのモデル割り当てUIを開く
+            y = BuildModelButtonSection(Pad, y, w); // Task36: opens the model-assignment UI for subscribed props
 
             y += 4f;
             _statusLabel = _panel.AddUIComponent<UILabel>();
             _statusLabel.textScale = 0.75f;
             _statusLabel.textColor = new Color32(220, 220, 220, 255);
-            // Task33: autoSize(既定true)とwordWrapの組み合わせがラベル幅を単語単位で縮めてしまい、
-            // 「所属: Blue (HQ)」のような短い1行までもが単語ごとに改行されてパネル外へはみ出す不具合の
-            // 直接の原因だったため、autoSize=false・wordWrap=false に固定して幅wを維持する。
-            // 代わりに autoHeight=true でラベル自身の高さを実際の行数（"\n"の数）に追従させ、
-            // RecomputeExpandedHeight() でパネル全体の高さをそこから算出する。
+            // Task33: the combination of autoSize (default true) and wordWrap shrank the label width to
+            // word granularity, which was the direct cause of a bug where even a short single line like
+            // "Faction: Blue (HQ)" wrapped at every word and overflowed the panel; so pin
+            // autoSize=false and wordWrap=false and keep the width at w. Instead, autoHeight=true lets
+            // the label's own height track the actual line count (number of "\n"), and
+            // RecomputeExpandedHeight() derives the whole panel height from that.
             _statusLabel.wordWrap = false;
             _statusLabel.autoSize = false;
             _statusLabel.autoHeight = true;
@@ -267,12 +280,12 @@ namespace CSWarfront.Game.UI
             _statusLabel.text = "";
             _statusLabel.relativePosition = new Vector3(Pad, y);
 
-            BuildProductionSection(w); // Task34: 自動生産切替・発注・取消UI。BaseInfoPanelProduction.cs に分離。
-            BuildMissileSection(w); // Task63: 弾道ミサイル基地専用UI（備蓄/建造/発射）。BaseInfoPanelMissile.cs に分離。
+            BuildProductionSection(w); // Task34: auto-produce toggle / order / cancel UI. Split into BaseInfoPanelProduction.cs.
+            BuildMissileSection(w); // Task63: ballistic-missile-base-only UI (stockpile/build/launch). Split into BaseInfoPanelMissile.cs.
 
             RecomputeExpandedHeight();
             _panel.isVisible = false;
-            ApplyCollapsedState(); // 展開/折りたたみの初期反映（_collapsedはセッション内で永続、通常は false）
+            ApplyCollapsedState(); // initial apply of expanded/collapsed (_collapsed persists within the session, normally false)
 
             if (!_loggedCreated)
             {
@@ -281,8 +294,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>_collapsed の現在値をUIに反映する（表示/非表示、パネル高さ、ボタン文言）。
-        /// トグルクリック時と、パネル生成直後（永続化された前回の状態を復元）に呼ぶ。</summary>
+        /// <summary>Applies the current value of _collapsed to the UI (show/hide, panel height, button
+        /// caption). Called on toggle click and right after panel creation (restoring the persisted
+        /// previous state).</summary>
         private static void ApplyCollapsedState()
         {
             if (_panel == null) return;
@@ -291,9 +305,10 @@ namespace CSWarfront.Game.UI
             if (_factionDropdown != null) _factionDropdown.isVisible = !_collapsed;
             ApplyModelButtonCollapsedState(_collapsed); // Task36
             if (_statusLabel != null) _statusLabel.isVisible = !_collapsed;
-            // Task63: 折りたたみ中はどちらも隠す。展開時にどちらを実際に見せるかは、次の
-            // RefreshContents（RefreshProductionSection/RefreshMissileSection）が選択中の基地種別
-            // （_lastIsMissileBase）から都度正しく上書きする。
+            // Task63: while collapsed, hide both. Which one is actually shown when expanded is
+            // re-decided correctly each time by the next RefreshContents
+            // (RefreshProductionSection/RefreshMissileSection) based on the selected base's type
+            // (_lastIsMissileBase).
             ApplyProductionCollapsedState(_collapsed); // Task34
             ApplyMissileSectionCollapsedState(_collapsed); // Task63
 
@@ -305,8 +320,8 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>最小化トグルボタンのクリックハンドラ。_collapsed を反転してUIに反映するだけで、
-        /// MilitaryManager 側の状態には一切触れない（純粋なUI表示設定）。</summary>
+        /// <summary>Click handler for the collapse toggle button. Only flips _collapsed and applies it to
+        /// the UI; never touches MilitaryManager state (a purely visual UI setting).</summary>
         private static void OnCollapseClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -372,8 +387,9 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>
-        /// ドロップダウン選択変更ハンドラ。RefreshContents による状態→UI反映（selectedIndex書き戻し）が
-        /// 自分自身を再度呼ばないよう _suppressDropdownEvent で無限ループを防ぐ。
+        /// Dropdown selection-change handler. _suppressDropdownEvent prevents an infinite loop where the
+        /// state-to-UI application in RefreshContents (writing selectedIndex back) would call this
+        /// handler again.
         /// </summary>
         private static void OnFactionSelected(UIComponent component, int value)
         {
@@ -396,7 +412,7 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>ドロップダウンの選択・ステータスラベルの文言を、ロック内でコピー済みのスナップショットから更新する。</summary>
+        /// <summary>Updates the dropdown selection and status label text from a snapshot already copied while holding the lock.</summary>
         private static void RefreshContents(BaseUiSnapshot snapshot)
         {
             byte ownerIndex = snapshot.OwnerFactionId ?? 0;
@@ -417,8 +433,8 @@ namespace CSWarfront.Game.UI
                 StringBuilder sb = _statusBuilder;
                 sb.Length = 0;
 
-                // Task61: 基地種別と生産可能な領域を先頭に表示する（海軍/航空基地の追加に伴い、
-                // プレイヤーが「この基地が何を作れるか」を一目で確認できるようにする）。
+                // Task61: show the base type and producible domains first (with the addition of naval/air
+                // bases, let the player see at a glance what this base can produce).
                 sb.Append("Type: ").Append(BaseTypeLabel(snapshot.Type));
                 sb.Append("  Can produce: ").Append(SpawnableDomainsLabel(snapshot.SpawnableDomains));
 
@@ -427,12 +443,12 @@ namespace CSWarfront.Game.UI
 
                 sb.Append("\nHP: ").Append(snapshot.CurrentHP.ToString("0")).Append(" / ").Append(snapshot.MaxHP.ToString("0"));
                 sb.Append("\nTreasury: ").Append(snapshot.OwnerTreasury.ToString("0"));
-                // Task99: 3資源経済＋補給物資（住宅→Manpower、商業/オフィス→Treasury、工業→Production）。
+                // Task99: three-resource economy + supplies (residential -> Manpower, commercial/office -> Treasury, industrial -> Production).
                 sb.Append("\nManpower: ").Append(snapshot.OwnerManpower.ToString("0"))
                   .Append("  Production: ").Append(snapshot.OwnerProduction.ToString("0"))
                   .Append("  Supplies: ").Append(snapshot.OwnerSupplyStock.ToString("0"));
 
-                // Task101: 野戦築城の状態表示（該当種別のみ）。
+                // Task101: field-fortification status display (only for the relevant types).
                 if (snapshot.Type == BaseType.SupplyDepot || snapshot.Type == BaseType.CargoStation)
                 {
                     sb.Append("\nStored supplies: ").Append(snapshot.StoredSupplies.ToString("0"))
@@ -446,8 +462,9 @@ namespace CSWarfront.Game.UI
                     if (snapshot.FortAmmo <= 0f) sb.Append("  [OUT OF AMMO]");
                 }
 
-                // Task35: 占領地域の発展から得る収入は既に実装済みだったが、桁が小さくUIに一切
-                // 出ていなかったため「未実装」に見えていた。0のときも表示することでその事実を伝える。
+                // Task35: income from the development of occupied territory was already implemented, but
+                // its magnitude was small and it never appeared in the UI at all, so it looked
+                // "unimplemented". Displaying it even when 0 communicates that fact.
                 sb.Append("\nIncome: +").Append(snapshot.LastIncome.ToString("0.0")).Append(" / 6h");
 
                 sb.Append("\nTech: Tier ").Append(snapshot.OwnerUnlockedTier);
@@ -483,9 +500,10 @@ namespace CSWarfront.Game.UI
                     sb.Append("\nCapture grace: ").Append(snapshot.CaptureGraceHours.ToString("0.0")).Append("h");
 
                 _statusLabel.text = sb.ToString();
-                RefreshProductionSection(snapshot); // Task34: ステータス行の下に生産セクションを再配置
-                // Task63: ミサイル基地専用セクション。ユニット生産セクションと同じ開始Y（ステータス行の
-                // 直下）から配置する（互いに排他表示のため、同じ位置から始めても重ならない）。
+                RefreshProductionSection(snapshot); // Task34: re-place the production section below the status lines
+                // Task63: missile-base-only section. Placed from the same starting Y as the unit
+                // production section (directly below the status lines); since they are mutually
+                // exclusive, starting from the same position causes no overlap.
                 RefreshMissileSection(snapshot, _statusLabel.relativePosition.y + _statusLabel.height + ProductionRowGap);
                 RecomputeExpandedHeight();
             }

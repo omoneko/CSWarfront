@@ -7,53 +7,61 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 車両撃破時の小さな爆発エフェクト（Task65、ユーザー要望「車両撃破時の爆発エフェクト
-    /// （小さな爆発でいいです）」）。State.RecentKillsのうち、CombatFx.IsVehicleDestructionCategory
-    /// がtrueを返すカテゴリ（歩兵・ドローン兵を除く車両系撃破）だけを対象にする＝撃破音
-    /// (CombatFx.SpawnKillSounds)と全く同じ判定基準を1箇所（CombatFxSound.cs）から共有する
-    /// （Task51の「生身の歩兵が爆発するのは演出として不自然」というルールを、音とエフェクトの
-    /// 両方で一貫させるため、カテゴリ一覧を複製しない）。
+    /// Small explosion effect on vehicle kills (Task65, user request "explosion effect on vehicle
+    /// kills (a small explosion is fine)"). Of State.RecentKills, only categories for which
+    /// CombatFx.IsVehicleDestructionCategory returns true (vehicle-type kills, excluding infantry and
+    /// drone soldiers) are targeted = exactly the same criterion as the kill sounds
+    /// (CombatFx.SpawnKillSounds), shared from a single place (CombatFxSound.cs)
+    /// (Task51's rule "flesh-and-blood infantry exploding looks unnatural" is kept consistent across
+    /// both sound and effects, without duplicating the category list).
     ///
-    /// 見た目（Task84、ユーザー要望「撃破時の爆発をもう少しリアルに。CS内のエフェクトも使っていい。
-    /// 規模は今くらい」）: CS標準の爆発エフェクト DisasterProperties.m_mediumExplosion を
-    /// EffectManager.DispatchEffect で再生する（AlienInvasionのEffects.PlayImpactBurstで実績のある
-    /// 経路。パーティクルの火球・煙・光を含む本物の爆発になる）。magnitudeは従来の火球サイズ
-    /// （ピーク約5.5m）と釣り合う控えめな値に較正する（Alienのレーザー着弾0.7より小さい0.5）。
-    /// EffectInfoが解決できない環境では、従来のprimitive球ベースの簡易爆発（下のフォールバック実装、
-    /// Task65の実装そのまま）へ自動フォールバックする。
+    /// Appearance (Task84, user request "make kill explosions a bit more realistic. Using CS's own
+    /// effects is fine. Keep the scale about the same"): plays the CS standard explosion effect
+    /// DisasterProperties.m_mediumExplosion via EffectManager.DispatchEffect (the path proven in
+    /// AlienInvasion's Effects.PlayImpactBurst. This gives a real explosion including particle
+    /// fireball, smoke, and light). The magnitude is calibrated to a modest value matching the old
+    /// fireball size (peak ~5.5m) (0.5, smaller than the Alien laser impact's 0.7).
+    /// In environments where the EffectInfo cannot be resolved, it automatically falls back to the
+    /// old primitive-sphere-based simple explosion (the fallback implementation below, the Task65
+    /// implementation as-is).
     ///
-    /// 旧来の方針（CS由来のリソースを借りない）はマテリアル借用の不可視バグ（cs-mesh-material-
-    /// rendering）に対するものであり、EffectManagerへのdispatchはCS自身が描画まで面倒を見るため
-    /// この問題とは無関係（Alien/Godzilla MODで実機実績あり）。
+    /// The old policy (do not borrow CS-owned resources) targeted the invisible-material bug from
+    /// borrowing materials (cs-mesh-material-rendering); dispatching to EffectManager is unrelated to
+    /// that problem because CS itself takes care of the rendering (field-proven in the Alien/Godzilla
+    /// mods).
     ///
-    /// CombatFx.cs（577行、Task65時点で500行近く）を肥大化させないよう別ファイル・別クラスとして
-    /// 新設した（CombatFxSoundのような partial 分割ではなく独立クラス。公開APIはSpawn/Update/
-    /// DestroyAllの3つのみで、MilitaryManager.OnMainVisualUpdate/Resetから呼ばれる形も
-    /// CombatFxのSpawn/Update/DestroyAllと完全に同じパターン）。
+    /// To avoid bloating CombatFx.cs (577 lines, close to 500 at Task65 time) this was created as a
+    /// separate file and separate class (an independent class rather than a partial split like
+    /// CombatFxSound. The public API is only the three methods Spawn/Update/DestroyAll, and the way
+    /// it is called from MilitaryManager.OnMainVisualUpdate/Reset follows exactly the same pattern as
+    /// CombatFx's Spawn/Update/DestroyAll).
     ///
-    /// スレッド境界: このクラスの public メソッドは全てメインスレッド専用（CombatFxと同じ規約、
-    /// sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと）。
+    /// Thread boundary: all public methods of this class are main-thread only (same convention as
+    /// CombatFx; NEVER call them from the sim thread (MilitaryManager.OnSimTick)).
     /// </summary>
     internal static class KillFx
     {
-        /// <summary>同時に生きていられるエフェクトの上限。撃破はCombatFxが扱う発砲より低頻度な
-        /// イベントなので、CombatFx.MaxLiveEffects(200)より控えめな値にする（防御的上限、
-        /// 大量殲滅が起きてもGameObjectが際限なく増えないようにするため）。</summary>
+        /// <summary>Upper bound on simultaneously live effects. Kills are a lower-frequency event
+        /// than the gunfire CombatFx handles, so this is more conservative than
+        /// CombatFx.MaxLiveEffects (200) (a defensive cap, so GameObjects cannot grow without bound
+        /// even during a mass annihilation).</summary>
         private const int MaxLiveEffects = 48;
 
-        // カメラから遠すぎる撃破は生成自体をスキップする（CombatFx.SpawnOneと同じ軽量な距離チェック）。
+        // Kills too far from the camera skip spawning entirely (same lightweight distance check as
+        // CombatFx.SpawnOne).
         private const float MaxSpawnDistanceFromCamera = 2000f;
 
-        // 火球: 複数の小さな球をわずかにオフセットして「塊」に見せる。素早く膨らんで縮む。
+        // Fireball: several small spheres slightly offset to look like a "clump". Swells quickly, then shrinks.
         private const int FireballChunkCount = 3;
         private const float FireballDuration = 0.45f;
         private const float FireballPeakSize = 5.5f;
         private const float FireballChunkOffset = 1.2f;
-        private const float FireballGrowFraction = 0.4f; // 前半40%で膨張、残りで消滅
+        private const float FireballGrowFraction = 0.4f; // expand during the first 40%, vanish over the rest
 
-        // 黒煙puff: 火球より少し遅れて始まり、ゆっくり膨らんで消える（合計寿命を~1.5sへ引き延ばす）。
+        // Black smoke puff: starts slightly after the fireball, slowly swells and fades (stretches
+        // the total lifetime to ~1.5s).
         private const float SmokeStartDelay = 0.15f;
-        private const float SmokeDuration = 1.35f; // 0.15 + 1.35 = 1.5s トータル寿命
+        private const float SmokeDuration = 1.35f; // 0.15 + 1.35 = 1.5s total lifetime
         private const float SmokePeakSize = 7f;
         private const float SmokeGrowFraction = 0.3f;
 
@@ -70,12 +78,14 @@ namespace CSWarfront.Game
 
         private static readonly List<Effect> _effects = new List<Effect>();
 
-        /// <summary>Task84: CS標準爆発の再生強度。EffectManager.DispatchEffectのmagnitude引数。
-        /// Alienのレーザー着弾(0.7)より控えめにして、従来の小爆発と同程度の規模に合わせる。</summary>
+        /// <summary>Task84: playback intensity of the CS standard explosion. The magnitude argument
+        /// to EffectManager.DispatchEffect. More modest than the Alien laser impact (0.7), matched to
+        /// roughly the scale of the old small explosion.</summary>
         private const float CsExplosionMagnitude = 0.5f;
 
-        /// <summary>Task84: 1回のSpawn呼び出し（=1フレーム）でdispatchするCS爆発の上限。
-        /// 大量殲滅時のパーティクル過剰を防ぐ（MaxLiveEffectsと同じ防御的上限の考え方）。</summary>
+        /// <summary>Task84: upper bound on CS explosions dispatched per Spawn call (= per frame).
+        /// Prevents particle overload during mass annihilation (same defensive-cap idea as
+        /// MaxLiveEffects).</summary>
         private const int MaxCsDispatchPerFrame = 16;
 
         private static EffectInfo _csEffect;
@@ -86,9 +96,10 @@ namespace CSWarfront.Game
         private static Material _fireballMaterial;
         private static Material _smokeMaterial;
 
-        /// <summary>1tick分のKillEventから爆発エフェクトを生成する（メインスレッド専用）。
-        /// 歩兵・ドローン兵の撃破、カメラから遠すぎる撃破は生成しない。MaxLiveEffectsに達していれば
-        /// それ以降は静かに無視する（例外にしない、CombatFx.Spawnと同じ方針）。</summary>
+        /// <summary>Spawns explosion effects from one tick's worth of KillEvents (main-thread only).
+        /// Kills of infantry/drone soldiers and kills too far from the camera spawn nothing. Once
+        /// MaxLiveEffects is reached, further kills are silently ignored (no exception, same policy as
+        /// CombatFx.Spawn).</summary>
         public static void Spawn(List<KillEvent> kills)
         {
             if (kills == null || kills.Count == 0) return;
@@ -102,7 +113,7 @@ namespace CSWarfront.Game
                 for (int i = 0; i < kills.Count; i++)
                 {
                     KillEvent k = kills[i];
-                    // Task51/65共通ルール: 歩兵・ドローン兵の撃破では爆発を出さない（撃破音と同じ判定）。
+                    // Shared Task51/65 rule: no explosion for infantry/drone-soldier kills (same criterion as the kill sounds).
                     if (!CombatFx.IsVehicleDestructionCategory(k.Category)) continue;
 
                     Vector3 pos = new Vector3(k.Position.X, k.Position.Y, k.Position.Z);
@@ -112,8 +123,9 @@ namespace CSWarfront.Game
                         if (distSqr > MaxSpawnDistanceFromCamera * MaxSpawnDistanceFromCamera) continue;
                     }
 
-                    // Task84: CS標準爆発が使えるならそちらを再生（リアルなパーティクル爆発）。
-                    // 解決できない環境でのみ従来のprimitive球フォールバックを使う。
+                    // Task84: play the CS standard explosion if available (realistic particle
+                    // explosion). Only in environments where it cannot be resolved is the old
+                    // primitive-sphere fallback used.
                     if (TryDispatchCsExplosion(pos))
                     {
                         if (++dispatched >= MaxCsDispatchPerFrame) break;
@@ -130,8 +142,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトを実時間(realDeltaTime)で進める（メインスレッド専用）。
-        /// 火球・黒煙の合計寿命(SmokeStartDelay+SmokeDuration)を過ぎたエフェクトを破棄する。</summary>
+        /// <summary>Advances all live effects by real time (realDeltaTime) (main-thread only).
+        /// Destroys effects whose combined fireball+smoke lifetime (SmokeStartDelay+SmokeDuration)
+        /// has elapsed.</summary>
         public static void Update(float realDeltaTime)
         {
             if (_effects.Count == 0) return;
@@ -160,9 +173,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の全エフェクトを破棄する（レベルアンロード時、メインスレッド専用、
-        /// MilitaryManager.Resetから呼ばれる）。キャッシュ済みマテリアルはGameObjectではないため
-        /// 破棄しない（CombatFx.DestroyAllと同じ扱い、次セッションでも使い回せる）。</summary>
+        /// <summary>Destroys all live effects (on level unload, main-thread only, called from
+        /// MilitaryManager.Reset). Cached materials are not GameObjects and therefore are not
+        /// destroyed (same treatment as CombatFx.DestroyAll; they can be reused in the next
+        /// session).</summary>
         public static void DestroyAll()
         {
             try
@@ -180,24 +194,26 @@ namespace CSWarfront.Game
             finally
             {
                 _effects.Clear();
-                // Task84: EffectInfoはプレハブ参照であり、レベル再読込後は破棄済みUnityオブジェクトに
-                // なりうる（==nullのfake-null自己修復も静的キャッシュには効かない、
-                // cs-static-unity-object-cacheの教訓）。次レベルで必ず再解決させる。
+                // Task84: EffectInfo is a prefab reference and after a level reload it can become a
+                // destroyed Unity object (the ==null fake-null self-healing does not work on static
+                // caches, lesson of cs-static-unity-object-cache). Force re-resolution in the next level.
                 _csEffect = null;
                 _csEffectResolveAttempted = false;
             }
         }
 
-        /// <summary>Task84: CS標準の爆発エフェクトを撃破位置で再生する。解決できなければfalseを返し、
-        /// 呼び出し元が従来のフォールバック爆発を使う。dispatch自体が例外を投げた場合はこのセッション中
-        /// CS爆発を諦めてフォールバックに切り替える（毎フレームのエラーログ連発を防ぐ）。</summary>
+        /// <summary>Task84: plays the CS standard explosion effect at the kill position. Returns
+        /// false if it cannot be resolved, in which case the caller uses the old fallback explosion.
+        /// If the dispatch itself throws, CS explosions are given up for the rest of this session and
+        /// the fallback takes over (prevents a barrage of per-frame error logs).</summary>
         private static bool TryDispatchCsExplosion(Vector3 pos)
         {
             return TryDispatchCsExplosion(pos, CsExplosionMagnitude);
         }
 
-        /// <summary>Task87: magnitude指定版（BombFxの着弾爆発が小さめの倍率で再利用する）。
-        /// エフェクト解決・エラー時の自己無効化はTask84の実装をそのまま共有する。</summary>
+        /// <summary>Task87: magnitude-specifying overload (reused by BombFx's impact explosion with a
+        /// smaller multiplier). Effect resolution and self-disabling on error share the Task84
+        /// implementation as-is.</summary>
         internal static bool TryDispatchCsExplosion(Vector3 pos, float magnitude)
         {
             EffectInfo effect = ResolveCsEffect();
@@ -214,16 +230,18 @@ namespace CSWarfront.Game
             catch (Exception e)
             {
                 ModConfig.LogError("KillFx.TryDispatchCsExplosion error (falling back to simple effect): " + e);
-                _csEffect = null; // 以後このセッションはフォールバック（_csEffectResolveAttemptedは立ったまま）
+                _csEffect = null; // fallback for the rest of this session (_csEffectResolveAttempted stays set)
                 return false;
             }
         }
 
-        /// <summary>CS標準爆発のEffectInfoを解決する（AlienInvasion Effects.ResolveImpactEffectと同じ
-        /// 解決順: DisasterProperties.m_mediumExplosion → 隕石着弾エフェクト）。プロセス中1回だけ試み、
-        /// 結果（失敗含む）をキャッシュする。EffectInfoはプレハブ参照でレベル再読込で無効になりうるため、
-        /// DestroyAll（レベルアンロード）でキャッシュを破棄して次レベルで再解決する
-        /// （[[cs-static-unity-object-cache]]のfake-null問題を避けるため、静的キャッシュを跨がせない）。</summary>
+        /// <summary>Resolves the EffectInfo of the CS standard explosion (same resolution order as
+        /// AlienInvasion Effects.ResolveImpactEffect: DisasterProperties.m_mediumExplosion -> meteor
+        /// impact effect). Attempted once per process; the result (including failure) is cached.
+        /// Because EffectInfo is a prefab reference that can become invalid on level reload, the cache
+        /// is discarded in DestroyAll (level unload) and re-resolved in the next level
+        /// (to avoid the fake-null problem of [[cs-static-unity-object-cache]], the static cache is
+        /// never carried across levels).</summary>
         private static EffectInfo ResolveCsEffect()
         {
             if (_csEffectResolveAttempted) return _csEffect;
@@ -241,7 +259,7 @@ namespace CSWarfront.Game
             }
             catch (Exception)
             {
-                // フォールバックへ
+                // fall through to the fallback
             }
 
             try
@@ -280,7 +298,7 @@ namespace CSWarfront.Game
                 var chunks = new Transform[FireballChunkCount];
                 for (int c = 0; c < FireballChunkCount; c++)
                 {
-                    // 見た目専用のわずかな散らし（決定性はCore側の話であり、Game層の演出には不要）。
+                    // Slight visual-only scatter (determinism is a Core-side concern and is not needed for Game-layer visuals).
                     Vector3 offset = UnityEngine.Random.insideUnitSphere * FireballChunkOffset;
                     chunks[c] = CreateSmallSphere(go.transform, pos + offset, 0f, GetFireballMaterial());
                 }
@@ -301,9 +319,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>クリック選択のraycastを邪魔しないよう、Colliderを無効化した小さな球を作る
-        /// （CombatFx.CreateSmallSphereと同じ役割・同じ実装。partialでの共有ではなく独立クラスの
-        /// ためのローカルコピーだが、中身は意図的に同一にしてある）。</summary>
+        /// <summary>Creates a small sphere with its Collider disabled so it does not interfere with
+        /// the click-selection raycast (same role and same implementation as
+        /// CombatFx.CreateSmallSphere. A local copy for the sake of an independent class rather than
+        /// sharing via partial, but the body is intentionally identical).</summary>
         private static Transform CreateSmallSphere(Transform parent, Vector3 worldPos, float size, Material material)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -324,7 +343,7 @@ namespace CSWarfront.Game
         {
             if (fx.FireballChunks == null) return;
             float t = FireballDuration > 0f ? Mathf.Clamp01(fx.Elapsed / FireballDuration) : 1f;
-            // 前半で急速に膨らみ(0->peak)、後半で0へ縮む（簡易な膨張->消滅カーブ）。
+            // Swells rapidly in the first phase (0->peak), then shrinks to 0 (simple expand->vanish curve).
             float size = t < FireballGrowFraction
                 ? Mathf.Lerp(0f, FireballPeakSize, t / FireballGrowFraction)
                 : Mathf.Lerp(FireballPeakSize, 0f, (t - FireballGrowFraction) / (1f - FireballGrowFraction));
@@ -343,7 +362,7 @@ namespace CSWarfront.Game
             if (local < 0f) { fx.Smoke.localScale = Vector3.zero; return; }
 
             float t = SmokeDuration > 0f ? Mathf.Clamp01(local / SmokeDuration) : 1f;
-            // ゆっくり膨らんでから縮む（黒煙が薄れて消えるように見せる、CombatFx.StepImpactPuffと同じ簡易表現）。
+            // Slowly swells then shrinks (makes the black smoke appear to thin out and vanish; same simple representation as CombatFx.StepImpactPuff).
             float size = t < SmokeGrowFraction
                 ? Mathf.Lerp(0f, SmokePeakSize, t / SmokeGrowFraction)
                 : Mathf.Lerp(SmokePeakSize, 0f, (t - SmokeGrowFraction) / (1f - SmokeGrowFraction));

@@ -8,14 +8,16 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// BaseInfoPanel のうち、プレイヤーによる手動生産（自動生産切替・発注・取消、Task34）に関わる
-    /// 部分だけを分離した partial class。BaseInfoPanel.cs 側の500行制限のため分離した
-    /// （Task30のBaseUiSnapshotBuilder分離、Task34のMilitaryManagerManualProduction.cs分離と同じ方針）。
+    /// Partial class splitting out only the parts of BaseInfoPanel that concern player-driven manual
+    /// production (auto-produce toggle / ordering / cancelling, Task34). Split off because of the
+    /// 500-line limit on BaseInfoPanel.cs (same policy as the Task30 BaseUiSnapshotBuilder split and the
+    /// Task34 MilitaryManagerManualProduction.cs split).
     ///
-    /// このクラス自身は _panel / _statusLabel / _currentBaseId / _collapsed 等の BaseInfoPanel.cs 側の
-    /// private static フィールドへ直接アクセスする（partial class は private メンバーも全パーツで共有する
-    /// ため問題ない）。呼び出しは必ず BaseInfoPanel.cs 側のBuild/Destroy/ApplyCollapsedState/RefreshContents
-    /// から行われ、このクラス単体では状態を持ち回らない。全メソッドはメインスレッド専用（Unity UI API）。
+    /// This class itself accesses the private static fields on the BaseInfoPanel.cs side directly
+    /// (_panel / _statusLabel / _currentBaseId / _collapsed etc.; fine because a partial class shares
+    /// private members across all its parts). Calls always come from Build/Destroy/ApplyCollapsedState/
+    /// RefreshContents on the BaseInfoPanel.cs side; this class does not carry state on its own. All
+    /// methods are main-thread only (Unity UI APIs).
     /// </summary>
     internal static partial class BaseInfoPanel
     {
@@ -25,10 +27,11 @@ namespace CSWarfront.Game.UI
         private const float SmallLabelHeight = 16f;
         private const float ProductionButtonHeight = 24f;
 
-        /// <summary>キュー表示で先頭以降を何件まで並べるか。それ以上は「…」で省略する（Task34仕様）。</summary>
+        /// <summary>How many entries after the head to list in the queue display. Beyond this, elide
+        /// with "…" (Task34 spec).</summary>
         private const int QueueDisplayMax = 3;
 
-        /// <summary>「研究投資」ボタン1クリックあたりの投資額（Task35）。</summary>
+        /// <summary>Amount invested per click of the "Invest in Research" button (Task35).</summary>
         private const float ResearchInvestAmount = 50f;
 
         private static UIButton _autoProduceButton;
@@ -41,52 +44,60 @@ namespace CSWarfront.Game.UI
         private static UILabel _productionMessageLabel;
         private static UILabel _queueLabel;
 
-        /// <summary>直近のスナップショットのAutoProduce値。クリック時に「反転した値」を計算するために覚えておく
-        /// （TryEnqueue等と違いUI側は現在値を保持していないと即座にトグルできないため）。</summary>
+        /// <summary>AutoProduce value from the most recent snapshot. Remembered so the click handler can
+        /// compute "the inverted value" (unlike TryEnqueue etc., the UI side cannot toggle instantly
+        /// without holding the current value).</summary>
         private static bool _lastAutoProduce = true;
 
-        /// <summary>直近のスナップショットの所属勢力ID（Task35）。研究投資/Tier解禁ボタンのクリック時に
-        /// MilitaryManagerへ渡すfactionIdとして使う（BaseUiSnapshotはOwnerFactionIdだけでなく研究値も
-        /// 持つが、ボタンのクリックハンドラはスナップショット全体を保持しないためここに覚えておく）。</summary>
+        /// <summary>Owning faction id from the most recent snapshot (Task35). Used as the factionId
+        /// passed to MilitaryManager when the research-invest / tier-unlock buttons are clicked
+        /// (BaseUiSnapshot carries not just OwnerFactionId but also the research values, but the button
+        /// click handlers do not retain the whole snapshot, so it is remembered here).</summary>
         private static byte? _lastOwnerFactionId;
 
-        /// <summary>直近のスナップショットの所属勢力UnlockedTier（Task35）。Tier解禁ボタンの失敗理由
-        /// （研究点不足 か 既に最大Tier か）を判定するために覚えておく。</summary>
+        /// <summary>Owning faction's UnlockedTier from the most recent snapshot (Task35). Remembered to
+        /// determine the tier-unlock button's failure reason (insufficient research points vs already at
+        /// max tier).</summary>
         private static byte _lastOwnerUnlockedTier = 1;
 
-        /// <summary>生産セクションの最下端Y（RecomputeExpandedHeightが全体パネル高さの算出に使う）。</summary>
+        /// <summary>Bottom Y of the production section (used by RecomputeExpandedHeight to derive the
+        /// overall panel height).</summary>
         private static float _productionBottomY;
 
-        /// <summary>ドロップダウン表示用テキスト（例: "Tank_T3  (¥153)" / 未解禁なら
-        /// "Tank_T4  (¥168) [未解禁]"、Task35）。所属勢力のUnlockedTierに依存するため、値が変わった
-        /// ときだけ再構築する（_lastUnitDropdownUnlockedTierで判定）。</summary>
+        /// <summary>Display texts for the dropdown (e.g. "Tank_T3  (¥153)", or if locked
+        /// "Tank_T4  (¥168) [locked]", Task35). They depend on the owning faction's UnlockedTier, so
+        /// they are rebuilt only when the value changes (checked via
+        /// _lastUnitDropdownUnlockedTier).</summary>
         private static string[] _unitDropdownItems;
-        /// <summary>_unitDropdownItems と同じ並びのTypeKey（実際の発注に使う値）。</summary>
+        /// <summary>TypeKeys in the same order as _unitDropdownItems (the values used for the actual order).</summary>
         private static string[] _unitDropdownTypeKeys;
-        /// <summary>_unitDropdownItemsを最後に構築したときのUnlockedTier。0は「まだ構築していない」
-        /// を表すセンチネル（有効なTierは1..5のため衝突しない、Task35）。</summary>
+        /// <summary>The UnlockedTier at the time _unitDropdownItems was last built. 0 is a sentinel
+        /// meaning "not built yet" (valid tiers are 1..5 so there is no collision, Task35).</summary>
         private static byte _lastUnitDropdownUnlockedTier;
 
-        /// <summary>_unitDropdownItemsを最後に構築したときのSpawnableDomains（Task61）。基地種別が
-        /// 変わって選択中の基地が入れ替わった場合（陸軍→海軍基地など）にドロップダウンの中身を
-        /// 陸上/海上/航空ロスターへ切り替えるために使う。既定値DomainMask.Noneは「まだ構築していない」
-        /// センチネル（有効な基地は必ずLand/Sea/Airのいずれか1ビット以上を持つため衝突しない）。</summary>
+        /// <summary>The SpawnableDomains at the time _unitDropdownItems was last built (Task61). Used to
+        /// switch the dropdown contents to the land/sea/air roster when the base type changed and the
+        /// selected base was swapped (e.g. army -&gt; naval base). The default DomainMask.None is a
+        /// "not built yet" sentinel (a valid base always has at least one of the Land/Sea/Air bits set,
+        /// so there is no collision).</summary>
         private static DomainMask _lastUnitDropdownDomains = DomainMask.None;
 
-        /// <summary>Task103: 同上、最後に構築したときのBaseType（貨物駅⇔陸軍基地の切替でリストを
-        /// 作り直すため。どちらもSpawnableDomains=Landでドメインだけでは区別できない）。</summary>
+        /// <summary>Task103: same as above, the BaseType at the time of the last build (to rebuild the
+        /// list on a cargo-station &lt;-&gt; army-base switch; both have SpawnableDomains=Land, so the
+        /// domain alone cannot distinguish them).</summary>
         private static BaseType _lastUnitDropdownBaseType = BaseType.Army;
 
         private static readonly StringBuilder _queueBuilder = new StringBuilder(128);
 
-        /// <summary>ステータスラベルの下に生産セクションの各コントロールを生成する（Build()から一度だけ呼ばれる）。
-        /// ここでの relativePosition は仮値でよい（RefreshProductionSectionが毎フレーム正しい位置へ更新する。
-        /// 初回表示前＝_panel.isVisible=falseの間にRefreshContentsが最低1回走るため実害はない）。</summary>
+        /// <summary>Creates the production section controls below the status label (called once from
+        /// Build()). The relativePosition values here may be placeholders (RefreshProductionSection
+        /// updates them to the correct positions every frame; RefreshContents runs at least once before
+        /// the first display — while _panel.isVisible=false — so no harm is done).</summary>
         private static void BuildProductionSection(float width)
         {
             if (_panel == null) return;
 
-            EnsureUnitDropdownItemsBuilt(1, DomainMask.Land); // 初期表示は未所属/UnlockedTier既定値(1)/陸軍基地相当。実値は初回RefreshContentsで反映される。
+            EnsureUnitDropdownItemsBuilt(1, DomainMask.Land); // Initial display assumes unaffiliated / default UnlockedTier (1) / army-base equivalent. Real values are applied by the first RefreshContents.
 
             _autoProduceButton = _panel.AddUIComponent<UIButton>();
             _autoProduceButton.size = new Vector2(ToggleButtonWidth, ToggleButtonHeight);
@@ -130,7 +141,7 @@ namespace CSWarfront.Game.UI
             _cancelButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, 0f);
             _cancelButton.eventClick += OnCancelClick;
 
-            // Task35: 資金→研究点への投資、および研究点によるTier解禁。
+            // Task35: investment of funds into research points, and tier unlocking with research points.
             _investButton = _panel.AddUIComponent<UIButton>();
             _investButton.text = "Invest in Research (¥" + ResearchInvestAmount.ToString("0") + ")";
             _investButton.textScale = 0.8f;
@@ -170,7 +181,7 @@ namespace CSWarfront.Game.UI
             _queueLabel.relativePosition = new Vector3(Pad, 0f);
         }
 
-        /// <summary>_collapsed の反映（BaseInfoPanel.ApplyCollapsedStateから呼ばれる）。</summary>
+        /// <summary>Applies _collapsed (called from BaseInfoPanel.ApplyCollapsedState).</summary>
         private static void ApplyProductionCollapsedState(bool collapsed)
         {
             if (_autoProduceButton != null) _autoProduceButton.isVisible = !collapsed;
@@ -184,15 +195,17 @@ namespace CSWarfront.Game.UI
             if (_queueLabel != null) _queueLabel.isVisible = !collapsed;
         }
 
-        /// <summary>ステータスラベルの実際の下端（毎フレーム変動しうる）から、生産セクション各行のY座標を
-        /// 再計算して反映する。BaseInfoPanel.RefreshContents から毎フレーム（折りたたみ中を除く）呼ばれる。</summary>
+        /// <summary>Recomputes and applies the Y coordinates of each production-section row from the
+        /// actual bottom of the status label (which can change every frame). Called every frame (except
+        /// while collapsed) from BaseInfoPanel.RefreshContents.</summary>
         private static void RefreshProductionSection(BaseUiSnapshot snapshot)
         {
             if (_panel == null || _statusLabel == null) return;
 
-            // Task63: ミサイル基地はユニット生産の代わりにBaseInfoPanelMissile.RefreshMissileSectionが
-            // 別のセクションを表示する（互いに排他）。毎フレーム（折りたたみ中を除く）呼ばれるため、
-            // 選択中の基地が入れ替わったフレームでも正しく追従する。
+            // Task63: for missile bases, BaseInfoPanelMissile.RefreshMissileSection shows a different
+            // section instead of unit production (mutually exclusive). Because this runs every frame
+            // (except while collapsed), it tracks correctly even on the frame where the selected base
+            // was swapped.
             bool isMissileBase = snapshot.Type == BaseType.MissileBase;
             ApplyProductionCollapsedState(isMissileBase);
             if (isMissileBase)
@@ -207,7 +220,7 @@ namespace CSWarfront.Game.UI
             _lastAutoProduce = snapshot.AutoProduce;
             _lastOwnerFactionId = snapshot.OwnerFactionId;
             _lastOwnerUnlockedTier = snapshot.OwnerUnlockedTier;
-            // Task35: 未解禁Tierの表示更新。Task61: 基地の生産可能領域に応じてLand/Sea/Airロスターを切り替える。
+            // Task35: refresh the display of locked tiers. Task61: switch between the Land/Sea/Air rosters according to the base's producible domains.
             EnsureUnitDropdownItemsBuilt(snapshot.OwnerUnlockedTier, snapshot.SpawnableDomains, snapshot.Type); // Task103
 
             if (_autoProduceButton != null)
@@ -230,7 +243,7 @@ namespace CSWarfront.Game.UI
             if (_cancelButton != null) _cancelButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, y);
             y += ProductionButtonHeight + ProductionRowGap;
 
-            // Task35: 研究投資／Tier解禁ボタン行。
+            // Task35: the research-invest / tier-unlock button row.
             if (_investButton != null) _investButton.relativePosition = new Vector3(Pad, y);
             if (_unlockButton != null) _unlockButton.relativePosition = new Vector3(Pad + halfWidth + ProductionRowGap, y);
             y += ProductionButtonHeight + ProductionRowGap;
@@ -257,8 +270,8 @@ namespace CSWarfront.Game.UI
                 bool ok = MilitaryManager.TrySetAutoProduce(_currentBaseId, newValue);
                 if (ok)
                 {
-                    // 次のRefreshContentsでスナップショットの実値へ上書きされるが、クリック直後の
-                    // 見た目の即時反映のためここでも更新しておく。
+                    // The next RefreshContents overwrites this with the snapshot's real value, but update
+                    // here too so the visual state reflects the click immediately.
                     _lastAutoProduce = newValue;
                 }
                 else
@@ -303,8 +316,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「研究投資」ボタン（Task35）。_lastOwnerFactionId へ ResearchInvestAmount を投資する。
-        /// 失敗理由はResearch.TryInvestの実装上、資金不足のみ（fが見つからない等の防御ケースは除く）。</summary>
+        /// <summary>The "Invest in Research" button (Task35). Invests ResearchInvestAmount for
+        /// _lastOwnerFactionId. By Research.TryInvest's implementation the only failure reason is
+        /// insufficient funds (aside from defensive cases such as the faction not being found).</summary>
         private static void OnInvestClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -323,10 +337,10 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>「Tier解禁」ボタン（Task35）。_lastOwnerFactionId の次Tierを解禁する。失敗時は
-        /// 直近スナップショットのUnlockedTierから「既に最大Tier」か「研究点不足」かを区別して表示する
-        /// （MilitaryManager.TryUnlockNextTierはbool一つしか返さないため、失敗理由はUI側が持つ直近の
-        /// 状態から判断する）。</summary>
+        /// <summary>The "Unlock Tier" button (Task35). Unlocks the next tier for _lastOwnerFactionId. On
+        /// failure, distinguish "already at max tier" from "insufficient research points" using the
+        /// UnlockedTier from the most recent snapshot (MilitaryManager.TryUnlockNextTier returns only a
+        /// single bool, so the failure reason is judged from the most recent state the UI holds).</summary>
         private static void OnUnlockClick(UIComponent component, UIMouseEventParameter eventParam)
         {
             try
@@ -351,8 +365,8 @@ namespace CSWarfront.Game.UI
             if (_productionMessageLabel != null) _productionMessageLabel.text = text;
         }
 
-        /// <summary>QueueResult -> 発注失敗理由の短い日本語文言（Task34仕様の例: 資金不足／キューが一杯。
-        /// Task35でTierLockedを追加）。</summary>
+        /// <summary>QueueResult -&gt; short message for the order-failure reason (Task34-spec examples:
+        /// insufficient funds / queue full. TierLocked added in Task35).</summary>
         private static string EnqueueResultMessage(QueueResult r)
         {
             switch (r)
@@ -368,8 +382,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>QueueResult -> 取消失敗理由の短い日本語文言。QueueFullはManualProduction.TryCancelLast側の
-        /// コメントの通り「取消可能な注文が無い」（空／唯一の注文が進行中）の意味で流用されている。</summary>
+        /// <summary>QueueResult -&gt; short message for the cancel-failure reason. As stated in the
+        /// comments on ManualProduction.TryCancelLast, QueueFull is repurposed to mean "no cancellable
+        /// order" (queue empty, or the only order is in progress).</summary>
         private static string CancelResultMessage(QueueResult r)
         {
             switch (r)
@@ -381,8 +396,9 @@ namespace CSWarfront.Game.UI
             }
         }
 
-        /// <summary>BaseInfoPanel.Destroyから呼ばれる。イベント購読解除とフィールドのリセットのみ行う
-        /// （UnityEngine.Object.Destroyでの実際のGameObject破棄は_panelごと呼び出し元が行う）。</summary>
+        /// <summary>Called from BaseInfoPanel.Destroy. Only unsubscribes events and resets fields
+        /// (the actual GameObject destruction via UnityEngine.Object.Destroy is done by the caller
+        /// together with _panel).</summary>
         private static void DestroyProductionSection()
         {
             if (_autoProduceButton != null) _autoProduceButton.eventClick -= OnAutoProduceClick;
@@ -404,11 +420,12 @@ namespace CSWarfront.Game.UI
             _lastOwnerFactionId = null;
             _lastOwnerUnlockedTier = 1;
             _productionBottomY = 0f;
-            // Task35: 表示テキストはUnlockedTierに依存するようになったため、次セッションで確実に
-            // 再構築させるためセンチネルへ戻す（_unitDropdownItems自体はLandUnitRoster由来で内容は
-            // 不変のため保持したままでよく、EnsureUnitDropdownItemsBuiltがTier不一致から再構築する）。
+            // Task35: the display texts now depend on UnlockedTier, so return to the sentinel to
+            // guarantee a rebuild in the next session (_unitDropdownItems itself comes from
+            // LandUnitRoster and its contents are immutable, so it may be kept;
+            // EnsureUnitDropdownItemsBuilt rebuilds from the tier mismatch).
             _lastUnitDropdownUnlockedTier = 0;
-            _lastUnitDropdownDomains = DomainMask.None; // Task61: 次セッションで確実にロスターを再構築させる。
+            _lastUnitDropdownDomains = DomainMask.None; // Task61: guarantee the roster is rebuilt in the next session.
         }
     }
 }
