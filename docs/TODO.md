@@ -1,56 +1,89 @@
-# CSWarfront 残タスク
+# CSWarfront Remaining Tasks
 
-最終更新: 2026-08-04（Update 3実装時点、Core 850/850 緑）
+Last updated: 2026-08-04 (as of the Update 3 implementation, Core 850/850 green)
 
-## Update 3（2026-08-04実装、配信前）— 野戦築城・ヘリ・鉄道
-（設計書 docs/superpowers/specs/2026-08-04-fortifications-heli-rail-design.md）
+## Update 3 (implemented 2026-08-04, pre-release) — field fortifications / helicopters / rail
 
-- **野戦築城5種**（Options指定建物方式・BaseType拡張）: 掩蔽壕（歩兵3体分射撃・建物非貫通・HP0で機能停止）／
-  砲兵陣地（砲兵1体分・範囲30m）／補給拠点（備蓄300・200m自動補給・占領で備蓄奪取）／
-  塹壕（攻撃対象外・歩兵守備+50%敵味方不問・新モデル）／貨物駅（備蓄500・レール100mスナップ）
-- **守備ボーナス**: 塹壕/掩蔽壕上の歩兵系は被ダメ÷1.5。歩兵AIは敵600m以内で300m内の陣地へ自動移動
-- **補給網**: 基地（勢力プール）→トラック/輸送ヘリ/列車→拠点・駅（備蓄）→前線。トラックは拠点で再積載＋
-  暇なときは拠点へ備蓄輸送
-- **ヘリ**: 攻撃ヘリ（航空基地生産・地上専任・ホバリング・対ヘリは戦車/対空/戦闘機のみ）／
-  輸送ヘリ（陸軍基地自動維持6機・物資60+歩兵3体空輸・撃墜で道連れ）
-- **鉄道**: RailGraph（12h再構築）・貨物駅ペア（2km以上・接続）ごとに列車1編成（勢力4編成）が
-  物資200＋「前線が1km以上近くなる」陸上ユニットを輸送
-- セーブv10（備蓄/施設弾薬/レール接続/搭乗）。モデル8種追加（塹壕は差し替え済み）。実機テスト未
+- **Five field fortifications** (Options-designated-building scheme, BaseType extension): Bunker (fires
+  as three infantry, no shooting through buildings, goes defunct at 0 HP) / Artillery position (one
+  artillery's worth, 30m splash) / Supply depot (300 stock, 200m auto-resupply, stock seized on
+  capture) / Trench (untargetable, +50% infantry defense friend or foe, new model) / Cargo station
+  (500 stock, 100m rail snap)
+- **Defense bonus**: infantry on a trench/bunker take damage ÷ 1.5. Infantry AI auto-moves to a
+  fortification within 300m when an enemy is within 600m
+- **Supply network**: bases (faction pool) → trucks/transport helicopters/trains → depots & stations
+  (stock) → the front. Trucks reload at depots and haul stock to depots when otherwise idle
+- **Helicopters**: attack helicopter (air-base production, ground-attack only, hovers; only
+  tanks/AA/fighters can shoot it down) / transport helicopter (army bases auto-maintain 6; airlifts
+  60 supplies + 3 infantry; carried units die with it if shot down)
+- **Rail**: RailGraph (rebuilt every 12h); per cargo-station pair (2km+ and connected) one train
+  (4 per faction) hauls 200 supplies + land units that would get 1km+ closer to the front
+- Save v10 (stock/fort ammo/rail connectivity/boarding). 8 new models (the trench replaces the old
+  one). Not yet playtested in-game
 
 
-## 実装済み（主要なもの）
+## Implemented (highlights)
 
-- **Update 1（2026-08-02配信済み）**: 外部襲来イベント（専用Invader勢力=ID5・モスグリーン・常時敵対・基地目標・迎撃出動）、Missile Disaster着弾のユニットダメージ連携、空間グリッド交戦判定＋勢力150体上限（重さ対策）、スタックユニット自動消滅（速度比例閾値）
-- **Update 2（2026-08-03実装、配信前）**: 3資源経済＋補給ロジスティクス（設計書 docs/superpowers/specs/2026-08-03-economy-supply-design.md）
-  - 基地1km圏のゾーン別発展度→住宅=人的資源/商業・オフィス=資金/工業=生産力（経済tick）
-  - ユニット生産=人的資源+生産力（生産力不足は資金×2で代替）。研究・ミサイルは従来どおり資金
-  - 弾薬ゲージ（兵科別の連続射撃可能時間、弾切れ=射撃停止のみ。Invader/空母/自爆ドローン/トラックは無限）
-  - 補給物資ストック（生産力から自動生産、上限1000）→基地/空母200m圏内で自動補給25%/h
-  - 補給トラック（新兵科・非武装・勢力30台別枠・陸軍基地が自動維持）が前線へ配送50%/h
-  - 航空機は弾切れで基地/空母へ帰還→再武装→自動再出撃。セーブv9（資源・弾薬・積載）
+- **Update 1 (released 2026-08-02)**: outside-incursion events (dedicated Invader faction = ID 5,
+  moss green, always hostile, targets bases, defenders scramble), Missile Disaster impact damage to
+  units, spatial-grid engagement checks + 150-unit faction cap (performance), auto-despawn of stuck
+  units (speed-proportional threshold)
+- **Update 2 (implemented 2026-08-03, pre-release)**: three-resource economy + supply logistics
+  - Per-zone development within 1km of a base → residential = manpower / commercial & office =
+    funds / industrial = production (economy tick)
+  - Unit production = manpower + production (production shortfall substitutable with funds ×2).
+    Research and missiles stay funds-only
+  - Ammo gauge (per-category continuous-fire hours; dry = fire stops, nothing more.
+    Invader/carriers/suicide drones/trucks are infinite)
+  - Supply stockpile (auto-produced from production, cap 1000) → auto-resupply 25%/h within 200m of
+    a base/carrier
+  - Supply trucks (new category, unarmed, separate 30-truck cap per faction, auto-maintained by army
+    bases) deliver to the front at 50%/h
+  - Aircraft return to base/carrier when dry → rearm → auto-sortie again. Save v9 (resources, ammo,
+    cargo)
 
-- 5勢力（色名: Red/Blue/Green/Yellow/Magenta）・関係マトリクス（敵対/中立/同盟/**宿敵**、Optionsで設定・宿敵は最優先攻撃）
-- **KAIJU/Alien疑似勢力**：ゴジラ/エイリアンMOD導入時のみ関係設定行が出現。宿敵指定で距離無制限出撃。**ゴジラ光線/トライポッドレーザーはユニットにもダメージ**（線分判定・即死級/重傷級）
-- 陸上7兵種 × Tier1-5／海上（ミサイル駆逐艦・空母=発着艦プラットフォーム専任）／航空（戦闘機・爆撃機・自爆ドローン）
-- **現実寄りの攻撃レート**（小火器=高頻度低威力⇔砲・ミサイル=低頻度高威力）、`unit-stats.xml`で購読者が基礎値を調整可能（テンプレート自動生成）
-- **交戦ルール**: 占領（HP0）は地上戦力のみ。航空・海上・弾道ミサイルは拠点HPを1までしか削れない。戦闘機=対空専任、爆撃機=地上・海上目標、駆逐艦=対地対艦（対空なし）。基地HPは20/hで自然回復＝回復を上回る継続地上攻撃でのみ陥落
-- **対空リワーク**: 1発ごとのTier別命中率（対ドローン=機銃0.70-0.90、対戦闘機/爆撃機=対空ミサイル0.55-0.83）。SAMは追尾弾体＋排気トレイル、標的機はフレア放出＋回避機動（MissileDisaster移植）
-- **航空パス移動**: 爆撃機=爆弾投下モデル付きヒットアンドアウェイ、戦闘機=すれ違いドッグファイト（レーストラック航過、DPS補正×3）
-- **移動**: 全体1.25倍速。陸=道路A*（宿敵追撃も可能な限り道路上）、海=**SeaGrid A*（96mグリッド・喫水2m考慮）**＋壁沿い迂回、空=巡航高度120・帰還（Idleで最寄り航空基地/空母へ、海は海軍基地へ）
-- **弾道ミサイル**: 備蓄生産→発射（**基地ごとに自動生産/自動発射をON/OFF**、手動ボタンあり）→AA迎撃→着弾。**飛行中ミサイル・部隊命令はセーブ対応（v8）**
-- 全プレイヤー向け文字列は英語化済み。モデル19種（ユニット12＋基地4＋爆弾/弾道ミサイル/迎撃ミサイル）は全てmodels.blendからエクスポート
-- 撃破爆発=CS標準エフェクト、爆撃音・駆逐艦砲撃音あり。ユニットは攻撃方向を向く（航空除く）
+- 5 factions (color names: Red/Blue/Green/Yellow/Magenta), relation matrix (hostile/neutral/allied/
+  **nemesis**, set in Options; nemeses are attacked first)
+- **KAIJU/Alien pseudo-factions**: relation rows appear only when the Godzilla/Alien MODs are
+  installed. Nemesis designation sorties at unlimited range. **The Godzilla beam / tripod laser
+  damages units too** (segment check, instant-death/critical grade)
+- 7 land classes × tiers 1–5 / naval (missile destroyer, carrier = dedicated flight platform) / air
+  (fighter, bomber, suicide drone)
+- **Realistic fire rates** (small arms = frequent & weak vs guns & missiles = rare & heavy);
+  subscribers can tune base stats via `unit-stats.xml` (template auto-generated)
+- **Engagement rules**: capture (0 HP) by ground forces only. Air, naval and ballistic missiles can
+  only take base HP down to 1. Fighters = anti-air only, bombers = ground & naval targets,
+  destroyers = anti-ground/anti-ship (no AA). Base HP regenerates 20/h = bases fall only to
+  sustained ground assault that outpaces regen
+- **AA rework**: per-shot tier-based hit chance (vs drones = gun 0.70–0.90, vs fighters/bombers =
+  SAM 0.55–0.83). SAMs are homing projectiles with exhaust trails; target aircraft pop flares and
+  jink (ported from MissileDisaster)
+- **Air pass movement**: bombers = hit-and-run with a bomb-drop model, fighters = crossing-pass
+  dogfights (racetrack passes, DPS compensation ×3)
+- **Movement**: global 1.25× speed. Land = road A* (nemesis pursuit stays on roads where possible),
+  sea = **SeaGrid A\* (96m grid, 2m draft)** + wall-following detours, air = cruise altitude 120 +
+  return home (Idle → nearest air base/carrier, ships → navy base)
+- **Ballistic missiles**: stockpile production → launch (**auto-production/auto-launch toggleable
+  per base**, manual button available) → AA interception → impact. **In-flight missiles and unit
+  orders persist in saves (v8)**
+- All player-facing strings are in English. All 19 models (12 units + 4 bases + bomb/ballistic
+  missile/interceptor) are exported from models.blend
+- Kill explosion = CS stock effect; bombing and destroyer gun sounds included. Units face their
+  attack direction (aircraft excluded)
 
-## 残タスク（公開後のアップデート候補）
+## Remaining tasks (post-release update candidates)
 
-### 機能
-1. **ミサイルの拡張**（設計書§4.7の完全版）：弾頭種別（クラスタ/核等）と威力係数、核の高コスト＝抑止力、着弾での都市建物破壊（`DisasterHelpers`、MissileDisaster流用）、占領時の備蓄弾奪取
-2. 海空ユニット専用の射撃音（現在は既存音の流用: 駆逐艦=砲撃音、戦闘機=銃撃音）
-8. ~~補給トラック専用モデル~~ 済（2026-08-03、20_Supply_Truck→Unit_SupplyTruck）
+### Features
+1. **Missile expansion** (the full version of design §4.7): warhead kinds (cluster/nuclear etc.) with
+   damage factors, nukes priced high = deterrence, city-building destruction on impact
+   (`DisasterHelpers`, reused from MissileDisaster), stockpile seizure on capture
+2. Dedicated firing sounds for naval/air units (currently reusing existing audio: destroyer = gun
+   sound, fighter = rifle sound)
+8. ~~Dedicated supply-truck model~~ done (2026-08-03, 20_Supply_Truck → Unit_SupplyTruck)
 
-### 改善・調整
-3. 数値バランスの実機調整（unit-stats.xmlで購読者側でも調整可能になった）
-4. 遮蔽にプロップを使う（現状は建物のみ）
-5. `MilitaryManager.cs`の500行規約超過の解消
-6. 集結・ミサイル指定モードの照準カーソル表示（現在はトーストのみ）
-7. SeaGridのセル解像度/範囲の実機チューニング（現在96m・±4800m）
+### Improvements / tuning
+3. In-game balance tuning of the numbers (subscribers can now tune via unit-stats.xml too)
+4. Use props for cover (currently buildings only)
+5. Resolve `MilitaryManager.cs` exceeding the 500-line rule
+6. Aiming cursor for rally/missile targeting modes (currently toast-only)
+7. In-game tuning of SeaGrid cell resolution/extent (currently 96m, ±4800m)

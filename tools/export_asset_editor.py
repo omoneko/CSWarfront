@@ -85,29 +85,29 @@ COLLECTION_NAME = 'Military_Assets'
 # regardless of the "NN_" numeric prefix or underscore spelling actually
 # used in the .blend.
 NAME_MAP = {
-    # 歩兵集団
+    # infantry squad
     'infantrysquad': 'InfantrySquad',
-    # ジープ
+    # jeep
     'jeep': 'Jeep',
     # APC
     'apc': 'APC',
-    # 戦車
+    # tank
     'tank': 'Tank',
-    # 自走砲
+    # self-propelled gun
     'spg': 'SPG',
     'selfpropelledgun': 'SPG',
-    # ドローン操縦士
+    # drone operator
     'droneoperator': 'DroneOperator',
-    # 戦闘機
+    # fighter
     'fighter': 'Fighter',
-    # 爆撃機
+    # bomber
     'bomber': 'Bomber',
-    # ミサイル駆逐艦 (source object is just named "Destroyer")
+    # missile destroyer (source object is just named "Destroyer")
     'destroyer': 'MissileDestroyer',
     'missiledestroyer': 'MissileDestroyer',
-    # 空母
+    # carrier
     'carrier': 'Carrier',
-    # 2026-07-30 追加分（基地3種はTask68でフォールバック名が付いたが、以後は明示マッピング）
+    # added 2026-07-30 (the 3 bases got fallback names in Task68; explicit mappings from here on)
     'basearmy': 'BaseArmy',
     'basenavy': 'BaseNavy',
     'baseair': 'BaseAir',
