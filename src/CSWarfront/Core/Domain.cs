@@ -2,19 +2,21 @@ using System;
 
 namespace CSWarfront.Core
 {
-    /// <summary>ユニット/基地が属する単一の活動領域。UnitType.Domain / MilitaryBase.SpawnableDomains の
-    /// 元になる単一値（複数を同時に表すことはない）。</summary>
+    /// <summary>The single activity domain a unit/base belongs to. The single value behind
+    /// UnitType.Domain / MilitaryBase.SpawnableDomains (never represents multiple domains at
+    /// once).</summary>
     public enum Domain { Land, Sea, Air }
 
     /// <summary>
-    /// 複数のDomainを同時に表すビットフラグ（Task61: 海上/航空戦力の追加に伴う対象ドメイン判定用）。
-    /// UnitType.CanTargetDomains（このユニットが攻撃対象にできる領域）と
-    /// MilitaryBase.SpawnableDomains（この基地が生産できるユニットの領域）の両方で使う。
+    /// Bit flags representing multiple Domains at once (Task61: target-domain checks accompanying the
+    /// naval/air force additions). Used by both UnitType.CanTargetDomains (the domains this unit may
+    /// attack) and MilitaryBase.SpawnableDomains (the domains of units this base can produce).
     ///
-    /// 既存の Domain（単一値、Land=0/Sea=1/Air=2）はビット演算に使えない値のため、
-    /// あえて別のフラグ専用enumとして新設した（Domainの値を1/2/4へ変更する破壊的変更を避けるため。
-    /// WarStateSerializerはDomainを直接シリアライズしない＝TypeKey文字列経由でのみ解決されるため
-    /// 変更しても実害は無いはずだが、念のため既存enumには一切手を加えない安全側の選択）。
+    /// The existing Domain (single-valued, Land=0/Sea=1/Air=2) has values unusable for bitwise math,
+    /// so this was deliberately added as a separate flags-only enum (avoiding the breaking change of
+    /// moving Domain's values to 1/2/4. WarStateSerializer never serializes Domain directly — it is
+    /// resolved only via the TypeKey string — so changing it should do no real harm, but leaving the
+    /// existing enum completely untouched is the safe choice).
     /// </summary>
     [Flags]
     public enum DomainMask
@@ -28,7 +30,7 @@ namespace CSWarfront.Core
 
     public static class DomainMaskUtil
     {
-        /// <summary>単一のDomainを対応するDomainMaskビットへ変換する。</summary>
+        /// <summary>Converts a single Domain to its corresponding DomainMask bit.</summary>
         public static DomainMask Of(Domain domain)
         {
             switch (domain)
@@ -40,7 +42,7 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>maskがdomainのビットを含むか。</summary>
+        /// <summary>Whether mask includes domain's bit.</summary>
         public static bool Contains(DomainMask mask, Domain domain)
         {
             DomainMask bit = Of(domain);

@@ -2,25 +2,26 @@ using System.Collections.Generic;
 
 namespace CSWarfront.Core
 {
-    /// <summary>兵科1種ぶんの基礎値上書き（Tier1基準値。TierScalingは上書き後の値にも通常どおり
-    /// かかる）。nullのフィールドは「上書きしない＝ロスター既定値のまま」。</summary>
+    /// <summary>One category's base-stat overrides (tier-1 reference values; TierScaling applies to
+    /// overridden values as usual). Null fields mean "no override = keep the roster default".</summary>
     public struct UnitStatOverride
     {
         public float? Hp, Attack, Range, Armor, SpeedKmh, Splash, Cost, BuildTime, Accuracy, FireIntervalHours;
-        public float? AmmoCombatHours; // Task99: 弾薬ゲージの連続射撃可能時間（0=弾薬無限）
+        public float? AmmoCombatHours; // Task99: the ammo gauge's continuous-fire duration (0 = infinite ammo)
     }
 
     /// <summary>
-    /// UnitType基礎値の外部上書きの置き場（Task92、ユーザー要望「UnitType定義のXML/JSON外出し
-    /// （Workshop公開後にユーザーがバランスをいじれるように）」設計書§4.3）。
+    /// The home for external overrides of UnitType base stats (Task92, user request "move UnitType
+    /// definitions out to XML/JSON so users can tweak balance after the Workshop release", design
+    /// §4.3).
     ///
-    /// Game層のUnitStatsFileがMODフォルダの unit-stats.xml を読み、ロスター構築より前にここへ
-    /// Setする。各ロスター（LandUnitRoster/NavalUnitRoster/AirUnitRoster）はBuild時に
-    /// このクラス経由で基礎値を解決する。ファイルが無い/項目が無い場合はロスターの
-    /// ハードコード既定値がそのまま使われる（＝完全に後方互換）。
+    /// The Game layer's UnitStatsFile reads unit-stats.xml from the MOD folder and Sets values here
+    /// before roster construction. Each roster (LandUnitRoster/NavalUnitRoster/AirUnitRoster)
+    /// resolves its base stats through this class at Build time. With no file or no entry, the
+    /// roster's hardcoded defaults are used unchanged (= fully backward compatible).
     ///
-    /// UnityEngine非依存・ファイルIOなし（読むのはGame層の責務）。静的状態を持つため、
-    /// テストでは使用後にClear()すること。
+    /// No UnityEngine dependency, no file IO (reading is the Game layer's responsibility). Holds
+    /// static state, so tests must Clear() after use.
     /// </summary>
     public static class UnitStatOverrides
     {

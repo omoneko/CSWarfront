@@ -1,28 +1,32 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 他MOD（ゴジラ災害/エイリアン侵略）が生成する怪獣・侵略者に対するCSWarfront側の戦闘状態（Task58）。
+    /// CSWarfront's combat-side state for the monsters/invaders other MODs (Godzilla Disaster /
+    /// Alien Invasion) spawn (Task58).
     ///
-    /// 相手MODはHPや被弾・撃破APIを一切公開していない（Godzilla.Game.GodzillaManager /
-    /// AlienInvasion.Game.InvasionManagerは位置と生死しか教えてくれない）ため、HPはCSWarfrontが
-    /// 独自に持つ。0になったらGame層（Game/ExternalThreatBridge）がリフレクション経由で相手MODの
-    /// despawn（Defeat/ForceDespawn、無ければResetForNewLevel）を呼び、この脅威を除去する。
+    /// Those MODs expose no HP, hit or defeat API at all (Godzilla.Game.GodzillaManager /
+    /// AlienInvasion.Game.InvasionManager only tell us position and alive/dead), so CSWarfront keeps
+    /// its own HP. When it hits 0 the Game layer (Game/ExternalThreatBridge) calls the other MOD's
+    /// despawn via reflection (Defeat/ForceDespawn, or ResetForNewLevel if absent) and removes this
+    /// threat.
     ///
-    /// WarState.Threatsは実行時のみ・非永続化：Game層が毎tick、生きている他MODの状態から
-    /// 再同期する（RoadGraph/CoverMapと同じパターン）。
+    /// WarState.Threats is runtime-only and never persisted: the Game layer resyncs it every tick
+    /// from the live state of the other MODs (the same pattern as RoadGraph/CoverMap).
     /// </summary>
     public class ExternalThreat
     {
         public uint Id;
 
-        /// <summary>Kaiju(ゴジラ) / Alien（Game層のExternalThreatBridgeが設定する）。Task59:
-        /// WarState.ThreatRelationsの検索キーとして使うため文字列からThreatKind enumへ変更した。</summary>
+        /// <summary>Kaiju (Godzilla) / Alien (set by the Game layer's ExternalThreatBridge). Task59:
+        /// changed from a string to the ThreatKind enum so it can key WarState.ThreatRelations
+        /// lookups.</summary>
         public ThreatKind Kind;
 
         public WorldPos Position;
 
-        /// <summary>当たり半径（水平）。大型なので通常のユニット同士の交戦より広めに取る
-        /// （ThreatCombatStepが unitType.Range + Radius を実効射程として扱う）。</summary>
+        /// <summary>The hit radius (horizontal). These are huge, so it is wider than regular
+        /// unit-vs-unit engagements (ThreatCombatStep treats unitType.Range + Radius as the effective
+        /// range).</summary>
         public float Radius;
 
         public float MaxHP;

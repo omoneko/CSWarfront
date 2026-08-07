@@ -1,24 +1,28 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task101: 塹壕・掩蔽壕の上にいる歩兵系（Infantry/MechInfantry）への守備ボーナス+50%
-    /// （＝被ダメージ÷1.5。設計§1.2）。**所有勢力・稼働状態は不問**——敵に取られた塹壕は
-    /// 敵歩兵に使われるし、機能停止した掩蔽壕も地形としての防御価値は残る。
-    /// 適用: CombatStepの対ユニットダメージ・KamikazeStepの起爆・FortCombatStepの射撃。
-    /// 外部脅威（ゴジラ光線等）・災害ミサイルは対象外（regular兵器でないため貫通する）。
+    /// Task101: the +50% defense bonus for infantry classes (Infantry/MechInfantry) standing on a
+    /// trench or bunker (= incoming damage ÷ 1.5, design §1.2). **Owner and operational state are
+    /// irrelevant** — a captured trench serves enemy infantry, and a defunct bunker keeps its
+    /// defensive value as terrain.
+    /// Applied to: CombatStep's unit-vs-unit damage, KamikazeStep's detonation, FortCombatStep's
+    /// fire. External threats (the Godzilla beam etc.) and disaster missiles are excluded (not
+    /// regular weapons, so they punch through).
     /// </summary>
     public static class FortDefenseBonus
     {
-        /// <summary>塹壕（16×32m）の効果半径（対角半径強の簡易円判定）。</summary>
+        /// <summary>The trench's (16×32m) effect radius (a simple circle a bit over the diagonal
+        /// radius).</summary>
         public const float TrenchRadius = 18f;
 
-        /// <summary>掩蔽壕（16×16m）の効果半径。</summary>
+        /// <summary>The bunker's (16×16m) effect radius.</summary>
         public const float BunkerRadius = 12f;
 
-        /// <summary>被ダメージの除数（1.5=守備+50%）。</summary>
+        /// <summary>The incoming-damage divisor (1.5 = +50% defense).</summary>
         public const float DamageDivisor = 1.5f;
 
-        /// <summary>targetへ適用する被ダメージ倍率（ボーナス圏内の歩兵系なら1/1.5、それ以外1.0）。</summary>
+        /// <summary>The incoming-damage multiplier applied to target (1/1.5 for infantry classes
+        /// inside a bonus zone, 1.0 otherwise).</summary>
         public static float Multiplier(WarState state, UnitInstance target, UnitType targetType)
         {
             if (targetType == null) return 1f;
@@ -27,7 +31,8 @@ namespace CSWarfront.Core
             return IsOnFortification(state, target.Position) ? 1f / DamageDivisor : 1f;
         }
 
-        /// <summary>posが塹壕/掩蔽壕のボーナス圏内か（FortSeekStepの「既に陣取っている」判定にも使う）。</summary>
+        /// <summary>Whether pos lies inside a trench/bunker bonus zone (also used by FortSeekStep's
+        /// "already entrenched" check).</summary>
         public static bool IsOnFortification(WarState state, WorldPos pos)
         {
             for (int i = 0; i < state.Bases.Count; i++)

@@ -9,17 +9,20 @@ namespace CSWarfront.Core
         public WorldPos SpawnPos;
     }
 
-    /// <summary>生産tick（純ロジック）。完成分を CompletedUnit として返す（スポーンはGame層）。</summary>
+    /// <summary>The production tick (pure logic). Returns finished builds as CompletedUnit (spawning
+    /// is the Game layer's job).</summary>
     public static class ProductionStep
     {
-        /// <summary>Task78:「海上ユニットが敵拠点へ移動せず自拠点にこもったまま」不具合の一因の対策。
-        /// 海軍基地(BaseType.Navy)の建物位置は水上とは限らない（岸に建てられる）ため、これをそのまま
-        /// 艦艇のSpawnPosにすると、MovementStep.AdvanceSeaの最初の一歩から着地点が水域外と判定され、
-        /// 生まれた瞬間から永遠に動けなくなる（岸に立ち往生する不具合の直接原因）。これを避けるため、
-        /// 基地位置を中心に同心円状（半径NavySpawnSearchStepずつ拡大、各半径でNavySpawnSearchRaysの
-        /// 方向を均等に走査）で最も近い水域点を探し、見つかればそこをSpawnPosにする。既に水上、または
-        /// NavySpawnSearchMaxRadius以内に水域が見つからなければ、従来通り基地位置そのままを返す
-        /// （ベストエフォート・決定的・乱数不使用）。</summary>
+        /// <summary>Task78: a fix for one cause of "naval units never move to enemy strongholds and
+        /// stay holed up at home". A navy base's (BaseType.Navy) building position is not necessarily
+        /// on water (it is built on the shore), so using it directly as a ship's SpawnPos means
+        /// MovementStep.AdvanceSea judges the landing point out-of-water from the very first step —
+        /// the unit is stuck forever from the moment of birth (the direct cause of the stranded-on-
+        /// shore bug). To avoid it, the nearest water point is searched concentrically around the base
+        /// (radius growing by NavySpawnSearchStep, scanning NavySpawnSearchRays evenly-spaced
+        /// directions per radius); if found, that becomes SpawnPos. If already on water, or no water
+        /// is found within NavySpawnSearchMaxRadius, the base position is returned unchanged as
+        /// before (best-effort, deterministic, no RNG).</summary>
         private const float NavySpawnSearchStep = 20f;
         private const float NavySpawnSearchMaxRadius = 200f;
         private const int NavySpawnSearchRays = 16;
@@ -64,7 +67,7 @@ namespace CSWarfront.Core
                     if (water.IsWater(x, z)) return new WorldPos(x, b.Position.Y, z);
                 }
             }
-            return b.Position; // 探索半径内に水域が見つからなかった: 従来通りベストエフォートで基地位置を使う。
+            return b.Position; // no water found within the search radius: best-effort base position as before.
         }
     }
 }

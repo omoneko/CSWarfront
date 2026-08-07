@@ -1,9 +1,10 @@
 namespace CSWarfront.Core
 {
-    /// <summary>HP0の基地を最近接の敵対攻撃側へ移管する（純ロジック）。Task46: 勢力の脱落判定
-    /// （Eliminated）はここでは直接いじらない。FactionStatus.Refreshが「所有基地の有無」から
-    /// 毎tick導出し直す唯一の場所になった（一度脱落した勢力でも基地を取り戻せば復活できるように
-    /// するため、Eliminated=trueを立てっぱなしにする経路をここから排除した）。</summary>
+    /// <summary>Transfers bases at 0 HP to the nearest hostile attacker (pure logic). Task46: faction
+    /// elimination (Eliminated) is no longer touched directly here. FactionStatus.Refresh became the
+    /// only place deriving it every tick from "does the faction own any base" (so a once-eliminated
+    /// faction can revive by regaining a base, the path that left Eliminated=true set forever was
+    /// removed from here).</summary>
     public static class Occupation
     {
         public static void ResolveCaptures(WarState state)
@@ -14,29 +15,30 @@ namespace CSWarfront.Core
                 if (b.CurrentHP > 0f || b.OwnerFactionId == null) continue;
                 byte oldOwner = b.OwnerFactionId.Value;
 
-                // Task101: 占領不可の築城（Bunker/ArtilleryPost）はHP0で機能停止（中立化・再稼働なし）。
-                // 地形としての守備ボーナス（FortDefenseBonus）だけは残る。
+                // Task101: non-capturable fortifications (Bunker/ArtilleryPost) go defunct at 0 HP
+                // (neutralized, never reactivated). Only the terrain defense bonus (FortDefenseBonus)
+                // remains.
                 if (!FortificationRules.IsCapturable(b.Type))
                 {
                     b.OwnerFactionId = null;
                     continue;
                 }
 
-                // 圏内・敵対の攻撃側から最近接を新所有者に
+                // The nearest in-zone hostile attacker becomes the new owner
                 UnitInstance nearest = null; float best = float.MaxValue;
                 for (int i = 0; i < state.Units.Count; i++)
                 {
                     var u = state.Units[i];
                     if (!u.IsAlive) continue;
-                    if (!state.Relations.Get(oldOwner, u.FactionId).IsHostile()) continue; // Task59: Nemesisも敵対として扱う
+                    if (!state.Relations.Get(oldOwner, u.FactionId).IsHostile()) continue; // Task59: Nemesis counts as hostile too
                     float d = b.Position.HorizontalDistanceTo(u.Position);
                     if (d > b.InfluenceRadius) continue;
                     if (d < best) { best = d; nearest = u; }
                 }
-                if (nearest == null) continue; // 攻撃側不在なら保留（次tickへ）
+                if (nearest == null) continue; // no attacker present: hold off (until the next tick)
 
                 b.OwnerFactionId = nearest.FactionId;
-                b.CurrentHP = b.MaxHP;         // 再稼働（キューはそのまま＝奪取）
+                b.CurrentHP = b.MaxHP;         // reactivated (the queue rides along = seized)
             }
         }
     }

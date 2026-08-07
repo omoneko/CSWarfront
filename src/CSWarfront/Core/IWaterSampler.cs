@@ -1,25 +1,28 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task61: 海上ユニット(Domain.Sea)の移動範囲・水面高さを判定するための、UnityEngine非依存の薄い
-    /// シーム（IHeightSampler/RoadGraph/CoverMapと同じ供給パターン）。Coreはこのインターフェースを
-    /// 消費するだけで、実装は一切知らない。Game層（src/CSWarfront/Game/WaterSampler.cs）が
-    /// CSのTerrainManagerを叩いて実装する。
+    /// Task61: a thin UnityEngine-free seam for judging naval units' (Domain.Sea) movement range and
+    /// water-surface height (the same supply pattern as IHeightSampler/RoadGraph/CoverMap). Core only
+    /// consumes this interface and knows nothing of the implementation. The Game layer
+    /// (src/CSWarfront/Game/WaterSampler.cs) implements it against CS's TerrainManager.
     ///
-    /// MVPの既知の制約: 海上ユニットの移動（MovementStepのSea分岐）はA*等の水上経路探索を一切行わない、
-    /// 単純な直線移動である。直線移動の次ステップが陸地に踏み込む場合はその場で停止する（呼び出し側
-    /// MovementStep参照）ため、岬や半島の裏側にいる目標へは物理的に到達できないことがある
-    /// （海軍専用のパスファインディングは将来課題）。
+    /// A known MVP limitation: naval movement (MovementStep's Sea branch) does no on-water
+    /// pathfinding (A* etc.) at all — it is simple straight-line movement. When the straight line's
+    /// next step would tread on land the unit stops in place (see the caller, MovementStep), so
+    /// targets behind capes and peninsulas can be physically unreachable (navy-only pathfinding is
+    /// future work).
     /// </summary>
     public interface IWaterSampler
     {
-        /// <summary>マップ座標(x, z)における水面の高さ(y)の取得を試みる。水がない地点、または
-        /// 判定に失敗した場合はfalseを返す。呼び出し側はfalseの場合、levelの値を一切使ってはならない。</summary>
+        /// <summary>Attempts to get the water-surface height (y) at map coordinates (x, z). Returns
+        /// false where there is no water or the check fails. On false the caller must never use
+        /// level's value.</summary>
         bool TrySampleWaterLevel(float x, float z, out float level);
 
-        /// <summary>マップ座標(x, z)が水面（航行可能）かどうかを返す。IHeightSamplerと違いTry形式ではない：
-        /// 「判定できない」場合もfalse（=水ではない、陸地扱い）とすることで、海上ユニットが不明な地形へ
-        /// 誤って踏み込むより、その場で足止めされる方を安全側とする（MovementStepのSea分岐参照）。</summary>
+        /// <summary>Whether map coordinates (x, z) are water surface (navigable). Unlike
+        /// IHeightSampler this is not Try-form: "cannot judge" also returns false (= not water,
+        /// treated as land), so a naval unit getting stalled in place is chosen as the safe side over
+        /// mistakenly treading onto unknown terrain (see MovementStep's Sea branch).</summary>
         bool IsWater(float x, float z);
     }
 }
