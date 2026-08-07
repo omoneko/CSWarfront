@@ -5,17 +5,21 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// BuildingManagerから発展度サンプルを作る（経済tickの低頻度でのみ呼ぶ）。
-    /// スレッド注記: このクラスは OnSimTick の経済tick（MilitaryManager.OnSimTick内）から呼ばれ、
-    /// simスレッド上で実行される。BuildingManager.instance.m_buildings.m_buffer の読み取りは
-    /// simスレッドが所有するデータであり、OnAfterSimulationTick相当のタイミング（sim step後）で
-    /// 読むぶんには安全＝メインスレッド専用の制約（車両生成・描画・UI等のCS API）には該当しない。
+    /// Builds development samples from BuildingManager (called only at the low frequency of the
+    /// economy tick).
+    /// Threading note: this class is called from the economy tick of OnSimTick (inside
+    /// MilitaryManager.OnSimTick) and runs on the sim thread. Reading
+    /// BuildingManager.instance.m_buildings.m_buffer targets data owned by the sim thread, and
+    /// reading it at OnAfterSimulationTick-equivalent timing (after the sim step) is safe — i.e. it
+    /// does not fall under the main-thread-only constraints (CS APIs for vehicle creation, rendering,
+    /// UI, etc.).
     /// </summary>
     public static class DevelopmentSampler
     {
         /// <summary>
-        /// sim スレッドから呼ばれる想定（MilitaryManager.OnSimTick の経済tick経由）。
-        /// BuildingManager の建物バッファはsim側が所有するデータのため、simスレッドでの読み取りは安全。
+        /// Intended to be called from the sim thread (via the economy tick of
+        /// MilitaryManager.OnSimTick). The BuildingManager building buffer is sim-owned data, so
+        /// reading it on the sim thread is safe.
         /// </summary>
         public static List<DevelopmentSample> Sample()
         {
@@ -27,20 +31,22 @@ namespace CSWarfront.Game
                 if ((buf[i].m_flags & Building.Flags.Created) == 0) continue;
                 if (buf[i].Info == null) continue;
                 Vector3 p = buf[i].m_position;
-                // 発展度＝建物レベル+1（MVP簡略。人口密度等は後日加味）。
+                // Development = building level + 1 (MVP simplification; population density etc. to be
+                // factored in later).
                 float dev = buf[i].m_level + 1;
                 list.Add(new DevelopmentSample
                 {
                     Position = new WorldPos(p.x, p.y, p.z),
                     Development = dev,
-                    Zone = ZoneFor(buf[i].Info.m_class.m_service) // Task99: 3資源経済のゾーン分類
+                    Zone = ZoneFor(buf[i].Info.m_class.m_service) // Task99: zone classification for the 3-resource economy
                 });
             }
             return list;
         }
 
-        /// <summary>Task99: CSのService種別→3資源経済のゾーン分類（住宅→人的資源、商業/オフィス→資金、
-        /// 工業→生産力）。それ以外（公共サービス等）はOther＝どの資源にも寄与しない。</summary>
+        /// <summary>Task99: CS Service kind → zone classification for the 3-resource economy
+        /// (residential → manpower, commercial/office → funds, industrial → production). Everything
+        /// else (public services etc.) is Other = contributes to no resource.</summary>
         private static ZoneKind ZoneFor(ItemClass.Service service)
         {
             switch (service)

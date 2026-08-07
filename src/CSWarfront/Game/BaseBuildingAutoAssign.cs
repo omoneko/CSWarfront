@@ -6,21 +6,22 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task109（ユーザー要望「公開している建物アセットをサブスクライブしていれば自動でデフォルト割り当てに」）:
-    /// ロード済みの建物プレハブを走査し、CS:WARFRONT用として公開されている建物アセットを基地種別へ
-    /// 自動割り当てする。
+    /// Task109 (user request "if the published building assets are subscribed, assign them as
+    /// defaults automatically"): scans the loaded building prefabs and auto-assigns building assets
+    /// published for CS:WARFRONT to their base types.
     ///
-    /// 判定はプレハブ名の正規化一致のみ（Workshopアセットのプレハブ名は "&lt;itemId&gt;.&lt;アセット名&gt;_Data"
-    /// という形式なので、先頭のid・末尾の"_Data"・記号・大小文字を落として比較する）。候補名は
-    /// models.blend／Asset Editor向けFBX（tools/export_asset_editor.py）で使っているアセット名に合わせてある。
+    /// Matching is done purely by normalized prefab-name comparison (Workshop asset prefab names have
+    /// the form "&lt;itemId&gt;.&lt;asset name&gt;_Data", so the leading id, trailing "_Data",
+    /// punctuation, and letter case are stripped before comparison). The candidate names match the
+    /// asset names used in models.blend / the Asset Editor FBX export (tools/export_asset_editor.py).
     ///
-    /// これはあくまで「未指定のときの既定値」であり、Optionsでの手動指定が常に優先される
-    /// （<see cref="BaseBuildingDesignation"/>参照）。自動割り当ての結果はログに出すので、
-    /// 意図しないアセットを拾っていないか確認できる。
+    /// This is strictly a "default when nothing is specified"; a manual assignment in Options always
+    /// takes precedence (see <see cref="BaseBuildingDesignation"/>). The auto-assignment results are
+    /// logged so it can be verified that no unintended assets were picked up.
     /// </summary>
     internal static class BaseBuildingAutoAssign
     {
-        /// <summary>基地種別ごとの候補名（正規化済み）。先に一致したものを採用する。</summary>
+        /// <summary>Candidate names per base type (already normalized). The first match wins.</summary>
         private static readonly KeyValuePair<BaseType, string[]>[] Candidates =
         {
             // Task112 (Workshop report by StarfleetPups: "auto detect says none"): the published base
@@ -47,8 +48,8 @@ namespace CSWarfront.Game
                 new[] { "railyard", "cargostation", "militarycargostation", "warfrontrailyard" })
         };
 
-        /// <summary>ロード済み建物プレハブを走査し、種別→プレハブ名の自動割り当てを返す
-        /// （1件も見つからなければ空）。メインスレッド専用（OnLevelLoadedから呼ぶ）。</summary>
+        /// <summary>Scans the loaded building prefabs and returns the auto-assignment of base type to
+        /// prefab name (empty if nothing is found). Main thread only (called from OnLevelLoaded).</summary>
         public static Dictionary<BaseType, string> Detect()
         {
             var found = new Dictionary<BaseType, string>();
@@ -67,7 +68,7 @@ namespace CSWarfront.Game
                     for (int c = 0; c < Candidates.Length; c++)
                     {
                         BaseType type = Candidates[c].Key;
-                        if (found.ContainsKey(type)) continue; // 先に見つかったものを優先（決定的）
+                        if (found.ContainsKey(type)) continue; // first match wins (deterministic)
 
                         string[] names = Candidates[c].Value;
                         for (int n = 0; n < names.Length; n++)
@@ -100,8 +101,8 @@ namespace CSWarfront.Game
             return found;
         }
 
-        /// <summary>"1234567890.Bunker_Data" → "bunker"。Workshopのidプレフィックス・"_Data"接尾・
-        /// 記号・大小文字の違いを吸収する。</summary>
+        /// <summary>"1234567890.Bunker_Data" → "bunker". Absorbs the Workshop id prefix, the "_Data"
+        /// suffix, punctuation, and letter-case differences.</summary>
         private static string NormalizeAssetName(string prefabName)
         {
             string name = prefabName;

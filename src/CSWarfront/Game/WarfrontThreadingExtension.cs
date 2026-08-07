@@ -3,14 +3,15 @@ using CSWarfront.Game.UI;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// スレッド分担（Task19で変更）:
-    ///  - sim スレッド（OnAfterSimulationTick）: Core判断ロジック＋CS実体（建物等）バッファ読み取り専用。
-    ///    CS建物バッファの空きスロット割当・空間グリッドはsimスレッドが所有するため、他スレッドから
-    ///    同時に触るとバッファが破壊されCS自身のシミュレーションコードがIndexOutOfRangeException
-    ///    （捕捉されないポップアップ）を投げる。
-    ///  - メインスレッド（OnUpdate）: ユニットの見た目（Unity GameObject）の同期専用。
-    ///    CS実体には一切触れない（new GameObject/AddComponent/Destroy/transform書込等のUnity
-    ///    オブジェクトAPIはメインスレッドでのみ呼び出し可能なため、ここに置く）。
+    /// Thread split (changed in Task19):
+    ///  - sim thread (OnAfterSimulationTick): Core decision logic plus read-only access to CS entity
+    ///    (building etc.) buffers. The free-slot allocation of CS building buffers and the spatial
+    ///    grid are owned by the sim thread, so touching them concurrently from another thread corrupts
+    ///    the buffers and CS's own simulation code throws IndexOutOfRangeException (an uncaught
+    ///    popup).
+    ///  - main thread (OnUpdate): dedicated to syncing unit visuals (Unity GameObjects).
+    ///    It never touches CS entities (Unity object APIs such as new GameObject/AddComponent/
+    ///    Destroy/transform writes may only be called on the main thread, hence they live here).
     /// </summary>
     public class WarfrontThreadingExtension : ThreadingExtensionBase
     {
@@ -21,16 +22,17 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// メインスレッド。ユニット見た目の同期に加え（Task25）、基地情報パネル（Game/UI/BaseInfoPanel）の
-        /// 生成・表示更新もここから駆動する。BaseInfoPanel の各メソッドは内部で例外を必ず握るため、
-        /// ここでの try/catch は他の main-thread 処理と同様の多重防御。一時停止中も動く。
+        /// Main thread. In addition to syncing unit visuals (Task25), this also drives creation and
+        /// display updates of the base info panel (Game/UI/BaseInfoPanel). Each BaseInfoPanel method
+        /// always swallows exceptions internally, so the try/catch here is defense in depth like the
+        /// other main-thread work. Runs while the game is paused too.
         /// </summary>
         public override void OnUpdate(float realTimeDelta, float simulationTimeDelta)
         {
             try { MilitaryManager.OnMainVisualUpdate(); }
             catch (System.Exception e) { ModConfig.LogError("OnMainVisualUpdate: " + e); }
 
-            // SpeedCalibration.InGameHoursPerRealSecond の実機較正診断（Task26）。
+            // On-device calibration diagnostics for SpeedCalibration.InGameHoursPerRealSecond (Task26).
             try { SpeedCalibrationDiagnostics.AccumulateRealSeconds(realTimeDelta); }
             catch (System.Exception e) { ModConfig.LogError("SpeedCalibrationDiagnostics: " + e); }
 
@@ -41,10 +43,11 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("BaseInfoPanel update: " + e); }
 
-            // Task36: モデル設定パネルは常設ではなくトグル開閉式のため、ここではEnsureCreated（冪等）のみ
-            // 呼んで下地を用意する。表示/非表示自体はBaseInfoPanelの「モデル設定」ボタンが駆動する。
-            // Task47: UpdateGameMenuStateはEscメニューが開いている間だけ表示中のパネルを一時的に隠し、
-            // 閉じたら戻す（トグル状態そのものは変更しない）。
+            // Task36: the model-assignment panel is toggle-open rather than permanent, so here we only
+            // call EnsureCreated (idempotent) to lay the groundwork. Showing/hiding itself is driven by
+            // the "model settings" button on BaseInfoPanel.
+            // Task47: UpdateGameMenuState temporarily hides a visible panel while the Esc menu is open
+            // and restores it when closed (the toggle state itself is not changed).
             try
             {
                 AssetAssignPanel.EnsureCreated();
@@ -52,8 +55,9 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("AssetAssignPanel update: " + e); }
 
-            // ユニットのクリック選択とステータスパネル（Task31）。位置同期（OnMainVisualUpdate、上）の
-            // 後に行うことで、raycastが今フレームの最新位置に配置済みの当たり判定と一致する。
+            // Unit click selection and status panel (Task31). Doing this after position sync
+            // (OnMainVisualUpdate, above) makes the raycast agree with colliders already placed at this
+            // frame's latest positions.
             try
             {
                 UnitSelection.Update();
@@ -62,8 +66,9 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("UnitInfoPanel update: " + e); }
 
-            // 範囲選択（Task48）。UnitSelection.Update（単発クリック、上）の直後に呼ぶことで、
-            // 「単発クリックがそのままドラッグへ発展した場合」を同一フレーム内で正しく検知できる。
+            // Box selection (Task48). Calling this right after UnitSelection.Update (single click,
+            // above) lets us correctly detect, within the same frame, the case where a single click
+            // develops into a drag.
             try
             {
                 UnitBoxSelection.EnsureCreated();
@@ -71,38 +76,39 @@ namespace CSWarfront.Game
             }
             catch (System.Exception e) { ModConfig.LogError("UnitBoxSelection update: " + e); }
 
-            // 部隊コマンドのホットキー入力（Task48）。UnitBoxSelection.Update（上）の後に呼ぶことで、
-            // 同じフレームで確定した選択（SelectedIds）を対象にコマンドを出せるようにする。
+            // Unit-command hotkey input (Task48). Calling it after UnitBoxSelection.Update (above)
+            // allows commands to target the selection (SelectedIds) finalized in the same frame.
             try
             {
                 UnitCommandInput.Update();
             }
             catch (System.Exception e) { ModConfig.LogError("UnitCommandInput update: " + e); }
 
-            // Task63: 弾道ミサイルの発射地点指定（右クリックターゲティング）。UnitCommandInputと同じ
-            // 「選択/コマンド系ホットキー入力」フェーズにまとめる。
+            // Task63: ballistic missile launch-point designation (right-click targeting). Grouped into
+            // the same "selection/command hotkey input" phase as UnitCommandInput.
             try
             {
                 MissileLaunchTargeting.Update();
             }
             catch (System.Exception e) { ModConfig.LogError("MissileLaunchTargeting update: " + e); }
 
-            // Task102: 軍事建設パネル（軍事建物9種のワンクリック配置。ホットキー/常駐ボタンで開閉）。
+            // Task102: military build panel (one-click placement of the 9 military building kinds;
+            // opened/closed via hotkey or the persistent button).
             try
             {
                 MilitaryBuildPanel.Update();
             }
             catch (System.Exception e) { ModConfig.LogError("MilitaryBuildPanel update: " + e); }
 
-            // Task106: 塹壕ライン敷設のターゲティング（2点右クリック）。
+            // Task106: targeting for trench-line placement (two right-clicked points).
             try
             {
                 TrenchLineTargeting.Update();
             }
             catch (System.Exception e) { ModConfig.LogError("TrenchLineTargeting update: " + e); }
 
-            // Task62: コマンド発行時の画面中央トースト。UnitCommandInputがShow()を呼ぶ側なので、
-            // ここでは冪等な生成とフェード/非表示の時間経過管理だけを毎フレーム行う。
+            // Task62: screen-center toast on command issue. UnitCommandInput is the caller of Show(),
+            // so here we only do idempotent creation and per-frame fade/hide timekeeping.
             try
             {
                 CommandToast.EnsureCreated();

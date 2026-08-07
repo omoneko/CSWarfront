@@ -5,10 +5,11 @@ using UnityEngine;
 namespace CSWarfront.Game.Audio
 {
     /// <summary>
-    /// Sounds/*.wav を WWW で読み込んで WarfrontSounds に登録するコルーチンホスト（メインスレッド、Task51）。
-    /// MissileDisaster.Game.Audio.SoundLoaderBehaviour と同じ実績パターン。DontDestroyOnLoad の隠し
-    /// GameObject に付与され、1回だけ全ファイルを読み込む。WAVを読むのはCS(Unity 5.6)がランタイムMP3
-    /// デコードに非対応なため（WarfrontSounds冒頭のコメント参照）。
+    /// Coroutine host that loads Sounds/*.wav via WWW and registers them in WarfrontSounds (main
+    /// thread, Task51). Same proven pattern as MissileDisaster.Game.Audio.SoundLoaderBehaviour.
+    /// Attached to a hidden DontDestroyOnLoad GameObject; loads all files exactly once. WAV is used
+    /// because CS (Unity 5.6) does not support runtime MP3 decoding (see the comment at the top of
+    /// WarfrontSounds).
     /// </summary>
     public class WarfrontSoundLoaderBehaviour : MonoBehaviour
     {
@@ -29,7 +30,7 @@ namespace CSWarfront.Game.Audio
                 string path = Path.Combine(folder, name + ".wav");
                 if (!File.Exists(path))
                 {
-                    ModConfig.LogError("WarfrontSoundLoader: ファイルなし " + path);
+                    ModConfig.LogError("WarfrontSoundLoader: file not found " + path);
                     continue;
                 }
 
@@ -39,20 +40,20 @@ namespace CSWarfront.Game.Audio
 
                 if (!string.IsNullOrEmpty(www.error))
                 {
-                    ModConfig.LogError("WarfrontSoundLoader: 読込失敗 " + name + " : " + www.error);
+                    ModConfig.LogError("WarfrontSoundLoader: load failed " + name + " : " + www.error);
                     continue;
                 }
 
                 AudioClip clip = null;
                 try { clip = www.GetAudioClip(false, false, AudioType.WAV); }
-                catch (System.Exception e) { ModConfig.LogError("WarfrontSoundLoader: デコード失敗 " + name + " : " + e); }
+                catch (System.Exception e) { ModConfig.LogError("WarfrontSoundLoader: decode failed " + name + " : " + e); }
                 if (clip == null)
                 {
-                    ModConfig.LogError("WarfrontSoundLoader: GetAudioClip が null " + name);
+                    ModConfig.LogError("WarfrontSoundLoader: GetAudioClip returned null " + name);
                     continue;
                 }
 
-                // 非同期デコードの完了を待つ（最大5秒）。
+                // Wait for asynchronous decoding to finish (up to 5 seconds).
                 float t = 0f;
                 while (clip.loadState == AudioDataLoadState.Loading && t < 5f)
                 {
@@ -61,13 +62,13 @@ namespace CSWarfront.Game.Audio
                 }
                 if (clip.loadState == AudioDataLoadState.Failed)
                 {
-                    ModConfig.LogError("WarfrontSoundLoader: ロード状態=Failed " + name);
+                    ModConfig.LogError("WarfrontSoundLoader: load state=Failed " + name);
                     continue;
                 }
 
                 clip.name = name;
                 WarfrontSounds.Register(name, clip);
-                ModConfig.Log("WarfrontSoundLoader: 読込完了 " + name + " (" + clip.length.ToString("0.0") + "s)");
+                ModConfig.Log("WarfrontSoundLoader: loaded " + name + " (" + clip.length.ToString("0.0") + "s)");
             }
         }
     }

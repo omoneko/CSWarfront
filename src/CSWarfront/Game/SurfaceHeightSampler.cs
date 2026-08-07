@@ -5,67 +5,81 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Core.IHeightSamplerのGame層実装（Task53、「ユニットが地面にめり込む」不具合の修正）。
-    /// CSのTerrainManagerを叩いて、道路/建物建設後の"見た目の"地表（roads on embankments,
-    /// terrain modified by construction, bridges等を含む）を返す。
+    /// Game-layer implementation of Core.IHeightSampler (Task53, fix for the "units sink into the
+    /// ground" bug). Queries CS's TerrainManager and returns the "visual" ground surface as it looks
+    /// after road/building construction (including roads on embankments, terrain modified by
+    /// construction, bridges, etc.).
     ///
-    /// スレッド注記: MovementStep.Advance（MilitaryManager.OnSimTickのsimスレッド）から呼ばれる想定。
-    /// DevelopmentSampler/RoadGraphBuilderと同じ前提＝TerrainManagerの読み取り専用APIをsimスレッドで
-    /// 呼ぶこと自体はCSの制約に反しない（メインスレッド専用なのはGameObject生成/描画/UI操作の方）。
+    /// Threading note: intended to be called from MovementStep.Advance (the sim thread of
+    /// MilitaryManager.OnSimTick). Same premise as DevelopmentSampler/RoadGraphBuilder: calling
+    /// TerrainManager's read-only APIs on the sim thread does not violate CS's constraints (what is
+    /// main-thread-only is GameObject creation/rendering/UI operations).
     ///
-    /// 検証済みシグネチャ（Assembly-CSharp.dllをILSpyでデコンパイルして再確認、Task55）:
-    ///  - TerrainManager.SampleDetailHeight(Vector3 worldPos): float ← 採用するのはこちら。
-    ///    実装（ILSpy逆コンパイル結果）:
+    /// Verified signatures (re-confirmed by decompiling Assembly-CSharp.dll with ILSpy, Task55):
+    ///  - TerrainManager.SampleDetailHeight(Vector3 worldPos): float ← this is the one we adopt.
+    ///    Implementation (ILSpy decompilation result):
     ///      float x = worldPos.x / 4f + 2160f;
     ///      float z = worldPos.z / 4f + 2160f;
     ///      return SampleDetailHeight(x, z) * (1f / 64f);
-    ///    ワールド座標→detailヒートマップのグリッド座標（0..4320、4321刻み）への変換と、
-    ///    raw格納値→ワールド高さ単位への1/64スケール変換の両方をこの中で行っている。
-    ///  - TerrainManager.SampleDetailHeight(float x, float z): float ← Task53はこちらを誤って
-    ///    採用していた（バグの根本原因）。実装（ILSpy逆コンパイル結果、抜粋）:
+    ///    It performs both the conversion from world coordinates to detail-heightmap grid
+    ///    coordinates (0..4320, 4321 steps) and the 1/64 scale conversion from the raw stored value
+    ///    to world height units inside this method.
+    ///  - TerrainManager.SampleDetailHeight(float x, float z): float ← Task53 mistakenly adopted
+    ///    this one (root cause of the bug). Implementation (ILSpy decompilation result, excerpt):
     ///      int num3 = Mathf.Clamp((int)x, 0, 4320);
     ///      int num4 = Mathf.Clamp((int)z, 0, 4320);
-    ///      ... GetDetailHeight(...)で上記グリッド座標を直接インデックスに使い、1/64スケールなしで返す
-    ///    つまりこのオーバーロードの引数x/zは「detailグリッド座標そのもの」であり、ワールド座標では
-    ///    ない。Task53はここへワールド座標のx/zをそのまま渡していたため、(a) 座標変換
-    ///    (/4+2160)が欠落し全く別の位置を参照し、(b) 1/64のスケール変換も欠落して返り値が
-    ///    最大64倍過大になっていた。これが「ユニットが空中戦を始める」（地表よりはるかに高い
-    ///    Yへスナップする）不具合の根本原因である。TrySampleHeightは例外を投げないため
-    ///    （インデックスはClampされている）、このバグはログにエラーを一切残さず、ユーザーの
-    ///    output_log.txtにもSurfaceHeightSampler関連のエラーは存在しなかった（Task55調査で確認）。
-    ///  - TerrainManager.instance: Singleton&lt;TerrainManager&gt;.instance（RoadGraphBuilder/
-    ///    CoverMapBuilderと同じColossalFramework.Singletonパターン、Task53から変更なし）。
+    ///      ... GetDetailHeight(...) uses the above grid coordinates directly as indices and returns
+    ///    without the 1/64 scaling. In other words, the x/z arguments of this overload are "detail
+    ///    grid coordinates themselves", not world coordinates. Task53 passed world-coordinate x/z
+    ///    straight into it, so (a) the coordinate conversion (/4+2160) was missing and a completely
+    ///    different location was sampled, and (b) the 1/64 scale conversion was also missing, making
+    ///    the return value up to 64x too large. This is the root cause of the "units start dogfighting
+    ///    in mid-air" bug (snapping to a Y far above the ground). Because TrySampleHeight does not
+    ///    throw (the indices are clamped), this bug left no error in the logs whatsoever, and the
+    ///    user's output_log.txt contained no SurfaceHeightSampler-related errors either (confirmed
+    ///    during the Task55 investigation).
+    ///  - TerrainManager.instance: Singleton&lt;TerrainManager&gt;.instance (same
+    ///    ColossalFramework.Singleton pattern as RoadGraphBuilder/CoverMapBuilder, unchanged since
+    ///    Task53).
     ///
-    /// 上記のSampleDetailHeight(Vector3)を採用する理由（Task53の元々の意図はそのまま維持）:
-    ///  detail heightmapは道路・建物の建設で地形が実際にフラット化/変形された結果を反映した
-    ///  "見た目どおり"の高さであり、SampleRawHeight/SampleFinalHeight/SampleBlockHeightが参照する
-    ///  粗い（1081刻み、約8m/セル）control heightmap（建設前の生の地形）とは別物。道路の盛土・橋・
-    ///  建物の基礎などで実際に変化した地表を反映するのはSampleDetailHeightの方である。
+    /// Reason for adopting SampleDetailHeight(Vector3) above (Task53's original intent is preserved
+    /// as-is): the detail heightmap reflects the terrain as actually flattened/deformed by road and
+    /// building construction — the "as seen" height — and is distinct from the coarse (1081 steps,
+    /// ~8m/cell) control heightmap (the raw pre-construction terrain) referenced by
+    /// SampleRawHeight/SampleFinalHeight/SampleBlockHeight. It is SampleDetailHeight that reflects
+    /// the ground surface actually changed by road embankments, bridges, building foundations, etc.
     ///
-    /// ハードニング（Task53導入、Task55でも維持）: このマップの実測地表は約270であり、旧実装（失敗時に
-    /// 0fを返すfloat SampleHeight）だと、TerrainManagerが一時的に未生成/例外を投げた瞬間にMovementStep
-    /// がその0fをそのままユニットのYへ採用し、1tickだけ地表の約270下へテレポートする可視グリッチに
-    /// なっていた。TrySampleHeight形式にし、失敗時はfalseを返してMovementStep側にY補間フォールバックを
-    /// 委ねる（このクラスは決して失敗値をheightに"それらしい"値として書き込まない）。
+    /// Hardening (introduced in Task53, kept in Task55): the measured ground surface on this map is
+    /// about 270, and with the old implementation (a float SampleHeight returning 0f on failure),
+    /// the moment TerrainManager was momentarily uninitialized or threw, MovementStep adopted that
+    /// 0f directly as the unit's Y, producing a visible glitch where the unit teleported ~270 below
+    /// the surface for one tick. We use the TrySampleHeight form instead: on failure it returns
+    /// false and delegates to MovementStep's Y-interpolation fallback (this class never writes a
+    /// "plausible-looking" failure value into height).
     ///
-    /// 多層防御（Task55追記）: 上記のような「例外は投げないが値が荒唐無稽」なバグ自体の再発を防ぐため、
-    /// Core.MovementStep側にもMaxSurfaceDeviationによる乖離クランプを追加した（このクラスの契約
-    /// （成功したら正しい高さを返す）が将来また崩れても、被害を機械的に抑える保険）。
+    /// Defense in depth (added in Task55): to prevent recurrence of the very class of bug above
+    /// ("throws no exception but returns an absurd value"), a deviation clamp via
+    /// MaxSurfaceDeviation was also added on the Core.MovementStep side (insurance that mechanically
+    /// limits the damage even if this class's contract (return the correct height on success) breaks
+    /// again in the future).
     /// </summary>
     internal sealed class SurfaceHeightSampler : IHeightSampler
     {
-        // RoadGraphBuilder/CoverMapBuilderと同じ間引きパターン（Task23/Task44）: MovementStepは
-        // simスレッド上でtickごとに大量に呼ばれるため、失敗が続く間ログを埋め尽くさないよう最初の
-        // 1回だけ記録する。成功したら次に失敗した際にまた1回だけ記録する（抑制状態をリセット）。
-        // simスレッド専用アクセスのためロック不要。
+        // Same throttling pattern as RoadGraphBuilder/CoverMapBuilder (Task23/Task44): MovementStep
+        // is called massively every tick on the sim thread, so to avoid flooding the log while
+        // failures persist we record only the first occurrence. After a success, the next failure is
+        // logged once again (the suppression state is reset).
+        // Sim-thread-only access, so no lock is needed.
         private static bool _failureAlreadyLogged;
 
         public bool TrySampleHeight(float x, float z, out float height)
         {
-            // RoadGraphBuilder/CoverMapBuilderと同じ防御方針: Singleton未生成（レベルロード直後の
-            // ごく短い間隙等）ならこのtickだけ諦める。ハードニング: ここで"それらしい"値（0f等）を
-            // 返さず、失敗をfalseで明示し、呼び出し元(MovementStep)に既存のY補間結果をそのまま
-            // 採用させる（0fがそのままYに採用され地表の遥か下へテレポートする不具合の再発防止）。
+            // Same defensive policy as RoadGraphBuilder/CoverMapBuilder: if the Singleton is not yet
+            // created (e.g. the very brief window right after level load), give up for this tick only.
+            // Hardening: do not return a "plausible-looking" value (0f etc.) here; signal failure
+            // explicitly with false and let the caller (MovementStep) keep its existing Y
+            // interpolation result as-is (prevents recurrence of the bug where 0f was adopted
+            // directly as Y and the unit teleported far below the surface).
             if (!Singleton<TerrainManager>.exists)
             {
                 if (!_failureAlreadyLogged)
@@ -79,18 +93,20 @@ namespace CSWarfront.Game
 
             try
             {
-                // Task55: SampleDetailHeight(float, float)はdetailグリッド座標を要求する内部向けの
-                // オーバーロードであり、ワールド座標ではない。ワールド座標のx/zからワールド単位の
-                // 高さを得るにはSampleDetailHeight(Vector3)を使う（座標変換と1/64スケール変換の両方を
-                // 内部で行ってくれる。上のクラスdocコメントのILSpy逆コンパイル結果を参照）。
+                // Task55: SampleDetailHeight(float, float) is an internal-facing overload that
+                // expects detail grid coordinates, not world coordinates. To get a world-unit height
+                // from world-coordinate x/z, use SampleDetailHeight(Vector3) (it performs both the
+                // coordinate conversion and the 1/64 scale conversion internally; see the ILSpy
+                // decompilation results in the class doc comment above).
                 height = Singleton<TerrainManager>.instance.SampleDetailHeight(new Vector3(x, 0f, z));
-                _failureAlreadyLogged = false; // 成功したので次の失敗はまた1回だけログする
+                _failureAlreadyLogged = false; // Success, so the next failure will again be logged once
                 return true;
             }
             catch (System.Exception e)
             {
-                // 例外が続いてもログを埋め尽くさないよう最初の1回だけ記録する（間引きなしで毎tick
-                // 出すと"Nothing may throw into the game loop"の原則がログスパムに変わってしまう）。
+                // Log only the first occurrence so continued exceptions do not flood the log
+                // (emitting every tick without throttling would turn the "Nothing may throw into the
+                // game loop" principle into log spam).
                 if (!_failureAlreadyLogged)
                 {
                     ModConfig.LogError("SurfaceHeightSampler.TrySampleHeight error: " + e);

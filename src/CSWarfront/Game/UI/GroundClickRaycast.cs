@@ -4,28 +4,32 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// マウス位置のスクリーン座標からワールド上の「クリック地点」を求める共用ヘルパー（Task77）。
-    /// UnitCommandInput（集結地点）と MissileLaunchTargeting（ミサイル目標）の両方から使う。
+    /// Shared helper that resolves the world-space "clicked point" from the mouse's screen
+    /// coordinates (Task77). Used by both UnitCommandInput (rally points) and
+    /// MissileLaunchTargeting (missile targets).
     ///
-    /// 手順:
-    ///  1. Physics.Raycast — ユニット/建物などMOD自前コライダーへの精密ヒット（従来経路）。
-    ///  2. 外れたら Core.TerrainRaycast — TerrainManagerの高さサンプリングとの交差計算。
-    ///     CS1の地形はUnity物理コライダーを持たないため、開けた地面のクリックは必ずこちらで
-    ///     確定する（従来はここが無く「raycast hit nothing」で全て却下されていた＝Task77の根本原因）。
+    /// Procedure:
+    ///  1. Physics.Raycast — precise hits against the mod's own colliders such as units/buildings
+    ///     (the legacy path).
+    ///  2. If that misses, Core.TerrainRaycast — intersection computed against TerrainManager
+    ///     height sampling. CS1 terrain has no Unity physics collider, so clicks on open ground
+    ///     are always resolved by this path (previously this path did not exist and everything was
+    ///     rejected with "raycast hit nothing" = the root cause of Task77).
     ///
-    /// スレッド注記: メインスレッド専用（Camera/Input/Physicsを触るため）。SurfaceHeightSamplerの
-    /// TerrainManager.SampleDetailHeight(Vector3)は読み取り専用APIであり、simスレッドと並行して
-    /// メインスレッドから読んでも安全（ログ抑制フラグの競合は無害）。
+    /// Threading note: main thread only (touches Camera/Input/Physics). SurfaceHeightSampler's
+    /// TerrainManager.SampleDetailHeight(Vector3) is a read-only API and is safe to read from the
+    /// main thread concurrently with the sim thread (races on the log-suppression flag are
+    /// harmless).
     /// </summary>
     internal static class GroundClickRaycast
     {
-        private const float MaxRaycastDistance = 10000f; // 従来のUnitCommandInput/MissileLaunchTargetingと同じ値
+        private const float MaxRaycastDistance = 10000f; // same value as the legacy UnitCommandInput/MissileLaunchTargeting
 
         private static readonly SurfaceHeightSampler _sampler = new SurfaceHeightSampler();
 
-        /// <summary>現在のマウス位置からクリック地点のワールド座標の取得を試みる。
-        /// カメラ未準備・地形交差も不成立の場合はfalseを返し、reasonに却下理由
-        /// （ログ用の短い英語句）を格納する。</summary>
+        /// <summary>Attempts to get the world position of the clicked point from the current mouse
+        /// position. Returns false if the camera is not ready and the terrain intersection also
+        /// fails, storing the rejection reason (a short English phrase for logging) in reason.</summary>
         public static bool TryGetPoint(out Vector3 point, out string reason)
         {
             point = default(Vector3);

@@ -5,17 +5,20 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task107: 鉄道輸送の計装（MilitaryManager partial、500行制限のため分離）。
+    /// Task107: rail transport instrumentation (MilitaryManager partial, split off because of the
+    /// 500-line limit).
     ///
-    /// ユーザー報告「軍用貨物列車がスポーンしても身動きできず文鎮化する」の原因は、実機でしか
-    /// 分からない条件（駅がレール網に届いているか／路線が成立しているか／列車が担当路線を
-    /// 持っているか）に依存する。レール網の再構築のたびに、勢力ごとの
-    ///   貨物駅の総数 / うち稼働（所有＋レール接続＋HP残）/ 成立した路線ペア数 / 列車数
-    /// をログへ出す。列車が動かないときに、どの段階で切れているのかがこれ1行で分かる。
+    /// The user-reported issue "military cargo trains spawn but cannot move and just sit there like a
+    /// paperweight" depends on conditions that can only be observed on a real machine (whether the
+    /// station reaches the rail network / whether a route can be formed / whether the train has a route
+    /// assigned). Every time the rail network is rebuilt, log per faction:
+    ///   total cargo stations / how many are operational (owned + rail-connected + HP remaining) /
+    ///   number of formed route pairs / train count
+    /// When trains do not move, this single line shows at which stage the chain is broken.
     /// </summary>
     public static partial class MilitaryManager
     {
-        /// <summary>simスレッド（OnSimTick、_stateLock内）。</summary>
+        /// <summary>Sim thread (OnSimTick, inside _stateLock).</summary>
         private static void LogRailRoutes()
         {
             try
@@ -44,7 +47,7 @@ namespace CSWarfront.Game
                         if (t != null && t.Category == UnitCategory.MilitaryTrain) trains++;
                     }
 
-                    if (stations == 0 && trains == 0) continue; // 鉄道要素を持たない勢力は黙る
+                    if (stations == 0 && trains == 0) continue; // factions with no rail assets stay silent
 
                     List<TrainStep.StationPair> pairs = TrainStep.RoutesOf(State, f.Id);
                     StringBuilder sb = new StringBuilder();
@@ -56,10 +59,11 @@ namespace CSWarfront.Game
                       .Append(" supplyStock=").Append(f.SupplyStock.ToString("0"));
                     ModConfig.Log(sb.ToString());
 
-                    // 路線が1本も成立しないときだけ、駅ごと/ペアごとの内訳を出す（原因の切り分け用）。
+                    // Only when no route forms at all, log the per-station/per-pair breakdown (for
+                    // isolating the cause).
                     if (pairs.Count == 0 && operational >= 2) LogRouteFailureDetail(f.Id);
 
-                    // Task109: 列車が動かないときの切り分け用に、編成ごとの状態を出す。
+                    // Task109: log per-train state, for isolating why trains do not move.
                     if (trains > 0) LogTrainStates(f.Id, pairs);
                 }
             }
@@ -69,9 +73,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task109: 編成ごとの状態（担当路線・位置・両駅までの距離・経路の消化状況・積荷）。
-        /// 「路線はあるのに列車が動かない」ときに、どこで止まっているのかを一行で判別するためのもの。
-        /// 担当路線の割り当てはTrainStep.Advanceと同じ規則（列挙順でラウンドロビン）で再現する。</summary>
+        /// <summary>Task109: per-train state (assigned route, position, distance to both stations, path
+        /// consumption progress, cargo). Used to tell in one line where a train is stuck when "routes
+        /// exist but the train does not move". The route assignment is reproduced with the same rule as
+        /// TrainStep.Advance (round-robin in enumeration order).</summary>
         private static void LogTrainStates(byte factionId, List<TrainStep.StationPair> pairs)
         {
             int trainIndex = 0;
@@ -110,12 +115,13 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>路線が1本も成立しないときの内訳。駅ごとに「スナップ先のレールノード」「レール網の
-        /// どの連結成分か」を、駅ペアごとに「距離」「経路探索の結果」を出す。これで
-        ///   - 別々の線路網に建っている（component が違う）
-        ///   - 近すぎる（distance < MinStationDistance）
-        ///   - 同じノードにスナップしている（区間長ゼロ）
-        /// のどれなのかが一意に分かる。</summary>
+        /// <summary>Breakdown for when no route forms at all. Logs, per station, "which rail node it
+        /// snapped to" and "which connected component of the rail network it is in"; and per station
+        /// pair, "the distance" and "the pathfinding result". This uniquely distinguishes which of the
+        /// following is the case:
+        ///   - built on separate rail networks (different component)
+        ///   - too close (distance &lt; MinStationDistance)
+        ///   - snapped to the same node (zero segment length)</summary>
         private static void LogRouteFailureDetail(byte factionId)
         {
             if (State.Rails == null)
@@ -134,12 +140,13 @@ namespace CSWarfront.Game
                 stations.Add(b);
             }
 
-            var snapped = new Dictionary<ushort, int>();   // BaseId -> component (-1: スナップ不可)
+            var snapped = new Dictionary<ushort, int>();   // BaseId -> component (-1: could not snap)
             var snappedNode = new Dictionary<ushort, ushort>();
             for (int i = 0; i < stations.Count; i++)
             {
                 MilitaryBase b = stations[i];
-                // 実際に列車が発着する地点（RailEntry、未解決なら駅の位置）で判定する。
+                // Judge at the point where trains actually depart/arrive (RailEntry; the station's
+                // position if unresolved).
                 WorldPos entry = CargoStationRules.RailPointOf(b);
                 ushort nodeId;
                 bool ok = State.Rails.TryFindNearestNode(entry, CargoStationRules.RailEntryRadius, out nodeId);

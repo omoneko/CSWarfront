@@ -5,29 +5,32 @@ using UnityEngine;
 
 namespace CSWarfront.Game
 {
-    /// <summary>メインスレッド専用スナップショット。飛翔中ミサイル1発分の「見た目」を決めるのに
-    /// 必要な最小限の情報のみ（Task63）。UnitVisualState と同じ設計思想。</summary>
+    /// <summary>Main-thread-only snapshot. Only the minimum information needed to determine the
+    /// "appearance" of one missile in flight (Task63). Same design philosophy as UnitVisualState.</summary>
     public struct MissileVisualState
     {
         public uint Id;
         public byte FactionId;
         public Vector3 From;
         public Vector3 To;
-        /// <summary>飛行進捗（0..1、Core.MissileInFlight.Progressの写し）。</summary>
+        /// <summary>Flight progress (0..1, copy of Core.MissileInFlight.Progress).</summary>
         public float Progress;
     }
 
     /// <summary>
-    /// 弾道ミサイルの見た目（Task63、塊6 MVP Part2）。UnitVisuals.Syncと同じ「宣言的reconcile」パターン:
-    /// From→Toの直線をProgressでたどるCore側の抽象を、見た目だけ高高度の放物線弧（apex height =
-    /// min(800, distance*0.5)）へ変換して描画する。ミサイルはCS車両/建物を一切借用しない素の
-    /// Unity GameObject（小さな細長い箱）＋TrailRenderer（暖色系トレーサー、CombatFxの
-    /// 「Standardシェーダー・固定色・sharedMaterial」という方針を踏襲）で表現する。
+    /// Ballistic missile visuals (Task63, chunk 6 MVP Part2). Same "declarative reconcile" pattern as
+    /// UnitVisuals.Sync: the Core-side abstraction that follows the straight From->To line by Progress
+    /// is converted, for display only, into a high-altitude parabolic arc (apex height =
+    /// min(800, distance*0.5)). The missile is represented by a plain Unity GameObject (a small
+    /// elongated box) that borrows no CS vehicle/building at all, plus a TrailRenderer (warm-colored
+    /// tracer, following CombatFx's "Standard shader / fixed color / sharedMaterial" policy).
     ///
-    /// 着弾/迎撃の演出（フラッシュ/爆発+音）は同じpartial classの別ファイル（MissileVisualsFx.cs）。
+    /// Impact/interception effects (flash/explosion + sound) live in another file of the same partial
+    /// class (MissileVisualsFx.cs).
     ///
-    /// スレッド境界: このクラスの public メソッドは全て「メインスレッド専用」
-    /// （UnitVisualsと同じ規約）。sim スレッド（MilitaryManager.OnSimTick）からは絶対に呼ばないこと。
+    /// Thread boundary: every public method of this class is "main thread only"
+    /// (same convention as UnitVisuals). Never call them from the sim thread
+    /// (MilitaryManager.OnSimTick).
     /// </summary>
     internal static partial class MissileVisuals
     {
@@ -36,11 +39,13 @@ namespace CSWarfront.Game
             public GameObject GameObject;
         }
 
-        // 見た目の弾道弧（Core.WorldPosは直線From→Toのみ、Progressで補間する抽象）。
+        // Visual ballistic arc (Core.WorldPos is only the straight From->To line, an abstraction
+        // interpolated by Progress).
         private const float ApexHeightCap = 800f;
         private const float ApexHeightRatio = 0.5f;
 
-        // 「小さな細長いGameObject」の寸法（発射地点→目標のワールド距離に対して十分小さい既定サイズ）。
+        // Dimensions of the "small elongated GameObject" (default size sufficiently small relative to
+        // the world distance from launch point to target).
         private const float BodyWidth = 2.5f;
         private const float BodyLength = 12f;
 
@@ -48,7 +53,7 @@ namespace CSWarfront.Game
         private const float TrailStartWidth = 1.4f;
         private const float TrailEndWidth = 0.1f;
 
-        // 姿勢（進行方向）を求めるための微小な先読み量（弧のパラメータt上）。
+        // Small look-ahead amount (on the arc parameter t) used to derive the attitude (direction of travel).
         private const float VelocitySampleDeltaT = 0.01f;
 
         private static readonly Dictionary<uint, Entry> _visuals = new Dictionary<uint, Entry>();
@@ -60,15 +65,16 @@ namespace CSWarfront.Game
         private static Material _bodyMaterial;
         private static Material _trailMaterial;
 
-        // 暖色系のトレーサー色（CombatFxのGunfire/DirectFire色と同系統。勢力色でチントしない
-        // ＝発射勢力を問わず「飛翔中の弾道ミサイル」そのものとして一目でわかるようにする）。
+        // Warm tracer colors (same family as CombatFx's Gunfire/DirectFire colors. Not tinted with the
+        // faction color = regardless of the launching faction, it is instantly recognizable as "a
+        // ballistic missile in flight" itself).
         private static readonly Color BodyColor = new Color(0.85f, 0.35f, 0.15f);
         private static readonly Color TrailColor = new Color(1f, 0.75f, 0.35f);
 
         public static int Count { get { return _visuals.Count; } }
 
-        /// <summary>スナップショットに基づき、生成/移動/破棄を宣言的に反映する（メインスレッド専用）。
-        /// スナップショットに存在しないid（着弾・迎撃・セーブロード等で消えたもの）はここで破棄される。</summary>
+        /// <summary>Declaratively applies create/move/destroy based on the snapshot (main thread only).
+        /// Ids absent from the snapshot (removed by impact, interception, save-load, etc.) are destroyed here.</summary>
         public static void Sync(List<MissileVisualState> snapshot)
         {
             if (snapshot == null) return;
@@ -85,7 +91,7 @@ namespace CSWarfront.Game
                     if (!_visuals.TryGetValue(s.Id, out entry) || entry.GameObject == null)
                     {
                         entry = Create(s);
-                        if (entry == null) continue; // 生成失敗はログ済み。次回のSyncで再試行する。
+                        if (entry == null) continue; // Creation failure is already logged. Retry on the next Sync.
                         _visuals[s.Id] = entry;
                     }
                     UpdatePose(entry, s);
@@ -104,7 +110,7 @@ namespace CSWarfront.Game
             for (int i = 0; i < _staleIds.Count; i++) Destroy(_staleIds[i]);
         }
 
-        /// <summary>追跡中の全ビジュアルを破棄する（レベルアンロード時、メインスレッド専用）。</summary>
+        /// <summary>Destroys all tracked visuals (on level unload, main thread only).</summary>
         public static void DestroyAll()
         {
             try
@@ -129,10 +135,10 @@ namespace CSWarfront.Game
         {
             try
             {
-                // Task90: 弾道ミサイルモデル（Models/Prop_BallisticMissile.obj、+Z=機首）があれば
-                // そちらを使う。models.blendにユーザーのモデルが追加されるまでは暫定モデル
-                // （MissileDisasterのIncomingWarhead流用）が同梱されている。解決できない環境のみ
-                // 従来の細長い箱にフォールバックする。
+                // Task90: if the ballistic missile model (Models/Prop_BallisticMissile.obj, +Z=nose)
+                // is available, use it. Until the user's model is added to models.blend, a provisional
+                // model (reused from MissileDisaster's IncomingWarhead) is bundled. Only environments
+                // where it cannot be resolved fall back to the traditional elongated box.
                 GameObject go;
                 Mesh modelMesh;
                 Material[] modelMaterials;
@@ -148,7 +154,7 @@ namespace CSWarfront.Game
                 {
                     go = GameObject.CreatePrimitive(PrimitiveType.Cube);
                     Collider col = go.GetComponent<Collider>();
-                    if (col != null) UnityEngine.Object.Destroy(col); // 選択/raycastの邪魔をしない
+                    if (col != null) UnityEngine.Object.Destroy(col); // Do not interfere with selection/raycasts
                     go.transform.localScale = new Vector3(BodyWidth, BodyWidth, BodyLength);
                     Renderer renderer = go.GetComponent<Renderer>();
                     if (renderer != null) renderer.sharedMaterial = GetBodyMaterial();
@@ -173,9 +179,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>From→ToをProgressで補間しつつ、見た目だけ放物線弧（apex height =
-        /// min(ApexHeightCap, 水平距離*ApexHeightRatio)）へ持ち上げる。姿勢は微小先読みで求めた
-        /// 進行方向（速度ベクトル）に向ける。</summary>
+        /// <summary>Interpolates From->To by Progress, while lifting the position onto a parabolic arc
+        /// (apex height = min(ApexHeightCap, horizontal distance*ApexHeightRatio)) for display only.
+        /// The attitude is oriented along the direction of travel (velocity vector) derived from a
+        /// small look-ahead.</summary>
         private static void UpdatePose(Entry entry, MissileVisualState s)
         {
             if (entry.GameObject == null) return;
@@ -205,7 +212,7 @@ namespace CSWarfront.Game
         private static Vector3 ArcPositionAt(Vector3 from, Vector3 to, float apex, float t)
         {
             Vector3 pos = Vector3.Lerp(from, to, t);
-            pos.y += 4f * apex * t * (1f - t); // CombatFx.ArcPositionAtと同じ標準的な放物線補間
+            pos.y += 4f * apex * t * (1f - t); // Same standard parabolic interpolation as CombatFx.ArcPositionAt
             return pos;
         }
 

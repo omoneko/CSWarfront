@@ -3,16 +3,18 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Core.SeaGrid（海上航行グリッド、Task92）のGame層ビルダー。WaterSampler（喫水考慮のIsWater、
-    /// Task88）でセル中心を判定して埋める。RoadGraphBuilderと同じ供給パターン：simスレッド専用
-    /// （MilitaryManager.OnSimTickから）、失敗時はnullを返しゲームループへ例外を投げない。
+    /// Game-layer builder for Core.SeaGrid (the naval navigation grid, Task92). Fills the grid by
+    /// testing each cell center with WaterSampler (draft-aware IsWater, Task88). Same supply pattern
+    /// as RoadGraphBuilder: sim thread only (from MilitaryManager.OnSimTick), returns null on failure
+    /// and never throws into the game loop.
     ///
-    /// グリッド範囲: マップ中央±HalfExtent（4800m）。CSの購入可能25タイル（中央4.32km四方）を
-    /// 余白込みで覆う。セル96m → 100×100 = 10,000セル。1セルにつきTerrainManagerの
-    /// HasWater/WaterLevel/SampleDetailHeight（WaterSampler.IsWater内）を1回呼ぶだけなので、
-    /// フルビルドは1tick内で十分終わる軽さ（RoadGraphBuilderのフルスキャンと同程度）。
-    /// 水域はプレイヤーの地形改変・水源操作で変わり得るため、SimTick側で一定間隔（24h）ごとに
-    /// 作り直す（道路網の12hより長め＝水はめったに変わらない）。
+    /// Grid extent: map center ±HalfExtent (4800m). Covers CS's 25 purchasable tiles (the central
+    /// 4.32km square) with margin. Cell 96m → 100×100 = 10,000 cells. Each cell makes only one call
+    /// to TerrainManager's HasWater/WaterLevel/SampleDetailHeight (inside WaterSampler.IsWater), so a
+    /// full build is light enough to finish well within one tick (comparable to RoadGraphBuilder's
+    /// full scan). Because water areas can change through the player's terraforming and water-source
+    /// manipulation, the SimTick side rebuilds at a fixed interval (24h) (longer than the road
+    /// network's 12h = water rarely changes).
     /// </summary>
     internal static class SeaGridBuilder
     {
@@ -42,7 +44,7 @@ namespace CSWarfront.Game
                 }
 
                 ModConfig.Log("SeaGridBuilder: built " + cells + "x" + cells + " grid, navigable cells=" + navigable);
-                return navigable > 0 ? grid : null; // 水の無い内陸マップではnull＝従来挙動のまま
+                return navigable > 0 ? grid : null; // On landlocked maps with no water, null = keep the previous behavior
             }
             catch (System.Exception e)
             {

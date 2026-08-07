@@ -3,15 +3,18 @@ using UnityEngine;
 namespace CSWarfront.Game.Effects
 {
     /// <summary>
-    /// 対空ミサイルに付けるロケット排気トレイル（ノズル火炎＋噴煙）。Task90、
-    /// MissileDisaster.Game.Effects.InterceptorTrailの移植（ユーザー指定「迎撃アニメーション周りは
-    /// MissileDisaster MODを参考に」——構造は不変、定数はスケールに合わせて縮小）。
-    /// ワールド空間なので飛翔経路に噴煙の航跡を残し、弾体破棄後も噴煙は寿命まで漂わせる。
-    /// GameObject/Material/Meshを生成するためメインスレッド専用。
+    /// Rocket exhaust trail attached to anti-air missiles (nozzle flame + exhaust smoke). Task90,
+    /// a port of MissileDisaster.Game.Effects.InterceptorTrail (per the user directive "model the
+    /// interception animation on the MissileDisaster MOD" — structure unchanged, constants scaled
+    /// down to match).
+    /// World space, so it leaves a smoke wake along the flight path, and the smoke keeps drifting
+    /// until its lifetime expires even after the projectile is destroyed.
+    /// Main thread only because it creates GameObjects/Materials/Meshes.
     /// </summary>
     internal static class SamTrail
     {
-        // MissileDisasterのExhaust*定数を対空ミサイルの規模（弾体3〜4m、飛翔0.5秒前後）へ縮小した較正値。
+        // Calibrated values scaling MissileDisaster's Exhaust* constants down to anti-air missile
+        // scale (projectile 3-4m, flight around 0.5 seconds).
         private const float FireRate = 90f;
         private const float FireLifetime = 0.2f;
         private const float FireSize = 3f;
@@ -26,7 +29,8 @@ namespace CSWarfront.Game.Effects
         private static Texture2D _glowTex;
         private static bool _ready;
 
-        /// <summary>対空ミサイルGameObjectにノズル火炎と噴煙を子として付与する。失敗しても飛翔は継続。</summary>
+        /// <summary>Attaches nozzle flame and exhaust smoke as children of the anti-air missile
+        /// GameObject. Flight continues even if this fails.</summary>
         public static void Attach(GameObject missile)
         {
             if (missile == null) return;
@@ -44,8 +48,9 @@ namespace CSWarfront.Game.Effects
             }
         }
 
-        /// <summary>弾体からトレイルを切り離し、新規放出だけ止めて既存の噴煙は寿命まで残す
-        /// （InterceptorTrail.DetachAndLingerの移植）。迎撃点到達時にこれを呼んでから弾体を破棄する。</summary>
+        /// <summary>Detaches the trail from the projectile, stopping only new emission while leaving
+        /// the existing smoke until its lifetime expires (port of InterceptorTrail.DetachAndLinger).
+        /// Call this when the interception point is reached, then destroy the projectile.</summary>
         public static void DetachAndLinger(GameObject missile)
         {
             if (missile == null) return;
@@ -57,7 +62,7 @@ namespace CSWarfront.Game.Effects
                 {
                     ParticleSystem ps = systems[i];
                     if (ps == null) continue;
-                    ps.transform.SetParent(null, true); // ワールド位置維持で独立
+                    ps.transform.SetParent(null, true); // Detach while keeping the world position
                     ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
                     Object.Destroy(ps.gameObject, life + 0.1f);
                 }

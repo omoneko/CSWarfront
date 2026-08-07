@@ -4,43 +4,46 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// CSの建物（BuildingManager）から遮蔽物マップ（Core.CoverMap）を構築する（simスレッド専用、Task44）。
-    /// RoadGraphBuilderと同じ供給パターン：simスレッドでCSバッファを読み取り、UnityEngine非依存の
-    /// POCOへ詰め替えてWarState.Coverへ渡す。
+    /// Builds the cover map (Core.CoverMap) from CS's buildings (BuildingManager) (sim thread only,
+    /// Task44). Same supply pattern as RoadGraphBuilder: read the CS buffers on the sim thread,
+    /// repack them into UnityEngine-independent POCOs, and hand them to WarState.Cover.
     ///
-    /// 検証済みシグネチャ（Assembly-CSharp.dllをリフレクションで確認、Task44）:
-    ///  - BuildingManager.m_buildings: Array16&lt;Building&gt;（フィールドm_bufferはBuilding[]）
-    ///  - Building.m_flags: Building.Flags（[Flags]enum、Created/Deleted/Hiddenあり）
-    ///  - Building.Info: BuildingInfoプロパティ（getter、BasePlacementWatcherが既に使用）
+    /// Verified signatures (confirmed via reflection on Assembly-CSharp.dll, Task44):
+    ///  - BuildingManager.m_buildings: Array16&lt;Building&gt; (field m_buffer is Building[])
+    ///  - Building.m_flags: Building.Flags ([Flags] enum, has Created/Deleted/Hidden)
+    ///  - Building.Info: BuildingInfo property (getter, already used by BasePlacementWatcher)
     ///  - Building.m_position: UnityEngine.Vector3
-    ///  - BuildingInfo.m_cellWidth / m_cellLength: 共にSystem.Int32（1セル=8メートル換算）
+    ///  - BuildingInfo.m_cellWidth / m_cellLength: both System.Int32 (1 cell = 8 meters)
     ///
-    /// Propについて（Task44、要件で許容されている代替案）: PropManager.m_props /
-    /// PropInstance.m_flags / PropInstance.Info(PropInfo) / PropInstance.Position は
-    /// リフレクションで存在を確認できたが、PropInfoには大きさを表す数値フィールド
-    /// （半径/幅/長さ相当）が無く、実際のサイズは UnityEngine.Mesh（m_mesh）の bounds からしか
-    /// 求められない。Meshはアセット側のUnityオブジェクトであり、simスレッド専用の「CS実体データ読み取り」
-    /// という前提から外れる（本プロジェクトの規約はsimスレッドでのUnityオブジェクト操作を禁止している）。
-    /// そのため本タスクではPropは対象外とし、建物のみを遮蔽物として登録する
-    /// （仕様書に明記された "props turn out to be impractical" のケースに該当）。
+    /// About props (Task44, an alternative the requirements permit): PropManager.m_props /
+    /// PropInstance.m_flags / PropInstance.Info (PropInfo) / PropInstance.Position could all be
+    /// confirmed to exist via reflection, but PropInfo has no numeric field describing size
+    /// (nothing equivalent to radius/width/length), and the actual size can only be derived from the
+    /// bounds of the UnityEngine.Mesh (m_mesh). A Mesh is an asset-side Unity object, which falls
+    /// outside the premise of "reading CS entity data" on the sim thread (this project's rules
+    /// forbid touching Unity objects on the sim thread). For this task, therefore, props are out of
+    /// scope and only buildings are registered as cover
+    /// (this corresponds to the "props turn out to be impractical" case explicitly noted in the spec).
     /// </summary>
     internal static class CoverMapBuilder
     {
-        /// <summary>1セルあたりの実寸（メートル、CSの建物グリッド基準）。</summary>
+        /// <summary>Real-world size of one cell (meters, per CS's building grid).</summary>
         private const float MetersPerCell = 8f;
 
-        /// <summary>BuildingInfo.m_cellWidth/m_cellLengthが取得できない場合の既定半径。</summary>
+        /// <summary>Default radius when BuildingInfo.m_cellWidth/m_cellLength are unavailable.</summary>
         private const float FallbackRadius = 8f;
 
-        /// <summary>登録する遮蔽物の総数上限（Task44）。巨大な都市でも毎tickの遮蔽探索コストを
-        /// 一定に保つための防御的キャップ。上限に達したら以降の建物は単純に無視する。</summary>
+        /// <summary>Cap on the total number of registered cover points (Task44). A defensive cap that
+        /// keeps the per-tick cover-search cost constant even in huge cities. Once the cap is reached,
+        /// further buildings are simply ignored.</summary>
         public const int MaxCoverPoints = 4000;
 
-        // RoadGraphBuilderと同じ間引きパターン：ビルド失敗ログの連続出力を防ぐ。
+        // Same throttling pattern as RoadGraphBuilder: prevents continuous output of build-failure logs.
         private static bool _failureAlreadyLogged;
 
         /// <summary>
-        /// BuildingManagerの建物バッファからCoverMapを構築する。失敗時はnull（呼び出し側は既存マップを維持すること）。
+        /// Builds a CoverMap from BuildingManager's building buffer. Returns null on failure (the
+        /// caller must keep the existing map).
         /// </summary>
         public static CoverMap Build()
         {
@@ -87,17 +90,22 @@ namespace CSWarfront.Game
                         continue;
                     }
 
-                    // 自軍の軍事基地建物（陸軍/海軍/航空/ミサイル、Task61）は遮蔽物として扱わない
-                    // （拠点の真上/直近に遮蔽点が立つのは意味がない）。
-                    // Task82: 電力タブの複製プレハブ機構（WarfrontBasePrefab.IsOwnBase、参照一致による
-                    // 判定）を撤去したため、置き換えルールとしてBasePlacementWatcher/BaseHiddenSyncと
-                    // 全く同じ判定基準——Info.nameがOptions指定建物(BaseBuildingDesignation)のいずれかと
-                    // 一致するか——を使う。これが最も単純かつ他の基地判定コードと一貫した基準であり、
-                    // 新たな状態（BasePlacementWatcher._baseInfoNamesのような「実際に登録済みの基地id」
-                    // 限定のキャッシュ）をここへ持ち込む必要が無い。定義上わずかに広い（＝現在Optionsで
-                    // 指定されているアセット名の建物は、まだBasePlacementWatcherに論理基地として登録
-                    // されていなくても遮蔽物から除外される）が、遮蔽物マップは近似的な障害物リストであり、
-                    // 基地予定地を過剰に除外する分には安全側（誤って基地を遮蔽物扱いする方が実害が大きい）。
+                    // Our own military base buildings (army/navy/air/missile, Task61) are not treated
+                    // as cover (a cover point standing directly on top of / right next to a base is
+                    // pointless).
+                    // Task82: the duplicated-prefab mechanism in the electricity tab
+                    // (WarfrontBasePrefab.IsOwnBase, matching by reference identity) was removed, so as
+                    // the replacement rule we use exactly the same criterion as
+                    // BasePlacementWatcher/BaseHiddenSync — whether Info.name matches one of the
+                    // Options-designated buildings (BaseBuildingDesignation). This is the simplest
+                    // criterion, consistent with the other base-detection code, and there is no need to
+                    // bring new state in here (a cache limited to "base ids actually registered", like
+                    // BasePlacementWatcher._baseInfoNames). It is slightly broader by definition
+                    // (= buildings whose asset name is currently designated in Options are excluded
+                    // from cover even if they are not yet registered with BasePlacementWatcher as a
+                    // logical base), but the cover map is an approximate obstacle list, and
+                    // over-excluding prospective base sites errs on the safe side (mistakenly treating
+                    // a base as cover would do more real harm).
                     BaseType ignoredType;
                     if (BaseBuildingDesignation.TryMatch(info.name, out ignoredType))
                     {
@@ -132,8 +140,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>BuildingInfo.m_cellWidth/m_cellLengthからおおよその半径（マップ単位）を導く。
-        /// 取得できない/非正の場合はFallbackRadiusにフォールバックする。</summary>
+        /// <summary>Derives an approximate radius (map units) from BuildingInfo.m_cellWidth/
+        /// m_cellLength. Falls back to FallbackRadius when unavailable or non-positive.</summary>
         private static float RadiusFor(BuildingInfo info)
         {
             int cellWidth = info.m_cellWidth;
@@ -142,7 +150,8 @@ namespace CSWarfront.Game
 
             float widthMeters = cellWidth * MetersPerCell;
             float lengthMeters = cellLength * MetersPerCell;
-            // 幅・奥行きそれぞれの半分（=中心から縁までの距離）の平均を「おおよその半径」とする。
+            // Take the average of half the width and half the depth (= distance from center to edge)
+            // as the "approximate radius".
             return (widthMeters + lengthMeters) / 4f;
         }
     }

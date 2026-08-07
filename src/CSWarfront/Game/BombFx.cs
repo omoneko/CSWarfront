@@ -6,30 +6,35 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 爆撃機の爆弾投下モーション（Task87、ユーザー要望「爆撃機は爆弾を落とすモーションを入れてほしい」）。
+    /// Bomber bomb-drop motion (Task87, per the user request "I'd like bombers to have a motion of
+    /// dropping bombs").
     ///
-    /// CombatFx.SpawnOneが、爆撃機(TacticalBomber)のShotEventについて直射トレーサーの代わりに
-    /// このクラスのSpawnDropを呼ぶ。爆弾は投下位置（爆撃機のモデル中央高さ）から着弾点まで、
-    /// 水平は等速・垂直は加速（自由落下風の二次カーブ）で落ち、機首（+Z）を速度方向へ向けて回転する。
-    /// 着弾時はKillFx.TryDispatchCsExplosion（CS標準爆発、Task84と同じ経路）を撃破爆発より小さめの
-    /// 倍率で再生する。
+    /// For a bomber (TacticalBomber) ShotEvent, CombatFx.SpawnOne calls this class's SpawnDrop instead
+    /// of a direct-fire tracer. The bomb falls from the release position (bomber model center height)
+    /// to the impact point — constant velocity horizontally, accelerating vertically (a free-fall-like
+    /// quadratic curve) — rotating its nose (+Z) toward the velocity direction. On impact it plays
+    /// KillFx.TryDispatchCsExplosion (the standard CS explosion, same path as Task84) at a smaller
+    /// magnitude than the kill explosion.
     ///
-    /// モデルはModels/Prop_Bomb.obj（WarfrontModelProvider経由）。2026-07-31時点ではmodels.blendに
-    /// 爆弾オブジェクトがまだ無いため暫定生成モデルを同梱している——ユーザーが「17_Bomb」等を
-    /// models.blendへ追加してtools/export_builtin_obj.pyを再実行すれば差し替わる。モデルが解決
-    /// できない環境ではプリミティブ球（暗色）で代用する。
+    /// The model is Models/Prop_Bomb.obj (via WarfrontModelProvider). As of 2026-07-31, models.blend
+    /// has no bomb object yet, so a provisionally generated model is bundled — once the user adds
+    /// something like "17_Bomb" to models.blend and reruns tools/export_builtin_obj.py, it gets
+    /// swapped in. Environments where the model cannot be resolved substitute a primitive sphere
+    /// (dark-colored).
     ///
-    /// スレッド境界: 全publicメソッドはメインスレッド専用（CombatFx/KillFxと同じ規約）。
+    /// Thread boundary: all public methods are main thread only (same convention as CombatFx/KillFx).
     /// </summary>
     internal static class BombFx
     {
-        private const int MaxLiveBombs = 40; // 防御的上限（KillFx.MaxLiveEffectsと同じ考え方）
+        private const int MaxLiveBombs = 40; // Defensive cap (same idea as KillFx.MaxLiveEffects)
 
-        /// <summary>落下時間（実秒）。高度120の巡航から地表まで、視認できる速さに較正した値。</summary>
+        /// <summary>Fall time (real seconds). Calibrated to a visually trackable speed from cruise at
+        /// altitude 120 down to the ground.</summary>
         private const float FallDuration = 1.1f;
 
-        /// <summary>着弾爆発の強度。撃破爆発(KillFx.CsExplosionMagnitude=0.5)より控えめ
-        /// （爆弾1発ごとに出るため、連続爆撃で過剰にならないように）。</summary>
+        /// <summary>Impact explosion magnitude. More restrained than the kill explosion
+        /// (KillFx.CsExplosionMagnitude=0.5) (it fires once per bomb, so this avoids excess during
+        /// sustained bombing runs).</summary>
         private const float ImpactExplosionMagnitude = 0.4f;
 
         private const string ModelName = "Prop_Bomb";
@@ -49,8 +54,8 @@ namespace CSWarfront.Game
         private static bool _modelResolveAttempted;
         private static Material _fallbackMaterial;
 
-        /// <summary>爆弾を1発投下する（メインスレッド専用、CombatFx.SpawnOneの爆撃機分岐から呼ばれる）。
-        /// from=投下位置（爆撃機のモデル中央高さ込み）、to=着弾点。</summary>
+        /// <summary>Drops one bomb (main thread only; called from the bomber branch of
+        /// CombatFx.SpawnOne). from=release position (including bomber model center height), to=impact point.</summary>
         public static void SpawnDrop(Vector3 from, Vector3 to)
         {
             try
@@ -69,15 +74,16 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>落下中の全爆弾を実時間で進める（メインスレッド専用）。着弾したら爆発を再生して破棄。</summary>
+        /// <summary>Advances all falling bombs in real time (main thread only). On impact, plays the
+        /// explosion and destroys the bomb.</summary>
         public static void Update(float realDeltaTime)
         {
             if (_bombs.Count == 0) return;
 
             try
             {
-                // Task89: 着弾音（爆撃音）用のカメラ位置。フレーム内で1回だけ取得する
-                // （CombatFxSound.SpawnKillSoundsと同じパターン）。
+                // Task89: camera position for the impact sound (bombing sound). Fetched only once per
+                // frame (same pattern as CombatFxSound.SpawnKillSounds).
                 Camera cam = Camera.main;
                 Vector3? cameraPos = cam != null ? (Vector3?)cam.transform.position : null;
 
@@ -89,13 +95,15 @@ namespace CSWarfront.Game
                     b.Elapsed += realDeltaTime;
                     float t = Mathf.Clamp01(b.Elapsed / FallDuration);
 
-                    // 水平は等速、垂直は加速（t^2）＝投下直後は前へ流れ、落ちるほど機首が下がる。
+                    // Constant velocity horizontally, accelerating vertically (t^2) = drifts forward
+                    // right after release, and the nose pitches down the further it falls.
                     float x = Mathf.Lerp(b.From.x, b.To.x, t);
                     float z = Mathf.Lerp(b.From.z, b.To.z, t);
                     float y = Mathf.Lerp(b.From.y, b.To.y, t * t);
                     Vector3 pos = new Vector3(x, y, z);
 
-                    // 速度方向（解析微分: 水平=定数、垂直=2t比例）へ機首(+Z)を向ける。
+                    // Point the nose (+Z) toward the velocity direction (analytic derivative:
+                    // horizontal=constant, vertical=proportional to 2t).
                     Vector3 vel = new Vector3(
                         (b.To.x - b.From.x) / FallDuration,
                         (b.To.y - b.From.y) * 2f * t / FallDuration,
@@ -107,8 +115,9 @@ namespace CSWarfront.Game
                     if (t >= 1f)
                     {
                         KillFx.TryDispatchCsExplosion(b.To, ImpactExplosionMagnitude);
-                        // Task89（ユーザー要望「爆撃機からの爆撃音」）: 着弾の瞬間に爆発音を鳴らす
-                        // （撃破音と同じvehicle_destroyed.wav・同じ同時再生数/距離減衰の管理を再利用）。
+                        // Task89 (user request "bombing sound from the bombers"): play an explosion
+                        // sound at the moment of impact (reuses the same vehicle_destroyed.wav as the
+                        // kill sound, with the same concurrent-playback / distance-attenuation management).
                         Audio.WarfrontSoundPlayer.PlayKill(b.To, cameraPos);
                         UnityEngine.Object.Destroy(b.Root);
                         _bombs.RemoveAt(i);
@@ -121,9 +130,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset、メインスレッド専用）。
-        /// モデルキャッシュも破棄する（Mesh/MaterialはWarfrontModelProviderがレベルを跨いで
-        /// キャッシュするが、こちらの参照は次レベルで取り直す方が安全側）。</summary>
+        /// <summary>On level unload (MilitaryManager.Reset, main thread only).
+        /// Also discards the model cache (WarfrontModelProvider caches the Mesh/Material across
+        /// levels, but re-fetching our references in the next level is the safer side).</summary>
         public static void DestroyAll()
         {
             try
@@ -161,10 +170,11 @@ namespace CSWarfront.Game
                 return go;
             }
 
-            // フォールバック: 小さな暗色の球（モデル未解決の環境でも投下は見える）。
+            // Fallback: a small dark sphere (the drop is still visible even in environments where
+            // the model is unresolved).
             GameObject fallback = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             Collider col = fallback.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.Destroy(col); // クリック判定を邪魔しない
+            if (col != null) UnityEngine.Object.Destroy(col); // Do not interfere with click hit-testing
             fallback.name = "CSWarfrontBombFallback";
             fallback.transform.localScale = new Vector3(1.6f, 1.6f, 2.4f);
             Renderer r = fallback.GetComponent<Renderer>();

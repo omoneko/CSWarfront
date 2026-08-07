@@ -5,43 +5,46 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// セーブ/ロード（SerializeLocked/LoadAndRebuild）向けの MilitaryManager 追加メンバー。
-    /// MilitaryManager.cs の500行制限のため分離した partial class（Task34のMilitaryManagerManualProduction
-    /// 等と同じ方針）。_stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for save/load (SerializeLocked/LoadAndRebuild).
+    /// Split into a partial class because of the 500-line limit on MilitaryManager.cs (same policy as
+    /// Task34's MilitaryManagerManualProduction etc.). _stateLock / State are private static members
+    /// declared in MilitaryManager.cs; being a partial class, they are directly accessible from here.
     /// </summary>
     public static partial class MilitaryManager
     {
         /// <summary>
-        /// セーブ用：_stateLock を保持したまま WarState をシリアライズする。
-        /// OnSimTick が State.Units 等を書き換えている最中の
-        /// 「Collection was modified」例外（＝セーブ静かに失敗＝データ消失）を防ぐ。
-        /// 呼び出し側（OnSaveData）は _stateLock を保持していないこと（再入不可のため）。
+        /// For saving: serializes WarState while holding _stateLock.
+        /// Prevents the "Collection was modified" exception (= a silent save failure = data loss)
+        /// that would occur while OnSimTick is mutating State.Units etc.
+        /// The caller (OnSaveData) must not hold _stateLock (the lock is non-reentrant).
         ///
-        /// Task72: このMODが立てた「見た目だけの」フラグ（CombatRoadBlockerのNetSegment.PathFailed、
-        /// BaseHiddenSyncのBuilding.Hidden）をセーブデータへ焼き込まないよう、シリアライズの前後で
-        /// 一時的に外して戻す。
+        /// Task72: to avoid baking this mod's "visual-only" flags (CombatRoadBlocker's
+        /// NetSegment.PathFailed, BaseHiddenSync's Building.Hidden) into the save data, they are
+        /// temporarily cleared before serialization and restored afterwards.
         ///
-        /// 重要（ilspycmdでSimulationManager/LoadingManager/AsyncTaskを逆コンパイルして確認した
-        /// 実際の保存順序、詳細はtask-72-report.md）: このメソッド（延いてはWarStateDataExtension.
-        /// OnSaveData）は、SimulationManager.Data.Serializeが「①全MODのOnSaveData()を呼ぶ →
-        /// ②その後でBuildingManager.Data/NetManager.Data等バニラの各マネージャのSerialize
-        /// （実際にBuilding.m_flags/NetSegment.m_flagsをストリームへ書く箇所）を呼ぶ」という順序の
-        /// ①の中で呼ばれる。しかも①②は同一のAsyncTask.Execute()（LoadingManager.SaveSimulationDataの
-        /// コルーチンをwhile(m_Action.MoveNext())で最後まで同期的に回し切る、yieldは末尾の1箇所のみ）
-        /// の中で連続して起きる。つまりこのメソッド内でクリア→即座にfinallyで戻す旧実装は、②が
-        /// Building.m_flags/NetSegment.m_flagsを読み取るより前に戻してしまうため無意味だった
-        /// （セーブファイルには結局Hidden/PathFailedが焼き込まれ続けていた＝要件で疑われた「漏れ」は
-        /// CombatRoadBlocker側にも実在していた）。
+        /// Important (actual save order confirmed by decompiling SimulationManager/LoadingManager/
+        /// AsyncTask with ilspycmd; details in task-72-report.md): this method (and hence
+        /// WarStateDataExtension.OnSaveData) is called inside step (1) of SimulationManager.Data.Serialize's
+        /// order: "(1) call every mod's OnSaveData() -> (2) only afterwards call the vanilla managers'
+        /// Serialize (BuildingManager.Data/NetManager.Data etc., which is where Building.m_flags/
+        /// NetSegment.m_flags are actually written to the stream)". Moreover (1) and (2) happen back to
+        /// back inside the same AsyncTask.Execute() (which drives the LoadingManager.SaveSimulationData
+        /// coroutine synchronously to completion via while(m_Action.MoveNext()); the only yield is a
+        /// single one at the very end). In other words, the old implementation that cleared the flags
+        /// here and immediately restored them in finally was useless, because it restored them before
+        /// (2) read Building.m_flags/NetSegment.m_flags — the save file kept getting Hidden/PathFailed
+        /// baked in after all (i.e. the "leak" suspected in the requirements really did exist on the
+        /// CombatRoadBlocker side too).
         ///
-        /// 修正: 戻す処理はここで同期的に行わず、Singleton&lt;SimulationManager&gt;.instance.AddAction
-        /// で「今のSaving AsyncTaskが完全に完了した後の次のアクション」として積む。
-        /// SimulationManager.SimulationStep先頭の`while(m_hasActions){...}`ループは、Dequeueして
-        /// 実行中のActionの中で新たにAddActionが呼ばれるとm_hasActionsが再びtrueに戻るため、
-        /// ループを継続して同フレーム内・かつ通常のOnSimTickより前に続けてそのActionも実行する。
-        /// これにより「バニラがBuilding/NetSegmentのフラグをストリームへ読み取り終えた直後」という
-        /// タイミングを外部からのIL改変無しで確実に取れる（詳細はCombatRoadBlocker.ReblockAfterSave/
-        /// BaseHiddenSync.ReapplyAfterSaveのコメントも参照）。
+        /// Fix: instead of restoring synchronously here, enqueue the restore via
+        /// Singleton&lt;SimulationManager&gt;.instance.AddAction as "the next action after the current
+        /// Saving AsyncTask has fully completed". The `while(m_hasActions){...}` loop at the top of
+        /// SimulationManager.SimulationStep keeps looping — because calling AddAction from within an
+        /// action that was just dequeued and is executing sets m_hasActions back to true — so that
+        /// action also runs within the same frame, and before the normal OnSimTick. This reliably
+        /// captures the moment "right after vanilla has finished reading the Building/NetSegment flags
+        /// into the stream" without any external IL patching (see also the comments in
+        /// CombatRoadBlocker.ReblockAfterSave / BaseHiddenSync.ReapplyAfterSave).
         /// </summary>
         public static byte[] SerializeLocked()
         {
@@ -63,13 +66,14 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// SerializeLockedのfinallyから呼ぶ。バニラのBuilding/NetSegmentフラグ書き込み
-        /// （SimulationManager.Data.Serialize内、このメソッドの戻り先よりさらに後）が終わった直後に
-        /// 実行されるよう、simスレッドの次のアクションとして予約する（Task72、コメントはSerializeLocked
-        /// 参照）。SimulationManagerが万一存在しない状況（理論上は起こらないはずだが、セーブ処理自体が
-        /// SimulationManagerの存在を前提にしている以上、無いことの方が異常）に備え、フォールバックとして
-        /// その場で同期的に戻す（タイミングは正しくない可能性があるが、フラグを永久に外れたままにする
-        /// よりは安全側）。
+        /// Called from SerializeLocked's finally. Schedules the restore as the sim thread's next action
+        /// so it runs right after vanilla's Building/NetSegment flag write-out (inside
+        /// SimulationManager.Data.Serialize, which happens even later than this method's return point)
+        /// has finished (Task72; see SerializeLocked for the full commentary). As a safeguard against
+        /// SimulationManager not existing (which should never happen in theory — since the save process
+        /// itself presupposes SimulationManager, its absence would be the anomaly), fall back to
+        /// restoring synchronously on the spot (the timing may be wrong, but that is safer than leaving
+        /// the flags cleared forever).
         /// </summary>
         private static void ScheduleReapplySaveFlags()
         {
@@ -91,19 +95,21 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// セーブデータからの復元専用エントリ（save/loadスレッドから呼ばれる）。State差し替えのみを
-        /// 行う。生存ユニットの見た目（GameObject）は次回以降の OnMainVisualUpdate が
-        /// State.Unitsをスナップショットして UnitVisuals.Sync に渡すことで自動的に再生成される
-        /// （宣言的reconcileのため、respawn用の特別なフラグ・処理は不要＝Task19で削除）。
+        /// Dedicated entry point for restoring from save data (called from the save/load thread).
+        /// Only swaps in the State. The visuals (GameObjects) of surviving units are regenerated
+        /// automatically because subsequent OnMainVisualUpdate calls snapshot State.Units and pass them
+        /// to UnitVisuals.Sync (declarative reconcile, so no special respawn flag/handling is needed —
+        /// removed in Task19).
         /// </summary>
         public static void LoadAndRebuild(WarState restored)
         {
             lock (_stateLock)
             {
                 State = restored;
-                // セーブから復元＝基地建物はCSが既に復元済み（BaseIdはstable buildingId）。
-                // BasePlacementWatcher.ProcessPending は復元済みBaseIdをIdempotencyチェックで
-                // スキップするため、EventBuildingCreated の再発火があっても二重登録はしない。
+                // Restored from a save = base buildings were already restored by CS (BaseId is a stable
+                // buildingId). BasePlacementWatcher.ProcessPending skips already-restored BaseIds via its
+                // idempotency check, so even if EventBuildingCreated fires again there is no double
+                // registration.
             }
         }
     }

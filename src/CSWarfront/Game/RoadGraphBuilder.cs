@@ -5,33 +5,38 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// CSの道路網（NetManager）からCore.RoadGraphを構築する（simスレッド専用、Task23）。
-    /// スレッド注記: MilitaryManager.OnSimTickから呼ばれる想定。NetManagerのセグメント/ノードバッファは
-    /// sim側が所有するデータのため、simスレッドでの読み取りは安全（DevelopmentSamplerと同じ理由。
-    /// メインスレッド専用API（描画・UI等）には一切触れない）。
+    /// Builds a Core.RoadGraph from CS's road network (NetManager) (sim thread only, Task23).
+    /// Threading note: intended to be called from MilitaryManager.OnSimTick. NetManager's
+    /// segment/node buffers are data owned by the sim side, so reading them on the sim thread is safe
+    /// (same reasoning as DevelopmentSampler; we never touch main-thread-only APIs (rendering, UI,
+    /// etc.)).
     ///
-    /// 検証済みシグネチャ（Assembly-CSharp.dll / ColossalFrameworkをリフレクションで確認、Task23）:
-    ///  - NetManager.m_segments: Array16&lt;NetSegment&gt;（フィールドm_bufferはNetSegment[]）
-    ///  - NetManager.m_nodes: Array16&lt;NetNode&gt;（フィールドm_bufferはNetNode[]）
-    ///  - NetSegment.m_flags: NetSegment.Flags（[Flags]enum、Createdフラグあり）
-    ///  - NetSegment.Info: NetInfoプロパティ（getter）
+    /// Verified signatures (confirmed via reflection on Assembly-CSharp.dll / ColossalFramework,
+    /// Task23):
+    ///  - NetManager.m_segments: Array16&lt;NetSegment&gt; (field m_buffer is NetSegment[])
+    ///  - NetManager.m_nodes: Array16&lt;NetNode&gt; (field m_buffer is NetNode[])
+    ///  - NetSegment.m_flags: NetSegment.Flags ([Flags] enum, has Created flag)
+    ///  - NetSegment.Info: NetInfo property (getter)
     ///  - NetSegment.m_startNode / m_endNode: System.UInt16
-    ///  - NetInfo.m_class: ItemClassフィールド（NetInfo自身が宣言、PrefabInfo由来ではない）
-    ///  - ItemClass.m_service: ItemClass.Service（[Flags]ではない単純enum、Road値あり）
-    ///  - NetNode.m_flags: NetNode.Flags（[Flags]enum、Createdフラグあり）
+    ///  - NetInfo.m_class: ItemClass field (declared by NetInfo itself, not inherited from PrefabInfo)
+    ///  - ItemClass.m_service: ItemClass.Service (a plain enum, not [Flags]; has a Road value)
+    ///  - NetNode.m_flags: NetNode.Flags ([Flags] enum, has Created flag)
     ///  - NetNode.m_position: UnityEngine.Vector3
     /// </summary>
     internal static class RoadGraphBuilder
     {
-        // 失敗ログの間引き用（Task23レビューImportant）。呼び出し側（MilitaryManager.OnSimTick）は
-        // 失敗が続く間 State.Roads == null のままRoadGraphBuilder.Buildを繰り返し呼ぶため、
-        // 抑制しないと失敗が続くたびに毎回ログが出てしまう。最初の1回だけ記録し、成功するまで
-        // 再度は出さない。成功したら次に失敗した際にまた1回だけ記録する（抑制状態をリセット）。
-        // simスレッド専用アクセスのためロック不要。
+        // For throttling failure logs (Task23 review, Important). The caller
+        // (MilitaryManager.OnSimTick) keeps calling RoadGraphBuilder.Build repeatedly with
+        // State.Roads == null while failures persist, so without suppression a log line would be
+        // emitted on every failed attempt. Record only the first occurrence and do not emit again
+        // until a success. After a success, the next failure is logged once again (the suppression
+        // state is reset).
+        // Sim-thread-only access, so no lock is needed.
         private static bool _failureAlreadyLogged;
 
         /// <summary>
-        /// NetManagerの道路網からRoadGraphを構築する。失敗時はnullを返す（呼び出し側は既存グラフを維持すること）。
+        /// Builds a RoadGraph from NetManager's road network. Returns null on failure (the caller
+        /// must keep the existing graph).
         /// </summary>
         public static RoadGraph Build()
         {
@@ -65,7 +70,7 @@ namespace CSWarfront.Game
                         segmentsSkippedNonRoad++;
                         continue;
                     }
-                    // 道路のみを採用する（線路・パイプライン・送電線等は対象外）。
+                    // Accept roads only (rails, pipelines, power lines, etc. are out of scope).
                     if (info.m_class.m_service != ItemClass.Service.Road)
                     {
                         segmentsSkippedNonRoad++;
@@ -89,7 +94,7 @@ namespace CSWarfront.Game
                 ModConfig.Log("RoadGraphBuilder: built nodes=" + graph.NodeCount +
                     " segmentsAccepted=" + segmentsAccepted +
                     " segmentsSkippedNonRoad=" + segmentsSkippedNonRoad);
-                _failureAlreadyLogged = false; // 成功したので次の失敗はまた1回だけログする
+                _failureAlreadyLogged = false; // Success, so the next failure will again be logged once
                 return graph;
             }
             catch (Exception e)

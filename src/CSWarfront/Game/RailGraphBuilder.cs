@@ -8,38 +8,47 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task101: CSの線路網（NetManager）からCore.RoadGraph（レール用インスタンス、WarState.Rails）を
-    /// 構築する（simスレッド専用）。RoadGraphBuilderの線路版——採用条件だけが違う:
-    /// ItemClass.Service.PublicTransport かつ SubService.PublicTransportTrain のセグメントのみ
-    /// （旅客線・貨物線の区別はしない。軍用列車=自前ビジュアルはどちらの線路でも走れる仕様）。
-    /// CSの列車運行（CargoTrainAI等）には一切干渉しない。
+    /// Task101: builds a Core.RoadGraph (the rail instance, WarState.Rails) from CS's rail network
+    /// (NetManager) (sim thread only). The rail counterpart of RoadGraphBuilder — only the acceptance
+    /// condition differs: only segments with ItemClass.Service.PublicTransport and
+    /// SubService.PublicTransportTrain (no distinction between passenger and cargo lines; by design,
+    /// military trains = our own visuals can run on either kind of track).
+    /// Does not interfere with CS's train operations (CargoTrainAI etc.) in any way.
     /// </summary>
     internal static class RailGraphBuilder
     {
-        /// <summary>Task108: 位置がほぼ同じなのに別idになっているノードを1つに融合する半径（m）。
-        /// 駅の構内線と本線の接合部などで、幾何的には繋がっているのにNetNodeが別々になっている
-        /// ケースがあり、そのままだと線路網がバラバラの連結成分に割れて経路が引けない。</summary>
+        /// <summary>Task108: radius (m) for welding nodes that have nearly identical positions but
+        /// different ids into one. At junctions between station yard tracks and main lines, etc.,
+        /// there are cases where the NetNodes are separate even though they are geometrically
+        /// connected; left as-is, the rail network splits into disconnected components and no route
+        /// can be found.</summary>
         private const float NodeWeldRadius = 6f;
 
-        /// <summary>融合を許す高低差（m）。立体交差（10m以上の桁下）を誤って繋げないための上限。</summary>
+        /// <summary>Height difference (m) allowed for welding. Upper bound to avoid mistakenly
+        /// connecting grade separations (10m+ of clearance under a girder).</summary>
         private const float NodeWeldHeightTolerance = 3f;
 
-        /// <summary>Task108: 曲線セグメントを何mごとにサンプリングするか。細かいほど線路に忠実だが
-        /// ノード数が増える（idはushortのため上限あり）。20mあれば見た目上ほぼ線路どおりに走る。</summary>
+        /// <summary>Task108: how many meters apart to sample curved segments. Finer is more faithful
+        /// to the track but increases node count (ids are ushort, so there is a cap). 20m is enough
+        /// to visually follow the track almost exactly.</summary>
         private const float SegmentSampleSpacing = 20f;
 
-        /// <summary>1セグメントあたりの中間ノード数の上限（極端に長いセグメントでの暴発防止）。</summary>
+        /// <summary>Cap on intermediate nodes per segment (guards against blowup on extremely long
+        /// segments).</summary>
         private const int MaxSamplesPerSegment = 12;
 
-        /// <summary>自前id空間の上限（ushort）。ここに達したら以後は中間ノードを挿さず端点のみで繋ぐ。</summary>
+        /// <summary>Upper bound of our own id space (ushort). Once reached, no more intermediate
+        /// nodes are inserted; segments are connected by their endpoints only.</summary>
         private const int MaxGraphNodes = 60000;
 
         private static bool _failureAlreadyLogged;
 
-        /// <summary>Task109: 曲線が信用できず直線に落としたセグメント数（ビルドごとにリセット、ログ用）。</summary>
+        /// <summary>Task109: number of segments whose curve was untrusted and fell back to a straight
+        /// line (reset per build, for logging).</summary>
         private static int _curveRejections;
 
-        /// <summary>CSのNetNode idをグラフの自前idへ写す（初出なら採番してノードを作る）。</summary>
+        /// <summary>Maps a CS NetNode id to our own graph id (on first appearance, assigns an id and
+        /// creates the node).</summary>
         private static ushort MapNode(RoadGraph graph, Dictionary<ushort, ushort> map, ref ushort nextId,
             ushort netNodeId, Vector3 pos)
         {
@@ -53,14 +62,16 @@ namespace CSWarfront.Game
             return graphId;
         }
 
-        /// <summary>セグメントの曲線に沿って中間ノードを挿し、startId→…→endIdの折れ線として繋ぐ
-        /// （曲線が取れない/短い/ノードid空間が尽きた場合は端点どうしを直接繋ぐ）。
+        /// <summary>Inserts intermediate nodes along the segment's curve and connects them as a
+        /// polyline startId→…→endId (if the curve is unavailable/too short/the node id space is
+        /// exhausted, connects the endpoints directly).
         ///
-        /// Task109（ユーザー報告「列車がレールの無いところを走る／宙を飛ぶ」）: 曲線は
-        /// NetSegment.CalculateMiddlePointsで自前に組み立てるのをやめ、CS自身がレーンごとに保持している
-        /// 実際の走行曲線（NetLane.m_bezier＝バニラの列車が走る線そのもの）から取る。あわせて、
-        /// サンプル点が端点から常識外に離れていたらそのセグメントは直線扱いに落とす安全弁を入れる
-        /// （どんな理由で曲線がおかしくても、線路から大きく外れた経路にはならない）。</summary>
+        /// Task109 (user report "trains run where there are no rails / fly through the air"): stop
+        /// assembling the curve ourselves via NetSegment.CalculateMiddlePoints; instead take it from
+        /// the actual travel curve CS itself keeps per lane (NetLane.m_bezier = the very line vanilla
+        /// trains run on). Additionally, add a safety valve that demotes a segment to a straight line
+        /// if a sample point is unreasonably far from the endpoints (whatever the reason the curve is
+        /// wrong, the route will never deviate far from the track).</summary>
         private static void AddCurvedSegment(RoadGraph graph, ref ushort nextId, ushort segmentId,
             NetSegment segment, NetInfo info, Vector3 startPos, Vector3 endPos, ushort startId, ushort endId)
         {
@@ -75,8 +86,9 @@ namespace CSWarfront.Game
                 return;
             }
 
-            // 安全弁: 端点間の中点から見て、サンプル点が「セグメント長の半分＋余裕」より遠ければ、
-            // 曲線が信用できない（＝線路から外れる）ので直線に落とす。
+            // Safety valve: if a sample point is farther from the midpoint between the endpoints than
+            // "half the segment length + margin", the curve is untrusted (= would leave the track),
+            // so fall back to a straight line.
             Vector3 chordMid = (startPos + endPos) * 0.5f;
             float sanityRadius = length * 0.5f + SegmentSampleSpacing;
 
@@ -105,8 +117,9 @@ namespace CSWarfront.Game
             graph.AddEdge(previous, endId);
         }
 
-        /// <summary>このセグメントの「列車が走るレーン」の走行曲線を返す（CS自身が計算・保持しているもの）。
-        /// レーンを辿れない/列車レーンが無い場合はfalse。</summary>
+        /// <summary>Returns the travel curve of this segment's "lane trains run on" (the one CS itself
+        /// computes and stores). Returns false if the lanes cannot be traversed or there is no train
+        /// lane.</summary>
         private static bool TryGetRailLaneBezier(NetSegment segment, NetInfo info, out Bezier3 bezier)
         {
             bezier = default(Bezier3);
@@ -120,7 +133,7 @@ namespace CSWarfront.Game
                 if (lane != null && (lane.m_vehicleType & VehicleInfo.VehicleType.Train) != 0)
                 {
                     bezier = lanes[laneId].m_bezier;
-                    // 長さ0（未計算）のレーンは使わない。
+                    // Do not use lanes with zero length (not yet computed).
                     return Vector3.Distance(bezier.a, bezier.d) > 0.01f || lanes[laneId].m_length > 0.01f;
                 }
                 laneId = lanes[laneId].m_nextLane;
@@ -128,11 +141,12 @@ namespace CSWarfront.Game
             return false;
         }
 
-        /// <summary>Task108: このNetInfoは列車が走れる線路か。従来はItemClass（PublicTransport /
-        /// PublicTransportTrain）だけで判定していたが、それだと駅の構内線・貨物線・Workshopの線路
-        /// アセットなど、クラス指定が異なるものを取りこぼし、線路網が分断されて見える恐れがある。
-        /// レーンに列車が通れるものがあるか（VehicleType.Train）を主判定にし、ItemClassは
-        /// フォールバックとして残す。地下鉄(Metro)・モノレール(Monorail)は対象外のまま。</summary>
+        /// <summary>Task108: is this NetInfo a track trains can run on? Previously judged only by
+        /// ItemClass (PublicTransport / PublicTransportTrain), but that risks missing station yard
+        /// tracks, cargo lines, Workshop track assets, and other items with different class settings,
+        /// making the rail network appear fragmented. The primary test is now whether any lane allows
+        /// trains (VehicleType.Train), with ItemClass kept as a fallback. Metro and Monorail remain
+        /// excluded.</summary>
         private static bool IsRailSegment(NetInfo info)
         {
             if (info.m_lanes != null)
@@ -171,8 +185,8 @@ namespace CSWarfront.Game
               .Append(" weldedNodes=").Append(welded)
               .Append(" components=").Append(sizes.Count)
               .Append(" largestComponent=").Append(largest)
-              .Append(" straightenedSegments=").Append(_curveRejections) // Task109: 曲線が怪しく直線化した数
-              .Append(" outsideExcluded=").Append(outsideExcluded);      // Task110: 域外接続の除外数
+              .Append(" straightenedSegments=").Append(_curveRejections) // Task109: count of segments straightened due to suspect curves
+              .Append(" outsideExcluded=").Append(outsideExcluded);      // Task110: count of excluded outside-connection segments
             if (rejected.Count > 0)
             {
                 sb.Append(" rejectedRailLikeInfos=");
@@ -200,13 +214,14 @@ namespace CSWarfront.Game
                 NetNode[] nodes = nm.m_nodes.m_buffer;
 
                 _curveRejections = 0;
-                int outsideExcluded = 0; // Task110: 域外接続に触れる区間の除外数（ログ用）
+                int outsideExcluded = 0; // Task110: count of segments excluded for touching outside connections (for logging)
                 var graph = new RoadGraph();
                 int segmentsAccepted = 0;
-                var rejected = new Dictionary<string, int>(); // Task108: 何を落としているかの内訳
-                // Task108: グラフのノードidはCSのNetNode idをそのまま使わず、自前のid空間で採番する
-                // （曲線サンプリングで挿す中間ノードとidが衝突しないようにするため。このグラフのidを
-                // CS側へ戻す用途は無い＝位置しか使わないので、独自採番で問題ない）。
+                var rejected = new Dictionary<string, int>(); // Task108: breakdown of what is being dropped
+                // Task108: the graph's node ids are not the CS NetNode ids as-is; we assign them from
+                // our own id space (so that ids do not collide with the intermediate nodes inserted by
+                // curve sampling. This graph's ids are never fed back to the CS side = only positions
+                // are used, so independent numbering is fine).
                 var netNodeToGraph = new Dictionary<ushort, ushort>();
                 ushort nextSyntheticId = 1;
 
@@ -218,7 +233,8 @@ namespace CSWarfront.Game
                     if (info == null) continue;
                     if (!IsRailSegment(info))
                     {
-                        // 鉄道っぽい名前なのに落ちているものだけ記録する（道路まで数えると無意味に膨らむ）。
+                        // Record only items with rail-like names that were rejected (counting roads
+                        // too would bloat this meaninglessly).
                         if (info.name != null && (info.name.Contains("Track") || info.name.Contains("Rail")))
                         {
                             int c;
@@ -234,9 +250,10 @@ namespace CSWarfront.Game
                     if ((nodes[startNode].m_flags & NetNode.Flags.Created) == 0) continue;
                     if ((nodes[endNode].m_flags & NetNode.Flags.Created) == 0) continue;
 
-                    // Task110（ユーザー要望「都市内の線路の上のみを通る」）: マップ端の域外接続へ
-                    // 繋がる区間は採用しない。軍用列車が域外接続ノードを経由して市外方向へ
-                    // ルーティングされるのを根元で断つ（バニラの列車運行には一切干渉しない）。
+                    // Task110 (user request "run only on tracks inside the city"): do not accept
+                    // segments that connect to outside connections at the map edge. This cuts off, at
+                    // the root, military trains being routed out of the city via outside-connection
+                    // nodes (does not interfere with vanilla train operations in any way).
                     if ((nodes[startNode].m_flags & NetNode.Flags.Outside) != 0
                         || (nodes[endNode].m_flags & NetNode.Flags.Outside) != 0)
                     {
@@ -249,18 +266,21 @@ namespace CSWarfront.Game
                     ushort startId = MapNode(graph, netNodeToGraph, ref nextSyntheticId, startNode, startPos);
                     ushort endId = MapNode(graph, netNodeToGraph, ref nextSyntheticId, endNode, endPos);
 
-                    // Task108（ユーザー報告「列車が線路上を移動せず、駅間を直線的に建物を貫通して進む」）:
-                    // CSのセグメントは直線ではなくベジエ曲線であり、端点2つだけを辺にすると曲線区間が
-                    // 弦（ショートカット）に化ける。曲線を約SegmentSampleSpacingごとにサンプリングして
-                    // 中間ノードを挿し、線路の形そのものを辿らせる。
+                    // Task108 (user report "trains do not move along the tracks; they go in straight
+                    // lines between stations, cutting through buildings"): CS segments are Bezier
+                    // curves, not straight lines, and making an edge from just the two endpoints turns
+                    // a curved section into its chord (a shortcut). Sample the curve roughly every
+                    // SegmentSampleSpacing and insert intermediate nodes so trains follow the actual
+                    // shape of the track.
                     AddCurvedSegment(graph, ref nextSyntheticId, (ushort)i, segments[i], info,
                         startPos, endPos, startId, endId);
                     segmentsAccepted++;
                 }
 
-                // Task108: 実機で「駅は全て稼働なのに路線が0本＝どの駅も別々の連結成分」という
-                // 状態になったため、線路網が何個の塊に割れているかを毎回ログする（軍用列車が
-                // 走れない原因の一次切り分け。健全なら大きな成分1つに集約されるはず）。
+                // Task108: on real hardware we hit a state where "all stations are operating yet there
+                // are 0 lines = every station is in a separate connected component", so log every time
+                // how many chunks the rail network is split into (first-line triage for why military
+                // trains cannot run. If healthy, it should collapse into one large component).
                 int welded = graph.WeldCoincidentNodes(NodeWeldRadius, NodeWeldHeightTolerance);
                 LogComponentSummary(graph, segmentsAccepted, welded, rejected, outsideExcluded);
                 _failureAlreadyLogged = false;

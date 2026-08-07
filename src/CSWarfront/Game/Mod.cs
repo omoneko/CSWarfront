@@ -4,21 +4,23 @@ using ICities;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// MOD情報とMod Optionsを提供するエントリポイント。ICities.IUserMod には多くのライフサイクルフックが無いため、
-    /// 実際の初期化（MilitaryManager.EnsureInitialized）は <see cref="WarfrontThreadingExtension"/>.OnAfterSimulationTick
-    /// （ゲームが assembly をスキャンして自動登録する ThreadingExtensionBase、simスレッド）で行う。
+    /// Entry point providing the mod info and Mod Options. ICities.IUserMod offers few lifecycle
+    /// hooks, so the actual initialization (MilitaryManager.EnsureInitialized) happens in
+    /// <see cref="WarfrontThreadingExtension"/>.OnAfterSimulationTick (a ThreadingExtensionBase the
+    /// game auto-registers by scanning the assembly; sim thread).
     /// </summary>
     public class Mod : IUserMod
     {
-        public string Name => "CS:WARFRONT"; // Task93: ユーザー指定のMODタイトル（Workshopタイトルと統一）
+        public string Name => "CS:WARFRONT"; // Task93: user-specified mod title (unified with the Workshop title)
         public string Description =>
             "A tier-based military simulation with 5 factions (land/sea/air, bases, territory, occupation). Building the building designated in Options turns it into a military base.";
 
-        /// <summary>Mod Options 画面（建設先勢力の選択、およびTask47でOptionsサブページ化した
-        /// モデル割り当てUI）。ゲームが自動検出して呼ぶ。モデル割り当てUI自体の構築は
-        /// OptionsModelAssignPage.Build（Game/UI/OptionsModelAssignPage.cs）に委譲する
-        /// （Task40時点はフローティングパネルを開くボタンだったが、Task47でOptionsグループ内に
-        /// 直接コントロール一式を並べる「サブページ」形式へ変更した）。</summary>
+        /// <summary>The Mod Options screen (build-target faction selection, plus the model-assignment
+        /// UI that Task47 turned into an Options subpage). Auto-detected and called by the game.
+        /// Building the model-assignment UI itself is delegated to OptionsModelAssignPage.Build
+        /// (Game/UI/OptionsModelAssignPage.cs) (as of Task40 it was a button that opened a floating
+        /// panel, but Task47 changed it to a "subpage" style that lays the full set of controls
+        /// directly inside an Options group).</summary>
         public void OnSettingsUI(UIHelperBase helper)
         {
             try
@@ -32,7 +34,7 @@ namespace CSWarfront.Game
 
                 AddUnitCommandHotkeyUI(helper);
 
-                AddInvasionEventsUI(helper); // Task94: 外部襲来イベント（Workshopコメント要望）
+                AddInvasionEventsUI(helper); // Task94: external invasion events (Workshop comment request)
 
                 OptionsRelationsPage.Build(helper);
 
@@ -40,7 +42,7 @@ namespace CSWarfront.Game
 
                 AddSoundUI(helper);
 
-                OptionsBaseBuildingPage.Build(helper); // Task74: 指定した建物を建てるとその種別の基地として機能する方式
+                OptionsBaseBuildingPage.Build(helper); // Task74: scheme where building the designated building makes it function as a base of that kind
 
                 OptionsModelAssignPage.Build(helper);
             }
@@ -50,9 +52,10 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Task94（Workshopコメント要望）: 外部襲来イベントのON/OFFと頻度。
-        /// ONにすると、ランダムなタイミングでマップ端に襲撃部隊（未使用勢力所属・防衛側と自動敵対）が
-        /// スポーンし、最寄りの基地へ攻めてくる。自分の基地を建てて防衛するプレイ向け。</summary>
+        /// <summary>Task94 (Workshop comment request): ON/OFF and frequency of external invasion
+        /// events. When ON, raid squads (belonging to an unused faction, automatically hostile to the
+        /// defender) spawn at the map edge at random times and attack the nearest base. Aimed at a
+        /// playstyle of building your own bases and defending them.</summary>
         private static void AddInvasionEventsUI(UIHelperBase helper)
         {
             UIHelperBase group = helper.AddGroup("Invasion events (waves attack from outside the city)");
@@ -64,10 +67,12 @@ namespace CSWarfront.Game
                 i => { if (i >= 0 && i <= 2) WarfrontSettings.InvasionFrequencyIndex = i; });
         }
 
-        /// <summary>Task48: 範囲選択した部隊への指揮コマンド（自由進撃/停止/集結待機）のホットキー割り当てUI。
-        /// MissileDisaster.ModSettingsのキーバインドドロップダウン（KeyOptions配列のインデックスで選択値を
-        /// 管理する）と同じパターン。WarfrontSettingsはメモリ内保持のみ（クラス冒頭のコメント参照）なので、
-        /// ここではGameSettings/SavedIntを一切経由せず、選択されたKeyCodeを直接プロパティへ代入するだけでよい。</summary>
+        /// <summary>Task48: hotkey binding UI for command orders to box-selected units (free advance /
+        /// hold / rally-and-wait). Same pattern as the key-binding dropdowns in
+        /// MissileDisaster.ModSettings (the selected value is managed as an index into the KeyOptions
+        /// array). WarfrontSettings is memory-only (see the comment at the top of that class), so here
+        /// we bypass GameSettings/SavedInt entirely and just assign the chosen KeyCode straight to the
+        /// property.</summary>
         private static void AddUnitCommandHotkeyUI(UIHelperBase helper)
         {
             UIHelperBase group = helper.AddGroup("Unit commands (select units with a box drag, then press)");
@@ -76,13 +81,13 @@ namespace CSWarfront.Game
             for (int i = 0; i < WarfrontSettings.KeyOptions.Length; i++)
                 keyNames[i] = WarfrontSettings.KeyOptions[i].ToString();
 
-            // Task76: 部隊選択モードのON/OFFトグルキー。ONの間だけドラッグでの範囲選択が働く
-            // （単発クリック選択は常時有効、Game/UI/UnitBoxSelection参照）。
+            // Task76: ON/OFF toggle key for unit selection mode. Drag-based box selection only works
+            // while it is ON (single-click selection is always active; see Game/UI/UnitBoxSelection).
             group.AddDropdown("Toggle unit selection mode (drag-box select; single click always works)",
                 keyNames, IndexOf(WarfrontSettings.SelectionModeKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.SelectionModeKey = WarfrontSettings.KeyOptions[i]; });
 
-            // Task102: 軍事建設パネル（軍事建物9種のワンクリック配置）の開閉キー。
+            // Task102: open/close key for the military build panel (one-click placement of the 9 military building kinds).
             group.AddDropdown("Toggle military construction panel",
                 keyNames, IndexOf(WarfrontSettings.BuildPanelKey),
                 i => { if (i >= 0 && i < WarfrontSettings.KeyOptions.Length) WarfrontSettings.BuildPanelKey = WarfrontSettings.KeyOptions[i]; });
@@ -107,10 +112,11 @@ namespace CSWarfront.Game
             return 0;
         }
 
-        /// <summary>Task49: ユニット上の勢力アイコン（小さな球、Game/UnitVisuals参照）の表示切り替え。
-        /// WarfrontSettingsと同じくメモリ内保持のみ（セッションをまたいだ既定値=ONへのリセットは許容、MVP）。
-        /// OFFにした場合、既に生成済みの球は次回 UnitVisuals.Sync() 時に破棄される
-        /// （UnitVisuals.Sync内でWarfrontSettings.ShowFactionIconsを見て個別に破棄する）。</summary>
+        /// <summary>Task49: toggle for the faction icons above units (small spheres, see
+        /// Game/UnitVisuals). Memory-only like WarfrontSettings (resetting to the default = ON across
+        /// sessions is acceptable, MVP). When turned OFF, already-created spheres are destroyed on the
+        /// next UnitVisuals.Sync() (UnitVisuals.Sync checks WarfrontSettings.ShowFactionIcons and
+        /// destroys them individually).</summary>
         private static void AddFactionIconUI(UIHelperBase helper)
         {
             UIHelperBase group = helper.AddGroup("Faction icons");
@@ -120,8 +126,9 @@ namespace CSWarfront.Game
                 v => WarfrontSettings.ShowFactionIcons = v);
         }
 
-        /// <summary>Task51: 兵科別射撃音・撃破音の音量スライダーとミュートトグル。WarfrontSettingsと
-        /// 同じくメモリ内保持のみ（セッションをまたいだ既定値=50%/ミュートOFFへのリセットは許容、MVP）。</summary>
+        /// <summary>Task51: volume slider and mute toggle for per-branch firing/kill sounds.
+        /// Memory-only like WarfrontSettings (resetting to the defaults = 50% / mute OFF across
+        /// sessions is acceptable, MVP).</summary>
         private static void AddSoundUI(UIHelperBase helper)
         {
             UIHelperBase group = helper.AddGroup("Firing sounds");

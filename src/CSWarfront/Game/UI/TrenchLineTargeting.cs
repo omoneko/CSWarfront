@@ -5,19 +5,24 @@ using UnityEngine;
 namespace CSWarfront.Game.UI
 {
     /// <summary>
-    /// Task106（ユーザー要望「塹壕を繰り返しモデルにして道路のように使いたい」）: 塹壕ライン敷設。
+    /// Task106 (user request "I want trenches to be a repeating model I can use like roads"):
+    /// trench line placement.
     ///
-    /// Military ConstructionパネルのTrenchボタンでこのモードに入り、
-    ///   右クリック1回目=起点 → 右クリック2回目=終点
-    /// を指定すると、MilitaryManager.RequestTrenchLineが2点間に塹壕建物を32m間隔で連続配置する
-    /// （実際の建物生成はsimスレッド、MilitaryManagerTrenchLine.cs参照）。
+    /// The Trench button on the Military Construction panel enters this mode; specifying
+    ///   1st right-click = start point → 2nd right-click = end point
+    /// makes MilitaryManager.RequestTrenchLine place trench buildings continuously between the two
+    /// points at 32m intervals (the actual building creation happens on the sim thread, see
+    /// MilitaryManagerTrenchLine.cs).
     ///
-    /// バニラのBuildingToolを使わず直接CreateBuildingするため、「道路に接して配置」という
-    /// バニラの配置要件を通らない＝野原に自由に塹壕線を掘れる（ユーザーが厄介と指摘した仕様の回避。
-    /// 配置後の「道路未接続」警告はMilitaryManager側が築城全種でアイコン抑制する）。
+    /// Because we call CreateBuilding directly instead of using the vanilla BuildingTool, the
+    /// vanilla "must be placed adjacent to a road" placement requirement never applies = trench
+    /// lines can be dug freely in open fields (works around the behavior the user flagged as
+    /// troublesome; the post-placement "road not connected" warning is icon-suppressed by
+    /// MilitaryManager for all fortification types).
     ///
-    /// クリック判定はMissileLaunchTargetingと同じ「押下→移動閾値以内で離す＝クリック」パターン
-    /// （カメラ回転ドラッグと区別する）。Escでキャンセル。メインスレッド専用。
+    /// Click detection uses the same "press → release within movement threshold = click" pattern as
+    /// MissileLaunchTargeting (to distinguish from camera-rotation drags). Esc cancels. Main
+    /// thread only.
     /// </summary>
     internal static class TrenchLineTargeting
     {
@@ -31,7 +36,7 @@ namespace CSWarfront.Game.UI
 
         public static bool IsAwaiting { get { return _awaiting; } }
 
-        /// <summary>Military ConstructionパネルのTrenchボタンから呼ばれる。</summary>
+        /// <summary>Called from the Trench button on the Military Construction panel.</summary>
         public static void Begin()
         {
             _awaiting = true;

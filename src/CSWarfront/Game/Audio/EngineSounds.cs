@@ -6,28 +6,34 @@ using UnityEngine;
 namespace CSWarfront.Game.Audio
 {
     /// <summary>
-    /// Task109（ユーザー要望「各ユニットの移動時の効果音」）: 移動音（エンジン音）のクリップ解決。
+    /// Task109 (user request "movement sound effects for each unit"): resolves the movement (engine)
+    /// sound clips.
     ///
-    /// 音源の内訳:
-    ///   - 地上車両 / 戦闘機 / 爆撃機 / ヘリコプター … ユーザー提供のwav（Sounds\engine_*.wav）
-    ///   - 軍用貨物列車 … CS自身の列車プレハブが持つループ音（ユーザー要望「貨物列車はCSのデフォルトのもの」）
-    /// 歩兵（生身）と海上ユニットには移動音を付けない（要件どおり。艦艇は砲撃音のみ）。
+    /// Sound sources:
+    ///   - Ground vehicles / fighters / bombers / helicopters ... user-supplied wavs (Sounds\engine_*.wav)
+    ///   - Military freight train ... the looping sound owned by CS's own train prefab
+    ///     (user request "freight trains should use CS's default sound")
+    /// Infantry (on foot) and naval units get no movement sound (as per requirements; ships only have
+    /// gunfire sounds).
     ///
-    /// 列車音の探索は「VehicleType.Trainのプレハブから、ループ再生のSoundEffect（EffectInfo）を
-    /// 再帰的に探す」だけ——プレハブ名を決め打ちしないので、CSのバージョン差や、効果を削る他MOD
-    /// （Vehicle Effects等）が入っていても壊れず、見つからなければ列車だけ無音になる。
-    /// レベルロード後（プレハブが揃った後）にResolveAllを1回呼ぶ。メインスレッド専用。
+    /// The train sound lookup is just "recursively search VehicleType.Train prefabs for a looping
+    /// SoundEffect (EffectInfo)" — no hard-coded prefab name, so it survives CS version differences
+    /// and other mods that strip effects (Vehicle Effects etc.); if nothing is found, only trains stay
+    /// silent. ResolveAll is called once after level load (once prefabs are available). Main thread
+    /// only.
     /// </summary>
     public static class EngineSounds
     {
-        /// <summary>移動音の基準音量（WarfrontSettings.SoundVolumeに掛かる）。爆発・砲撃より小さく
-        /// 抑える（ユーザー要望「音量は爆発音に比べたら小さめでいい」）。</summary>
+        /// <summary>Base volume for movement sounds (multiplied by WarfrontSettings.SoundVolume). Kept
+        /// quieter than explosions/gunfire (user request "the volume can be lower than the explosion
+        /// sounds").</summary>
         public const float EngineVolumeScale = 0.35f;
 
         private static AudioClip _trainClip;
         private static bool _resolved;
 
-        /// <summary>レベルロード時に1回。CSから借りる列車音だけを解決する（他はWarfrontSoundsのwav）。</summary>
+        /// <summary>Once at level load. Only resolves the train sound borrowed from CS (everything else
+        /// uses WarfrontSounds' wavs).</summary>
         public static void ResolveAll()
         {
             if (_resolved) return;
@@ -36,21 +42,21 @@ namespace CSWarfront.Game.Audio
             TryResolveTrainClip();
         }
 
-        /// <summary>レベルアンロード時（次のセッションで解決し直す）。</summary>
+        /// <summary>At level unload (re-resolve in the next session).</summary>
         public static void Reset()
         {
             _resolved = false;
             _trainClip = null;
         }
 
-        /// <summary>このユニット種別の移動音クリップ（無ければfalse＝移動音なし）。</summary>
+        /// <summary>Movement sound clip for this unit category (false if none = no movement sound).</summary>
         public static bool TryGetClip(UnitCategory category, out AudioClip clip)
         {
             clip = null;
 
             switch (category)
             {
-                // 地上の車両系（歩兵・ドローン兵＝生身は対象外）。
+                // Ground vehicle types (infantry/drone infantry = on foot, excluded).
                 case UnitCategory.MechInfantry:
                 case UnitCategory.Apc:
                 case UnitCategory.Tank:
@@ -74,11 +80,11 @@ namespace CSWarfront.Game.Audio
                     break;
 
                 case UnitCategory.MilitaryTrain:
-                    clip = _trainClip; // CSの列車音（ユーザー要望）
+                    clip = _trainClip; // CS's train sound (user request)
                     break;
 
                 default:
-                    return false; // Infantry/DroneInfantry/艦艇/自爆ドローン＝移動音なし
+                    return false; // Infantry/DroneInfantry/ships/suicide drones = no movement sound
             }
 
             return clip != null;
@@ -114,7 +120,7 @@ namespace CSWarfront.Game.Audio
             }
         }
 
-        /// <summary>EffectInfoの木を辿ってループ再生のSoundEffectのクリップを探す（MultiEffect対応）。</summary>
+        /// <summary>Walks the EffectInfo tree looking for a looping SoundEffect's clip (handles MultiEffect).</summary>
         private static AudioClip FindLoopingClip(EffectInfo effect, int depth)
         {
             if (effect == null || depth > 4) return null;

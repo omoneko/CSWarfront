@@ -4,20 +4,22 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// プレイヤーの部隊コマンド（範囲選択→自由進撃/停止/集結待機/AI委任、Task48）向けの
-    /// MilitaryManager 追加メンバー。MilitaryManager.cs の500行制限のため分離した partial class
-    /// （Task34のMilitaryManagerManualProductionと同じ方針）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for player unit commands (box selection → free advance /
+    /// hold / rally-and-wait / delegate to AI, Task48). Split into a partial class because of the
+    /// 500-line limit on MilitaryManager.cs (same policy as MilitaryManagerManualProduction from
+    /// Task34).
+    /// _stateLock / State are private static members declared on the MilitaryManager.cs side;
+    /// since this is a partial class they can be accessed directly from here as well.
     ///
-    /// 呼び出し元（Game/UI/UnitCommandInput）はメインスレッドから呼ぶ。各メソッドは _stateLock を
-    /// 短時間だけ保持してCore.UnitCommandsへ委譲するだけの薄いラッパーで、Unity API には一切触れない
-    /// （ロック保持中にUnity APIを呼ばないという既定の規約に従う）。
+    /// The caller (Game/UI/UnitCommandInput) calls from the main thread. Each method is a thin
+    /// wrapper that holds _stateLock only briefly and delegates to Core.UnitCommands, and never
+    /// touches any Unity API (following the established convention of not calling Unity APIs
+    /// while holding the lock).
     /// </summary>
     public static partial class MilitaryManager
     {
-        /// <summary>自由進撃（Task48）。Core.UnitCommands.ApplyFreeAdvance へ委譲し、影響を受けた
-        /// ユニット数を1行ログする。State未初期化なら0を返す。</summary>
+        /// <summary>Free advance (Task48). Delegates to Core.UnitCommands.ApplyFreeAdvance and logs
+        /// the number of affected units in one line. Returns 0 if State is uninitialized.</summary>
         public static int CommandFreeAdvance(IList<uint> instanceIds)
         {
             lock (_stateLock)
@@ -29,8 +31,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>停止（Task48）。Core.UnitCommands.ApplyHold へ委譲し、影響を受けたユニット数を
-        /// 1行ログする。State未初期化なら0を返す。</summary>
+        /// <summary>Hold (Task48). Delegates to Core.UnitCommands.ApplyHold and logs the number of
+        /// affected units in one line. Returns 0 if State is uninitialized.</summary>
         public static int CommandHold(IList<uint> instanceIds)
         {
             lock (_stateLock)
@@ -42,8 +44,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>集結待機（Task48）。Core.UnitCommands.ApplyRally へ委譲し、影響を受けたユニット数を
-        /// 1行ログする。State未初期化なら0を返す。</summary>
+        /// <summary>Rally and wait (Task48). Delegates to Core.UnitCommands.ApplyRally and logs the
+        /// number of affected units in one line. Returns 0 if State is uninitialized.</summary>
         public static int CommandRally(IList<uint> instanceIds, WorldPos rallyPoint)
         {
             lock (_stateLock)
@@ -56,8 +58,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>AI委任へ戻す（Task48）。Core.UnitCommands.ClearOrders へ委譲し、影響を受けた
-        /// ユニット数を1行ログする。State未初期化なら0を返す。</summary>
+        /// <summary>Return control to the AI (Task48). Delegates to Core.UnitCommands.ClearOrders and
+        /// logs the number of affected units in one line. Returns 0 if State is uninitialized.</summary>
         public static int CommandClear(IList<uint> instanceIds)
         {
             lock (_stateLock)

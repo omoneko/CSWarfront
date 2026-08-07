@@ -4,18 +4,20 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// プレイヤーによる弾道ミサイル操作（基地パネルからの手動建造発注・発射地点指定、Task63）向けの
-    /// MilitaryManager 追加メンバー。MilitaryManager.cs の500行制限のため分離した partial class
-    /// （Task34のMilitaryManagerManualProduction.csと同じ方針）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。全メソッドは _stateLock を短時間だけ
-    /// 保持してCoreへ委譲するだけの薄いラッパーで、Unity API には一切触れない。
+    /// Additional MilitaryManager members for player ballistic-missile operations (manual build
+    /// orders and launch-target designation from the base panel, Task63). Split into a partial
+    /// class because of the 500-line limit on MilitaryManager.cs (same policy as
+    /// MilitaryManagerManualProduction.cs from Task34).
+    /// _stateLock / State are private static members declared on the MilitaryManager.cs side;
+    /// since this is a partial class they can be accessed directly from here as well. All methods
+    /// are thin wrappers that hold _stateLock only briefly and delegate to Core, and never touch
+    /// any Unity API.
     /// </summary>
     public static partial class MilitaryManager
     {
         /// <summary>
-        /// 基地情報パネルから呼ばれる、プレイヤーによるミサイル手動建造発注（Task63）。
-        /// Core.MissileStockpile.TryBuildMissile へ _stateLock 内で委譲するだけの薄いラッパー。
+        /// Player-driven manual missile build order, called from the base info panel (Task63).
+        /// Thin wrapper that just delegates to Core.MissileStockpile.TryBuildMissile inside _stateLock.
         /// </summary>
         public static MissileBuildResult TryQueueMissileBuild(ushort baseId)
         {
@@ -27,9 +29,10 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 基地情報パネルから呼ばれる、プレイヤーによるミサイル発射（Task63）。
-        /// target はUI側（UnitCommandInputの集結地点指定と同じraycast経路）が求めたワールド座標。
-        /// Core.MissileStep.TryLaunch へ _stateLock 内で委譲するだけの薄いラッパー。
+        /// Player-driven missile launch, called from the base info panel (Task63).
+        /// target is the world position resolved by the UI side (the same raycast path as
+        /// UnitCommandInput's rally-point designation).
+        /// Thin wrapper that just delegates to Core.MissileStep.TryLaunch inside _stateLock.
         /// </summary>
         public static LaunchResult TryLaunchMissile(ushort baseId, Vector3 target)
         {

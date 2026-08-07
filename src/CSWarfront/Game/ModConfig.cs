@@ -1,23 +1,26 @@
 using UnityEngine;
 namespace CSWarfront.Game
 {
-    /// <summary>デバッグログの薄ラッパ。常時ログは残さない（規約）。</summary>
+    /// <summary>Thin wrapper over debug logging. No always-on logging is left in (per convention).</summary>
     public static class ModConfig
     {
         public const string Tag = "[CSWarfront] ";
 
-        /// <summary>MODディレクトリ直下、発砲音・撃破音(*.wav)を配置するサブフォルダ名（Task51）。
-        /// build.ps1がsrc\CSWarfront\Sounds\*.wavをここへ配置し、WarfrontSoundsが実行時に読み込む。</summary>
+        /// <summary>Name of the subfolder, directly under the mod directory, holding the firing/kill
+        /// sounds (*.wav) (Task51). build.ps1 places src\CSWarfront\Sounds\*.wav here, and
+        /// WarfrontSounds loads them at runtime.</summary>
         public const string SoundsFolderName = "Sounds";
 
-        /// <summary>MODディレクトリ直下、兵科別・軍事基地の既定モデル(*.obj/*.mtl)を配置する
-        /// サブフォルダ名（Task57）。build.ps1がsrc\CSWarfront\Models\*.obj,*.mtlをここへ配置し、
-        /// Game/Models/WarfrontModelProviderが実行時に読み込む。</summary>
+        /// <summary>Name of the subfolder, directly under the mod directory, holding the default
+        /// per-branch and military-base models (*.obj/*.mtl) (Task57). build.ps1 places
+        /// src\CSWarfront\Models\*.obj,*.mtl here, and Game/Models/WarfrontModelProvider loads them at
+        /// runtime.</summary>
         public const string ModelsFolderName = "Models";
 
-        /// <summary>Task69: 既定(built-in)モデルのマルチマテリアル描画（WarfrontMeshBuilder.TryBuild）で
-        /// 使う Standard シェーダのパラメータと、.mtl 側にそのスロットの色が無かった場合のフォールバック色。
-        /// MissileDisaster.Game.ModConfig の同名定数と同じ値（実績のある値をそのまま踏襲）。</summary>
+        /// <summary>Task69: Standard-shader parameters used for multi-material rendering of the default
+        /// (built-in) models (WarfrontMeshBuilder.TryBuild), plus the fallback color used when the .mtl
+        /// has no color for that slot. Same values as the same-named constants in
+        /// MissileDisaster.Game.ModConfig (proven values carried over as-is).</summary>
         public const float ObjMetallic = 0.6f;
         public const float ObjGlossiness = 0.5f;
         public static readonly Color ObjFallbackColor = new Color(0.25f, 0.25f, 0.25f, 1f);

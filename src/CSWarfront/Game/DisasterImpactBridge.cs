@@ -5,17 +5,19 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// MissileDisaster MODの着弾ビーコン（MissileDisaster.Game.ImpactBeacon、全弾種の着弾を
-    /// {id, x, z, destructionRadius, burnRadius, isNuclear} で公開）をリフレクションで読み、
-    /// 新着1件につきCore.DisasterImpactStep.ApplyImpactでユニットへ被害を適用する（Task94、
-    /// Workshopコメント対応「ミサイル災害でユニットが死なない」）。
+    /// Reads the MissileDisaster mod's impact beacon (MissileDisaster.Game.ImpactBeacon, which
+    /// publishes the impacts of all warhead types as {id, x, z, destructionRadius, burnRadius,
+    /// isNuclear}) via reflection, and applies damage to units through
+    /// Core.DisasterImpactStep.ApplyImpact for each new impact (Task94, addressing the Workshop
+    /// comment "units do not die from missile disasters").
     ///
-    /// ExternalThreatBridgeのBeamLogAdapterと同じ方針:
-    ///  - ビルド時参照なし。解決は1回だけ試み、失敗（未導入/旧バージョン）はキャッシュして無効化。
-    ///  - 最初の読み取りで現在IDをベースライン化し、過去の着弾へは適用しない。
-    ///  - 何が起きてもゲームループへ例外を投げない。
-    /// simスレッド・_stateLock内から毎tick呼ぶ（内部で間引かない——着弾は稀なイベントで、
-    /// CurrentId()の呼び出しはロック1回ぶんの軽さのため）。
+    /// Same policy as ExternalThreatBridge's BeamLogAdapter:
+    ///  - No build-time reference. Resolution is attempted only once; failure (not installed /
+    ///    old version) is cached and the feature is disabled.
+    ///  - The first read baselines the current ID; past impacts are not applied.
+    ///  - Never throws an exception into the game loop, no matter what happens.
+    /// Called every tick from the sim thread inside _stateLock (no internal throttling — impacts
+    /// are rare events, and the CurrentId() call costs only about one lock acquisition).
     /// </summary>
     internal static class DisasterImpactBridge
     {
@@ -39,7 +41,7 @@ namespace CSWarfront.Game
                 long current = (long)_currentIdMethod.Invoke(null, null);
                 if (_lastConsumedId < 0)
                 {
-                    _lastConsumedId = current; // ベースライン: 過去の着弾は適用しない
+                    _lastConsumedId = current; // baseline: past impacts are not applied
                     return;
                 }
                 if (current <= _lastConsumedId) return;
@@ -48,7 +50,7 @@ namespace CSWarfront.Game
                 for (int s = 0; s + Stride - 1 < snap.Length; s += Stride)
                 {
                     long id = (long)snap[s];
-                    if (id <= _lastConsumedId) break; // 新しい順なので既読IDに達したら終了
+                    if (id <= _lastConsumedId) break; // newest-first, so stop once an already-consumed ID is reached
 
                     int hits = DisasterImpactStep.ApplyImpact(state,
                         snap[s + 1], snap[s + 2], snap[s + 3], snap[s + 4], snap[s + 5] >= 0.5f);
@@ -85,14 +87,14 @@ namespace CSWarfront.Game
                 }
                 if (asm == null)
                 {
-                    _available = false; // 未導入: エラーではない
+                    _available = false; // not installed: not an error
                     return false;
                 }
 
                 Type type = asm.GetType(TypeName);
                 if (type == null)
                 {
-                    // 旧バージョンのMissileDisaster（汎用ビーコン追加前）: 単に機能無効。
+                    // Older version of MissileDisaster (before the generic beacon was added): the feature is simply disabled.
                     ModConfig.Log("DisasterImpactBridge: ImpactBeacon not found (older MissileDisaster?); unit damage from disaster missiles is disabled.");
                     _available = false;
                     return false;

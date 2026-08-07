@@ -6,35 +6,40 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 対空ミサイルの飛翔演出（Task90、ユーザー要望「対空兵器は戦闘機や爆撃機に対して対空ミサイルを
-    /// 発射」「迎撃アニメーション周りはMissileDisaster MODを参考に」）。
-    /// MissileDisaster.Game.InterceptorProjectileの追尾弾体パターンの移植:
-    ///  - 発射位置から標的機の現在位置（UnitVisuals経由、毎フレーム追尾）へモデル弾体
-    ///    （Models/Prop_Interceptor.obj、+Z=機首）が飛ぶ。SamTrail（ノズル火炎＋噴煙）付き。
-    ///  - 命中弾（Missed=false）: 到達時にSamBurstFx.PlayFlash（閃光）。ダメージはCore側で確定済み。
-    ///  - 外れ弾（Missed=true）: 標的の脇へ逸れた点を狙い、到達時にPlayFizzle（不発煙）。
-    ///  - どちらも接近時（FlareTriggerDistance以内）に一度だけ、標的機がフレアを放出し
-    ///    （SamBurstFx.PlayFlares）回避機動を取る（UnitVisuals.NotifyEvade、視覚上のジンク）。
-    ///    命中/外れの結果自体はCoreの命中ロールで確定済み——フレアと回避は「外れた理由」の演出。
+    /// Anti-air missile flight effects (Task90, per the user requests "anti-air weapons should fire
+    /// anti-air missiles at fighters and bombers" and "model the interception animation on the
+    /// MissileDisaster MOD").
+    /// A port of the homing-projectile pattern from MissileDisaster.Game.InterceptorProjectile:
+    ///  - A model projectile (Models/Prop_Interceptor.obj, +Z=nose) flies from the launch position
+    ///    toward the target aircraft's current position (via UnitVisuals, homing every frame). With a
+    ///    SamTrail (nozzle flame + exhaust smoke).
+    ///  - Hit round (Missed=false): SamBurstFx.PlayFlash (flash) on arrival. Damage is already settled
+    ///    on the Core side.
+    ///  - Miss round (Missed=true): aims at a point veering off to the side of the target, and plays
+    ///    PlayFizzle (dud smoke) on arrival.
+    ///  - In both cases, once on approach (within FlareTriggerDistance), the target aircraft releases
+    ///    flares (SamBurstFx.PlayFlares) and takes an evasive maneuver (UnitVisuals.NotifyEvade, a
+    ///    visual jink). The hit/miss outcome itself is already settled by the Core hit roll — the
+    ///    flares and evasion are theatrics explaining "why it missed".
     ///
-    /// スレッド境界: 全publicメソッドはメインスレッド専用（CombatFx/BombFxと同じ規約）。
+    /// Thread boundary: all public methods are main thread only (same convention as CombatFx/BombFx).
     /// </summary>
     internal static class AaMissileFx
     {
         private const int MaxLive = 32;
-        private const float Speed = 260f;               // m/秒（実時間）。射程120-190mを0.5〜0.8秒で駆ける
-        private const float CatchRadius = 10f;          // 到達判定距離
-        private const float MaxFlightSeconds = 4f;      // 追尾不能時の保険
-        private const float MissOffsetDistance = 30f;   // 外れ弾が標的の脇へ逸れる距離
-        private const float FlareTriggerDistance = 70f; // フレア放出・回避機動を始める接近距離
+        private const float Speed = 260f;               // m/sec (real time). Covers the 120-190m range in 0.5-0.8 seconds
+        private const float CatchRadius = 10f;          // Arrival-detection distance
+        private const float MaxFlightSeconds = 4f;      // Safeguard when homing becomes impossible
+        private const float MissOffsetDistance = 30f;   // Distance a miss round veers off to the side of the target
+        private const float FlareTriggerDistance = 70f; // Approach distance at which flare release / evasion starts
         private const string ModelName = "Prop_Interceptor";
 
         private class Sam
         {
             public GameObject Root;
             public uint TargetId;
-            public Vector3 AimPos;      // 標的消失時の最終既知点（または外れ弾の逸れ先）
-            public Vector3 MissOffset;  // 外れ弾のみ: 標的位置に足すオフセット
+            public Vector3 AimPos;      // Last known point when the target disappears (or the veer-off point of a miss round)
+            public Vector3 MissOffset;  // Miss rounds only: offset added to the target position
             public bool Missed;
             public bool FlareDone;
             public float Elapsed;
@@ -47,8 +52,9 @@ namespace CSWarfront.Game
         private static bool _modelResolveAttempted;
         private static Material _fallbackMaterial;
 
-        /// <summary>1発発射する（CombatFx.SpawnOneのSamMissile分岐から。from=発射位置（銃口高さ込み）、
-        /// to=発射時点の標的位置、targetId=標的機、missed=Core側で確定済みの外れフラグ）。</summary>
+        /// <summary>Launches one round (from the SamMissile branch of CombatFx.SpawnOne.
+        /// from=launch position (including muzzle height), to=target position at launch time,
+        /// targetId=target aircraft, missed=miss flag already settled on the Core side).</summary>
         public static void Spawn(Vector3 from, Vector3 to, uint targetId, bool missed)
         {
             try
@@ -70,7 +76,8 @@ namespace CSWarfront.Game
                 };
                 if (missed)
                 {
-                    // 進行方向に対して横へ逸れるオフセット（決定的: targetIdの偶奇で左右を決める）。
+                    // Offset veering sideways relative to the direction of travel (deterministic:
+                    // left/right decided by the parity of targetId).
                     Vector3 dir = (to - from);
                     dir.y = 0f;
                     Vector3 side = dir.sqrMagnitude > 1e-4f
@@ -90,7 +97,7 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>飛翔中の全弾を実時間で進める（メインスレッド専用）。</summary>
+        /// <summary>Advances all rounds in flight in real time (main thread only).</summary>
         public static void Update(float realDeltaTime)
         {
             if (_live.Count == 0) return;
@@ -104,7 +111,8 @@ namespace CSWarfront.Game
 
                     sam.Elapsed += realDeltaTime;
 
-                    // 標的の現在位置を追尾（見た目が消えていれば最終既知点へ）。外れ弾はオフセット付き。
+                    // Home in on the target's current position (or the last known point if the visual
+                    // has disappeared). Miss rounds get the offset added.
                     Vector3 targetPos;
                     if (UnitVisuals.TryGetPosition(sam.TargetId, out targetPos))
                         sam.AimPos = sam.Missed ? targetPos + sam.MissOffset : targetPos;
@@ -114,7 +122,8 @@ namespace CSWarfront.Game
                     float dist = delta.magnitude;
                     float step = Speed * realDeltaTime;
 
-                    // 接近したら標的機が一度だけフレアを撒いて回避機動に入る（結果はCore確定済み）。
+                    // On approach, the target aircraft scatters flares once and enters an evasive
+                    // maneuver (the outcome is already settled by Core).
                     if (!sam.FlareDone && dist <= FlareTriggerDistance)
                     {
                         sam.FlareDone = true;
@@ -151,7 +160,7 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>レベルアンロード時（MilitaryManager.Reset、メインスレッド専用）。</summary>
+        /// <summary>On level unload (MilitaryManager.Reset, main thread only).</summary>
         public static void DestroyAll()
         {
             try
@@ -195,7 +204,7 @@ namespace CSWarfront.Game
                 return go;
             }
 
-            // フォールバック: 細長い白い箱（InterceptorProjectileのフォールバック球と同じ役割）。
+            // Fallback: an elongated white box (same role as InterceptorProjectile's fallback sphere).
             GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
             Collider col = box.GetComponent<Collider>();
             if (col != null) UnityEngine.Object.Destroy(col);

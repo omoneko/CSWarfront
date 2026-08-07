@@ -7,12 +7,13 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// MissileVisuals のうち、着弾/迎撃の演出（フラッシュ/爆発+音、Task63）だけを分離した partial class
-    /// （MissileVisuals.cs 側の見通しのため、UnitVisuals/UnitVisualsFactionIconと同じ分割方針）。
-    /// WarState.RecentImpacts（Core.MissileImpactEvent）のスナップショットを受け取り、
-    /// Intercepted=falseなら着弾（大きめの爆発＋既存の砲撃/撃破に近い爆発音）、
-    /// Intercepted=trueなら迎撃（小さな閃光のみ、ダメージ演出無し）を出す。
-    /// 全メソッドはメインスレッド専用（Unity API呼び出しのため）。
+    /// Partial class separating out only the impact/interception effects (flash/explosion + sound,
+    /// Task63) from MissileVisuals (for the readability of the MissileVisuals.cs side; same splitting
+    /// policy as UnitVisuals/UnitVisualsFactionIcon).
+    /// Receives a snapshot of WarState.RecentImpacts (Core.MissileImpactEvent) and emits: an impact
+    /// (larger explosion + an explosion sound close to the existing bombardment/kill sounds) if
+    /// Intercepted=false, or an interception (small flash only, no damage effects) if Intercepted=true.
+    /// All methods are main thread only (because they call Unity APIs).
     /// </summary>
     internal static partial class MissileVisuals
     {
@@ -36,8 +37,9 @@ namespace CSWarfront.Game
 
         private static readonly List<FxEntry> _fx = new List<FxEntry>();
 
-        /// <summary>1tick分のMissileImpactEventから着弾/迎撃の演出を生成する（メインスレッド専用）。
-        /// CombatFx.Spawnと同じ「カメラ位置を1回だけ取得してから全件処理する」パターン。</summary>
+        /// <summary>Generates impact/interception effects from one tick's worth of MissileImpactEvents
+        /// (main thread only). Same "fetch the camera position once, then process all entries"
+        /// pattern as CombatFx.Spawn.</summary>
         public static void HandleImpacts(List<MissileImpactEvent> events)
         {
             if (events == null || events.Count == 0) return;
@@ -60,7 +62,7 @@ namespace CSWarfront.Game
                     else
                     {
                         SpawnFlash(pos, ImpactFlashSize, ImpactFlashDuration, GetImpactMaterial());
-                        WarfrontSoundPlayer.PlayKill(pos, cameraPos); // 既存の「爆発」相当音(vehicle_destroyed)を再利用
+                        WarfrontSoundPlayer.PlayKill(pos, cameraPos); // Reuse the existing "explosion"-equivalent sound (vehicle_destroyed)
                     }
                 }
             }
@@ -70,8 +72,8 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の演出（フラッシュ）を実時間で進め、寿命が尽きたものを破棄する
-        /// （メインスレッド専用）。MilitaryManager.OnMainVisualUpdateから毎フレーム呼ぶこと。</summary>
+        /// <summary>Advances the live effects (flashes) in real time and destroys those whose lifetime
+        /// has expired (main thread only). Call every frame from MilitaryManager.OnMainVisualUpdate.</summary>
         public static void UpdateFx(float realDeltaTime)
         {
             if (_fx.Count == 0) return;
@@ -101,7 +103,7 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>生存中の演出を破棄する（レベルアンロード時、メインスレッド専用）。</summary>
+        /// <summary>Destroys the live effects (on level unload, main thread only).</summary>
         public static void DestroyAllFx()
         {
             try

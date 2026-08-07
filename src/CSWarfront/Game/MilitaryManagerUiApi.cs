@@ -3,27 +3,29 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 基地/ユニット情報パネル向けのUI-facingラッパー（所有権変更・UIスナップショット取得）向けの
-    /// MilitaryManager 追加メンバー。MilitaryManager.cs の500行制限のため分離した partial class
-    /// （Task34のMilitaryManagerManualProduction、Task49のMilitaryManagerRelations等と同じ方針。
-    /// 勢力関係/研究/生産/ミサイル/部隊コマンド向けのラッパーは既にそれぞれ専用partialへ分離済みのため
-    /// ここでは重複させず、基地所有権と基地/ユニットのUIスナップショット取得のみを持つ）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for the UI-facing wrappers used by the base/unit info panels
+    /// (ownership changes, UI snapshot retrieval). Split into a partial class because of the 500-line
+    /// limit on MilitaryManager.cs (same policy as Task34's MilitaryManagerManualProduction, Task49's
+    /// MilitaryManagerRelations, etc. The wrappers for faction relations/research/production/missiles/
+    /// unit commands are already split into their own dedicated partials, so nothing is duplicated
+    /// here — this file holds only base ownership and base/unit UI snapshot retrieval).
+    /// _stateLock / State are private static members declared in MilitaryManager.cs; being a partial
+    /// class, they are directly accessible from here.
     ///
-    /// 呼び出し元（Game/UI配下の各パネル）はメインスレッドから呼ぶ。各メソッドは _stateLock を
-    /// 短時間だけ保持するだけの薄いラッパーで、Unity API には一切触れない（ロック保持中にUnity APIを
-    /// 呼ばないという既定の規約に従う）。
+    /// Callers (the panels under Game/UI) invoke these from the main thread. Each method is a thin
+    /// wrapper that holds _stateLock only briefly and never touches Unity APIs (following the standing
+    /// convention of not calling Unity APIs while holding the lock).
     /// </summary>
     public static partial class MilitaryManager
     {
         /// <summary>
-        /// 基地情報パネル（Game/UI/BaseInfoPanel）から呼ばれる、基地の所属勢力変更（Task25）。
-        /// メインスレッドから呼ばれる想定だが、simスレッド（OnSimTick）も同じ _stateLock を取るため
-        /// 排他は保証される。HQ整合性は BasePlacementWatcher.ReassignHqIfCleared を共有利用する
-        /// （解体経路と重複させないため）。
+        /// Changes a base's owning faction (Task25); called from the base info panel
+        /// (Game/UI/BaseInfoPanel). Expected to be called from the main thread, but mutual exclusion is
+        /// guaranteed because the sim thread (OnSimTick) takes the same _stateLock. HQ consistency
+        /// reuses BasePlacementWatcher.ReassignHqIfCleared (shared to avoid duplicating the demolition
+        /// path).
         /// </summary>
-        /// <returns>baseId の基地または factionId の勢力が見つからない場合は false。</returns>
+        /// <returns>false if the base with baseId or the faction with factionId is not found.</returns>
         public static bool TrySetBaseOwner(ushort baseId, byte factionId)
         {
             lock (_stateLock)
@@ -41,19 +43,20 @@ namespace CSWarfront.Game
                 if (newFaction == null) return false;
 
                 byte? oldOwner = mb.OwnerFactionId;
-                if (oldOwner.HasValue && oldOwner.Value == factionId) return true; // 変更なし
+                if (oldOwner.HasValue && oldOwner.Value == factionId) return true; // no change
 
                 bool wasHq = mb.IsHeadquarters;
                 mb.OwnerFactionId = factionId;
                 mb.IsHeadquarters = false;
 
-                // 旧所有勢力のHQだった場合はクリアして、その勢力が他に持つ基地があれば昇格する。
+                // If this was the old owner faction's HQ, clear it and promote another base owned by
+                // that faction, if any.
                 if (oldOwner.HasValue && wasHq)
                 {
                     BasePlacementWatcher.ReassignHqIfCleared(State, oldOwner.Value, baseId);
                 }
 
-                // 新所有勢力がまだHQを持たない場合、この基地をHQにする。
+                // If the new owner faction does not yet have an HQ, make this base its HQ.
                 if (!newFaction.HomeBaseId.HasValue)
                 {
                     newFaction.HomeBaseId = baseId;
@@ -68,12 +71,13 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task66: 指定勢力が指定種別の拠点を1つでも所有しているか（AssetAssignPanel/OptionsModelAssignPage
-        /// が「基地種別ごとのモデル割り当て」を適用する際、割り当て対象の拠点が現時点で1つも無い場合に
-        /// ユーザーへヒントを出すために使う。バグ調査で判明した通り、割り当て自体は正しく保存されていても、
-        /// 対応する拠点が存在しなければ見た目には何も反映されないため、ユーザーには「反映されていない」
-        /// ように見えてしまう——このメソッドはその状況を明示的に案内するためのものであり、割り当ての
-        /// 保存/適用ロジック自体には一切影響しない）。
+        /// Task66: whether the given faction owns at least one base of the given type (used by
+        /// AssetAssignPanel/OptionsModelAssignPage to show a hint to the user when applying a
+        /// "per-base-type model assignment" while no base of that type currently exists to apply it to.
+        /// As discovered during bug investigation, even when the assignment itself is saved correctly,
+        /// nothing visibly changes if no matching base exists, so to the user it looks like the
+        /// assignment "did not take effect" — this method exists solely to explain that situation
+        /// explicitly and has no effect whatsoever on the assignment save/apply logic itself).
         /// </summary>
         public static bool HasOwnedBaseOfType(byte factionId, BaseType type)
         {
@@ -90,7 +94,8 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 基地情報パネル表示用の値をロック内でコピーして返す（UIが WarState へ直接触れないため、Task25）。
+        /// Copies the values for the base info panel inside the lock and returns them (so the UI never
+        /// touches WarState directly, Task25).
         /// </summary>
         public static bool TryGetBaseSnapshot(ushort baseId, out BaseUiSnapshot snapshot)
         {
@@ -111,8 +116,9 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>ユニット情報パネル表示用の値をロック内でコピーして返す（Task31。TryGetBaseSnapshotと
-        /// 同じパターン）。死亡済みはまだ残っている可能性があるため見つからない扱いにする。</summary>
+        /// <summary>Copies the values for the unit info panel inside the lock and returns them (Task31;
+        /// same pattern as TryGetBaseSnapshot). Dead units may still linger, so they are treated as not
+        /// found.</summary>
         public static bool TryGetUnitSnapshot(uint instanceId, out UnitUiSnapshot snapshot)
         {
             lock (_stateLock)

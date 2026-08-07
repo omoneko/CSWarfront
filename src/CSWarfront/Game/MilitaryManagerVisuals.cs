@@ -5,57 +5,63 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// メインスレッド駆動（OnMainVisualUpdate）向けの MilitaryManager 追加メンバー。MilitaryManager.cs
-    /// の500行制限のため分離した partial class（Task34のMilitaryManagerManualProduction等と同じ方針）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for main-thread-driven work (OnMainVisualUpdate). Split into
+    /// a partial class because of the 500-line limit on MilitaryManager.cs (same policy as Task34's
+    /// MilitaryManagerManualProduction etc.). _stateLock / State are private static members declared in
+    /// MilitaryManager.cs; being a partial class, they are directly accessible from here.
     ///
-    /// OnMainVisualUpdate は ThreadingExtensionBase.OnUpdate 経由でメインスレッドから呼ばれ、
-    /// ユニットの見た目（Unity GameObject）のみを同期する。CS実体（Vehicle/Building等）には
-    /// 一切触れない。_stateLock はスナップショットを構築する間だけ保持し、ロックを解放してから
-    /// Unity API呼び出しを行う（ロック保持中の重い/ブロッキング処理を避け、simスレッドを待たせないため）。
+    /// OnMainVisualUpdate is called from the main thread via ThreadingExtensionBase.OnUpdate and only
+    /// synchronizes unit visuals (Unity GameObjects). It never touches CS entities (Vehicle/Building
+    /// etc.). _stateLock is held only while building the snapshot; Unity API calls happen after the
+    /// lock is released (avoiding heavy/blocking work while holding the lock so the sim thread never
+    /// has to wait).
     /// </summary>
     public static partial class MilitaryManager
     {
-        // OnMainVisualUpdate で使い回すスナップショット（GC回避）。メインスレッド専用アクセス。
+        // Snapshot reused across OnMainVisualUpdate calls (avoids GC). Main-thread access only.
         private static readonly List<UnitVisualState> _visualSnapshot = new List<UnitVisualState>();
 
-        // Task60: 同上、軍事拠点（BaseVisuals）向けのスナップショット。メインスレッド専用アクセス。
+        // Task60: same as above, snapshot for military bases (BaseVisuals). Main-thread access only.
         private static readonly List<BaseVisualState> _baseVisualSnapshot = new List<BaseVisualState>();
 
-        // Task42: OnMainVisualUpdate で使い回す発砲イベントのスナップショット（GC回避）。
-        // メインスレッド専用アクセス。State.RecentShotsの内容を_stateLock内でここへコピーしてから、
-        // ロック解放後にCombatFx.Spawnへ渡す（UnitVisuals向けの_visualSnapshotと同じパターン）。
+        // Task42: snapshot of shot events reused across OnMainVisualUpdate calls (avoids GC).
+        // Main-thread access only. The contents of State.RecentShots are copied here inside _stateLock,
+        // then passed to CombatFx.Spawn after the lock is released (same pattern as _visualSnapshot for
+        // UnitVisuals).
         private static readonly List<ShotEvent> _shotSnapshot = new List<ShotEvent>();
 
-        // Task51: 同上、State.RecentKillsの内容を_stateLock内でここへコピーしてから、ロック解放後に
-        // CombatFx.SpawnKillSoundsへ渡す（_shotSnapshotと全く同じパターン）。
+        // Task51: same as above; the contents of State.RecentKills are copied here inside _stateLock,
+        // then passed to CombatFx.SpawnKillSounds after the lock is released (exactly the same pattern
+        // as _shotSnapshot).
         private static readonly List<KillEvent> _killSnapshot = new List<KillEvent>();
 
-        // Task63: 同上、State.MissilesInFlight向けのスナップショット（MissileVisuals.Sync用）。
+        // Task63: same as above, snapshot for State.MissilesInFlight (for MissileVisuals.Sync).
         private static readonly List<MissileVisualState> _missileSnapshot = new List<MissileVisualState>();
 
-        // Task63: 同上、State.RecentImpactsの内容を_stateLock内でここへコピーしてから、ロック解放後に
-        // MissileVisuals.HandleImpactsへ渡す（_shotSnapshot/_killSnapshotと全く同じパターン）。
+        // Task63: same as above; the contents of State.RecentImpacts are copied here inside _stateLock,
+        // then passed to MissileVisuals.HandleImpacts after the lock is released (exactly the same
+        // pattern as _shotSnapshot/_killSnapshot).
         private static readonly List<MissileImpactEvent> _missileImpactSnapshot = new List<MissileImpactEvent>();
 
-        // Task62: 同上、選択中ユニットの進撃/集結先（UI.OrderDestinationMarkers向け）。
-        // UI.UnitBoxSelection.SelectedIds（Game層・main-thread専用の状態）を_stateLock内で参照するのは
-        // OnMainVisualUpdate自体がメインスレッド専用のため問題ない（他のGame層main-thread状態と同じ扱い）。
+        // Task62: same as above, advance/rally destinations of the selected units (for
+        // UI.OrderDestinationMarkers). Referencing UI.UnitBoxSelection.SelectedIds (Game-layer,
+        // main-thread-only state) inside _stateLock is fine because OnMainVisualUpdate itself is
+        // main-thread-only (treated the same as other Game-layer main-thread state).
         private static readonly List<UI.OrderDestinationState> _orderMarkerSnapshot = new List<UI.OrderDestinationState>();
 
         /// <summary>
-        /// メインスレッド（ThreadingExtensionBase.OnUpdate経由）：ユニットの見た目（Unity GameObject）
-        /// のみを同期する。CS実体（Vehicle/Building等）には一切触れない。
-        /// _stateLock はスナップショットを構築する間だけ保持し、ロックを解放してから
-        /// UnitVisuals.Sync（Unity API呼び出し）を行う（ロック保持中の重い/ブロッキング処理を避け、
-        /// simスレッドを待たせないため）。
+        /// Main thread (via ThreadingExtensionBase.OnUpdate): synchronizes unit visuals (Unity
+        /// GameObjects) only. Never touches CS entities (Vehicle/Building etc.).
+        /// _stateLock is held only while building the snapshot; UnitVisuals.Sync (Unity API calls)
+        /// happens after the lock is released (avoiding heavy/blocking work while holding the lock so
+        /// the sim thread never has to wait).
         /// </summary>
         public static void OnMainVisualUpdate()
         {
             if (State == null) return;
 
-            // Task94: 外部襲来の発生通知（simスレッドが立てたフラグをメインスレッドで消費）。
+            // Task94: notification that an external invasion has started (flag set by the sim thread,
+            // consumed on the main thread).
             if (_invasionToastPending)
             {
                 _invasionToastPending = false;
@@ -86,9 +92,10 @@ namespace CSWarfront.Game
                     });
                 }
 
-                // Task62: 選択中ユニット（UI.UnitBoxSelection.SelectedIds）の進撃/集結先を同じロック内で
-                // 収集する（M&B風の目的地マーカー、UI.OrderDestinationMarkers向け）。Hold中・目的地未設定の
-                // ユニットは対象外（マーカーを出さない＝仕様どおり「目的地が無い」ことを意味する）。
+                // Task62: collect the advance/rally destinations of the selected units
+                // (UI.UnitBoxSelection.SelectedIds) inside the same lock (M&B-style destination markers,
+                // for UI.OrderDestinationMarkers). Units that are holding or have no destination set are
+                // excluded (no marker shown = per spec, this means "there is no destination").
                 var selectedIds = UI.UnitBoxSelection.SelectedIds;
                 for (int i = 0; i < selectedIds.Count; i++)
                 {
@@ -116,17 +123,18 @@ namespace CSWarfront.Game
                     }
                 }
 
-                // Task60: 軍事拠点も同じロック内でスナップショットを組み立てる。位置(WorldPos)は
-                // Core（State.Bases、基地配置時にBasePlacementWatcherが一度だけ記録した不変値
-                // ＝拠点は配置後に移動しないため再読込不要）から、向きはBasePlacementWatcher
-                // ._baseAngles（simスレッドがCS建物バッファから既に読み取り済みのキャッシュ、
-                // このロックと同じ_stateLockで書き込まれるため、ここで読むのは安全）から取る。
-                // BuildingManagerバッファへメインスレッドから直接アクセスすることは一切無い
-                // （CS実体はsimスレッド専用というルールを維持する）。
+                // Task60: military bases are also snapshotted inside the same lock. The position
+                // (WorldPos) comes from Core (State.Bases, an immutable value recorded once by
+                // BasePlacementWatcher at base placement — bases never move after placement, so no
+                // re-read is needed); the angle comes from BasePlacementWatcher._baseAngles (a cache the
+                // sim thread already read from the CS building buffer; it is written under this same
+                // _stateLock, so reading it here is safe).
+                // The BuildingManager buffer is never accessed directly from the main thread
+                // (preserving the rule that CS entities are sim-thread-only).
                 for (int i = 0; i < State.Bases.Count; i++)
                 {
                     MilitaryBase b = State.Bases[i];
-                    if (b.OwnerFactionId == null) continue; // 未所属の拠点は勢力別割り当ての対象外
+                    if (b.OwnerFactionId == null) continue; // unowned bases are excluded from per-faction assignment
 
                     float angle;
                     if (!BasePlacementWatcher.TryGetAngle(b.BaseId, out angle)) angle = 0f;
@@ -137,21 +145,22 @@ namespace CSWarfront.Game
                         FactionId = b.OwnerFactionId.Value,
                         Position = new Vector3(b.Position.X, b.Position.Y, b.Position.Z),
                         Angle = angle,
-                        Type = b.Type // Task66: 基地種別ごとのモデル割り当てキーを解決するために必要
+                        Type = b.Type // Task66: needed to resolve the model-assignment key per base type
                     });
                 }
 
-                // Task42: 発砲エフェクトも同じロック内でコピーする（State.RecentShotsはsimスレッドが
-                // 書き込むトランジェント・バッファのため、ロック外で読むとレースになる）。
+                // Task42: shot effects are also copied inside the same lock (State.RecentShots is a
+                // transient buffer written by the sim thread, so reading it outside the lock would race).
                 for (int i = 0; i < State.RecentShots.Count; i++)
                     _shotSnapshot.Add(State.RecentShots[i]);
 
-                // Task51: 撃破イベントも同じロック内・同じ理由でコピーする。
+                // Task51: kill events are copied inside the same lock, for the same reason.
                 for (int i = 0; i < State.RecentKills.Count; i++)
                     _killSnapshot.Add(State.RecentKills[i]);
 
-                // Task63: 飛翔中ミサイルと着弾/迎撃イベントも同じロック内でスナップショットを組み立てる
-                // （State.MissilesInFlight/RecentImpactsはsimスレッドが書き込むため、ロック外で読むとレースになる）。
+                // Task63: in-flight missiles and impact/interception events are also snapshotted inside
+                // the same lock (State.MissilesInFlight/RecentImpacts are written by the sim thread, so
+                // reading them outside the lock would race).
                 for (int i = 0; i < State.MissilesInFlight.Count; i++)
                 {
                     MissileInFlight m = State.MissilesInFlight[i];
@@ -169,22 +178,24 @@ namespace CSWarfront.Game
             }
 
             UnitVisuals.Sync(_visualSnapshot);
-            BaseVisuals.Sync(_baseVisualSnapshot); // Task60: ロック解放後、Unity操作はここで行う
-            UI.OrderDestinationMarkers.Sync(_orderMarkerSnapshot); // Task62: 同上
-            MissileVisuals.Sync(_missileSnapshot); // Task63: 同上
+            BaseVisuals.Sync(_baseVisualSnapshot); // Task60: after lock release, Unity operations happen here
+            UI.OrderDestinationMarkers.Sync(_orderMarkerSnapshot); // Task62: same as above
+            MissileVisuals.Sync(_missileSnapshot); // Task63: same as above
 
-            // Task42: Unity操作（GameObject生成/破棄/移動）はロック解放後に行う
-            // （UnitVisuals.Syncと同じ規約：ロック保持中にUnity APIを呼ぶとsimスレッドを長時間ブロックしうる）。
+            // Task42: Unity operations (GameObject create/destroy/move) happen after the lock is released
+            // (same convention as UnitVisuals.Sync: calling Unity APIs while holding the lock could block
+            // the sim thread for a long time).
             CombatFx.Spawn(_shotSnapshot);
-            UnitVisuals.NotifyShots(_shotSnapshot); // Task83: 発砲したユニットは射撃方向を向く
-            CombatFx.SpawnKillSounds(_killSnapshot); // Task51: 撃破音（視覚エフェクトは無し）
-            KillFx.Spawn(_killSnapshot); // Task65: 撃破爆発エフェクト（音とは別のエフェクト専用クラス、同じカテゴリ判定を共有）
+            UnitVisuals.NotifyShots(_shotSnapshot); // Task83: units that fired turn to face their firing direction
+            CombatFx.SpawnKillSounds(_killSnapshot); // Task51: kill sound (no visual effect)
+            KillFx.Spawn(_killSnapshot); // Task65: kill explosion effect (effect-only class separate from the sound, shares the same category logic)
             CombatFx.Update(Time.deltaTime);
             KillFx.Update(Time.deltaTime);
-            BombFx.Update(Time.deltaTime); // Task87: 落下中の爆弾のアニメーション
-            AaMissileFx.Update(Time.deltaTime); // Task90: 飛翔中の対空ミサイル（追尾・フレア・回避）
+            BombFx.Update(Time.deltaTime); // Task87: animation of falling bombs
+            AaMissileFx.Update(Time.deltaTime); // Task90: in-flight anti-air missiles (homing/flares/evasion)
 
-            // Task63: 着弾/迎撃の演出（フラッシュ/爆発+音）と、生存中の演出の実時間更新。
+            // Task63: impact/interception presentation (flash/explosion + sound) and real-time update of
+            // ongoing effects.
             MissileVisuals.HandleImpacts(_missileImpactSnapshot);
             MissileVisuals.UpdateFx(Time.deltaTime);
         }

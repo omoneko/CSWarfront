@@ -7,24 +7,28 @@ using ICities;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// レベル（ゲームセッション）のライフサイクルに合わせてMilitaryManager/BasePlacementWatcherの
-    /// 静的状態を初期化する。CSはLoadingExtensionBaseのサブクラスを自動検出するため、明示的な登録は
-    /// 不要（WarfrontThreadingExtensionと同様）。
-    /// OnLevelUnloading（メインメニューへ戻る／別セーブへ移る際に呼ばれる）でリセットすることで、
-    /// 同一プロセス内でのセーブ復元後→新規ゲーム開始という遷移でセッション状態が次のゲームへ
-    /// 持ち越されるのを防ぐ（Task16レビューImportant）。重い処理はここでは行わない。
+    /// Initializes the static state of MilitaryManager/BasePlacementWatcher in step with the level
+    /// (game session) lifecycle. CS auto-detects subclasses of LoadingExtensionBase, so no explicit
+    /// registration is needed (same as WarfrontThreadingExtension).
+    /// Resetting in OnLevelUnloading (called when returning to the main menu / switching to another
+    /// save) prevents session state from carrying over into the next game in the
+    /// restore-save-then-start-new-game transition within the same process (Task16 review Important).
+    /// No heavy work is done here.
     /// </summary>
     public class WarfrontLoadingExtension : LoadingExtensionBase
     {
         /// <summary>
-        /// ゲームプレイ可能なモード（NewGame/LoadGame及びシナリオ由来の対応モード）でのみ、
-        /// 基地建物の設置/解体イベント購読を開始する（アセット/テーマ/マップエディタ等では不要）。
-        /// LoadMode の各メンバーは ICities.dll から検証済み（research-power-tab-building.md §3）。
+        /// Only in playable modes (NewGame/LoadGame and the corresponding scenario-derived modes) do we
+        /// start subscribing to base-building placement/demolition events (not needed in the
+        /// asset/theme/map editors, etc.). The LoadMode members were verified against ICities.dll
+        /// (research-power-tab-building.md §3).
         ///
-        /// Task82: かつては電力タブの複製プレハブ（WarfrontBasePrefab）をここで実行時登録していたが、
-        /// Options指定建物（BaseBuildingDesignation）方式への一本化に伴い撤去した（複製プレハブ機構
-        /// そのものを削除。既存セーブに残る旧クローンプレハブの建物はもう登録されないため基地として
-        /// 認識されない——CS自身は未知のプレハブ扱いになるだけで、ロード自体がクラッシュすることはない）。
+        /// Task82: the duplicated electricity-tab prefab (WarfrontBasePrefab) used to be registered at
+        /// runtime here, but it was removed when we consolidated on the Options-designated-building
+        /// (BaseBuildingDesignation) approach (the duplicated-prefab mechanism itself was deleted.
+        /// Buildings using the old clone prefab that remain in existing saves are no longer registered
+        /// and thus not recognized as bases — CS itself merely treats them as unknown prefabs, and
+        /// loading does not crash).
         /// </summary>
         public override void OnLevelLoaded(LoadMode mode)
         {
@@ -33,13 +37,14 @@ namespace CSWarfront.Game
                 if (mode == LoadMode.NewGame || mode == LoadMode.LoadGame ||
                     mode == LoadMode.NewGameFromScenario)
                 {
-                    LoadModAssets(); // Task36: ユニットモデル割り当て／Task51: 発砲音・撃破音／Task57: 既定モデル
+                    LoadModAssets(); // Task36: unit model assignments / Task51: firing & kill sounds / Task57: default models
 
-                    // Task109: プレハブが揃ったこの時点で、CS:WARFRONT用の建物アセット（サブスクライブ
-                    // 済み）を名前で検出し、未指定の基地種別の既定値にする（手動指定が常に優先）。
+                    // Task109: now that prefabs are all in place, detect (by name) the subscribed
+                    // building assets intended for CS:WARFRONT and use them as defaults for base kinds
+                    // that have no assignment (manual assignments always take precedence).
                     BaseBuildingDesignation.ApplyAutoDetected(BaseBuildingAutoAssign.Detect());
 
-                    // Task109: 移動音（CS自身の車両効果から借用するループ音）の解決。
+                    // Task109: resolve movement sounds (loop sounds borrowed from CS's own vehicle effects).
                     Audio.EngineSounds.ResolveAll();
 
                     BasePlacementWatcher.Subscribe();
@@ -52,26 +57,27 @@ namespace CSWarfront.Game
         {
             try
             {
-                // イベント購読解除を先に行ってから MilitaryManager.Reset() で pending リスト等を
-                // クリアする（Reset後にイベントが飛んで pending に積まれるのを避けるための順序）。
+                // Unsubscribe from events first, then clear the pending lists etc. via
+                // MilitaryManager.Reset() (this order avoids an event firing after Reset and being
+                // queued onto pending).
                 BasePlacementWatcher.Unsubscribe();
                 MilitaryManager.Reset();
-                UI.MilitaryBuildPanel.Reset(); // Task102: 破棄済みUI参照を持ち越さない
-                UI.TrenchLineTargeting.Reset(); // Task106: ターゲティング状態を持ち越さない
-                Audio.EngineSounds.Reset();     // Task109: 次のセッションでクリップを解決し直す
+                UI.MilitaryBuildPanel.Reset(); // Task102: do not carry over references to destroyed UI
+                UI.TrenchLineTargeting.Reset(); // Task106: do not carry over targeting state
+                Audio.EngineSounds.Reset();     // Task109: re-resolve clips in the next session
             }
             catch (System.Exception e) { ModConfig.LogError("OnLevelUnloading: " + e); }
         }
 
         /// <summary>
-        /// Task36: UnitAssetBindings（TypeKey→サブスクライブ済みプロップ名の割り当て）を、Task51:
-        /// WarfrontSounds（発砲音・撃破音のwav読込）を、Task74: BaseBuildingDesignation
-        /// （基地種別→指定建物アセット名の割り当て）を、それぞれMODディレクトリから読み込む/初期化する。
-        /// Mod.cs（IUserMod.OnEnabled、MissileDisasterと同様のパターン）ではなくここで行うのは、
-        /// 本クラスが既にゲームプレイ可能なLoadModeでのOnLevelLoadedというタイミングを持っており、
-        /// 資産読み込みも同じタイミングで十分だからである。modPath が取得できない場合はログのみで
-        /// 継続し、両者ともメモリ内のみで動作する（UnitAssetBindingsの割り当てやWarfrontSoundsの音は
-        /// 使えないが、ロード自体は止めない）。
+        /// Task36: loads/initializes UnitAssetBindings (TypeKey → subscribed prop name assignments),
+        /// Task51: WarfrontSounds (loading firing/kill sound wavs), and Task74: BaseBuildingDesignation
+        /// (base kind → designated building asset name assignments), each from the mod directory.
+        /// This is done here rather than in Mod.cs (IUserMod.OnEnabled, the same pattern as
+        /// MissileDisaster) because this class already has the OnLevelLoaded timing in a playable
+        /// LoadMode, and loading assets at that same timing is sufficient. If modPath cannot be
+        /// obtained, we just log and continue; both operate in-memory only (the UnitAssetBindings
+        /// assignments and WarfrontSounds audio are unavailable, but loading itself is not blocked).
         /// </summary>
         private static void LoadModAssets()
         {
@@ -85,7 +91,7 @@ namespace CSWarfront.Game
                 }
                 string modPath = info != null ? info.modPath : null;
                 UnitAssetBindings.Load(modPath);
-                BaseBuildingDesignation.Load(modPath); // Task74: Optionsで指定した基地用建物アセットの割り当て
+                BaseBuildingDesignation.Load(modPath); // Task74: assignments of base building assets designated in Options
                 WarfrontSounds.Initialize(modPath); // Task51
                 WarfrontModelProvider.Initialize(modPath); // Task57
             }

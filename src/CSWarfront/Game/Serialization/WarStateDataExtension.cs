@@ -2,7 +2,8 @@ using ICities;
 using CSWarfront.Core;
 namespace CSWarfront.Game.Serialization
 {
-    /// <summary>WarStateをセーブデータへ永続化。ロード時に状態復元＋表現再生成。</summary>
+    /// <summary>Persists WarState into save data. On load, restores state and regenerates the
+    /// presentation.</summary>
     public class WarStateDataExtension : SerializableDataExtensionBase
     {
         private const string DataId = "CSWarfront.WarState.v1";
@@ -11,8 +12,9 @@ namespace CSWarfront.Game.Serialization
         {
             try
             {
-                // _stateLock を保持したままシリアライズする（OnSimTick等によるState.Units変更中の
-                // 「Collection was modified」例外＝セーブ静かに失敗＝データ消失を防ぐ）。
+                // Serialize while holding _stateLock (prevents a "Collection was modified" exception
+                // while State.Units is being changed by OnSimTick etc. = a silently failed save = data
+                // loss).
                 byte[] bytes = MilitaryManager.SerializeLocked();
                 serializableDataManager.SaveData(DataId, bytes);
             }
@@ -24,22 +26,24 @@ namespace CSWarfront.Game.Serialization
             try
             {
                 byte[] bytes = serializableDataManager.LoadData(DataId);
-                if (bytes == null || bytes.Length == 0) return; // 新規ゲームは既定初期化に任せる
+                if (bytes == null || bytes.Length == 0) return; // a new game is left to the default initialization
                 var types = new UnitTypeRegistry();
-                UnitStatsFile.EnsureLoaded(); // Task92: unit-stats.xmlの上書きをロスター構築より前に反映する
-                LandUnitRoster.RegisterAll(types); // 陸上7兵種×Tier1〜5（Task28）。旧セーブのTank_T1も同じキーで解決される。
-                NavalUnitRoster.RegisterAll(types); // 海上2種×Tier1〜5（Task61）。海上/航空ユニットを含むセーブの復元に必要。
-                AirUnitRoster.RegisterAll(types);   // 航空3種×Tier1〜5（Task61）。
+                UnitStatsFile.EnsureLoaded(); // Task92: apply unit-stats.xml overrides before building the rosters
+                LandUnitRoster.RegisterAll(types); // 7 land branches x Tier 1-5 (Task28). Tank_T1 from old saves resolves via the same key.
+                NavalUnitRoster.RegisterAll(types); // 2 naval kinds x Tier 1-5 (Task61). Needed to restore saves containing naval/air units.
+                AirUnitRoster.RegisterAll(types);   // 3 air kinds x Tier 1-5 (Task61).
                 WarState restored = WarStateSerializer.Deserialize(bytes, types);
-                // Task88: 勢力名は表示専用のMOD定義（色名）なので、セーブに残っている旧名
-                // （"Faction 3"等）は常に現行のWarfrontSettings.FactionNamesで上書きする。
+                // Task88: faction names are display-only mod-defined values (color names), so any old
+                // names left in the save ("Faction 3" etc.) are always overwritten with the current
+                // WarfrontSettings.FactionNames.
                 string[] names = WarfrontSettings.FactionNames;
                 for (int i = 0; i < restored.Factions.Count; i++)
                 {
                     var f = restored.Factions[i];
                     if (f.Id < names.Length) f.Name = names[f.Id];
                 }
-                // State差し替えと表現（車両）再生成を同一ロック内で行う（MilitaryManager参照）。
+                // The state swap and presentation (vehicle) regeneration happen inside the same lock
+                // (see MilitaryManager).
                 MilitaryManager.LoadAndRebuild(restored);
             }
             catch (System.Exception e) { ModConfig.LogError("Load: " + e); }

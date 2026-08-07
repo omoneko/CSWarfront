@@ -3,21 +3,23 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// 勢力関係（Task49、Options画面「勢力の関係」グループ）向けの MilitaryManager 追加メンバー。
-    /// MilitaryManager.cs の500行制限のため分離した partial class
-    /// （Task34の MilitaryManagerManualProduction / Task48の MilitaryManagerUnitCommands と同じ方針）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for faction relations (Task49, the "Faction Relations" group
+    /// on the Options screen). Split into a partial class because of the 500-line limit on
+    /// MilitaryManager.cs (same policy as Task34's MilitaryManagerManualProduction / Task48's
+    /// MilitaryManagerUnitCommands). _stateLock / State are private static members declared in
+    /// MilitaryManager.cs; being a partial class, they are directly accessible from here.
     ///
-    /// 呼び出し元（Game/Mod.cs の Options UI コールバック）はメインスレッドから呼ぶ。各メソッドは
-    /// _stateLock を短時間だけ保持して Core.RelationMatrix / Core.RelationPresets へ委譲するだけの
-    /// 薄いラッパーで、Unity API には一切触れない（ロック保持中にUnity APIを呼ばないという既定の規約に従う）。
+    /// Callers (the Options UI callbacks in Game/Mod.cs) invoke these from the main thread. Each method
+    /// is a thin wrapper that holds _stateLock only briefly and delegates to Core.RelationMatrix /
+    /// Core.RelationPresets, never touching Unity APIs (following the standing convention of not
+    /// calling Unity APIs while holding the lock).
     /// </summary>
     public static partial class MilitaryManager
     {
         /// <summary>
-        /// 勢力 a と b の関係を r に設定する（Task49）。RelationMatrix.Set は対称なので鏡側も更新される。
-        /// State未初期化（メインメニューから開いた場合など）なら false を返し、何もしない。
+        /// Sets the relation between factions a and b to r (Task49). RelationMatrix.Set is symmetric,
+        /// so the mirror side is updated too.
+        /// Returns false and does nothing if State is not initialized (e.g. opened from the main menu).
         /// </summary>
         public static bool TrySetRelation(byte a, byte b, Relation r)
         {
@@ -32,8 +34,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 現在の勢力 a-b 間の関係を取得する（Task49、Options UI の初期表示用）。
-        /// State未初期化なら false を返し、out引数は既定値（Neutral）のままにする。
+        /// Gets the current relation between factions a and b (Task49, for the Options UI's initial
+        /// display). Returns false if State is not initialized, leaving the out argument at its default
+        /// (Neutral).
         /// </summary>
         public static bool TryGetRelation(byte a, byte b, out Relation r)
         {
@@ -47,8 +50,8 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 「全て敵対に戻す」ボタン（Task49）。Core.RelationPresets.ApplyAllHostile へ委譲する。
-        /// State未初期化なら false を返し、何もしない。
+        /// "Reset all to hostile" button (Task49). Delegates to Core.RelationPresets.ApplyAllHostile.
+        /// Returns false and does nothing if State is not initialized.
         /// </summary>
         public static bool TryResetRelationsToAllHostile()
         {
@@ -63,8 +66,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task59: 勢力 factionId と外部脅威 kind（KAIJU/Alien）の関係を r に設定する。
-        /// State未初期化（メインメニューから開いた場合など）なら false を返し、何もしない。
+        /// Task59: sets the relation between faction factionId and external threat kind (KAIJU/Alien)
+        /// to r.
+        /// Returns false and does nothing if State is not initialized (e.g. opened from the main menu).
         /// </summary>
         public static bool TrySetThreatRelation(byte factionId, ThreatKind kind, Relation r)
         {
@@ -79,8 +83,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// Task59: 現在の勢力 factionId - 外部脅威 kind 間の関係を取得する（Options UI の初期表示用）。
-        /// State未初期化なら false を返し、out引数は既定値（Hostile、ThreatRelationsのデフォルトと同じ）のままにする。
+        /// Task59: gets the current relation between faction factionId and external threat kind (for
+        /// the Options UI's initial display). Returns false if State is not initialized, leaving the
+        /// out argument at its default (Hostile, same as ThreatRelations' default).
         /// </summary>
         public static bool TryGetThreatRelation(byte factionId, ThreatKind kind, out Relation r)
         {

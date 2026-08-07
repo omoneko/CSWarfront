@@ -5,20 +5,20 @@ using UnityEngine;
 namespace CSWarfront.Game.Audio
 {
     /// <summary>
-    /// Sounds/*.wav を実行時に読み込んで AudioClip をキャッシュする（Task51、兵科別射撃音・撃破音）。
-    /// ミサイル災害MOD(MissileDisaster.Game.Audio.SoundLibrary)と同じ実績パターン:
-    /// Initialize(modPath) を WarfrontLoadingExtension.OnLevelLoaded から呼び、DontDestroyOnLoad の
-    /// 隠しホスト GameObject 上の WarfrontSoundLoaderBehaviour がコルーチンで実読込を行う（1回だけ）。
-    /// すべてメインスレッド。
+    /// Loads Sounds/*.wav at runtime and caches the AudioClips (Task51, per-branch firing/kill sounds).
+    /// Same proven pattern as the Missile Disaster mod (MissileDisaster.Game.Audio.SoundLibrary):
+    /// Initialize(modPath) is called from WarfrontLoadingExtension.OnLevelLoaded, and a
+    /// WarfrontSoundLoaderBehaviour on a hidden DontDestroyOnLoad host GameObject performs the actual
+    /// loading in a coroutine (only once). Everything runs on the main thread.
     ///
-    /// 注意: CS(Unity 5.6)はランタイムMP3デコード非対応（WWW.GetAudioClip(AudioType.MPEG)がnullを返す、
-    /// MissileDisasterで実機確認済み）。そのためユーザーが用意したmp3原本はビルド時にWAVへ変換し、
-    /// Sounds/*.wav として配置・読込する（build.ps1参照。mp3原本もsrc\CSWarfront\Sounds\に残しているが、
-    /// デプロイ対象は*.wavのみ）。
+    /// Note: CS (Unity 5.6) does not support runtime MP3 decoding (WWW.GetAudioClip(AudioType.MPEG)
+    /// returns null, confirmed in-game with MissileDisaster). Therefore the user-supplied mp3 originals
+    /// are converted to WAV at build time and deployed/loaded as Sounds/*.wav (see build.ps1; the mp3
+    /// originals are also kept in src\CSWarfront\Sounds\, but only the *.wav files are deployed).
     /// </summary>
     public static class WarfrontSounds
     {
-        // Sounds フォルダに置く wav のベース名（拡張子なし）。
+        // Base names (without extension) of the wav files placed in the Sounds folder.
         public const string Rifle1 = "rifle1";
         public const string Rifle2 = "rifle2";
         public const string Rifle3 = "rifle3";
@@ -32,9 +32,9 @@ namespace CSWarfront.Game.Audio
         public const string Ricochet = "ricochet";
         public const string VehicleDestroyed = "vehicle_destroyed";
 
-        // Task109: 移動音（ループ再生）。ユーザー提供のmp3をモノラル22.05kHzのWAVへ変換したもの
-        // （3D定位のためモノラル必須）。軍用貨物列車だけはCS自身の列車音を借りるので、ここには無い
-        // （EngineSounds参照）。
+        // Task109: engine/movement sounds (looped playback). User-supplied mp3s converted to mono
+        // 22.05kHz WAV (mono is required for 3D spatialization). Only the military freight train
+        // borrows CS's own train sound, so it is not listed here (see EngineSounds).
         public const string EngineGround = "engine_ground";
         public const string EngineFighter = "engine_fighter";
         public const string EngineBomber = "engine_bomber";
@@ -54,21 +54,21 @@ namespace CSWarfront.Game.Audio
         private static bool _loadStarted;
         private static readonly Dictionary<string, AudioClip> _clips = new Dictionary<string, AudioClip>();
 
-        // Task51: 兵科別バリアントのローテーション用カウンタ。System.Randomは使わず、呼ばれるたびに
-        // 0..length-1を順番に進めるだけ（安価・決定的）。あくまでGame層の演出状態であり、
-        // Coreのシミュレーション決定性（乱数不使用の契約）には一切関与しない。
+        // Task51: rotation counters for the per-branch sound variants. No System.Random; each call just
+        // advances through 0..length-1 in order (cheap and deterministic). This is purely Game-layer
+        // presentation state and never touches the Core simulation's determinism contract (no RNG use).
         private static int _rifleIndex, _mgIndex, _cannonIndex;
 
         /// <summary>
-        /// WarfrontLoadingExtension.OnLevelLoaded から呼ぶ。DontDestroyOnLoad の常駐ホストを作り、
-        /// Sounds/*.wav の読込を即開始する（多重起動しない）。メインスレッドから。
+        /// Called from WarfrontLoadingExtension.OnLevelLoaded. Creates the resident DontDestroyOnLoad
+        /// host and immediately starts loading Sounds/*.wav (never started twice). Main thread only.
         /// </summary>
         public static void Initialize(string modDir)
         {
             if (_loadStarted) return;
             if (string.IsNullOrEmpty(modDir))
             {
-                ModConfig.LogError("WarfrontSounds.Initialize: modDir が空");
+                ModConfig.LogError("WarfrontSounds.Initialize: modDir is empty");
                 return;
             }
             _loadStarted = true;
@@ -91,7 +91,7 @@ namespace CSWarfront.Game.Audio
             if (!string.IsNullOrEmpty(name) && clip != null) _clips[name] = clip;
         }
 
-        /// <summary>読込済みなら AudioClip を返す。未読込/失敗なら null。</summary>
+        /// <summary>Returns the AudioClip if it has been loaded; null if not loaded yet or loading failed.</summary>
         public static AudioClip Get(string name)
         {
             AudioClip c;
@@ -99,19 +99,21 @@ namespace CSWarfront.Game.Audio
         }
 
         /// <summary>
-        /// 兵科ごとの発砲音バリアントを決定的にローテーションして選ぶ（Task51）。
-        /// Infantry/MechInfantry→銃撃音(4種)、Apc/DroneInfantry→重機関銃(2種)、Tank/Artillery→砲撃音(3種)、
-        /// AntiAir→対空ミサイル(単一)。マッピング対象外の兵科（海空ユニット等、現状未実装）はnullを返し、
-        /// 呼び出し側（CombatFx）は無音のまま処理を継続する。
+        /// Deterministically rotates through the firing-sound variants for each branch (Task51).
+        /// Infantry/MechInfantry: rifle fire (4 variants); Apc/DroneInfantry: heavy machine gun (2);
+        /// Tank/Artillery: cannon fire (3); AntiAir: AA missile (single). Unmapped branches (naval/air
+        /// units etc., currently unimplemented) return null, and the caller (CombatFx) continues
+        /// silently.
         /// </summary>
         public static string ShotSoundFor(UnitCategory category)
         {
             return ShotSoundFor(category, ShotKind.Gunfire);
         }
 
-        /// <summary>Task90: ShotKindも考慮するオーバーロード。対空(AntiAir)は撃ち分けに対応する——
-        /// 対ドローンの機銃(Gunfire)は重機関銃音、対戦闘機/爆撃機のSamMissileは対空ミサイル音。
-        /// それ以外の兵科ではShotKindは無視される（従来どおりカテゴリのみで決まる）。</summary>
+        /// <summary>Task90: overload that also considers ShotKind. Anti-air (AntiAir) supports distinct
+        /// sounds — the anti-drone machine gun (Gunfire) uses the heavy machine gun sound, while
+        /// SamMissile against fighters/bombers uses the AA missile sound.
+        /// For all other branches ShotKind is ignored (still determined by category only, as before).</summary>
         public static string ShotSoundFor(UnitCategory category, ShotKind kind)
         {
             switch (category)
@@ -124,7 +126,7 @@ namespace CSWarfront.Game.Audio
                     return MgVariants[NextIndex(ref _mgIndex, MgVariants.Length)];
                 case UnitCategory.Tank:
                 case UnitCategory.Artillery:
-                case UnitCategory.Destroyer: // Task88: 駆逐艦の艦砲/ミサイルにも砲撃音を当てる（従来は未マッピング＝無音）
+                case UnitCategory.Destroyer: // Task88: destroyers' naval guns/missiles also get the cannon sound (previously unmapped = silent)
                     return CannonVariants[NextIndex(ref _cannonIndex, CannonVariants.Length)];
                 case UnitCategory.AntiAir:
                     return kind == ShotKind.SamMissile

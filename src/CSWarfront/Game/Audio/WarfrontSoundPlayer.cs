@@ -5,29 +5,33 @@ using UnityEngine;
 namespace CSWarfront.Game.Audio
 {
     /// <summary>
-    /// 読込済み AudioClip を指定ワールド座標で3D再生する（Task51、メインスレッド専用）。
-    /// MissileDisaster.Game.Audio.SoundPlayer と同じ実績パターン（spatialBlend=1・線形ロールオフの
-    /// 一時GameObject）に、大規模乱戦向けの追加防御を載せている:
-    ///   - 同時再生数の上限（種別ごと）: 同じ音が何十発も重なって鳴り、音声ボイスを食い潰すのを防ぐ。
-    ///   - カメラからの距離カリング: 遠すぎる発砲/撃破はそもそもAudioSourceを生成しない
-    ///     （Unityの線形ロールオフだけに任せると、聞こえない距離でもGameObjectが積み上がる）。
-    ///   - 一時停止中は再生しない（SimulationManager.instance.SimulationPaused）。
-    ///   - WarfrontSettings.SoundVolume/SoundMuted を毎回参照する。
+    /// Plays loaded AudioClips in 3D at a given world position (Task51, main thread only).
+    /// Same proven pattern as MissileDisaster.Game.Audio.SoundPlayer (temporary GameObject with
+    /// spatialBlend=1 and linear rolloff), plus extra defenses for large-scale battles:
+    ///   - Concurrency cap per sound category: prevents dozens of overlapping copies of the same sound
+    ///     from exhausting the audio voices.
+    ///   - Camera distance culling: shots/kills that are too far away never even get an AudioSource
+    ///     (relying on Unity's linear rolloff alone still piles up GameObjects at inaudible distances).
+    ///   - No playback while the game is paused (SimulationManager.instance.SimulationPaused).
+    ///   - WarfrontSettings.SoundVolume/SoundMuted are consulted on every call.
     /// </summary>
     public static class WarfrontSoundPlayer
     {
-        // Task51: 発砲音（銃撃/重機関銃/砲撃/対空ミサイル）の同時再生数上限。乱戦で毎tick最大200件の
-        // ShotEventが来てもボイスが埋め尽くされないよう、控えめな値にする（要件どおり目安8件）。
+        // Task51: concurrency cap for firing sounds (rifle/heavy MG/cannon/AA missile). Kept
+        // conservative (about 8 as per the requirements) so that even up to 200 ShotEvents per tick in
+        // a melee cannot flood the voices.
         private const int MaxConcurrentShotSounds = 8;
-        private const float ShotMinDistance = 20f;   // これより近いと最大音量
-        private const float ShotMaxDistance = 600f;  // これより遠いと無音（カメラ距離カリングにも使う）
+        private const float ShotMinDistance = 20f;   // full volume when closer than this
+        private const float ShotMaxDistance = 600f;  // silent beyond this (also used for camera distance culling)
 
-        // Task51: 撃破音（車両撃破時）は発砲より遥かに低頻度なので上限は緩め、少し遠くまで届かせる。
+        // Task51: kill sounds (vehicle destroyed) are far less frequent than firing, so the cap is
+        // looser and they carry a bit farther.
         private const int MaxConcurrentKillSounds = 4;
         private const float KillMinDistance = 20f;
         private const float KillMaxDistance = 800f;
 
-        // Task51: 跳弾音は演出専用のスパイス（銃撃バーストのたびにまれに鳴る）なので上限は最小限。
+        // Task51: the ricochet sound is pure presentation spice (occasionally plays on a gunfire
+        // burst), so its cap is minimal.
         private const int MaxConcurrentRicochetSounds = 2;
 
         private static readonly List<float> _shotExpiry = new List<float>();
@@ -70,14 +74,14 @@ namespace CSWarfront.Game.Audio
                 if (activeExpiry.Count >= maxConcurrent) return;
 
                 AudioClip clip = WarfrontSounds.Get(clipName);
-                if (clip == null) return; // 未読込/失敗時は無音（戦闘処理は継続）
+                if (clip == null) return; // silent if not loaded yet or loading failed (combat processing continues)
 
                 var go = new GameObject("CSWarfrontSound_" + clipName);
                 go.transform.position = position;
                 var src = go.AddComponent<AudioSource>();
                 src.clip = clip;
                 src.volume = Mathf.Clamp01(WarfrontSettings.SoundVolume / 100f);
-                src.spatialBlend = 1f; // 完全3D
+                src.spatialBlend = 1f; // fully 3D
                 src.rolloffMode = AudioRolloffMode.Linear;
                 src.minDistance = minDistance;
                 src.maxDistance = maxDistance;
@@ -94,8 +98,9 @@ namespace CSWarfront.Game.Audio
             }
         }
 
-        /// <summary>期限切れ（再生完了済み）のスロットを取り除く。Update系のフックを別途持たず、
-        /// 次にこの種別の音を鳴らそうとしたタイミングで遅延評価する（安価・メインスレッド専用）。</summary>
+        /// <summary>Removes expired (finished playing) slots. There is no separate Update-style hook;
+        /// this is evaluated lazily the next time a sound of that category is about to play (cheap,
+        /// main thread only).</summary>
         private static void Prune(List<float> activeExpiry)
         {
             float now = Time.realtimeSinceStartup;

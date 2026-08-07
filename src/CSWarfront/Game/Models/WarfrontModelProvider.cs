@@ -7,21 +7,23 @@ using UnityEngine;
 namespace CSWarfront.Game.Models
 {
     /// <summary>
-    /// 兵科別ユニットの既定（built-in）モデルの単一窓口（Task57、Task69でマルチマテリアル対応）。
-    /// Mod 配置フォルダの Models/&lt;name&gt;.obj(+.mtl) から実行時にメッシュ/マテリアルを構築して
-    /// キャッシュする。
-    /// <see cref="TryGetModel"/>: MissileDisaster.Game.Models.MissileModelProvider.BuildFromObj を
-    /// 縮小移植。.obj の usemtl ブロックをそのままサブメッシュとして残し、サブメッシュごとに .mtl の
-    /// Kd 色で塗った自前マテリアルを返す（GameObject化は呼び出し側 UnitVisuals が行う）。
-    /// ユニットの既定モデル解決の主経路（Task69: 既定モデルは常に自分自身のMTL色で描画し、勢力色
-    /// ティントは廃止した）。
-    /// AssetBundle・デカール・GameObject即時生成等は持ち込まない。
-    /// メッシュ/マテリアル生成を伴うため、必ずメインスレッドから呼ぶこと。
+    /// Single entry point for the default (built-in) per-branch unit models (Task57; multi-material
+    /// support added in Task69). Builds and caches meshes/materials at runtime from
+    /// Models/&lt;name&gt;.obj(+.mtl) in the mod's deployment folder.
+    /// <see cref="TryGetModel"/>: a trimmed-down port of
+    /// MissileDisaster.Game.Models.MissileModelProvider.BuildFromObj. Keeps the .obj's usemtl blocks
+    /// as-is as submeshes and returns per-submesh materials tinted with the .mtl's Kd colors (the
+    /// caller, UnitVisuals, handles turning them into GameObjects).
+    /// This is the primary path for resolving a unit's default model (Task69: default models are
+    /// always rendered with their own MTL colors; faction-color tinting was removed).
+    /// No AssetBundles, decals, or immediate GameObject creation are involved.
+    /// Because it creates meshes/materials, it must always be called from the main thread.
     ///
-    /// Task82: 拠点（電力タブの複製プレハブ、WarfrontBasePrefab）専用だった単一メッシュ統合版
-    /// <c>TryGetMesh</c> と、その平均色を返す <c>TryGetAverageColor</c> は、複製プレハブ機構自体の
-    /// 完全撤去に伴い呼び出し元が無くなったため削除した（Building_*.obj のモデルファイル自体は
-    /// asset-editor-export の書き出しフローが引き続き使うため残置、tools/ 参照）。
+    /// Task82: the single-mesh merged variant <c>TryGetMesh</c> (used only for bases, i.e. the cloned
+    /// electricity-tab prefab WarfrontBasePrefab) and its average-color companion
+    /// <c>TryGetAverageColor</c> were deleted because the cloned-prefab mechanism itself was fully
+    /// removed and they had no callers left (the Building_*.obj model files themselves remain because
+    /// the asset-editor-export write-out flow still uses them; see tools/).
     /// </summary>
     internal static class WarfrontModelProvider
     {
@@ -36,8 +38,8 @@ namespace CSWarfront.Game.Models
         private static readonly Dictionary<string, BuiltModel> _modelCache = new Dictionary<string, BuiltModel>();
         private static readonly HashSet<string> _warnedMissingModel = new HashSet<string>();
 
-        /// <summary>冪等。WarfrontLoadingExtension.LoadModAssets から、UnitAssetBindings.Load /
-        /// WarfrontSounds.Initialize と同じタイミングで呼ぶこと。</summary>
+        /// <summary>Idempotent. Must be called from WarfrontLoadingExtension.LoadModAssets at the same
+        /// timing as UnitAssetBindings.Load / WarfrontSounds.Initialize.</summary>
         public static void Initialize(string modDirectory)
         {
             if (_initialized) return;
@@ -46,14 +48,16 @@ namespace CSWarfront.Game.Models
         }
 
         /// <summary>
-        /// Task69: Models/&lt;modelName&gt;.obj(+.mtl) を、.obj が持つ usemtl ブロックそのままの
-        /// マルチサブメッシュ Mesh + サブメッシュごとの .mtl 色マテリアル配列として読み込む
-        /// （<see cref="WarfrontMeshBuilder.TryBuild"/> 参照。MissileDisaster.Game.Models.
-        /// MissileModelProvider.BuildFromObj を縮小移植したもの）。
-        /// 既定モデルは全て自分自身のMTL色で描画する方針（勢力色ティントは既定モデルでは廃止、
-        /// 呼び出し側 UnitVisuals 参照）のため、こちらが built-in モデル解決の主経路になる。
-        /// 失敗時（未初期化/ファイル無し/解析失敗）は false を返す。名前単位でキャッシュする
-        /// （静的モデルのため、生成した Mesh/Material[] をそのまま全ユニットで共有して問題ない）。
+        /// Task69: loads Models/&lt;modelName&gt;.obj(+.mtl) as a multi-submesh Mesh keeping the
+        /// .obj's usemtl blocks as-is, plus an array of per-submesh materials colored from the .mtl
+        /// (see <see cref="WarfrontMeshBuilder.TryBuild"/>; a trimmed-down port of
+        /// MissileDisaster.Game.Models.MissileModelProvider.BuildFromObj).
+        /// Since the policy is that all default models render with their own MTL colors
+        /// (faction-color tinting was dropped for default models; see the caller UnitVisuals), this is
+        /// the primary path for built-in model resolution.
+        /// Returns false on failure (not initialized / file missing / parse failure). Cached per name
+        /// (the models are static, so the generated Mesh/Material[] can safely be shared by all
+        /// units).
         /// </summary>
         public static bool TryGetModel(string modelName, out Mesh mesh, out Material[] materials)
         {

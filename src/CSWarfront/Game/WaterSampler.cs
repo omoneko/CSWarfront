@@ -5,37 +5,45 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Core.IWaterSamplerのGame層実装（Task61: 海上戦力の追加）。CSのTerrainManagerを叩いて、
-    /// 座標が水面かどうか・その水面の高さを返す。SurfaceHeightSamplerと同じ供給パターン
-    /// （sim スレッド専用、MovementStep.Advanceから呼ばれる想定、失敗時は例外を投げずfalseで通知）。
+    /// Game-layer implementation of Core.IWaterSampler (Task61: adding naval forces). Queries CS's
+    /// TerrainManager and reports whether a coordinate is on water and the height of that water
+    /// surface. Same supply pattern as SurfaceHeightSampler (sim thread only, intended to be called
+    /// from MovementStep.Advance; on failure, never throws and signals via false).
     ///
-    /// 検証済みシグネチャ（Assembly-CSharp.dllをilspycmdで逆コンパイルして確認、Task61）:
+    /// Verified signatures (confirmed by decompiling Assembly-CSharp.dll with ilspycmd, Task61):
     ///  - TerrainManager.HasWater(Vector2 position): bool
-    ///      position.x = ワールドX、position.y = ワールドZ（Vector2へ(x,z)を詰めて渡す規約。
-    ///      TerrainManagerの座標系はSurfaceHeightSamplerが使うSampleDetailHeight(Vector3)とは異なり、
-    ///      HasWater/WaterLevelはワールド座標をそのままVector2で受け取る——内部で
-    ///      Mathf.FloorToInt((position.x + 8640f) * 16f) 等のグリッド変換を行っている）。
-    ///      水シミュレーションのセルに閾値以上の水深（隣接ブロック高さとの差 >= MIN_WATER_AMOUNT(8)、
-    ///      TerrainManager.MIN_WATER_AMOUNT定数）があればtrue。
+    ///      position.x = world X, position.y = world Z (the convention is to pack (x,z) into the
+    ///      Vector2. TerrainManager's coordinate handling differs from the SampleDetailHeight(Vector3)
+    ///      used by SurfaceHeightSampler: HasWater/WaterLevel take world coordinates directly as a
+    ///      Vector2 — internally they perform grid conversions such as
+    ///      Mathf.FloorToInt((position.x + 8640f) * 16f)).
+    ///      Returns true if the water-simulation cell has at least the threshold water depth
+    ///      (difference from the adjacent block height >= MIN_WATER_AMOUNT(8), the
+    ///      TerrainManager.MIN_WATER_AMOUNT constant).
     ///  - TerrainManager.WaterLevel(Vector2 position): float
-    ///      HasWaterと全く同じグリッド変換・閾値判定を内部で行い、水面が無ければ0fを返し、あれば
-    ///      水面の高さ（ワールド単位、内部rawハイト値 * 1/64fで換算済み）を返す。
-    ///  - TerrainManager.instance: Singleton&lt;TerrainManager&gt;.instance（SurfaceHeightSamplerと同じ
-    ///    ColossalFramework.Singletonパターン）。
+    ///      Performs exactly the same grid conversion and threshold test internally as HasWater;
+    ///      returns 0f if there is no water surface, otherwise returns the height of the water
+    ///      surface (world units, already converted from the internal raw height value * 1/64f).
+    ///  - TerrainManager.instance: Singleton&lt;TerrainManager&gt;.instance (same
+    ///    ColossalFramework.Singleton pattern as SurfaceHeightSampler).
     ///
-    /// ハードニング: SurfaceHeightSamplerと同じ方針で、TerrainManager未生成/例外時はfalseを返し、
-    /// 呼び出し元（Core.MovementStep）に安全側フォールバック（water==null時と同じ「移動を許可する」/
-    /// 「Yを従来のまま維持する」）を委ねる。ログはSingleton未生成・例外いずれも初回のみ記録し、
-    /// 成功したら次回の失敗でまた1回だけ記録する（simスレッドから高頻度に呼ばれるためログスパムを防ぐ）。
+    /// Hardening: same policy as SurfaceHeightSampler — when TerrainManager is uninitialized or an
+    /// exception occurs, return false and delegate the safe-side fallback to the caller
+    /// (Core.MovementStep) (the same behavior as when water==null: "allow the movement" / "keep Y
+    /// as before"). Both the missing-Singleton and exception cases are logged only on the first
+    /// occurrence; after a success the next failure is again logged once (called at high frequency
+    /// from the sim thread, so this prevents log spam).
     /// </summary>
     internal sealed class WaterSampler : IWaterSampler
     {
-        /// <summary>Task88（ユーザー要望「海上戦力について、喫水を考慮した行動範囲に」）: 艦艇が
-        /// 航行可能とみなす最低水深（メートル）。IsWaterはHasWater（水があるか、閾値は僅か約0.125m）
-        /// に加えて「水面高さ − 水底の地形高さ >= この値」を要求する。これにより波打ち際・浅瀬には
-        /// 進入できず、艦艇はある程度深い水域だけを行動範囲にする（岸に張り付く見た目の防止）。
-        /// 実機の海岸勾配に合わせた較正値（深すぎると既存の海軍基地沖でスポーン地点が見つからなく
-        /// なるため控えめに設定。プレイテストで要調整）。</summary>
+        /// <summary>Task88 (user request "for naval forces, make the operating area draft-aware"):
+        /// the minimum water depth (meters) at which vessels are considered able to navigate. In
+        /// addition to HasWater (is there water at all; its threshold is a tiny ~0.125m), IsWater
+        /// requires "water surface height − seabed terrain height >= this value". This keeps vessels
+        /// out of the surf line and shallows, restricting them to reasonably deep water (prevents the
+        /// visual of ships hugging the shore). A calibration value matched to the coastal slopes on
+        /// real maps (set conservatively, because too deep a value would leave no spawn points found
+        /// off existing naval bases. To be tuned in playtesting).</summary>
         internal const float MinNavigableDepth = 2f;
 
         private static bool _failureAlreadyLogged;
@@ -58,8 +66,9 @@ namespace CSWarfront.Game
                     return false;
                 }
 
-                // Task88: 喫水チェック。水深 = 水面高さ − 水底（地形）高さ。SampleDetailHeight(Vector3)は
-                // 水底でも地形の高さを返す（水面ではない。SurfaceHeightSamplerと同じ検証済みAPI）。
+                // Task88: draft check. Water depth = water surface height − seabed (terrain) height.
+                // SampleDetailHeight(Vector3) returns the terrain height even on the seabed (not the
+                // water surface; the same verified API SurfaceHeightSampler uses).
                 float waterLevel = tm.WaterLevel(pos);
                 float seabed = tm.SampleDetailHeight(new Vector3(x, 0f, z));
                 bool navigable = (waterLevel - seabed) >= MinNavigableDepth;
@@ -86,7 +95,7 @@ namespace CSWarfront.Game
             {
                 TerrainManager tm = Singleton<TerrainManager>.instance;
                 Vector2 pos = new Vector2(x, z);
-                if (!tm.HasWater(pos)) return false; // 陸地。levelは書き込まない契約（呼び出し側は使わない）。
+                if (!tm.HasWater(pos)) return false; // Land. By contract, level is not written (the caller does not use it).
 
                 level = tm.WaterLevel(pos);
                 _failureAlreadyLogged = false;

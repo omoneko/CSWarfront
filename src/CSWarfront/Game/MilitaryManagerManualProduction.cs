@@ -2,19 +2,20 @@ using CSWarfront.Core;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// プレイヤーによる手動生産（基地パネルからの発注・取消・自動生産切替）向けの
-    /// MilitaryManager 追加メンバー（Task34）。MilitaryManager.cs の500行制限のため分離した
-    /// partial class（Task30のBaseUiSnapshotBuilder分離と同じ方針）。
-    /// _stateLock / State は MilitaryManager.cs 側で宣言された private static メンバーで、
-    /// partial class なのでこちらからもそのままアクセスできる。
+    /// Additional MilitaryManager members for player-driven manual production (ordering,
+    /// cancellation, and auto-production toggling from the base panel) (Task34). Split into a
+    /// partial class because of the 500-line limit on MilitaryManager.cs (same policy as the
+    /// BaseUiSnapshotBuilder split in Task30).
+    /// _stateLock / State are private static members declared on the MilitaryManager.cs side;
+    /// since this is a partial class they can be accessed directly from here as well.
     /// </summary>
     public static partial class MilitaryManager
     {
         /// <summary>
-        /// 基地情報パネルから呼ばれる、プレイヤーによる手動ユニット発注（Task34）。
-        /// Core.ManualProduction.TryEnqueue へ _stateLock 内で委譲するだけの薄いラッパー。
-        /// State未初期化ならBaseNotFoundを返す（実運用ではEnsureInitialized済みの前提だが、
-        /// 呼び出しタイミングに依存しないよう防御的にNULLガードする）。
+        /// Player-driven manual unit order, called from the base info panel (Task34).
+        /// Thin wrapper that just delegates to Core.ManualProduction.TryEnqueue inside _stateLock.
+        /// Returns BaseNotFound if State is uninitialized (in practice EnsureInitialized is assumed
+        /// to have run, but we defensively null-guard so we do not depend on call timing).
         /// </summary>
         public static QueueResult TryQueueUnit(ushort baseId, string typeKey)
         {
@@ -26,8 +27,8 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 基地情報パネルから呼ばれる、プレイヤーによる手動発注の取消（Task34）。
-        /// Core.ManualProduction.TryCancelLast へ _stateLock 内で委譲するだけの薄いラッパー。
+        /// Player-driven cancellation of a manual order, called from the base info panel (Task34).
+        /// Thin wrapper that just delegates to Core.ManualProduction.TryCancelLast inside _stateLock.
         /// </summary>
         public static QueueResult TryCancelLastOrder(ushort baseId)
         {
@@ -39,9 +40,9 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 基地情報パネルから呼ばれる、基地のAI自動生産ON/OFF切替（Task34）。
+        /// Toggles a base's AI auto-production ON/OFF, called from the base info panel (Task34).
         /// </summary>
-        /// <returns>baseId の基地が見つからない場合は false。</returns>
+        /// <returns>false if no base with baseId is found.</returns>
         public static bool TrySetAutoProduce(ushort baseId, bool value)
         {
             lock (_stateLock)
@@ -58,11 +59,11 @@ namespace CSWarfront.Game
         }
 
         /// <summary>
-        /// 基地情報パネルから呼ばれる、ミサイル基地の自動発射ON/OFF切替（Task90）。
-        /// OFFの間はMissileDoctrine（AIの自動発射）がこの基地を撃たず、プレイヤーの
-        /// 「Set Launch Target」経由でのみ発射できる。
+        /// Toggles a missile base's auto-launch ON/OFF, called from the base info panel (Task90).
+        /// While OFF, MissileDoctrine (the AI's automatic launching) will not fire from this base;
+        /// it can only launch via the player's "Set Launch Target".
         /// </summary>
-        /// <returns>baseId の基地が見つからない場合は false。</returns>
+        /// <returns>false if no base with baseId is found.</returns>
         public static bool TrySetMissileAutoLaunch(ushort baseId, bool value)
         {
             lock (_stateLock)

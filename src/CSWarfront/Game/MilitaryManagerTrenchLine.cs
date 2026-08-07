@@ -6,35 +6,41 @@ using UnityEngine;
 namespace CSWarfront.Game
 {
     /// <summary>
-    /// Task106: 塹壕ライン敷設のsim側処理（MilitaryManager partial、500行制限のため分離）。
+    /// Task106: sim-side handling of trench line placement (MilitaryManager partial, split out due to
+    /// the 500-line limit).
     ///
-    /// UI（TrenchLineTargeting、メインスレッド）が2点を確定するとRequestTrenchLineがキューへ積み、
-    /// OnSimTickのProcessPendingTrenchLinesがsimスレッドで消化する:
-    ///   - Options指定のTrench建物アセットを、起点→終点の直線上にTrenchSegmentSpacing間隔で
-    ///     BuildingManager.CreateBuildingにより直接生成する（バニラ配置ツールを使わないため
-    ///     「道路に接して配置」要件を完全にバイパスする）。向きはライン方向へ自動回転。
-    ///   - 1セグメントごとに建物の建設費を通常どおり市の資金から支払う（足りなくなったら中断）。
-    ///   - 生成された建物はEventBuildingCreated経由でBasePlacementWatcherが通常どおり
-    ///     論理塹壕（無所属）として登録する（専用の登録処理は不要）。
+    /// When the UI (TrenchLineTargeting, main thread) confirms two points, RequestTrenchLine pushes
+    /// them onto a queue, and ProcessPendingTrenchLines in OnSimTick drains it on the sim thread:
+    ///   - Spawns the Trench building asset designated in Options directly along the straight line
+    ///     from start to end at TrenchSegmentSpacing intervals via BuildingManager.CreateBuilding
+    ///     (since the vanilla placement tool is not used, the "must be placed adjacent to a road"
+    ///     requirement is completely bypassed). Orientation is auto-rotated to the line direction.
+    ///   - Each segment pays the building's construction cost from the city's funds as usual
+    ///     (placement stops when money runs out).
+    ///   - Spawned buildings are registered as logical trenches (unaffiliated) by
+    ///     BasePlacementWatcher via EventBuildingCreated as usual (no dedicated registration
+    ///     handling is needed).
     ///
-    /// あわせてSuppressFortificationProblemsが、登録済みの築城系建物（塹壕・掩蔽壕・砲兵陣地・
-    /// 補給拠点・貨物駅）の問題アイコン（道路未接続・電気・水道等）を毎tick消す——野戦築城は
-    /// 都市インフラを必要としない、という扱いにする（道路未接続警告への対策）。
+    /// In addition, SuppressFortificationProblems clears the problem icons (road not connected,
+    /// electricity, water, etc.) of registered fortification-type buildings (trenches, bunkers,
+    /// artillery positions, supply depots, cargo stations) every tick — treating field
+    /// fortifications as not requiring city infrastructure (countermeasure for the
+    /// road-not-connected warning).
     /// </summary>
     public static partial class MilitaryManager
     {
-        /// <summary>1本のラインで配置するセグメント数の上限（暴発防止）。</summary>
+        /// <summary>Maximum number of segments placed per line (runaway prevention).</summary>
         public const int MaxTrenchSegmentsPerLine = 64;
 
-        /// <summary>建物フットプリント1セルの一辺（m）。CSの建物グリッドは8m/セル。</summary>
+        /// <summary>Side length of one building-footprint cell (m). CS's building grid is 8m/cell.</summary>
         private const float CellSizeMeters = 8f;
 
         private struct TrenchLineRequest { public Vector3 Start, End; }
 
-        // メインスレッド（UI）→simスレッドの受け渡しキュー。_stateLockで保護する。
+        // Handoff queue from main thread (UI) to sim thread. Protected by _stateLock.
         private static readonly List<TrenchLineRequest> _pendingTrenchLines = new List<TrenchLineRequest>();
 
-        /// <summary>メインスレッド（TrenchLineTargeting）から呼ばれる。</summary>
+        /// <summary>Called from the main thread (TrenchLineTargeting).</summary>
         public static void RequestTrenchLine(Vector3 start, Vector3 end)
         {
             lock (_stateLock)
@@ -43,7 +49,7 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>simスレッド（OnSimTick、_stateLock内）: 保留中の塹壕ラインを建物として生成する。</summary>
+        /// <summary>Sim thread (OnSimTick, inside _stateLock): spawns pending trench lines as buildings.</summary>
         private static void ProcessPendingTrenchLines()
         {
             if (_pendingTrenchLines.Count == 0) return;
@@ -74,22 +80,25 @@ namespace CSWarfront.Game
             float length = delta.magnitude;
             Vector3 dir = length > 0.01f ? delta / length : Vector3.forward;
 
-            // どちらのローカル軸が長辺かはアセット依存なのでフットプリント（8m/セル）から判定し、
-            // 配置間隔もその長辺の実寸にする（セグメント同士が隙間なく繋がる）。
-            float sizeX = Mathf.Max(1, info.m_cellWidth) * CellSizeMeters;   // ローカルX方向の長さ
-            float sizeZ = Mathf.Max(1, info.m_cellLength) * CellSizeMeters;  // ローカルZ方向の長さ
+            // Which local axis is the long side depends on the asset, so determine it from the
+            // footprint (8m/cell) and use the actual length of that long side as the placement
+            // spacing (so segments connect without gaps).
+            float sizeX = Mathf.Max(1, info.m_cellWidth) * CellSizeMeters;   // length along local X
+            float sizeZ = Mathf.Max(1, info.m_cellLength) * CellSizeMeters;  // length along local Z
             bool longAxisIsX = sizeX > sizeZ;
             float spacing = longAxisIsX ? sizeX : sizeZ;
 
-            // CSの建物回転は Quaternion.AngleAxis(m_angle * Rad2Deg, Vector3.down)（Building.
-            // CalculateMeshRotation のILで確認済み）。すなわち「up軸まわりに -m_angle 回す」ため、
-            //   ローカル+Z → (-sin θ, 0, cos θ)   … 長辺がZなら θ = Atan2(-dir.x, dir.z)
-            //   ローカル+X → ( cos θ, 0, sin θ)   … 長辺がXなら θ = Atan2(dir.z, dir.x)
-            // で長辺をライン方向へ一致させられる（従来の Atan2(dir.x, dir.z) はX成分が反転した
-            // 別方向を向いていた）。
+            // CS building rotation is Quaternion.AngleAxis(m_angle * Rad2Deg, Vector3.down)
+            // (confirmed in the IL of Building.CalculateMeshRotation). That is, it rotates
+            // "-m_angle around the up axis", so:
+            //   local +Z → (-sin θ, 0, cos θ)   … if the long axis is Z, θ = Atan2(-dir.x, dir.z)
+            //   local +X → ( cos θ, 0, sin θ)   … if the long axis is X, θ = Atan2(dir.z, dir.x)
+            // aligns the long axis with the line direction (the previous Atan2(dir.x, dir.z)
+            // pointed in a different direction with the X component flipped).
             float angle = longAxisIsX ? Mathf.Atan2(dir.z, dir.x) : Mathf.Atan2(-dir.x, dir.z);
 
-            // 引いた線分そのものを塹壕で覆う（各セグメントの中心を spacing 間隔で線分上に並べる）。
+            // Cover the drawn line segment itself with trenches (place each segment's center along
+            // the segment at spacing intervals).
             int segments = Mathf.Min(MaxTrenchSegmentsPerLine,
                 Mathf.Max(1, Mathf.RoundToInt(length / spacing)));
 
@@ -104,7 +113,8 @@ namespace CSWarfront.Game
                 Vector3 pos = start + dir * ((i + 0.5f) * spacing);
                 pos.y = tm.SampleDetailHeight(pos);
 
-                // 建設費は通常どおり市の資金から支払う（払えなくなったら中断）。
+                // Construction cost is paid from the city's funds as usual (stop when it can no
+                // longer be paid).
                 int cost = info.m_buildingAI.GetConstructionCost();
                 if (cost > 0)
                 {
@@ -121,7 +131,8 @@ namespace CSWarfront.Game
                 {
                     sm.m_currentBuildIndex++;
                     placed++;
-                    // 登録自体はEventBuildingCreated→BasePlacementWatcher（無所属の塹壕として登録）。
+                    // Registration itself happens via EventBuildingCreated → BasePlacementWatcher
+                    // (registered as an unaffiliated trench).
                 }
             }
             ModConfig.Log("TrenchLine: placed " + placed + " trench segment(s) from (" +
@@ -131,9 +142,11 @@ namespace CSWarfront.Game
                 (longAxisIsX ? "X" : "Z") + ", spacing=" + spacing.ToString("0") + "m");
         }
 
-        /// <summary>simスレッド（OnSimTick、_stateLock内）: 築城系建物の問題アイコン（道路未接続・
-        /// 電気・水道等）を消す。野戦築城は都市インフラ不要という扱い（Task106）。
-        /// 対象は登録済みの論理施設（State.Bases）のうちFortificationRules.IsFortificationのもの。</summary>
+        /// <summary>Sim thread (OnSimTick, inside _stateLock): clears problem icons (road not
+        /// connected, electricity, water, etc.) of fortification-type buildings. Field
+        /// fortifications are treated as not requiring city infrastructure (Task106).
+        /// Targets are registered logical facilities (State.Bases) for which
+        /// FortificationRules.IsFortification is true.</summary>
         private static void SuppressFortificationProblems()
         {
             if (State == null) return;
@@ -150,9 +163,10 @@ namespace CSWarfront.Game
                 Notification.ProblemStruct old = buffer[b.BaseId].m_problems;
                 if (old == none) continue;
                 buffer[b.BaseId].m_problems = none;
-                // 重要: 問題アイコンはレンダーグループへ焼き込まれる（Notification.PopulateGroupData）ため、
-                // m_problemsを書き換えるだけでは画面上のアイコンが消えない。バニラのAIと同じく
-                // UpdateNotificationsを呼んでグループを更新させる（simスレッドから呼ぶのが正しい）。
+                // Important: problem icons are baked into render groups (Notification.
+                // PopulateGroupData), so just rewriting m_problems does not remove the on-screen
+                // icon. As vanilla AIs do, call UpdateNotifications to refresh the group (calling
+                // from the sim thread is correct).
                 bm.UpdateNotifications(b.BaseId, old, none);
             }
         }
