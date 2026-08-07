@@ -1,21 +1,24 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 研究によるTier解禁（Task35）。撃破報酬・資金投資で貯まった Faction.ResearchPoints を消費して
-    /// Faction.UnlockedTier を引き上げる、純ロジック・決定的・RNG不使用のクラス。
-    /// UnityEngine非依存。ProductionPlanning / ManualProduction はUnlockedTierを参照してTierゲートする。
+    /// Tier unlocking through research (Task35). A pure-logic, deterministic, RNG-free class that
+    /// spends the Faction.ResearchPoints accumulated from kill rewards and cash investment to raise
+    /// Faction.UnlockedTier. No UnityEngine dependency. ProductionPlanning / ManualProduction read
+    /// UnlockedTier to gate tiers.
     /// </summary>
     public static class Research
     {
-        /// <summary>撃破報酬レート。撃破したUnitTypeのCostに掛けて研究点を算出する（Task35）。</summary>
+        /// <summary>The kill-reward rate. Multiplied by the destroyed UnitType's Cost to yield
+        /// research points (Task35).</summary>
         public const float KillRewardRate = 0.5f;
 
-        /// <summary>資金→研究点の変換効率。1.0fは等価交換（Task35）。</summary>
+        /// <summary>The cash → research-point conversion efficiency. 1.0f is an even trade
+        /// (Task35).</summary>
         public const float TreasuryToResearchRate = 1.0f;
 
         /// <summary>
-        /// 指定Tierへ解禁するのに必要な研究点。T2=100, T3=250, T4=500, T5=1000。
-        /// それ以外（1以下・6以上）は解禁不可の意味で0を返す。
+        /// Research points required to unlock the given tier. T2=100, T3=250, T4=500, T5=1000.
+        /// Anything else (1 or below, 6 or above) returns 0, meaning unlockable-by-nothing.
         /// </summary>
         public static float CostToUnlock(byte nextTier)
         {
@@ -29,7 +32,8 @@ namespace CSWarfront.Core
             }
         }
 
-        /// <summary>faction が次のTierへ解禁可能か（UnlockedTier&lt;5 かつ ResearchPoints が足りている）。</summary>
+        /// <summary>Whether the faction can unlock the next tier (UnlockedTier&lt;5 and enough
+        /// ResearchPoints).</summary>
         public static bool CanUnlockNext(Faction f)
         {
             if (f == null || f.UnlockedTier >= 5) return false;
@@ -38,7 +42,8 @@ namespace CSWarfront.Core
             return cost > 0f && f.ResearchPoints >= cost;
         }
 
-        /// <summary>条件を満たせば研究点を消費してUnlockedTierを1上げる。満たさなければ何もせずfalse。</summary>
+        /// <summary>Spends research points and raises UnlockedTier by one when the conditions hold.
+        /// Otherwise does nothing and returns false.</summary>
         public static bool TryUnlockNext(Faction f)
         {
             if (!CanUnlockNext(f)) return false;
@@ -49,7 +54,8 @@ namespace CSWarfront.Core
             return true;
         }
 
-        /// <summary>撃破報酬の研究点。撃破したユニットのCost × KillRewardRate。destroyedがnullなら0。</summary>
+        /// <summary>The kill reward in research points: the destroyed unit's Cost × KillRewardRate.
+        /// 0 when destroyed is null.</summary>
         public static float KillReward(UnitType destroyed)
         {
             if (destroyed == null) return 0f;
@@ -57,9 +63,9 @@ namespace CSWarfront.Core
         }
 
         /// <summary>
-        /// 資金を研究点へ変換する（Task35 Part3）。f.TrySpend(treasuryAmount) が成功した場合のみ
-        /// treasuryAmount * TreasuryToResearchRate を研究点へ加算しtrueを返す。資金不足ならfalse
-        /// （何も変更しない）。
+        /// Converts cash to research points (Task35 Part3). Only when f.TrySpend(treasuryAmount)
+        /// succeeds does it add treasuryAmount * TreasuryToResearchRate to research points and return
+        /// true. Returns false on insufficient funds (changing nothing).
         /// </summary>
         public static bool TryInvest(Faction f, float treasuryAmount)
         {

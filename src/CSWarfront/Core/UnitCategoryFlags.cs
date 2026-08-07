@@ -1,28 +1,31 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// UnitCategoryに「戦い方」の分類フラグを与える拡張（Task79）。文字列比較（TypeKeyのContains等）や
-    /// カテゴリの列挙を各所にハードコードするのではなく、判定をここ1箇所に集約する。
-    /// CombatStep/BaseCombatStep/ThreatCombatStep/MovementStep/KamikazeStepはすべてこのヘルパー
-    /// 経由でカテゴリを判定し、UnitCategory.SuicideDroneという具体値を直接比較する箇所を増やさない
-    /// （将来、体当たり式のカテゴリが増えてもIsKamikaze側の1箇所を直すだけで済む）。
+    /// Extensions giving UnitCategory its "fighting style" classification flags (Task79). Rather than
+    /// hardcoding string comparisons (TypeKey.Contains etc.) or category enumerations all over the
+    /// place, the checks are consolidated here. CombatStep/BaseCombatStep/ThreatCombatStep/
+    /// MovementStep/KamikazeStep all classify categories through these helpers, never adding more
+    /// direct comparisons against the concrete UnitCategory.SuicideDrone (if ramming-style categories
+    /// multiply someday, only the IsKamikaze side needs the one-line fix).
     /// </summary>
     public static class UnitCategoryFlags
     {
-        /// <summary>自爆特攻（目標へ直接ダイブし、体当たりで一度だけ全ダメージを与えて自壊する）で
-        /// 戦うカテゴリか（Task79）。現時点ではSuicideDrone専用。trueを返すカテゴリのユニットは、
-        /// 通常の射程内ランダムダメージ・ShotEvent発行を行う射撃系ステップ（CombatStep/
-        /// BaseCombatStep/ThreatCombatStep）から早期continueで除外され、代わりにKamikazeStepと
-        /// MovementStepのダイブ移動が交戦全体を扱う。</summary>
+        /// <summary>Whether this category fights by suicide attack (diving straight into the target
+        /// and dealing its full damage once by ramming, destroying itself) — Task79. SuicideDrone-only
+        /// for now. Units of categories returning true are excluded (by early continue) from the
+        /// shooting steps that do regular in-range damage and ShotEvent emission (CombatStep/
+        /// BaseCombatStep/ThreatCombatStep); instead KamikazeStep and MovementStep's dive movement
+        /// handle the whole engagement.</summary>
         public static bool IsKamikaze(this UnitCategory category)
         {
             return category == UnitCategory.SuicideDrone;
         }
 
-        /// <summary>航空機のカテゴリか（Task86）。Game層のUnitVisualsが「発砲時に攻撃方向を向く」
-        /// 対象から航空機を除外する（飛行方向と別方向を向いたまま飛ぶ横滑りの見た目を防ぐ——
-        /// 航空機は常に進行方向を向き、パス航過のすれ違いで機動を表現する）判定に使う。
-        /// 未実装のプレースホルダ（GroundAttack等）も将来の追加に備えて含める。</summary>
+        /// <summary>Whether this category is an aircraft (Task86). The Game layer's UnitVisuals uses
+        /// it to exclude aircraft from "face the attack direction when firing" (preventing the
+        /// side-slipping look of flying while facing away from the flight direction — aircraft always
+        /// face their heading and express maneuvers through crossing passes). Unimplemented
+        /// placeholders (GroundAttack etc.) are included in anticipation of future additions.</summary>
         public static bool IsAircraft(this UnitCategory category)
         {
             switch (category)

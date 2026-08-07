@@ -1,17 +1,18 @@
 namespace CSWarfront.Core
 {
-    /// <summary>MovementStepの続き（Task79: 自爆ドローン(UnitCategoryFlags.IsKamikaze)のダイブ移動）。
-    /// 500行/ファイルの上限に収めるため、ダイブ先解決とダイブ移動本体だけをこのファイルへ分離した
-    /// （MovementStepSea.csと同じpartial classパターン）。</summary>
+    /// <summary>MovementStep continued (Task79: the suicide drones'
+    /// (UnitCategoryFlags.IsKamikaze) dive movement). Only the dive-target resolution and the dive
+    /// movement itself were split into this file to stay under the 500-line/file cap (the same
+    /// partial-class pattern as MovementStepSea.cs).</summary>
     public static partial class MovementStep
     {
-        /// <summary>Task79: KamikazeStepが書いたロック(TargetId/TargetThreatId/TargetBaseId)から、
-        /// ダイブ先の「目標の現在位置」を解決する。ロックしたユニットが撃破/消滅していた、脅威が
-        /// 撃破(IsDefeated)されていた、または基地がもはや敵対所有でなくなっていた（占領猶予中の基地は
-        /// KamikazeStepがそもそもロックしないため、猶予再突入によるnull化は起こらない）場合はnullを
-        /// 返す（このtickはダイブせず、呼び出し元が通常のResolveDomainObjectiveへフォールスルーする）。
-        /// TargetId/TargetThreatId/TargetBaseIdの全てがnull（まだ何もロックしていない）の場合もnullを
-        /// 返す。</summary>
+        /// <summary>Task79: resolves the dive destination — "the target's current position" — from the
+        /// lock KamikazeStep wrote (TargetId/TargetThreatId/TargetBaseId). Returns null when the
+        /// locked unit was destroyed/removed, the threat was defeated (IsDefeated), or the base is no
+        /// longer hostile-owned (bases in capture grace are never locked by KamikazeStep in the first
+        /// place, so nulling by grace re-entry cannot happen) — that tick it does not dive, and the
+        /// caller falls through to the regular ResolveDomainObjective. Also returns null when
+        /// TargetId/TargetThreatId/TargetBaseId are all null (nothing locked yet).</summary>
         private static WorldPos? ResolveKamikazeTarget(WarState state, UnitInstance u)
         {
             if (u.TargetId.HasValue)
@@ -48,11 +49,12 @@ namespace CSWarfront.Core
             return null;
         }
 
-        /// <summary>Task79: 自爆ドローンのダイブ移動。目標の現在位置(target)へ向けて3D（X/Y/Z全て）で
-        /// 直線的に突入する。CruiseAltitude（巡航高度の維持）・IHeightSampler（地表スナップ）・
-        /// IWaterSampler（水域チェック）のいずれにも一切触れない（「ignoring cover/paths」という
-        /// 仕様どおり、地形・障害物を無視して最短距離で目標へ向かう）。速度はtype.Speed（呼び出し元の
-        /// stepLen=Speed×dt）にDiveSpeedMultiplierを掛けた実効値を使う。</summary>
+        /// <summary>Task79: the suicide drone's dive movement. Charges straight at the target's
+        /// current position (target) in 3D (X/Y/Z all at once). Touches none of CruiseAltitude
+        /// (cruise-altitude keeping), IHeightSampler (ground snapping) or IWaterSampler (water
+        /// checks) — per the "ignoring cover/paths" spec, it heads for the target by the shortest
+        /// line, ignoring terrain and obstacles. Speed is the effective value of type.Speed (the
+        /// caller's stepLen = Speed × dt) times DiveSpeedMultiplier.</summary>
         private static void AdvanceKamikaze(UnitInstance u, float stepLen, WorldPos target)
         {
             float diveStepLen = stepLen * DiveSpeedMultiplier;

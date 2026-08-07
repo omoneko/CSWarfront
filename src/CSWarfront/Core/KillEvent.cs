@@ -1,30 +1,32 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// ユニットが撃破された瞬間を表す軽量イベント（Task51、兵科別射撃音・撃破音）。ShotEventと同じ
-    /// 設計思想: ダメージ計算そのものには一切影響しない、間引かれた表現専用のトランジェント・イベント。
+    /// A lightweight event marking the moment a unit was destroyed (Task51, per-category firing and
+    /// kill sounds). Same design philosophy as ShotEvent: a throttled, presentation-only transient
+    /// event with zero influence on the damage computation itself.
     ///
-    /// CombatStep.Advanceの死亡判定ループ（ユニットがUnitState.Deadへ遷移する、まさにその箇所）で
-    /// ちょうど1件だけ積まれる。State != Dead を遷移条件にしているため、同一ユニットについて同tick内で
-    /// 複数回積まれることはない（決定的）。
+    /// Exactly one is queued in CombatStep.Advance's death-resolution loop (at the very spot the unit
+    /// transitions to UnitState.Dead). Because State != Dead gates the transition, the same unit can
+    /// never queue more than once within a tick (deterministic).
     ///
-    /// WarState.RecentKillsに積まれ、Game層（MilitaryManager.OnMainVisualUpdate）が毎フレーム
-    /// ロック内でコピーして消費する。非永続化（WarStateSerializerには一切書き出さない）。
+    /// Queued into WarState.RecentKills and consumed by the Game layer
+    /// (MilitaryManager.OnMainVisualUpdate), which copies inside the lock every frame. Not persisted
+    /// (never written by WarStateSerializer).
     /// </summary>
     public struct KillEvent
     {
-        /// <summary>撃破されたユニットの最終位置（撃破音を再生する位置）。</summary>
+        /// <summary>The destroyed unit's final position (where the kill sound plays).</summary>
         public WorldPos Position;
 
-        /// <summary>撃破されたユニット（victim）の所属勢力ID。</summary>
+        /// <summary>The destroyed unit's (victim's) faction ID.</summary>
         public byte FactionId;
 
-        /// <summary>撃破されたユニット（victim）の兵科（Task53、歩兵系の撃破音オミット）。
-        /// Game層（CombatFx.SpawnKillSounds）がこれを見て、歩兵（Infantry/DroneInfantry）の
-        /// 撃破では「車両撃破時」の爆発音を鳴らさないよう間引く。ダメージ計算・命中判定には
-        /// 一切使わない（ShotEvent.Categoryと同じく見た目・音専用の付随データ）。
-        /// UnitTypeが見つからない防御的ケースではdefault(UnitCategory)（Tank=0）が入る
-        /// （その場合は撃破音を鳴らす側＝安全側のフォールバック）。</summary>
+        /// <summary>The destroyed unit's (victim's) category (Task53, omitting infantry kill sounds).
+        /// The Game layer (CombatFx.SpawnKillSounds) reads this to skip the "vehicle destroyed"
+        /// explosion sound for infantry (Infantry/DroneInfantry) kills. Never used for damage or hit
+        /// computation (like ShotEvent.Category, purely visual/audio side data).
+        /// In the defensive case where the UnitType cannot be found it holds default(UnitCategory)
+        /// (Tank=0) — which falls back to playing the kill sound = the safe side.</summary>
         public UnitCategory Category;
 
         public KillEvent(WorldPos position, byte factionId, UnitCategory category)

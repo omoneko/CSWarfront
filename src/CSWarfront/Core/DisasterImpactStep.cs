@@ -1,33 +1,41 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// MissileDisaster MOD（プレイヤーが撃つ災害ミサイル）の着弾によるユニットへの一撃ダメージ
-    /// （Task94、Workshopコメント対応「ミサイル災害でユニットが死なない」）。
+    /// One-shot unit damage from impacts of the MissileDisaster MOD (the disaster missiles the player
+    /// fires) — Task94, the Workshop-comment fix for "units don't die to the missile disaster".
     ///
-    /// MissileDisasterは着弾を疎結合ビーコン（ImpactBeacon: 座標＋破壊半径＋延焼半径＋核フラグ）で
-    /// 公開し、Game層のDisasterImpactBridgeが新着1件につきこのApplyImpactを1回呼ぶ。
+    /// MissileDisaster publishes impacts as loosely-coupled beacons (ImpactBeacon: coordinates +
+    /// destruction radius + burn radius + nuclear flag); the Game layer's DisasterImpactBridge calls
+    /// this ApplyImpact once per new beacon.
     ///
-    /// ダメージ方針はThreatBeamStep（ゴジラ光線）と同じ:
-    ///  - 勢力・ThreatRelationsを一切参照しない（災害ミサイルは誰の味方でもない）。
-    ///  - 装甲無視の定額一撃。死亡判定・KillEvent発行も同じパターン。
-    ///  - 2段階の同心円: 破壊半径内（建物倒壊圏）は大ダメージ、延焼半径内（その外側）は中ダメージ。
-    ///    核は破壊圏内が即死級（生存を許さない）、延焼圏（熱線）も重傷級。
+    /// The damage policy matches ThreatBeamStep (the Godzilla beam):
+    ///  - Never consults factions or ThreatRelations (a disaster missile is nobody's ally).
+    ///  - A fixed armor-ignoring one-shot. Death resolution and KillEvent emission follow the same
+    ///    pattern.
+    ///  - Two concentric rings: heavy damage inside the destruction radius (the building-collapse
+    ///    zone), medium damage inside the burn radius (outside it). For nukes the destruction zone is
+    ///    instant-death grade (no survival allowed) and the burn zone (thermal flash) is
+    ///    critical-injury grade.
     /// </summary>
     public static class DisasterImpactStep
     {
-        /// <summary>通常弾頭: 破壊半径内のダメージ（Tier5級のHP336を一撃で沈める規模）。</summary>
+        /// <summary>Conventional warhead: damage inside the destruction radius (enough to one-shot a
+        /// tier-5-grade 336 HP).</summary>
         public const float ConventionalDestructionDamage = 500f;
 
-        /// <summary>通常弾頭: 延焼半径内（破壊圏の外側）のダメージ。</summary>
+        /// <summary>Conventional warhead: damage inside the burn radius (outside the destruction
+        /// zone).</summary>
         public const float ConventionalBurnDamage = 120f;
 
-        /// <summary>核弾頭: 破壊半径（5psi圏）内のダメージ。いかなるユニットでも確実に即死する値。</summary>
+        /// <summary>Nuclear warhead: damage inside the destruction radius (the 5psi zone). A value
+        /// that reliably kills any unit outright.</summary>
         public const float NuclearDestructionDamage = 1000000f;
 
-        /// <summary>核弾頭: 熱線半径内（破壊圏の外側）のダメージ。</summary>
+        /// <summary>Nuclear warhead: damage inside the thermal-flash radius (outside the destruction
+        /// zone).</summary>
         public const float NuclearBurnDamage = 500f;
 
-        /// <summary>着弾1件ぶんのダメージを適用する。戻り値はダメージを受けたユニット数（ログ用）。</summary>
+        /// <summary>Applies one impact's damage. Returns the number of units damaged (for logging).</summary>
         public static int ApplyImpact(WarState state, float x, float z, float destructionRadius, float burnRadius,
             bool isNuclear)
         {
@@ -49,7 +57,8 @@ namespace CSWarfront.Core
                 hit++;
             }
 
-            // 死亡判定（ThreatBeamStep/ThreatAuraStepと同じパターン。他stepで既にDeadなら二重に積まない）。
+            // Death resolution (the same pattern as ThreatBeamStep/ThreatAuraStep; units already Dead
+            // from another step are never queued twice).
             for (int i = 0; i < state.Units.Count; i++)
             {
                 UnitInstance u = state.Units[i];

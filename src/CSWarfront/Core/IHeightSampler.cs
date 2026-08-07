@@ -1,26 +1,28 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// Task53:「ユニットが地面にめり込む」不具合の修正。地形の生の高さではなく、道路/建物建設後の
-    /// "見た目の"地表（roads on embankments, terrain modified by construction, bridges等を含む）を
-    /// サンプリングするための、UnityEngine非依存の薄いシーム（RoadGraph/CoverMapと同じ供給パターン）。
+    /// Task53: the fix for "units sinking into the ground". A thin UnityEngine-free seam for sampling
+    /// not the raw terrain height but the "visual" ground surface after road/building construction
+    /// (including roads on embankments, terrain modified by construction, bridges, etc.) — the same
+    /// supply pattern as RoadGraph/CoverMap.
     ///
-    /// Coreはこのインターフェースを消費するだけで、実装は一切知らない。Game層
-    /// （src/CSWarfront/Game/SurfaceHeightSampler.cs）がCSのTerrainManagerを叩いて実装する。
+    /// Core only consumes this interface and knows nothing of the implementation. The Game layer
+    /// (src/CSWarfront/Game/SurfaceHeightSampler.cs) implements it against CS's TerrainManager.
     ///
-    /// Task53ハードニング: 旧SampleHeight(float,float):floatは、TerrainManagerが一時的に未生成/例外を
-    /// 投げた場合に0fを返していた。マップの地表は0f付近とは限らない（実測で約270）ため、その0fが
-    /// そのままユニットのYへ採用されると1tickだけ地表の遥か下へテレポートする可視バグになる。
-    /// Try形式にすることで「サンプリング失敗」を呼び出し側（MovementStep）が明示的に判別できるようにし、
-    /// 失敗時はY補間へフォールバックさせ、失敗値を絶対にYへ採用しないようにする。
+    /// Task53 hardening: the old SampleHeight(float,float):float returned 0f when the TerrainManager
+    /// was momentarily uncreated or threw. Map ground is not necessarily near 0f (about 270 in
+    /// practice), so adopting that 0f as the unit's Y made a visible bug — a one-tick teleport far
+    /// below the ground. The Try form lets the caller (MovementStep) explicitly distinguish "sampling
+    /// failed", fall back to Y interpolation on failure, and never adopt a failure value into Y.
     /// </summary>
     public interface IHeightSampler
     {
-        /// <summary>マップ座標(x, z)における地表の高さ(y)の取得を試みる。呼び出し側（MovementStep）は
-        /// sim スレッドから呼ぶ想定（Game層の実装がTerrainManager読み取りを行うため）。
-        /// 成功すればtrueを返しheightに値を格納する。失敗（地形システム未生成・例外等）した場合は
-        /// falseを返す。呼び出し側はfalseの場合、heightの値を一切使ってはならない
-        /// （既存のY補間・スナップ挙動を維持すること）。</summary>
+        /// <summary>Attempts to get the ground-surface height (y) at map coordinates (x, z). The
+        /// caller (MovementStep) is expected to call from the sim thread (the Game-layer
+        /// implementation reads the TerrainManager). Returns true on success, storing the value in
+        /// height. Returns false on failure (terrain system uncreated, exceptions, etc.). On false the
+        /// caller must never use height's value (keep the existing Y interpolation/snap
+        /// behavior).</summary>
         bool TrySampleHeight(float x, float z, out float height);
     }
 }
