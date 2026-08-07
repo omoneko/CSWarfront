@@ -1,16 +1,18 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 勢力関係の既定プリセット。以前は Game/MilitaryManager.EnsureInitialized 内にインラインで
-    /// 書かれていた「全ペアHostile」ロジックをここへ抽出し、Core（テスト可能）と Game（Options画面の
-    /// 「全て敵対に戻す」ボタン）の両方から同じ実装を共有できるようにする。
-    /// UnityEngine非依存・決定的（入力のみに依存し内部状態を持たない）。
+    /// Default presets for faction relations. Extracts the "every pair Hostile" logic previously
+    /// written inline in Game/MilitaryManager.EnsureInitialized, so Core (testable) and Game (the
+    /// Options screen's "reset all to hostile" button) share the same implementation.
+    /// No UnityEngine dependency; deterministic (depends only on its inputs, holds no internal
+    /// state).
     /// </summary>
     public static class RelationPresets
     {
         /// <summary>
-        /// 0..count-1 の全ての異なる勢力ペアを Hostile に設定する。count は m の実サイズ以下であること
-        /// （m のコンストラクタに渡した factionCount 以下を渡す想定）。m が null の場合は何もしない。
+        /// Sets every distinct faction pair in 0..count-1 to Hostile. count must not exceed m's real
+        /// size (callers are expected to pass at most the factionCount given to m's constructor).
+        /// Does nothing when m is null.
         /// </summary>
         public static void ApplyAllHostile(RelationMatrix m, int count)
         {

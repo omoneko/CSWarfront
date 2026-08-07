@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace CSWarfront.Core
 {
-    /// <summary>MTLから読み取ったマテリアルの色と透明度。</summary>
+    /// <summary>A material's color and opacity read from MTL.</summary>
     public class MtlColor
     {
         public float R;
@@ -14,12 +14,12 @@ namespace CSWarfront.Core
     }
 
     /// <summary>
-    /// MTLテキストを解析する純粋パーサ（UnityEngine非依存）。MissileDisaster.Core.MtlParser を
-    /// Task57 でポートしたもの（挙動は変更していない）。CSWarfrontの実行時パスは現状メッシュのみを
-    /// 使い（Game/Models/WarfrontModelProvider参照）、マテリアル色はユニット/建物とも自前生成
-    /// （UnitMaterialFactory）で塗るため、このパーサ自体はまだ呼び出されていないが、
-    /// tools/gen_models.py が出力する .mtl の将来的な読み込み・検証用に MissileDisaster と同じ
-    /// 形で移植しておく。
+    /// A pure parser for MTL text (no UnityEngine dependency). MissileDisaster.Core.MtlParser ported
+    /// in Task57 (behavior unchanged). CSWarfront's runtime path currently uses only the meshes (see
+    /// Game/Models/WarfrontModelProvider) and paints material colors itself for both units and
+    /// buildings (UnitMaterialFactory), so this parser is not yet called — it is carried over in the
+    /// same MissileDisaster shape for future reading/validation of the .mtl files
+    /// tools/gen_models.py emits.
     /// </summary>
     public static class MtlParser
     {

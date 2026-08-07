@@ -1,11 +1,12 @@
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// 他MOD（ゴジラ災害/エイリアン侵略）が生成する外部脅威(ExternalThreat)の種別（Task59）。
-    /// ExternalThreat.Kind および WarState.ThreatRelations のキーとして使う。
-    /// 追加する場合は必ず末尾に追記すること：ThreatRelations.ThreatKindCount とWarStateSerializerの
-    /// 永続化ブロックは「0..ThreatKindCount-1」を固定順で読み書きするため、既存の値の並びを変えると
-    /// 別の脅威の関係を読み違える（RelationのNemesis追記と同じ注意点）。
+    /// The kind of external threat (ExternalThreat) other MODs (Godzilla Disaster / Alien Invasion)
+    /// spawn (Task59). Used as ExternalThreat.Kind and the key into WarState.ThreatRelations.
+    /// When adding kinds, always append at the tail: ThreatRelations.ThreatKindCount and
+    /// WarStateSerializer's persistence block read/write "0..ThreatKindCount-1" in fixed order, so
+    /// reordering existing values would misread another threat's relations (the same caveat as
+    /// Relation's Nemesis addition).
     /// </summary>
     public enum ThreatKind { Kaiju, Alien }
 }

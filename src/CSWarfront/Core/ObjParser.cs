@@ -5,11 +5,11 @@ using System.Globalization;
 namespace CSWarfront.Core
 {
     /// <summary>
-    /// OBJテキストを解析する純粋パーサ（UnityEngine非依存）。MissileDisaster.Core.ObjParser を
-    /// Task57 でポートしたもの（挙動は変更していない）。
-    /// OBJは右手座標系・Unityは左手座標系のため、X座標の反転と三角形の巻き順反転を
-    /// セットで行うことで、モデルが裏返らずに正しく描画されるようにしている
-    /// （src/CSWarfront/Models/*.obj は tools/gen_models.py がこの規約に合わせて出力している）。
+    /// A pure parser for OBJ text (no UnityEngine dependency). MissileDisaster.Core.ObjParser ported
+    /// in Task57 (behavior unchanged).
+    /// OBJ is right-handed and Unity left-handed, so flipping the X coordinate and reversing the
+    /// triangle winding as a pair keeps models rendering correctly instead of inside-out
+    /// (src/CSWarfront/Models/*.obj are emitted to this convention by tools/gen_models.py).
     /// </summary>
     public static class ObjParser
     {

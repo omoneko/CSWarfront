@@ -1,9 +1,10 @@
 namespace CSWarfront.Core
 {
-    /// <summary>対称な勢力関係表。自分自身は常に Allied。
-    /// Task95: 行列の外側のId（Faction.InvaderFactionId等、factionCount以上）が絡む関係は
-    /// 常にHostileへハードコードされる（Setも無視）。外部襲来のInvader勢力を「どう操作しても
-    /// 確定で敵対」にするための仕様で、5x5固定のセーブ形式（WarStateSerializer）も変えずに済む。</summary>
+    /// <summary>The symmetric faction-relation table. Self is always Allied.
+    /// Task95: any relation involving an id beyond the matrix (Faction.InvaderFactionId etc., ids at
+    /// or above factionCount) is hardcoded to Hostile (Set is ignored too). The spec making the
+    /// outside-incursion Invader faction "definitively hostile no matter what", without changing the
+    /// fixed 5x5 save format (WarStateSerializer) either.</summary>
     public class RelationMatrix
     {
         private readonly Relation[,] _rel;
@@ -20,16 +21,16 @@ namespace CSWarfront.Core
 
         public Relation Get(int a, int b)
         {
-            if (a >= _count || b >= _count) return a == b ? Relation.Allied : Relation.Hostile; // Invader等は常時敵対
+            if (a >= _count || b >= _count) return a == b ? Relation.Allied : Relation.Hostile; // Invader etc. stay permanently hostile
             return _rel[a, b];
         }
 
         public void Set(int a, int b, Relation r)
         {
-            if (a == b) return;      // 自己関係は不変
-            if (a >= _count || b >= _count) return; // Invader等の行列外Idは常時Hostile固定（変更不可）
+            if (a == b) return;      // the self relation is immutable
+            if (a >= _count || b >= _count) return; // out-of-matrix ids (Invader etc.) stay locked to Hostile
             _rel[a, b] = r;
-            _rel[b, a] = r;          // 対称
+            _rel[b, a] = r;          // symmetric
         }
     }
 }

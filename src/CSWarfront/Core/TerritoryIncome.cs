@@ -1,18 +1,20 @@
 using System.Collections.Generic;
 namespace CSWarfront.Core
 {
-    /// <summary>発展度サンプルのゾーン種別（Task99: 3資源経済）。Game層のDevelopmentSamplerが
-    /// CSのItemClass.Serviceから分類する。Otherはどの資源にも寄与しない（公共施設等）。</summary>
+    /// <summary>The zone kind of a development sample (Task99: the three-resource economy). The Game
+    /// layer's DevelopmentSampler classifies it from CS's ItemClass.Service. Other contributes to no
+    /// resource (public facilities etc.).</summary>
     public enum ZoneKind { Other, Residential, CommercialOffice, Industrial }
 
     public struct DevelopmentSample
     {
         public WorldPos Position;
         public float Development;
-        public ZoneKind Zone; // Task99: 既定Other（旧テスト/呼び出し元は資源産出に寄与しない）
+        public ZoneKind Zone; // Task99: defaults to Other (legacy tests/callers contribute no resource income)
     }
 
-    /// <summary>ゾーン別収入（Task99）: 住宅→人的資源、商業/オフィス→資金、工業→生産力。</summary>
+    /// <summary>Per-zone income (Task99): residential → manpower, commercial/office → funds,
+    /// industrial → production.</summary>
     public struct ZonedIncome
     {
         public float Manpower;
@@ -20,11 +22,12 @@ namespace CSWarfront.Core
         public float Production;
     }
 
-    /// <summary>基地の勢力圏内の発展度合計×レート＝収入（純ロジック）。</summary>
+    /// <summary>Income = total development inside the base's sphere × rate (pure logic).</summary>
     public static class TerritoryIncome
     {
-        /// <summary>Task99: 3資源経済のスキャン半径（ユーザー仕様「基地半径1km以内」）。
-        /// InfluenceRadius（500m、占領・UIリング等の勢力圏）とは独立の経済専用半径。</summary>
+        /// <summary>Task99: the three-resource economy's scan radius (user spec "within 1km of the
+        /// base"). An economy-only radius independent of InfluenceRadius (500m, the sphere for
+        /// capture, UI rings etc.).</summary>
         public const float EconomyRadius = 1000f;
 
         public static float ForBase(MilitaryBase b, IEnumerable<DevelopmentSample> samples, float rate)
@@ -37,8 +40,8 @@ namespace CSWarfront.Core
             return sum * rate;
         }
 
-        /// <summary>Task99: EconomyRadius圏内の発展度をゾーン別に集計して3資源の収入にする。
-        /// 未所属基地は全て0（ForBaseと同じ規約）。</summary>
+        /// <summary>Task99: tallies development inside EconomyRadius by zone into the three-resource
+        /// income. Ownerless bases yield all zeros (the same convention as ForBase).</summary>
         public static ZonedIncome ZonedForBase(MilitaryBase b, IEnumerable<DevelopmentSample> samples, float rate)
         {
             var inc = new ZonedIncome();

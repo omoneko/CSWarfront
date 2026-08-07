@@ -1,7 +1,7 @@
 using System;
 namespace CSWarfront.Core
 {
-    /// <summary>UnityEngine非依存の座標。Game層で UnityEngine.Vector3 と相互変換する。</summary>
+    /// <summary>A UnityEngine-free coordinate. The Game layer converts to/from UnityEngine.Vector3.</summary>
     public struct WorldPos
     {
         public readonly float X, Y, Z;

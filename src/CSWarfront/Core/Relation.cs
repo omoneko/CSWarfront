@@ -1,16 +1,17 @@
 namespace CSWarfront.Core
 {
-    // Task59: Nemesis を末尾に追記した。WarStateSerializerは関係をint(enumの数値)としてそのまま
-    // 書き出す(v4以前のフォーマット変更は不要)ため、既存の値(Hostile=0/Neutral=1/Allied=2)の意味は
-    // 変わらない。Nemesis=3は新規追記分。
+    // Task59: Nemesis was appended at the tail. WarStateSerializer writes relations as raw ints (the
+    // enum's numeric value) — no v4-or-earlier format change needed — so the existing values
+    // (Hostile=0/Neutral=1/Allied=2) keep their meaning. Nemesis=3 is the new addition.
     public enum Relation { Hostile, Neutral, Allied, Nemesis }
 
     /// <summary>
-    /// Task59:「宿敵」は通常のHostileに「他の敵対勢力より優先して狙われる」という優先度を足しただけの
-    /// 特殊な敵対関係であり、ダメージ適用・基地占領・被占領・AI進軍先選定など「敵対かどうか」を
-    /// 判定する全ての箇所ではHostileと全く同じに扱う必要がある。素の `== Relation.Hostile` 比較を
-    /// Core中に残すとNemesisがそこだけ非敵対扱いになってしまうため、判定は必ずこのヘルパー経由で行う
-    /// （TargetSearch/BaseCombatStep/Occupation/AiTargeting/ThreatCombatStep/InvasionOrders参照）。
+    /// Task59: a "nemesis" is a special hostile relation that merely adds "targeted with priority
+    /// over other hostile factions" on top of regular Hostile; everywhere that asks "is it hostile" —
+    /// damage application, base capture, being captured, AI advance-target selection — it must be
+    /// treated exactly like Hostile. Leaving raw `== Relation.Hostile` comparisons in Core would make
+    /// Nemesis non-hostile at just those spots, so the check must always go through this helper
+    /// (see TargetSearch/BaseCombatStep/Occupation/AiTargeting/ThreatCombatStep/InvasionOrders).
     /// </summary>
     public static class RelationExtensions
     {
