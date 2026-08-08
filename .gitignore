@@ -6,3 +6,4 @@ obj/
 # Internal development notes (Japanese design docs/plans), kept local only
 docs/superpowers/
 __pycache__/
+PreviewImage.png
