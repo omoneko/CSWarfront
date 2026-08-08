@@ -22,6 +22,17 @@ namespace CSWarfront.Game
         public static string BuildPanel_ToastAssetNotLoaded = "Asset not loaded: {0}";
         public static string BuildPanel_ToastPlacing = "Placing: {0}  (Esc to cancel)";
 
+        // --- MilitaryBuildPanel: defense layout save/rebuild (Task114) ---------------------------
+        public static string BuildPanel_RegisterDefenseButton = "Save Defense Layout";
+        public static string BuildPanel_RegisterDefenseTooltip = "Remember every friendly fortification currently on the map (bunkers, artillery positions, supply depots, trenches, cargo stations)";
+        public static string BuildPanel_RebuildDefenseButton = "Rebuild Defenses";
+        public static string BuildPanel_RebuildDefenseTooltip = "Rebuild the saved fortifications that were destroyed. Intact positions are untouched; normal construction costs apply";
+        public static string BuildPanel_ToastLayoutSaved = "Defense layout saved: {0} position(s)";
+        public static string BuildPanel_ToastNoLayout = "No defense layout saved yet - click Save Defense Layout first";
+        public static string BuildPanel_ToastNothingMissing = "All saved defense positions are intact";
+        public static string BuildPanel_ToastRebuilt = "Rebuilt {0} of {1} missing position(s)";
+        public static string BuildPanel_ToastRebuiltOutOfMoney = "Rebuilt {0} of {1} missing position(s) - out of money";
+
         // --- BaseInfoPanel: title / faction section / model button -------------------------------
         public static string BaseInfo_Title = "CSWarfront Military Base";
         public static string BaseInfo_SectionFaction = "Faction";

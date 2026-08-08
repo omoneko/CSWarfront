@@ -43,6 +43,9 @@ namespace CSWarfront.Game.UI
         private const float RowHeight = 30f;
         private const float Pad = 8f;
 
+        /// <summary>Extra height for the defense-layout button row at the bottom (Task114).</summary>
+        private const float DefenseRowHeight = 26f;
+
         private static UIPanel _panel;
         private static UIButton[] _rowButtons;
         private static UIButton _toggleButton;
@@ -56,6 +59,12 @@ namespace CSWarfront.Game.UI
             if (!PanelChrome.IsGameReadyForUi()) return;
 
             EnsureCreated();
+
+            // Task114: relay result messages from the sim-side defense-layout processing (the sim
+            // thread cannot touch Unity UI, so it queues strings and we toast them here).
+            string simMessage;
+            while (MilitaryManager.TryDequeueUiToast(out simMessage))
+                CommandToast.Show(simMessage);
 
             // Live-game bug fix (user report "pressing Esc does not cancel out of build mode"):
             // in vanilla, the construction menu (GeneratedGroupPanel) receives Esc and clears the
@@ -134,7 +143,7 @@ namespace CSWarfront.Game.UI
                 _panel.name = "WarfrontBuildPanel";
                 _panel.backgroundSprite = "MenuPanel2";
                 _panel.width = PanelWidth;
-                _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f) + Pad;
+                _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f) + DefenseRowHeight + 4f + Pad;
                 _panel.relativePosition = new Vector3(150f, 55f); // Task110: opens directly below the top-row button
                 _panel.isVisible = false;
 
@@ -178,6 +187,33 @@ namespace CSWarfront.Game.UI
                     b.eventClick += (c, e) => OnRowClick(rowIndex);
                     _rowButtons[i] = b;
                 }
+
+                // Task114 (Workshop request): save/rebuild the defense layout with one click each.
+                float defenseRowY = Pad + 28f + RowTypes.Length * (RowHeight + 4f);
+                float halfWidth = (PanelWidth - Pad * 2f - 4f) * 0.5f;
+
+                UIButton save = _panel.AddUIComponent<UIButton>();
+                save.text = WarfrontStrings.BuildPanel_RegisterDefenseButton;
+                save.tooltip = WarfrontStrings.BuildPanel_RegisterDefenseTooltip;
+                save.textScale = 0.7f;
+                save.size = new Vector2(halfWidth, DefenseRowHeight);
+                save.normalBgSprite = "ButtonMenu";
+                save.hoveredBgSprite = "ButtonMenuHovered";
+                save.pressedBgSprite = "ButtonMenuPressed";
+                save.relativePosition = new Vector3(Pad, defenseRowY);
+                save.eventClick += (c, e) => MilitaryManager.RequestRegisterDefenseLayout();
+
+                UIButton rebuild = _panel.AddUIComponent<UIButton>();
+                rebuild.text = WarfrontStrings.BuildPanel_RebuildDefenseButton;
+                rebuild.tooltip = WarfrontStrings.BuildPanel_RebuildDefenseTooltip;
+                rebuild.textScale = 0.7f;
+                rebuild.size = new Vector2(halfWidth, DefenseRowHeight);
+                rebuild.normalBgSprite = "ButtonMenu";
+                rebuild.hoveredBgSprite = "ButtonMenuHovered";
+                rebuild.pressedBgSprite = "ButtonMenuPressed";
+                rebuild.relativePosition = new Vector3(Pad + halfWidth + 4f, defenseRowY);
+                rebuild.eventClick += (c, e) => MilitaryManager.RequestRebuildDefenses();
+
                 RefreshRows();
             }
         }

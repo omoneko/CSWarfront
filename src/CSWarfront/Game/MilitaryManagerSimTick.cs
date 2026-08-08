@@ -115,6 +115,11 @@ namespace CSWarfront.Game
                 // tick's BasePlacementWatcher.ProcessPending).
                 ProcessPendingTrenchLines();
 
+                // Task114: register/rebuild the saved defense layout (requests queued by the
+                // construction panel's Save Defense Layout / Rebuild Defenses buttons; rebuilt
+                // buildings are registered as logical facilities by BasePlacementWatcher as usual).
+                ProcessDefenseLayoutRequests();
+
                 // Task106: clear problem icons (no road connection, electricity, water, etc.) on
                 // fortification-type buildings (field fortifications are treated as not needing city
                 // infrastructure).

@@ -35,7 +35,7 @@ namespace CSWarfront.Core
         //           defaults (no stock, full fort ammo, rail unconnected, not carried).
         // The binary format is position-dependent: never insert between existing fields — always append at
         // the tail.
-        private const int Version = 10;
+        private const int Version = 11;
 
         /// <summary>Default three-resource grant given to v8-or-older saves (same amounts as a new game's
         /// initial grant).</summary>
@@ -146,6 +146,15 @@ namespace CSWarfront.Core
                     w.Write(u.InstanceId);
                     w.Write(u.CarriedByUnitId.HasValue);
                     w.Write(u.CarriedByUnitId.HasValue ? u.CarriedByUnitId.Value : 0u);
+                }
+
+                // v11 (Task114): the saved defense layout (rebuild-destroyed-fortifications feature).
+                w.Write(s.DefenseLayout.Count);
+                foreach (var e in s.DefenseLayout)
+                {
+                    w.Write((byte)e.Type);
+                    WritePos(w, e.Position);
+                    w.Write(e.Angle);
                 }
 
                 w.Flush();
@@ -346,6 +355,19 @@ namespace CSWarfront.Core
                         UnitInstance u = s.FindUnit(iid);
                         if (u == null) continue;
                         if (carried) u.CarriedByUnitId = carrier;
+                    }
+                }
+
+                // v11 (Task114): the saved defense layout. v10 and older simply have none saved.
+                if (version >= 11)
+                {
+                    int dcount = r.ReadInt32();
+                    for (int i = 0; i < dcount; i++)
+                    {
+                        byte t = r.ReadByte();
+                        WorldPos p = ReadPos(r);
+                        float angle = r.ReadSingle();
+                        s.DefenseLayout.Add(new DefenseLayoutEntry { Type = (BaseType)t, Position = p, Angle = angle });
                     }
                 }
             }

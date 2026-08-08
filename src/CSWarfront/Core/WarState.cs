@@ -124,6 +124,11 @@ namespace CSWarfront.Core
         /// </summary>
         public List<MissileInFlight> MissilesInFlight = new List<MissileInFlight>();
 
+        /// <summary>Task114: the saved defense layout ("Save Defense Layout" / "Rebuild Defenses" in
+        /// the military construction panel). Overwritten wholesale on every save-layout click;
+        /// persisted since v11. See DefenseLayout for the matching rules.</summary>
+        public List<DefenseLayoutEntry> DefenseLayout = new List<DefenseLayoutEntry>();
+
         /// <summary>Task63: id counter for missiles in flight. A separate namespace from UnitInstance's
         /// NextInstanceId (missiles are not UnitInstances, so a collision would be harmless, but they are
         /// separated to avoid confusion). Task92: persisted since v8 together with MissilesInFlight
