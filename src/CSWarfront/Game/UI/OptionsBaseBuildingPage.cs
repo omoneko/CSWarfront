@@ -68,7 +68,8 @@ namespace CSWarfront.Game.UI
         private static readonly BaseType[] RowTypes =
         {
             BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase,
-            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.SupplyDepot, BaseType.Trench, BaseType.CargoStation
+            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.SupplyDepot, BaseType.Trench, BaseType.CargoStation,
+            BaseType.AtPillbox, BaseType.AaPosition // Task117
         };
         private static readonly string[] RowDisplayNames =
         {
@@ -76,7 +77,8 @@ namespace CSWarfront.Game.UI
             UnitAssetBindings.NavyBaseDisplayName,
             UnitAssetBindings.AirBaseDisplayName,
             UnitAssetBindings.MissileBaseDisplayName,
-            WarfrontStrings.OptionsBaseBuilding_BunkerRow, WarfrontStrings.OptionsBaseBuilding_ArtilleryPostRow, WarfrontStrings.OptionsBaseBuilding_SupplyDepotRow, WarfrontStrings.OptionsBaseBuilding_TrenchRow, WarfrontStrings.OptionsBaseBuilding_CargoStationRow
+            WarfrontStrings.OptionsBaseBuilding_BunkerRow, WarfrontStrings.OptionsBaseBuilding_ArtilleryPostRow, WarfrontStrings.OptionsBaseBuilding_SupplyDepotRow, WarfrontStrings.OptionsBaseBuilding_TrenchRow, WarfrontStrings.OptionsBaseBuilding_CargoStationRow,
+            WarfrontStrings.OptionsBaseBuilding_AtPillboxRow, WarfrontStrings.OptionsBaseBuilding_AaPositionRow // Task117
         };
 
         private static UICheckBox _customOnlyCheckbox;

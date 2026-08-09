@@ -94,7 +94,7 @@ namespace CSWarfront.Game.UI
             {
                 if (!PanelChrome.IsGameReadyForUi()) return; // Task56: do not touch the UI library while loading/unloading
                 if (_panel != null) return;
-                if (TryGetVanillaPanel() == null) return; // UI not initialized yet. Retry next frame.
+                if (!EnsureVanillaPanelsCached()) return; // UI not initialized yet. Retry next frame.
                 Build();
             }
             catch (Exception e)
@@ -126,8 +126,8 @@ namespace CSWarfront.Game.UI
                     return;
                 }
 
-                CityServiceWorldInfoPanel vanilla = TryGetVanillaPanel();
-                if (vanilla == null || vanilla.component == null || !vanilla.component.isVisible)
+                WorldInfoPanel vanilla = TryGetVisibleVanillaPanel();
+                if (vanilla == null)
                 {
                     Hide();
                     return;
@@ -200,6 +200,7 @@ namespace CSWarfront.Game.UI
                 _suppressDropdownEvent = false;
                 _collapsed = false;
                 _expandedHeight = 0f;
+                _vanillaPanels = null; // Task115: drop the cached panel references (next level re-finds them)
                 _detachedFromVanilla = false;
             }
         }
@@ -215,12 +216,37 @@ namespace CSWarfront.Game.UI
             _detachedFromVanilla = false;
         }
 
-        private static CityServiceWorldInfoPanel TryGetVanillaPanel()
+        /// <summary>Task115 (Workshop report "vanilla bunker ruins work as bunkers but show no
+        /// panel"): fortifications can be designated from ANY building asset, and each asset
+        /// category opens a different vanilla WorldInfoPanel subclass — the old implementation only
+        /// followed CityServiceWorldInfoPanel, so our panel never appeared next to e.g. a ruins
+        /// info panel. All WorldInfoPanel instances are cached once (the library set is static for
+        /// the session) and we follow whichever one is visible.</summary>
+        private static WorldInfoPanel[] _vanillaPanels;
+
+        private static bool EnsureVanillaPanelsCached()
         {
+            if (_vanillaPanels != null && _vanillaPanels.Length > 0) return true;
             // UIView.library.Get<T> returns null (not an exception) when the panel is not yet
-            // registered/created, so "not ready" is treated as a normal path here (avoids log spam every
-            // frame).
-            return UIView.library.Get<CityServiceWorldInfoPanel>(VanillaPanelName);
+            // registered/created, so "not ready" is treated as a normal path here (avoids log spam
+            // every frame). The city-service panel doubles as the "library initialized" probe.
+            if (UIView.library == null ||
+                UIView.library.Get<CityServiceWorldInfoPanel>(VanillaPanelName) == null) return false;
+            // FindObjectsOfTypeAll also finds panels whose GameObject is currently inactive
+            // (hidden info panels may be deactivated); too expensive per frame but fine once.
+            _vanillaPanels = Resources.FindObjectsOfTypeAll<WorldInfoPanel>();
+            return _vanillaPanels != null && _vanillaPanels.Length > 0;
+        }
+
+        private static WorldInfoPanel TryGetVisibleVanillaPanel()
+        {
+            if (!EnsureVanillaPanelsCached()) return null;
+            for (int i = 0; i < _vanillaPanels.Length; i++)
+            {
+                WorldInfoPanel p = _vanillaPanels[i];
+                if (p != null && p.component != null && p.component.isVisible) return p;
+            }
+            return null;
         }
 
         private static void Build()

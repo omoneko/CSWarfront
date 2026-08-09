@@ -43,12 +43,45 @@ namespace CSWarfront.Core
         /// diagonal radius of its 16×16m footprint).</summary>
         public const float SelfLosIgnoreRadius = 14f;
 
+        // --- Task117 (Workshop request): AT pillbox — anti-armor direct fire. "Artillery with less
+        // --- fire rate, higher damage, a little less range": heavy single shots, building-blocked
+        // --- line of sight like the bunker, and the Tank matchup profile (strong vs armor). ---
+        public const float AtAttack = 110f;
+        public const float AtRange = 200f;            // a little less than the artillery position's 250
+        public const float AtAccuracy = 0.55f;
+        public const float AtAmmoHours = 24f;
+        public const float AtFireIntervalHours = 3f;  // slow, weighty muzzle reports
+
+        // --- Task117: AA position — static anti-air. Reuses the AntiAir category's discrete
+        // --- per-shot scheme (AntiAirCombat): every AaFireIntervalHours one shot at the nearest
+        // --- hostile aircraft rolls hit/miss deterministically; only hits deal the lump damage. ---
+        public const float AaAttack = 45f;
+        public const float AaRange = 250f;
+        /// <summary>The AntiAir tier whose hit-chance table the emplacement borrows
+        /// (AntiAirCombat.HitChanceFor).</summary>
+        public const byte AaTier = 3;
+        public const float AaAmmoHours = 24f;
+        public const float AaFireIntervalHours = 0.8f;
+
         public static void Advance(WarState state, float dt)
         {
             for (int j = 0; j < state.Bases.Count; j++)
             {
                 MilitaryBase b = state.Bases[j];
                 if (b.OwnerFactionId == null || b.CurrentHP <= 0f) continue;
+
+                // Task117: the two new emplacements have their own firing models.
+                if (b.Type == BaseType.AtPillbox)
+                {
+                    if (b.FortAmmo > 0f) AdvanceAtPillbox(state, b, dt);
+                    continue;
+                }
+                if (b.Type == BaseType.AaPosition)
+                {
+                    if (b.FortAmmo > 0f) AdvanceAaPosition(state, b, dt);
+                    continue;
+                }
+
                 if (b.Type != BaseType.Bunker && b.Type != BaseType.ArtilleryPost) continue;
                 if (b.FortAmmo <= 0f) continue; // dry = stop firing, nothing more
 
@@ -98,6 +131,92 @@ namespace CSWarfront.Core
                         b.OwnerFactionId.Value, 0, target.InstanceId, attackerCategory, false));
                 }
             }
+        }
+
+        /// <summary>Task117: AT pillbox — the bunker's flow (nearest hostile land unit, sight line
+        /// blocked by buildings) with the Tank matchup profile, so the continuous expected-value
+        /// damage lands hard on armor. The slow AtFireIntervalHours only paces the visible muzzle
+        /// shots (ShotEvents), exactly like the other forts.</summary>
+        private static void AdvanceAtPillbox(WarState state, MilitaryBase b, float dt)
+        {
+            UnitInstance target = FindNearestHostileLand(state, b, AtRange);
+            if (target == null) return;
+            if (state.Cover != null &&
+                state.Cover.BlocksLine(b.Position, target.Position, SelfLosIgnoreRadius))
+                return; // direct fire: no shooting through buildings
+
+            ApplyFortDamage(state, b, target, AtAttack, AtAccuracy, UnitCategory.Tank, dt);
+
+            b.FortAmmo -= dt / AtAmmoHours;
+            if (b.FortAmmo < 0f) b.FortAmmo = 0f;
+
+            b.FortFireCooldown -= dt;
+            if (b.FortFireCooldown <= 0f)
+            {
+                b.FortFireCooldown = AtFireIntervalHours;
+                state.AddShot(new ShotEvent(b.Position, target.Position, ShotKind.DirectFire,
+                    b.OwnerFactionId.Value, 0, target.InstanceId, UnitCategory.Tank, false));
+            }
+        }
+
+        /// <summary>Task117: AA position — discrete per-shot anti-air, borrowing the AntiAir
+        /// category's scheme (AntiAirCombat, AaTier hit table): every AaFireIntervalHours one shot at
+        /// the nearest hostile aircraft rolls hit/miss deterministically; a hit deals the lump
+        /// "Attack × interval × matchup", a miss deals nothing and only queues the Missed=true
+        /// ShotEvent (SAM-veering-off display). Ammo drains per shot.</summary>
+        private static void AdvanceAaPosition(WarState state, MilitaryBase b, float dt)
+        {
+            b.FortFireCooldown -= dt;
+            if (b.FortFireCooldown > 0f) return;
+
+            UnitInstance target = FindNearestHostileAir(state, b, AaRange);
+            if (target == null)
+            {
+                b.FortFireCooldown = 0f; // stay ready while no target is in range
+                return;
+            }
+            b.FortFireCooldown = AaFireIntervalHours;
+
+            UnitType targetType = state.Types.Get(target.TypeKey);
+            UnitCategory targetCategory = targetType != null ? targetType.Category : default(UnitCategory);
+            float chance = AntiAirCombat.HitChanceFor(AaTier, targetCategory);
+            bool hit = AntiAirCombat.RollHit(b.BaseId, target.InstanceId, state.TickCounter, chance);
+            if (hit)
+            {
+                float armor = targetType != null ? targetType.Armor : 0f;
+                float matchup = targetType != null
+                    ? CombatMatchup.Multiplier(UnitCategory.AntiAir, targetType.Category) : 1f;
+                target.CurrentHP -= CombatMath.DamagePerHit(AaAttack, armor) * AaFireIntervalHours * matchup;
+                state.CombatZones.ReportCombat(target.Position);
+            }
+
+            b.FortAmmo -= AaFireIntervalHours / AaAmmoHours;
+            if (b.FortAmmo < 0f) b.FortAmmo = 0f;
+
+            bool usesMissile = AntiAirCombat.UsesMissileAgainst(targetCategory);
+            state.AddShot(new ShotEvent(b.Position, target.Position,
+                usesMissile ? ShotKind.SamMissile : ShotKind.Gunfire,
+                b.OwnerFactionId.Value, 0, target.InstanceId, UnitCategory.AntiAir, !hit));
+        }
+
+        /// <summary>The nearest hostile aircraft (Domain.Air — helicopters included) in range.
+        /// Carried units are excluded as usual.</summary>
+        private static UnitInstance FindNearestHostileAir(WarState state, MilitaryBase b, float range)
+        {
+            UnitInstance best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance u = state.Units[i];
+                if (!u.IsAlive || u.IsCarried) continue;
+                if (!state.Relations.Get(b.OwnerFactionId.Value, u.FactionId).IsHostile()) continue;
+                UnitType t = state.Types.Get(u.TypeKey);
+                if (t == null || t.Domain != Domain.Air) continue;
+                float d = b.Position.HorizontalDistanceTo(u.Position);
+                if (d > range) continue;
+                if (d < bestDist) { bestDist = d; best = u; }
+            }
+            return best;
         }
 
         private static void ApplyFortDamage(WarState state, MilitaryBase b, UnitInstance target,

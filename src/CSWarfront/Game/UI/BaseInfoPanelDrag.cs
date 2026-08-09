@@ -23,7 +23,7 @@ namespace CSWarfront.Game.UI
         }
 
         /// <summary>Makes our panel follow to the right of the vanilla panel's absolute position (or the left if off-screen). Also clamps to the bottom screen edge.</summary>
-        private static void PositionNextToVanilla(CityServiceWorldInfoPanel vanilla)
+        private static void PositionNextToVanilla(WorldInfoPanel vanilla)
         {
             UIComponent vc = vanilla.component;
             UIView view = PanelChrome.GetCachedView(); // Task56: called every frame, so use the cached accessor

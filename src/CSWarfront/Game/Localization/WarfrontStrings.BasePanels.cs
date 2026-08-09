@@ -16,6 +16,8 @@ namespace CSWarfront.Game
         public static string BuildPanel_RowSupplyDepot = "Supply Depot";
         public static string BuildPanel_RowTrench = "Trench";
         public static string BuildPanel_RowCargoStation = "Cargo Station";
+        public static string BuildPanel_RowAtPillbox = "AT Pillbox";    // Task117
+        public static string BuildPanel_RowAaPosition = "AA Position";  // Task117
         public static string BuildPanel_RowSuffixAssetMissing = " (asset missing)";
         public static string BuildPanel_RowSuffixNotSet = " (not set)";
         public static string BuildPanel_RowTooltipNotSet = "Assign a building in Options > Base Buildings";

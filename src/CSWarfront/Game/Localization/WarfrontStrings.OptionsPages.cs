@@ -62,6 +62,8 @@ namespace CSWarfront.Game
         public static string OptionsBaseBuilding_SupplyDepotRow = "Supply Depot";
         public static string OptionsBaseBuilding_TrenchRow = "Trench";
         public static string OptionsBaseBuilding_CargoStationRow = "Cargo Station";
+        public static string OptionsBaseBuilding_AtPillboxRow = "AT Pillbox";     // Task117
+        public static string OptionsBaseBuilding_AaPositionRow = "AA Position";   // Task117
         public static string OptionsBaseBuilding_SubscribedOnlyCheckbox = "Subscribed only";
         public static string OptionsBaseBuilding_SearchField = "Search (partial match)";
         public static string OptionsBaseBuilding_ResetButton = "Reset to Default";

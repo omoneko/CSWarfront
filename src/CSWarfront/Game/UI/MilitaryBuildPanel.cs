@@ -28,7 +28,8 @@ namespace CSWarfront.Game.UI
         private static readonly BaseType[] RowTypes =
         {
             BaseType.Army, BaseType.Navy, BaseType.AirForce, BaseType.MissileBase,
-            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.SupplyDepot, BaseType.Trench, BaseType.CargoStation
+            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.SupplyDepot, BaseType.Trench, BaseType.CargoStation,
+            BaseType.AtPillbox, BaseType.AaPosition // Task117
         };
         private static readonly string[] RowDisplayNames =
         {
@@ -36,7 +37,8 @@ namespace CSWarfront.Game.UI
             WarfrontStrings.BuildPanel_RowAirBase, WarfrontStrings.BuildPanel_RowMissileBase,
             WarfrontStrings.BuildPanel_RowBunker, WarfrontStrings.BuildPanel_RowArtilleryPosition,
             WarfrontStrings.BuildPanel_RowSupplyDepot, WarfrontStrings.BuildPanel_RowTrench,
-            WarfrontStrings.BuildPanel_RowCargoStation
+            WarfrontStrings.BuildPanel_RowCargoStation,
+            WarfrontStrings.BuildPanel_RowAtPillbox, WarfrontStrings.BuildPanel_RowAaPosition // Task117
         };
 
         private const float PanelWidth = 240f;

@@ -153,6 +153,22 @@ namespace CSWarfront.Game
         /// RoadGraphBuilder) whose midpoint (average of start/end node positions) falls within the
         /// radius of any combat zone. Once MaxBlockedSegments is reached the rest are ignored (the
         /// scan itself still runs to the end so the logging stays consistent).</summary>
+        /// <summary>Task116 (Workshop reports "the game freezes for a second during intense
+        /// battles"): every blocked/unblocked segment costs an UpdateSegment call, which triggers
+        /// pathfinding/render updates for all traffic touching it. Combat-zone centers wobble as new
+        /// reports merge in, so without damping the desired set churns — segments oscillate in and
+        /// out every update and mass re-path storms cause the hitches. Two dampers:
+        ///  - a segment is unblocked only after it has been out of every zone for this many
+        ///    consecutive update passes (block/unblock oscillation suppression);</summary>
+        private const int UnblockGracePasses = 2;
+
+        /// <summary>- and at most this many UpdateSegment calls are issued per pass (the rest simply
+        /// wait for the next pass, spreading the spike over time).</summary>
+        private const int MaxSegmentUpdatesPerPass = 48;
+
+        /// <summary>Consecutive passes each owned segment has been absent from the desired set.</summary>
+        private static readonly Dictionary<ushort, int> _undesiredPasses = new Dictionary<ushort, int>();
+
         private static HashSet<ushort> ComputeDesired(WarState state, NetSegment[] segments, NetNode[] nodes)
         {
             var desired = new HashSet<ushort>();
@@ -198,11 +214,13 @@ namespace CSWarfront.Game
         {
             int added = 0;
             int removed = 0;
+            int updates = 0; // Task116: UpdateSegment calls issued this pass (spike spreading)
 
             // Additions: in desired but not in _owned.
             foreach (ushort id in desired)
             {
                 if (_owned.Contains(id)) continue;
+                if (updates >= MaxSegmentUpdatesPerPass) break; // rest wait for the next pass
                 if (id >= segments.Length) continue;
                 if ((segments[id].m_flags & BlockFlag) != NetSegment.Flags.None)
                 {
@@ -211,28 +229,45 @@ namespace CSWarfront.Game
                 }
                 segments[id].m_flags |= BlockFlag;
                 nm.UpdateSegment(id);
+                updates++;
                 _owned.Add(id);
                 added++;
             }
 
-            // Removals: in _owned but not in desired.
+            // Removals: in _owned but out of desired for UnblockGracePasses consecutive passes
+            // (Task116: zone centers wobble, so instant unblocking oscillates — see the field docs).
             List<ushort> toRemove = null;
             foreach (ushort id in _owned)
             {
-                if (desired.Contains(id)) continue;
+                if (desired.Contains(id))
+                {
+                    _undesiredPasses.Remove(id);
+                    continue;
+                }
+                int misses;
+                _undesiredPasses.TryGetValue(id, out misses);
+                misses++;
+                if (misses < UnblockGracePasses)
+                {
+                    _undesiredPasses[id] = misses;
+                    continue;
+                }
                 (toRemove ?? (toRemove = new List<ushort>())).Add(id);
             }
             if (toRemove != null)
             {
                 for (int i = 0; i < toRemove.Count; i++)
                 {
+                    if (updates >= MaxSegmentUpdatesPerPass) break; // rest wait for the next pass
                     ushort id = toRemove[i];
                     if (id < segments.Length)
                     {
                         segments[id].m_flags &= ~BlockFlag;
                         nm.UpdateSegment(id);
+                        updates++;
                     }
                     _owned.Remove(id);
+                    _undesiredPasses.Remove(id);
                     removed++;
                 }
             }
@@ -337,6 +372,7 @@ namespace CSWarfront.Game
             finally
             {
                 _owned.Clear();
+                _undesiredPasses.Clear(); // Task116
                 _accum = 0f;
                 _failureAlreadyLogged = false;
             }

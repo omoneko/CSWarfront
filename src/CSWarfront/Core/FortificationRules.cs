@@ -14,6 +14,12 @@ namespace CSWarfront.Core
     ///  - Trench: an untargetable terrain effect (+50% infantry defense, friend and foe alike).
     ///  - CargoStation: a rail-transport terminal plus stock. Capturable. Unused for transport while
     ///    disconnected from the rails.
+    ///
+    /// Task117 (Workshop request) added two more:
+    ///  - AtPillbox: anti-armor direct fire (Tank matchup profile, heavy slow shots, blocked by
+    ///    buildings). HP 0 handled like the Bunker.
+    ///  - AaPosition: static anti-air (the AntiAir category's discrete per-shot hit rolls, vs
+    ///    aircraft and helicopters only). HP 0 handled like the Bunker.
     /// </summary>
     public static class FortificationRules
     {
@@ -21,7 +27,8 @@ namespace CSWarfront.Core
         {
             return type == BaseType.Bunker || type == BaseType.ArtilleryPost
                 || type == BaseType.SupplyDepot || type == BaseType.Trench
-                || type == BaseType.CargoStation;
+                || type == BaseType.CargoStation
+                || type == BaseType.AtPillbox || type == BaseType.AaPosition; // Task117
         }
 
         /// <summary>Whether it can be attacked. Only the Trench is false (excluded from BaseCombatStep,
@@ -32,11 +39,13 @@ namespace CSWarfront.Core
             return type != BaseType.Trench;
         }
 
-        /// <summary>Whether HP 0 means capture. Only Bunker/ArtilleryPost are false = at HP 0 the owner
-        /// is nulled (function stops). Occupation.ResolveCaptures branches on this.</summary>
+        /// <summary>Whether HP 0 means capture. The firing fortifications
+        /// (Bunker/ArtilleryPost/AtPillbox/AaPosition) are false = at HP 0 the owner is nulled
+        /// (function stops). Occupation.ResolveCaptures branches on this.</summary>
         public static bool IsCapturable(BaseType type)
         {
-            return type != BaseType.Bunker && type != BaseType.ArtilleryPost;
+            return type != BaseType.Bunker && type != BaseType.ArtilleryPost
+                && type != BaseType.AtPillbox && type != BaseType.AaPosition; // Task117
         }
 
         /// <summary>Maximum HP at placement. The Trench is effectively invulnerable (untargetable, so it
@@ -50,6 +59,8 @@ namespace CSWarfront.Core
                 case BaseType.SupplyDepot: return 400f;
                 case BaseType.CargoStation: return 400f;
                 case BaseType.Trench: return 1000000000f;
+                case BaseType.AtPillbox: return 320f;  // Task117: hardened concrete, a bit tougher than the bunker
+                case BaseType.AaPosition: return 250f; // Task117: same class as the artillery position
                 default: return 500f; // the normal-base default (same as MilitaryBase's field initializer)
             }
         }

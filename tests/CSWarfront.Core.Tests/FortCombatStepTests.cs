@@ -85,6 +85,57 @@ public class FortCombatStepTests
     }
 
     [Fact]
+    public void At_pillbox_hits_armor_in_range_and_respects_line_of_sight()
+    {
+        var s = StateWithFort(BaseType.AtPillbox, out MilitaryBase pillbox);
+        UnitInstance enemy = AddEnemyTank(s, 100, 0);
+
+        FortCombatStep.Advance(s, 1f);
+        Assert.True(enemy.CurrentHP < 1000f, "expected AT pillbox damage");
+        Assert.Equal(1f - 1f / FortCombatStep.AtAmmoHours, pillbox.FortAmmo, 3);
+
+        // Direct fire: a building on the sight line stops it (same rule as the bunker).
+        var s2 = StateWithFort(BaseType.AtPillbox, out MilitaryBase pillbox2);
+        UnitInstance enemy2 = AddEnemyTank(s2, 100, 0);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(50, 0, 0), 10f);
+        s2.Cover = cover;
+        FortCombatStep.Advance(s2, 1f);
+        Assert.Equal(1000f, enemy2.CurrentHP, 3);
+        Assert.Equal(1f, pillbox2.FortAmmo, 3);
+    }
+
+    [Fact]
+    public void Aa_position_shoots_aircraft_only_with_discrete_shots()
+    {
+        var s = StateWithFort(BaseType.AaPosition, out MilitaryBase aa);
+        AirUnitRoster.RegisterAll(s.Types);
+        var fighter = new UnitInstance(200, "AirSuperiority_T1", 1, 1000f, new WorldPos(100, 120, 0));
+        s.Units.Add(fighter);
+        UnitInstance tank = AddEnemyTank(s, 80, 0); // ground unit: never an AA target
+
+        FortCombatStep.Advance(s, 1f);
+
+        Assert.Single(s.RecentShots); // exactly one discrete shot (hit or miss)
+        Assert.Equal(ShotKind.SamMissile, s.RecentShots[0].Kind);
+        Assert.Equal(UnitCategory.AntiAir, s.RecentShots[0].Category);
+        Assert.Equal(1000f, tank.CurrentHP, 3); // the ground tank was not engaged
+        Assert.Equal(1f - FortCombatStep.AaFireIntervalHours / FortCombatStep.AaAmmoHours, aa.FortAmmo, 3);
+    }
+
+    [Fact]
+    public void Aa_position_holds_fire_with_no_aircraft_in_range()
+    {
+        var s = StateWithFort(BaseType.AaPosition, out MilitaryBase aa);
+        AddEnemyTank(s, 80, 0); // ground only
+
+        FortCombatStep.Advance(s, 1f);
+
+        Assert.Empty(s.RecentShots);
+        Assert.Equal(1f, aa.FortAmmo, 3);
+    }
+
+    [Fact]
     public void Forts_refill_ammo_next_to_a_stocked_depot()
     {
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);

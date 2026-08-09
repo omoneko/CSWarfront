@@ -45,7 +45,12 @@ namespace CSWarfront.Game
             new KeyValuePair<BaseType, string[]>(BaseType.Trench,
                 new[] { "trench", "warfronttrench" }),
             new KeyValuePair<BaseType, string[]>(BaseType.CargoStation,
-                new[] { "railyard", "cargostation", "militarycargostation", "warfrontrailyard" })
+                new[] { "railyard", "cargostation", "militarycargostation", "warfrontrailyard" }),
+            // Task117: candidate names for the future published assets of the two new emplacements.
+            new KeyValuePair<BaseType, string[]>(BaseType.AtPillbox,
+                new[] { "atpillbox", "antitankpillbox", "pillbox", "warfrontatpillbox" }),
+            new KeyValuePair<BaseType, string[]>(BaseType.AaPosition,
+                new[] { "aaposition", "antiairposition", "aadefenseposition", "warfrontaaposition" })
         };
 
         /// <summary>Scans the loaded building prefabs and returns the auto-assignment of base type to
