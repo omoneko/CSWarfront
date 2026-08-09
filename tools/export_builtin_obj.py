@@ -166,6 +166,14 @@ NAME_MAP = {
     # car (for articulated display). The locomotive = Unit_MilitaryTrain (keeping the old
     # name: default unit-model resolution uses it); Game/UnitVisualsTrain.cs draws the
     # remaining cars coupled in consist order.
+    # Task117 (2026-08-09): the two new emplacements (AT pillbox / AA position).
+    'atpillbox': 'Fort_AtPillbox',
+    'antitankpillbox': 'Fort_AtPillbox',
+    'pillbox': 'Fort_AtPillbox',
+    'aaposition': 'Fort_AaPosition',
+    'antiairposition': 'Fort_AaPosition',
+    'antiaircraftposition': 'Fort_AaPosition',
+    'aadefenseposition': 'Fort_AaPosition',
     'trainloco': 'Unit_MilitaryTrain',
     'traincoach': 'Unit_MilitaryTrainCoach',
     'trainvan': 'Unit_MilitaryTrainVan',

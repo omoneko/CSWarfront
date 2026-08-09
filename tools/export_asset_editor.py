@@ -114,6 +114,16 @@ NAME_MAP = {
     'spaag': 'SPAAG',
     'loiteringdrone': 'LoiteringDrone',
     'basemissile': 'BaseMissile',
+    # Task117 (2026-08-09): the two new emplacements. Export names match
+    # BaseBuildingAutoAssign's candidate lists so a published asset named e.g.
+    # "ATPillbox" auto-assigns for subscribers.
+    'atpillbox': 'ATPillbox',
+    'antitankpillbox': 'ATPillbox',
+    'pillbox': 'ATPillbox',
+    'aaposition': 'AAPosition',
+    'antiairposition': 'AAPosition',
+    'antiaircraftposition': 'AAPosition',
+    'aadefenseposition': 'AAPosition',
 }
 
 DEFAULT_BASE_COLOR = (0.8, 0.8, 0.8)  # Blender's untouched Principled default
