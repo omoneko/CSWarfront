@@ -21,6 +21,15 @@ namespace CSWarfront.Game.UI
                 case BaseType.Navy: return WarfrontStrings.BaseInfo_TypeNavalBase;
                 case BaseType.AirForce: return WarfrontStrings.BaseInfo_TypeAirBase;
                 case BaseType.MissileBase: return WarfrontStrings.BaseInfo_TypeMissileBase;
+                // Task118: localized labels for the fortifications (reusing the construction-panel
+                // row strings; the raw enum names remain only the last-resort fallback).
+                case BaseType.Bunker: return WarfrontStrings.BuildPanel_RowBunker;
+                case BaseType.ArtilleryPost: return WarfrontStrings.BuildPanel_RowArtilleryPosition;
+                case BaseType.SupplyDepot: return WarfrontStrings.BuildPanel_RowSupplyDepot;
+                case BaseType.Trench: return WarfrontStrings.BuildPanel_RowTrench;
+                case BaseType.CargoStation: return WarfrontStrings.BuildPanel_RowCargoStation;
+                case BaseType.AtPillbox: return WarfrontStrings.BuildPanel_RowAtPillbox;
+                case BaseType.AaPosition: return WarfrontStrings.BuildPanel_RowAaPosition;
                 default: return type.ToString();
             }
         }

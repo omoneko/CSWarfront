@@ -308,7 +308,7 @@ namespace CSWarfront.Core
             for (int b = 0; b < state.Bases.Count; b++)
             {
                 MilitaryBase fort = state.Bases[b];
-                if (fort.Type != BaseType.Bunker && fort.Type != BaseType.ArtilleryPost) continue;
+                if (!FortificationRules.IsArmedFortification(fort.Type)) continue; // Task118
                 if (fort.OwnerFactionId == null || fort.OwnerFactionId.Value != truck.FactionId) continue;
                 if (fort.CurrentHP <= 0f) continue;
                 if (fort.FortAmmo >= NeedThreshold) continue;

@@ -482,7 +482,7 @@ namespace CSWarfront.Game.UI
                     if (snapshot.Type == BaseType.CargoStation)
                         sb.Append(snapshot.RailConnected ? WarfrontStrings.BaseInfo_StatusRailConnected : WarfrontStrings.BaseInfo_StatusRailNotConnected);
                 }
-                else if (snapshot.Type == BaseType.Bunker || snapshot.Type == BaseType.ArtilleryPost)
+                else if (FortificationRules.IsArmedFortification(snapshot.Type)) // Task118: AT pillbox / AA position included
                 {
                     sb.Append(WarfrontStrings.BaseInfo_StatusFortAmmoPrefix).Append((snapshot.FortAmmo * 100f).ToString("0")).Append("%");
                     if (snapshot.FortAmmo <= 0f) sb.Append(WarfrontStrings.BaseInfo_StatusOutOfAmmo);

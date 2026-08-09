@@ -150,4 +150,24 @@ public class FortCombatStepTests
         Assert.Equal(ResupplyStep.RefillPerHour, bunker.FortAmmo, 3);
         Assert.True(depot.StoredSupplies < 100f);
     }
+
+    [Fact]
+    public void New_emplacements_refill_ammo_like_the_bunker()
+    {
+        // Task118: AT pillbox and AA position share the bunker's ammo/resupply treatment.
+        foreach (BaseType type in new[] { BaseType.AtPillbox, BaseType.AaPosition })
+        {
+            var s = StateWithFort(type, out MilitaryBase fort);
+            fort.FortAmmo = 0f;
+            var depot = new MilitaryBase(2, BaseType.SupplyDepot, new WorldPos(100, 0, 0));
+            depot.OwnerFactionId = 0;
+            depot.StoredSupplies = 100f;
+            s.Bases.Add(depot);
+
+            ResupplyStep.Advance(s, 1f);
+
+            Assert.Equal(ResupplyStep.RefillPerHour, fort.FortAmmo, 3);
+            Assert.True(depot.StoredSupplies < 100f);
+        }
+    }
 }

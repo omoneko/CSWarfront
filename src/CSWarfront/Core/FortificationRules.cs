@@ -31,6 +31,16 @@ namespace CSWarfront.Core
                 || type == BaseType.AtPillbox || type == BaseType.AaPosition; // Task117
         }
 
+        /// <summary>Task118: the fortifications that fire and therefore carry ammunition (FortAmmo).
+        /// The single switch shared by everything that treats "a fort that shoots" uniformly:
+        /// FortCombatStep (dry = hold fire), ResupplyStep (in-zone auto refill), SupplyTruckStep /
+        /// TransportHeliStep (field delivery) and the info panel's ammo display.</summary>
+        public static bool IsArmedFortification(BaseType type)
+        {
+            return type == BaseType.Bunker || type == BaseType.ArtilleryPost
+                || type == BaseType.AtPillbox || type == BaseType.AaPosition;
+        }
+
         /// <summary>Whether it can be attacked. Only the Trench is false (excluded from BaseCombatStep,
         /// missile impacts and suicide drones — and from the AI's advance objectives
         /// (ChooseTargetBase)).</summary>
