@@ -57,6 +57,21 @@ namespace CSWarfront.Core
                     continue;
                 }
 
+                // Task120: a unit deliberately standing at a cover/fortification position is not stuck —
+                // it is doing exactly what CoverSeekStep/FortSeekStep told it to. It stays State==Moving
+                // (the enemy that pinned it may be out of weapons range, so CombatStep never flips it to
+                // Engaging), and the old code silently despawned such units after DespawnAfterHours —
+                // the playtest report "attackers dig in near the objective and then vanish without ever
+                // capturing". The holds themselves are time-boxed (MovementStep.MaxCoverHoldHours /
+                // FortSeekStep.MaxFortHoldHours), so exempting them cannot resurrect the permanent-stall
+                // case this cleanup exists for.
+                if (u.CoverHold && u.CoverDestination.HasValue)
+                {
+                    u.StuckAnchor = null;
+                    u.StuckHours = 0f;
+                    continue;
+                }
+
                 if (!u.StuckAnchor.HasValue ||
                     u.Position.HorizontalDistanceTo(u.StuckAnchor.Value) >= ProgressThresholdFor(state, u))
                 {

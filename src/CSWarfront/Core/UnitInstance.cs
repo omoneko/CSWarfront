@@ -164,6 +164,17 @@ namespace CSWarfront.Core
         /// is decided (CoverSeekStep).</summary>
         public float CoverHoldTimer;
 
+        /// <summary>Task120: elapsed in-game time this unit has been entrenched at a fortification chosen by
+        /// FortSeekStep (runtime-only, not persisted). Past FortSeekStep.MaxFortHoldHours the unit lets go
+        /// and resumes its advance (so entrenching can never block an assault/capture forever), and
+        /// FortSeekCooldown then keeps it from immediately re-entrenching in the same spot.</summary>
+        public float FortHoldTimer;
+
+        /// <summary>Task120: remaining in-game time during which FortSeekStep must not pick a fortification
+        /// for this unit (runtime-only, not persisted). Set when a fort hold is released by
+        /// MaxFortHoldHours.</summary>
+        public float FortSeekCooldown;
+
         /// <summary>Elapsed in-game time during which State==Engaging and TargetId has kept pointing at the
         /// same opponent (runtime-only, not persisted; Task52). Incremented/reset by CoverSeekStep each
         /// tick; past CoverSeekStep.MaxEngageHoldHours, MovementStep allows movement toward

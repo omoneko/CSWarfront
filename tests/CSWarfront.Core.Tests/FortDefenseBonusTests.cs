@@ -128,4 +128,53 @@ public class FortDefenseBonusTests
         FortSeekStep.Advance(s, 0.1f);
         Assert.False(tank.CoverHold);
     }
+
+    /// <summary>Task120: entrenching is time-boxed, so an assault can never stall in a trench forever.</summary>
+    [Fact]
+    public void Entrenched_infantry_lets_go_after_the_hold_cap_and_will_not_immediately_re_entrench()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        s.Bases.Add(new MilitaryBase(1, BaseType.Trench, new WorldPos(0, 0, 0)));
+        // The infantry already stands on the trench; its objective is far away (no objective lock).
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        infantry.OrderTargetPos = new WorldPos(3000, 0, 0);
+        var enemy = new UnitInstance(2, "Tank_T1", 1, 100f, new WorldPos(400, 0, 0));
+        s.Units.Add(infantry); s.Units.Add(enemy);
+
+        FortSeekStep.Advance(s, 1f);
+        Assert.True(infantry.CoverHold); // digs in first
+
+        // Hold past the cap: the unit releases and starts advancing again.
+        for (int i = 0; i < 6; i++) FortSeekStep.Advance(s, 1f);
+        Assert.False(infantry.CoverHold);
+        Assert.Null(infantry.CoverDestination);
+        Assert.True(infantry.FortSeekCooldown > 0f);
+
+        // While the cooldown lasts it does not re-entrench on the very next tick.
+        FortSeekStep.Advance(s, 1f);
+        Assert.False(infantry.CoverHold);
+    }
+
+    /// <summary>Task120: near its objective the unit presses the attack instead of digging in.</summary>
+    [Fact]
+    public void Infantry_close_to_its_objective_does_not_divert_to_a_fort()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        s.Bases.Add(new MilitaryBase(1, BaseType.Trench, new WorldPos(100, 0, 0)));
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        infantry.OrderTargetPos = new WorldPos(50, 0, 0); // the base being assaulted, well inside the lock radius
+        var enemy = new UnitInstance(2, "Tank_T1", 1, 100f, new WorldPos(300, 0, 0));
+        s.Units.Add(infantry); s.Units.Add(enemy);
+
+        FortSeekStep.Advance(s, 1f);
+
+        Assert.False(infantry.CoverHold);
+        Assert.Null(infantry.CoverDestination);
+    }
 }

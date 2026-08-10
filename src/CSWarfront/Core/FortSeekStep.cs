@@ -24,6 +24,23 @@ namespace CSWarfront.Core
         /// <summary>The fortification search radius.</summary>
         public const float SeekRadius = 300f;
 
+        /// <summary>Task120 (playtest report "infantry pile into trenches and get stuck; attackers never
+        /// capture and eventually vanish"): the maximum time a unit may stay entrenched. The original
+        /// implementation re-zeroed CoverHoldTimer every tick, which permanently defeated
+        /// MovementStep.MaxCoverHoldHours — units pinned themselves to a trench forever, never resumed the
+        /// assault, and (being State==Moving yet motionless) were eventually despawned by
+        /// StuckCleanupStep. Entrenching is now time-boxed.</summary>
+        public const float MaxFortHoldHours = 4f;
+
+        /// <summary>Task120: after a hold is released, this long must pass before the unit may entrench
+        /// again — otherwise the very next tick would re-pin it to the same fortification.</summary>
+        public const float ReseekCooldownHours = 8f;
+
+        /// <summary>Task120: a unit this close to its objective (OrderTargetPos — the base it is assaulting
+        /// or capturing) never diverts to a fortification. Taking the objective always outranks digging
+        /// in nearby.</summary>
+        public const float ObjectiveLockRadius = 200f;
+
         public static void Advance(WarState state, float dt)
         {
             state.UnitGrid.Build(state.Units);
@@ -38,17 +55,50 @@ namespace CSWarfront.Core
                 if (type == null) continue;
                 if (type.Category != UnitCategory.Infantry && type.Category != UnitCategory.MechInfantry) continue;
 
+                // Task120: run down the re-seek cooldown; while it lasts the unit advances normally.
+                if (u.FortSeekCooldown > 0f)
+                {
+                    u.FortSeekCooldown -= dt;
+                    if (u.FortSeekCooldown > 0f) continue;
+                    u.FortSeekCooldown = 0f;
+                }
+
+                // Task120: close to the objective, press the attack instead of digging in.
+                if (u.OrderTargetPos.HasValue &&
+                    u.Position.HorizontalDistanceTo(u.OrderTargetPos.Value) <= ObjectiveLockRadius)
+                {
+                    u.FortHoldTimer = 0f;
+                    continue;
+                }
+
                 UnitInstance enemy = TargetSearch.FindNearestHostile(u, state.UnitGrid, state.Relations,
                     EnemyRadius, DomainMask.All, state.Types);
-                if (enemy == null) continue; // no enemy nearby: stay with regular cover/advance
+                if (enemy == null) { u.FortHoldTimer = 0f; continue; } // no enemy nearby: regular cover/advance
 
                 MilitaryBase fort = FindBestFort(state, u, enemy.Position);
-                if (fort == null) continue;
+                if (fort == null) { u.FortHoldTimer = 0f; continue; }
+
+                // Task120: only count time actually spent entrenched (arrived), not the approach march.
+                bool arrived = u.Position.HorizontalDistanceTo(fort.Position) <= MovementStep.CoverArrivalDistance;
+                if (arrived)
+                {
+                    u.FortHoldTimer += dt;
+                    if (u.FortHoldTimer > MaxFortHoldHours)
+                    {
+                        // Time boxed out: let go and resume the advance (the objective matters more).
+                        u.FortHoldTimer = 0f;
+                        u.FortSeekCooldown = ReseekCooldownHours;
+                        u.CoverDestination = null;
+                        u.CoverHold = false;
+                        u.CoverHoldTimer = 0f;
+                        continue;
+                    }
+                }
 
                 // Head for / hold the fortification (overwriting CoverSeekStep's decision, see the class comment).
                 u.CoverDestination = fort.Position;
                 u.CoverHold = true;
-                u.CoverHoldTimer = 0f; // keeps the hold cap (MovementStep.MaxCoverHoldHours) permanently defeated
+                u.CoverHoldTimer = 0f; // the fort hold has its own cap (MaxFortHoldHours) instead
             }
         }
 

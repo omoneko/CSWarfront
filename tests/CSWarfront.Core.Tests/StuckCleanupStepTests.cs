@@ -26,6 +26,20 @@ public class StuckCleanupStepTests
     }
 
     [Fact]
+    public void Unit_deliberately_holding_at_cover_is_never_despawned()
+    {
+        // Task120: holding at a cover/fortification position is intentional stillness, not being stuck.
+        var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));
+        s.Units[0].CoverDestination = new WorldPos(1000, 0, 1000);
+        s.Units[0].CoverHold = true;
+
+        int despawned = AdvanceStuckHours(s, StuckCleanupStep.DespawnAfterHours + 5f);
+
+        Assert.Equal(0, despawned);
+        Assert.Equal(UnitState.Moving, s.Units[0].State);
+    }
+
+    [Fact]
     public void Stuck_moving_unit_despawns_silently_after_the_threshold()
     {
         var s = StateWithUnit(UnitState.Moving, new WorldPos(1000, 0, 1000));
