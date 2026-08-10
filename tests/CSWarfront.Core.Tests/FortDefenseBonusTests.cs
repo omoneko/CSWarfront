@@ -101,7 +101,7 @@ public class FortDefenseBonusTests
     }
 
     [Fact]
-    public void Infantry_ignores_enemy_held_trenches_and_idles_without_enemies()
+    public void Infantry_idles_without_enemies_and_assaults_enemy_held_trenches()
     {
         var s = new WarState();
         for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
@@ -116,17 +116,55 @@ public class FortDefenseBonusTests
         FortSeekStep.Advance(s, 0.1f);
         Assert.False(infantry.CoverHold);
 
-        // An enemy infantry occupies the trench: does not head for that trench.
+        // Task122: an enemy infantry occupies the trench -> it becomes an assault target.
         var enemyInf = new UnitInstance(2, "Infantry_T1", 1, 100f, new WorldPos(205, 0, 0));
         s.Units.Add(enemyInf);
         FortSeekStep.Advance(s, 0.1f);
-        Assert.False(infantry.CoverHold);
+        Assert.True(infantry.CoverHold);
+        Assert.Equal(200f, infantry.CoverDestination.Value.X, 1);
 
         // Confirming tanks are outside FortSeek's scope: tanks do not seek fortified positions.
         var tank = new UnitInstance(3, "Tank_T1", 0, 100f, new WorldPos(0, 0, 50));
         s.Units.Add(tank);
         FortSeekStep.Advance(s, 0.1f);
         Assert.False(tank.CoverHold);
+    }
+
+    /// <summary>Task122: contested trenches outrank free ones, capture completes as soon as the
+    /// defenders are gone, and the squad then rolls on to the next contested trench.</summary>
+    [Fact]
+    public void Squad_takes_the_contested_trench_then_moves_on_to_the_next_one()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        var free = new MilitaryBase(1, BaseType.Trench, new WorldPos(0, 0, 60));     // empty, closer to the enemy
+        var near = new MilitaryBase(2, BaseType.Trench, new WorldPos(80, 0, 0));     // contested, nearest to us
+        var next = new MilitaryBase(3, BaseType.Trench, new WorldPos(160, 0, 0));    // contested, further along
+        s.Bases.Add(free); s.Bases.Add(near); s.Bases.Add(next);
+
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        var defenderNear = new UnitInstance(2, "Infantry_T1", 1, 100f, new WorldPos(80, 0, 0));
+        var defenderNext = new UnitInstance(3, "Infantry_T1", 1, 100f, new WorldPos(160, 0, 0));
+        s.Units.Add(infantry); s.Units.Add(defenderNear); s.Units.Add(defenderNext);
+
+        // The contested trench nearest to us wins over the empty one closer to the enemy.
+        FortSeekStep.Advance(s, 0.1f);
+        Assert.Equal(80f, infantry.CoverDestination.Value.X, 1);
+
+        // Its defender is wiped out: the trench is ours immediately, and the squad rolls on to the
+        // next contested trench (this one is now free, so it no longer outranks an assault target).
+        defenderNear.State = UnitState.Dead;
+        FortSeekStep.Advance(s, 0.1f);
+        Assert.Equal(160f, infantry.CoverDestination.Value.X, 1);
+
+        // With every defender gone it simply garrisons the free trench closest to the enemy.
+        defenderNext.State = UnitState.Dead;
+        var enemyTank = new UnitInstance(4, "Tank_T1", 1, 100f, new WorldPos(0, 0, 400));
+        s.Units.Add(enemyTank);
+        FortSeekStep.Advance(s, 0.1f);
+        Assert.Equal(60f, infantry.CoverDestination.Value.Z, 1);
     }
 
     /// <summary>Task120: entrenching is time-boxed, so an assault can never stall in a trench forever.</summary>

@@ -16,9 +16,18 @@ namespace CSWarfront.Core
     ///
     /// Eligible fortifications (Task121): trenches, bunkers, artillery positions, AT pillboxes and AA
     /// positions. The firing emplacements and bunkers must be friendly-owned (a defunct, ownerless one
-    /// still counts as terrain); trenches are ownerless by design and open to anyone — but never one
-    /// already held by enemy infantry. Each fortification holds at most GarrisonCapacity friendly
-    /// units; overflow goes to the next-best fortification in range.
+    /// still counts as terrain); trenches are ownerless by design and open to anyone. Each fortification
+    /// holds at most GarrisonCapacity friendly units; overflow goes to the next-best fortification in
+    /// range.
+    ///
+    /// Task122 (user request "assault enemy-held trenches, take them, then move on to the next one"):
+    /// an enemy-held trench is no longer avoided — it becomes an assault target and outranks digging
+    /// into a free position. Since trenches are ownerless, taking one simply means clearing its
+    /// defenders: the moment the last enemy occupant dies the trench stops counting as held, and the
+    /// very next tick the attackers garrison it as normal and the next enemy-held trench becomes the
+    /// new assault target — the squads roll up a trench line section by section. Assault parties are
+    /// capped by the same GarrisonCapacity, so surplus units peel off to the next contested trench
+    /// instead of piling onto one.
     /// </summary>
     public static class FortSeekStep
     {
@@ -228,15 +237,18 @@ namespace CSWarfront.Core
             assignedFort.Remove(u.InstanceId);
         }
 
-        /// <summary>The usable fortification within SeekRadius closest to the enemy position, skipping
-        /// ones already at GarrisonCapacity (Task121 — that is the "overflow moves to an adjacent
-        /// position" rule). The fortification this unit already occupies never counts itself as full.
-        /// Null when nothing suitable is in range.</summary>
+        /// <summary>The fortification this unit should head for, or null when nothing suitable is in
+        /// range. Assault targets come first (Task122: the nearest enemy-held trench, so squads roll up
+        /// a trench line from their end); otherwise the free position closest to the enemy (Task101).
+        /// Positions already at GarrisonCapacity are skipped in both passes (Task121 — the "overflow
+        /// moves to an adjacent position" rule), except that the slot this unit already holds never
+        /// counts itself as full.</summary>
         private static MilitaryBase FindBestFort(WarState state, UnitInstance u, WorldPos enemyPos,
             Dictionary<long, int> garrison, ushort? currentFortId)
         {
-            MilitaryBase best = null;
-            float bestEnemyDist = float.MaxValue;
+            MilitaryBase bestAssault = null, bestFree = null;
+            float bestAssaultDist = float.MaxValue, bestFreeDist = float.MaxValue;
+
             for (int b = 0; b < state.Bases.Count; b++)
             {
                 MilitaryBase mb = state.Bases[b];
@@ -250,7 +262,6 @@ namespace CSWarfront.Core
                     mb.OwnerFactionId.Value != u.FactionId) continue;
 
                 if (u.Position.HorizontalDistanceTo(mb.Position) > SeekRadius) continue;
-                if (mb.Type == BaseType.Trench && IsHeldByEnemyInfantry(state, mb, u.FactionId, radius)) continue;
 
                 // Task121: capacity. The slot this unit already holds is excluded from the count, so
                 // staying put is always allowed.
@@ -258,12 +269,21 @@ namespace CSWarfront.Core
                 if (currentFortId.HasValue && currentFortId.Value == mb.BaseId) occupants--;
                 if (occupants >= GarrisonCapacity) continue;
 
+                // Task122: an enemy-held trench is an assault target rather than something to avoid.
+                if (mb.Type == BaseType.Trench && IsHeldByEnemyInfantry(state, mb, u.FactionId, radius))
+                {
+                    float da = u.Position.HorizontalDistanceTo(mb.Position);
+                    // Deterministic tie-break on BaseId (equal distances must not depend on list order).
+                    if (da < bestAssaultDist || (da == bestAssaultDist && bestAssault != null && mb.BaseId < bestAssault.BaseId))
+                    { bestAssaultDist = da; bestAssault = mb; }
+                    continue;
+                }
+
                 float d = enemyPos.HorizontalDistanceTo(mb.Position);
-                // Deterministic tie-break on BaseId (equal distances must not depend on list order).
-                if (d < bestEnemyDist || (d == bestEnemyDist && best != null && mb.BaseId < best.BaseId))
-                { bestEnemyDist = d; best = mb; }
+                if (d < bestFreeDist || (d == bestFreeDist && bestFree != null && mb.BaseId < bestFree.BaseId))
+                { bestFreeDist = d; bestFree = mb; }
             }
-            return best;
+            return bestAssault ?? bestFree;
         }
 
         /// <summary>Whether enemy-faction infantry already sits on this trench (never head for a
