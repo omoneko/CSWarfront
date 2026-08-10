@@ -86,9 +86,11 @@ namespace CSWarfront.Game.UI
         private static UILabel _countLabel;
         private static UILabel _hintLabel;
 
-        private static readonly UIDropDown[] _rowDropdowns = new UIDropDown[9];
-        private static readonly UILabel[] _rowLabels = new UILabel[9];
-        private static readonly UIButton[] _rowResetButtons = new UIButton[9];
+        // Task117 regression fix: these were hard-coded to 9 and threw IndexOutOfRange in BuildRow
+        // when the AT pillbox / AA position rows were added — size them from RowTypes instead.
+        private static readonly UIDropDown[] _rowDropdowns = new UIDropDown[RowTypes.Length];
+        private static readonly UILabel[] _rowLabels = new UILabel[RowTypes.Length];
+        private static readonly UIButton[] _rowResetButtons = new UIButton[RowTypes.Length];
 
         private static readonly List<string> _filteredNames = new List<string>();
         private static bool _customOnly = true;

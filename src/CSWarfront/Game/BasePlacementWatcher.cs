@@ -291,6 +291,33 @@ namespace CSWarfront.Game
 
         private static void ProcessReleased(WarState state, List<ushort> ids)
         {
+            // Task119 (mass-disappearance investigation): when one drain contains many releases,
+            // record how many of them were our military facilities and what they were, so the next
+            // occurrence of the "whole defense line vanished at once" report can be attributed. The
+            // per-base "base removed" log below stays, but with dozens of entries the summary line
+            // plus the cached Info names give the full picture even if the log gets truncated.
+            if (ids.Count >= 10)
+            {
+                int military = 0;
+                var sample = new System.Text.StringBuilder(256);
+                foreach (ushort id in ids)
+                {
+                    if (FindBase(state, id) == null) continue;
+                    military++;
+                    if (military <= 8)
+                    {
+                        string infoName;
+                        _baseInfoNames.TryGetValue(id, out infoName);
+                        sample.Append(' ').Append(id).Append('=').Append(infoName ?? "?");
+                    }
+                }
+                if (military > 0)
+                {
+                    ModConfig.Log("BasePlacementWatcher: WARNING mass release drain: total=" + ids.Count +
+                        " military=" + military + " first:" + sample);
+                }
+            }
+
             foreach (ushort id in ids)
             {
                 MilitaryBase mb = FindBase(state, id);
