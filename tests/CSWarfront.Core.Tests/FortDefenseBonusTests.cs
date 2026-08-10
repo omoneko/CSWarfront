@@ -158,6 +158,86 @@ public class FortDefenseBonusTests
         Assert.False(infantry.CoverHold);
     }
 
+    /// <summary>Task121: a fortification holds at most 3 friendly units; the overflow goes to the next
+    /// fortification in range.</summary>
+    [Fact]
+    public void Fourth_unit_overflows_to_the_adjacent_fortification()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        var near = new MilitaryBase(1, BaseType.Trench, new WorldPos(100, 0, 0));   // closest to the enemy
+        var spare = new MilitaryBase(2, BaseType.Trench, new WorldPos(0, 0, 100));  // the adjacent one
+        s.Bases.Add(near); s.Bases.Add(spare);
+        s.Units.Add(new UnitInstance(99, "Tank_T1", 1, 100f, new WorldPos(400, 0, 0))); // the enemy
+
+        var squad = new UnitInstance[4];
+        for (uint i = 0; i < 4; i++)
+        {
+            squad[i] = new UnitInstance(i + 1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+            s.Units.Add(squad[i]);
+        }
+
+        FortSeekStep.Advance(s, 0.1f);
+
+        // Three take the trench nearest the enemy, the fourth is pushed to the other one.
+        for (int i = 0; i < 3; i++)
+            Assert.Equal(near.Position.X, squad[i].CoverDestination.Value.X, 1);
+        Assert.Equal(spare.Position.Z, squad[3].CoverDestination.Value.Z, 1);
+
+        Assert.Equal(FortSeekStep.GarrisonCapacity, FortSeekStep.CountGarrison(s, near, 0));
+        Assert.Equal(1, FortSeekStep.CountGarrison(s, spare, 0));
+    }
+
+    /// <summary>Task121: with every nearby fortification full, the unit just keeps advancing.</summary>
+    [Fact]
+    public void Units_beyond_capacity_advance_normally_when_no_fort_has_room()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        s.Bases.Add(new MilitaryBase(1, BaseType.Trench, new WorldPos(100, 0, 0)));
+        s.Units.Add(new UnitInstance(99, "Tank_T1", 1, 100f, new WorldPos(400, 0, 0)));
+
+        var squad = new UnitInstance[4];
+        for (uint i = 0; i < 4; i++)
+        {
+            squad[i] = new UnitInstance(i + 1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+            s.Units.Add(squad[i]);
+        }
+
+        FortSeekStep.Advance(s, 0.1f);
+
+        for (int i = 0; i < 3; i++) Assert.True(squad[i].CoverHold);
+        Assert.False(squad[3].CoverHold);
+        Assert.Null(squad[3].CoverDestination);
+    }
+
+    /// <summary>Task121: the firing emplacements are garrisonable too, and enemy-owned ones are not.</summary>
+    [Fact]
+    public void Firing_emplacements_are_garrisonable_when_friendly()
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        var mine = new MilitaryBase(1, BaseType.AaPosition, new WorldPos(100, 0, 0));
+        mine.OwnerFactionId = 0;
+        var theirs = new MilitaryBase(2, BaseType.AtPillbox, new WorldPos(150, 0, 0)); // closer to the enemy
+        theirs.OwnerFactionId = 1;
+        s.Bases.Add(mine); s.Bases.Add(theirs);
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        s.Units.Add(infantry);
+        s.Units.Add(new UnitInstance(2, "Tank_T1", 1, 100f, new WorldPos(400, 0, 0)));
+
+        FortSeekStep.Advance(s, 0.1f);
+
+        Assert.True(infantry.CoverHold);
+        Assert.Equal(100f, infantry.CoverDestination.Value.X, 1); // the friendly AA position, not the enemy pillbox
+    }
+
     /// <summary>Task120: near its objective the unit presses the attack instead of digging in.</summary>
     [Fact]
     public void Infantry_close_to_its_objective_does_not_divert_to_a_fort()

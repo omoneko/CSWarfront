@@ -1,20 +1,24 @@
+using System.Collections.Generic;
+
 namespace CSWarfront.Core
 {
     /// <summary>
     /// Task101: the infantry's fortification-seeking AI (design §1.4, user request "infantry should
     /// actively head for trenches and bunkers near the enemy"). Infantry-class units
     /// (AiControlled/FreeAdvance) with a hostile unit inside EnemyRadius are given, as their stand, the
-    /// trench/bunker within SeekRadius that lies "closest to the enemy".
+    /// fortification within SeekRadius that lies "closest to the enemy".
     ///
     /// The implementation reuses the same CoverDestination/CoverHold fields as CoverSeekStep's
     /// cover movement, and runs **after CoverSeekStep** to overwrite it (fortifications always beat
-    /// building shadows). A stateless design re-derived deterministically every tick; keeping
-    /// CoverHoldTimer at 0 also dodges MovementStep's hold cap = the unit stays entrenched as long as
-    /// enemies remain. Once the enemy is gone it does nothing = the unit naturally reverts to regular
-    /// cover/advance.
+    /// building shadows). A stateless design re-derived deterministically every tick. Once the enemy is
+    /// gone it does nothing = the unit naturally reverts to regular cover/advance, and every hold is
+    /// time-boxed by MaxFortHoldHours (Task120) so an assault can never stall in a trench.
     ///
-    /// Eligible fortifications: friendly-owned Bunkers (defunct = ownerless ones count too, as
-    /// terrain) and Trenches (any owner — but never one already held by enemy infantry).
+    /// Eligible fortifications (Task121): trenches, bunkers, artillery positions, AT pillboxes and AA
+    /// positions. The firing emplacements and bunkers must be friendly-owned (a defunct, ownerless one
+    /// still counts as terrain); trenches are ownerless by design and open to anyone — but never one
+    /// already held by enemy infantry. Each fortification holds at most GarrisonCapacity friendly
+    /// units; overflow goes to the next-best fortification in range.
     /// </summary>
     public static class FortSeekStep
     {
@@ -36,6 +40,14 @@ namespace CSWarfront.Core
         /// again — otherwise the very next tick would re-pin it to the same fortification.</summary>
         public const float ReseekCooldownHours = 8f;
 
+        /// <summary>Task121 (user request "at most three friendly units per fortification; overflow goes
+        /// to an adjacent one"): how many friendly units may occupy one fortification at a time.
+        /// Occupancy counts units standing in it AND units currently marching to it (both hold it as
+        /// their CoverDestination), so a full position never attracts a fourth unit that would end up
+        /// milling around outside. When every fortification in range is full the unit simply advances as
+        /// usual.</summary>
+        public const int GarrisonCapacity = 3;
+
         /// <summary>Task120: a unit this close to its objective (OrderTargetPos — the base it is assaulting
         /// or capturing) never diverts to a fortification. Taking the objective always outranks digging
         /// in nearby.</summary>
@@ -44,6 +56,13 @@ namespace CSWarfront.Core
         public static void Advance(WarState state, float dt)
         {
             state.UnitGrid.Build(state.Units);
+
+            // Task121: current occupancy per (fortification, faction), plus which fortification each
+            // unit is already committed to. Built once per tick from the live assignments, then kept in
+            // step as units are (re)assigned below, so the capacity check sees this tick's decisions too.
+            Dictionary<long, int> garrison;
+            Dictionary<uint, ushort> assignedFort;
+            BuildGarrisonTally(state, out garrison, out assignedFort);
 
             for (int i = 0; i < state.Units.Count; i++)
             {
@@ -73,10 +92,13 @@ namespace CSWarfront.Core
 
                 UnitInstance enemy = TargetSearch.FindNearestHostile(u, state.UnitGrid, state.Relations,
                     EnemyRadius, DomainMask.All, state.Types);
-                if (enemy == null) { u.FortHoldTimer = 0f; continue; } // no enemy nearby: regular cover/advance
+                if (enemy == null) { u.FortHoldTimer = 0f; ReleaseGarrison(u, garrison, assignedFort); continue; }
 
-                MilitaryBase fort = FindBestFort(state, u, enemy.Position);
-                if (fort == null) { u.FortHoldTimer = 0f; continue; }
+                ushort currentFortId;
+                bool hasCurrent = assignedFort.TryGetValue(u.InstanceId, out currentFortId);
+                MilitaryBase fort = FindBestFort(state, u, enemy.Position, garrison,
+                    hasCurrent ? (ushort?)currentFortId : null);
+                if (fort == null) { u.FortHoldTimer = 0f; ReleaseGarrison(u, garrison, assignedFort); continue; }
 
                 // Task120: only count time actually spent entrenched (arrived), not the approach march.
                 bool arrived = u.Position.HorizontalDistanceTo(fort.Position) <= MovementStep.CoverArrivalDistance;
@@ -91,6 +113,7 @@ namespace CSWarfront.Core
                         u.CoverDestination = null;
                         u.CoverHold = false;
                         u.CoverHoldTimer = 0f;
+                        ReleaseGarrison(u, garrison, assignedFort); // Task121: frees the slot for someone else
                         continue;
                     }
                 }
@@ -99,12 +122,118 @@ namespace CSWarfront.Core
                 u.CoverDestination = fort.Position;
                 u.CoverHold = true;
                 u.CoverHoldTimer = 0f; // the fort hold has its own cap (MaxFortHoldHours) instead
+
+                // Task121: keep the running tally in step with this decision.
+                if (!hasCurrent || currentFortId != fort.BaseId)
+                {
+                    if (hasCurrent) Bump(garrison, currentFortId, u.FactionId, -1);
+                    Bump(garrison, fort.BaseId, u.FactionId, +1);
+                    assignedFort[u.InstanceId] = fort.BaseId;
+                }
             }
         }
 
-        /// <summary>The usable fortification within SeekRadius closest to the enemy position. Null if
-        /// none.</summary>
-        private static MilitaryBase FindBestFort(WarState state, UnitInstance u, WorldPos enemyPos)
+        /// <summary>Task121: the garrisonable fortification types and the radius (m) within which a unit
+        /// counts as being "in" one. Trenches and bunkers reuse the defense-bonus radii; the firing
+        /// emplacements use a radius derived from their footprint (AT pillbox 16×16, artillery position
+        /// and AA position 24×24).</summary>
+        public static bool TryGetGarrisonRadius(BaseType type, out float radius)
+        {
+            switch (type)
+            {
+                case BaseType.Trench: radius = FortDefenseBonus.TrenchRadius; return true;
+                case BaseType.Bunker: radius = FortDefenseBonus.BunkerRadius; return true;
+                case BaseType.AtPillbox: radius = 12f; return true;
+                case BaseType.ArtilleryPost: radius = 18f; return true;
+                case BaseType.AaPosition: radius = 18f; return true;
+                default: radius = 0f; return false;
+            }
+        }
+
+        /// <summary>Task121: how many of factionId's units currently hold this fortification (standing in
+        /// it or marching to it). Used by the capacity check and exposed for tests.</summary>
+        public static int CountGarrison(WarState state, MilitaryBase fort, byte factionId)
+        {
+            float radius;
+            if (fort == null || !TryGetGarrisonRadius(fort.Type, out radius)) return 0;
+
+            int count = 0;
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance o = state.Units[i];
+                if (!o.IsAlive || o.IsCarried) continue;
+                if (o.FactionId != factionId) continue;
+                if (!o.CoverHold || !o.CoverDestination.HasValue) continue;
+                if (o.CoverDestination.Value.HorizontalDistanceTo(fort.Position) <= radius) count++;
+            }
+            return count;
+        }
+
+        private static long GarrisonKey(ushort baseId, byte factionId)
+        {
+            return ((long)baseId << 8) | factionId;
+        }
+
+        private static void Bump(Dictionary<long, int> garrison, ushort baseId, byte factionId, int delta)
+        {
+            long key = GarrisonKey(baseId, factionId);
+            int n;
+            garrison.TryGetValue(key, out n);
+            n += delta;
+            if (n <= 0) garrison.Remove(key);
+            else garrison[key] = n;
+        }
+
+        private static int GarrisonOf(Dictionary<long, int> garrison, ushort baseId, byte factionId)
+        {
+            int n;
+            garrison.TryGetValue(GarrisonKey(baseId, factionId), out n);
+            return n;
+        }
+
+        /// <summary>Task121: tallies the live assignments once per tick (see Advance).</summary>
+        private static void BuildGarrisonTally(WarState state, out Dictionary<long, int> garrison,
+            out Dictionary<uint, ushort> assignedFort)
+        {
+            garrison = new Dictionary<long, int>();
+            assignedFort = new Dictionary<uint, ushort>();
+
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance o = state.Units[i];
+                if (!o.IsAlive || o.IsCarried) continue;
+                if (!o.CoverHold || !o.CoverDestination.HasValue) continue;
+
+                for (int b = 0; b < state.Bases.Count; b++)
+                {
+                    MilitaryBase mb = state.Bases[b];
+                    float radius;
+                    if (!TryGetGarrisonRadius(mb.Type, out radius)) continue;
+                    if (o.CoverDestination.Value.HorizontalDistanceTo(mb.Position) > radius) continue;
+
+                    Bump(garrison, mb.BaseId, o.FactionId, +1);
+                    assignedFort[o.InstanceId] = mb.BaseId;
+                    break; // one unit occupies at most one fortification
+                }
+            }
+        }
+
+        /// <summary>Task121: gives up this unit's garrison slot (it is no longer heading for a fort).</summary>
+        private static void ReleaseGarrison(UnitInstance u, Dictionary<long, int> garrison,
+            Dictionary<uint, ushort> assignedFort)
+        {
+            ushort fortId;
+            if (!assignedFort.TryGetValue(u.InstanceId, out fortId)) return;
+            Bump(garrison, fortId, u.FactionId, -1);
+            assignedFort.Remove(u.InstanceId);
+        }
+
+        /// <summary>The usable fortification within SeekRadius closest to the enemy position, skipping
+        /// ones already at GarrisonCapacity (Task121 — that is the "overflow moves to an adjacent
+        /// position" rule). The fortification this unit already occupies never counts itself as full.
+        /// Null when nothing suitable is in range.</summary>
+        private static MilitaryBase FindBestFort(WarState state, UnitInstance u, WorldPos enemyPos,
+            Dictionary<long, int> garrison, ushort? currentFortId)
         {
             MilitaryBase best = null;
             float bestEnemyDist = float.MaxValue;
@@ -112,19 +241,27 @@ namespace CSWarfront.Core
             {
                 MilitaryBase mb = state.Bases[b];
                 float radius;
-                if (mb.Type == BaseType.Trench) radius = FortDefenseBonus.TrenchRadius;
-                else if (mb.Type == BaseType.Bunker) radius = FortDefenseBonus.BunkerRadius;
-                else continue;
+                if (!TryGetGarrisonRadius(mb.Type, out radius)) continue;
 
-                // Bunkers must be friendly-owned (or defunct = neutral). Never charge into a working enemy bunker.
-                if (mb.Type == BaseType.Bunker && mb.OwnerFactionId != null &&
+                // Owned emplacements (bunker, artillery position, AT pillbox, AA position) must be
+                // friendly (or defunct = neutral): never charge into a working enemy one. Trenches are
+                // ownerless by design and open to anyone.
+                if (mb.Type != BaseType.Trench && mb.OwnerFactionId != null &&
                     mb.OwnerFactionId.Value != u.FactionId) continue;
 
                 if (u.Position.HorizontalDistanceTo(mb.Position) > SeekRadius) continue;
                 if (mb.Type == BaseType.Trench && IsHeldByEnemyInfantry(state, mb, u.FactionId, radius)) continue;
 
+                // Task121: capacity. The slot this unit already holds is excluded from the count, so
+                // staying put is always allowed.
+                int occupants = GarrisonOf(garrison, mb.BaseId, u.FactionId);
+                if (currentFortId.HasValue && currentFortId.Value == mb.BaseId) occupants--;
+                if (occupants >= GarrisonCapacity) continue;
+
                 float d = enemyPos.HorizontalDistanceTo(mb.Position);
-                if (d < bestEnemyDist) { bestEnemyDist = d; best = mb; }
+                // Deterministic tie-break on BaseId (equal distances must not depend on list order).
+                if (d < bestEnemyDist || (d == bestEnemyDist && best != null && mb.BaseId < best.BaseId))
+                { bestEnemyDist = d; best = mb; }
             }
             return best;
         }
