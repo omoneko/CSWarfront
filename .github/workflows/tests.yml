@@ -1,0 +1,29 @@
+# Runs the Core unit tests on every push.
+#
+# Only the Core tests run here, and that is deliberate: the mod assembly itself targets
+# .NET Framework 3.5 and references Cities: Skylines' own managed DLLs (Assembly-CSharp,
+# ColossalManaged, ICities, UnityEngine), which ship with the game and cannot be
+# redistributed to a CI runner. The Core project has no UnityEngine dependency and the test
+# project compiles those sources directly, so it builds and runs anywhere.
+#
+# A green run therefore means "the pure logic is sound", not "the mod compiles". Building the
+# mod stays a local step (build.ps1).
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run Core tests
+        run: dotnet test tests/CSWarfront.Core.Tests/CSWarfront.Core.Tests.csproj --configuration Release
