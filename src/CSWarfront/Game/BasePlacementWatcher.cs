@@ -23,6 +23,7 @@ namespace CSWarfront.Game
         private static readonly object _pendingLock = new object();
         private static readonly List<ushort> _pendingCreated = new List<ushort>();
         private static readonly List<ushort> _pendingReleased = new List<ushort>();
+        private static readonly List<ushort> _pendingRelocated = new List<ushort>(); // Task123
 
         /// <summary>
         /// Task60: cache of base building orientations (radians, CS Building.m_angle). Used by
@@ -70,8 +71,16 @@ namespace CSWarfront.Game
                 BuildingManager bm = Singleton<BuildingManager>.instance;
                 bm.EventBuildingCreated += OnBuildingCreated;
                 bm.EventBuildingReleased += OnBuildingReleased;
+                // Task123 (bug report "units keep spawning where the base was originally built, even
+                // after moving it"): relocation (Move It!, vanilla relocate) goes through
+                // BuildingManager.RelocateBuilding, which keeps the same building id and raises
+                // neither Created nor Released — so the logical base kept its registration-time
+                // Position forever and every position-derived behavior (unit spawn point, overlay
+                // model, capture radius, income sampling, rail/supply distances) stayed at the old
+                // spot. EventBuildingRelocated is the event CS raises for exactly this.
+                bm.EventBuildingRelocated += OnBuildingRelocated;
                 _subscribed = true;
-                ModConfig.Log("BasePlacementWatcher: subscribed to EventBuildingCreated/EventBuildingReleased");
+                ModConfig.Log("BasePlacementWatcher: subscribed to EventBuildingCreated/Released/Relocated");
             }
             catch (Exception e) { ModConfig.LogError("BasePlacementWatcher.Subscribe exception: " + e); }
         }
@@ -87,6 +96,7 @@ namespace CSWarfront.Game
                     BuildingManager bm = Singleton<BuildingManager>.instance;
                     bm.EventBuildingCreated -= OnBuildingCreated;
                     bm.EventBuildingReleased -= OnBuildingReleased;
+                    bm.EventBuildingRelocated -= OnBuildingRelocated; // Task123
                 }
             }
             catch (Exception e) { ModConfig.LogError("BasePlacementWatcher.Unsubscribe exception: " + e); }
@@ -100,6 +110,7 @@ namespace CSWarfront.Game
             {
                 _pendingCreated.Clear();
                 _pendingReleased.Clear();
+                _pendingRelocated.Clear(); // Task123
             }
             // Task60: the caller (MilitaryManager.Reset) already holds _stateLock, so no additional
             // lock is needed here (_baseAngles writes always happen inside that lock, via ProcessCreated).
@@ -130,6 +141,13 @@ namespace CSWarfront.Game
             catch (Exception e) { ModConfig.LogError("BasePlacementWatcher.OnBuildingReleased exception: " + e); }
         }
 
+        // Task123: the building moved but kept its id — re-read its transform on the sim thread.
+        private static void OnBuildingRelocated(ushort id)
+        {
+            try { lock (_pendingLock) { _pendingRelocated.Add(id); } }
+            catch (Exception e) { ModConfig.LogError("BasePlacementWatcher.OnBuildingRelocated exception: " + e); }
+        }
+
         /// <summary>
         /// Called from the sim thread (MilitaryManager.OnSimTick, whose caller already holds _stateLock).
         /// Drains the pending lists, reads the CS building buffer, and updates WarState.Bases.
@@ -140,10 +158,12 @@ namespace CSWarfront.Game
 
             List<ushort> created = null;
             List<ushort> released = null;
+            List<ushort> relocated = null;
             lock (_pendingLock)
             {
                 if (_pendingCreated.Count > 0) { created = new List<ushort>(_pendingCreated); _pendingCreated.Clear(); }
                 if (_pendingReleased.Count > 0) { released = new List<ushort>(_pendingReleased); _pendingReleased.Clear(); }
+                if (_pendingRelocated.Count > 0) { relocated = new List<ushort>(_pendingRelocated); _pendingRelocated.Clear(); }
             }
 
             // Debug instrumentation (temporary): to isolate the cause of a bug where base registration
@@ -161,6 +181,33 @@ namespace CSWarfront.Game
             // a "building exists but no logical base" state (which no subsequent event ever repairs).
             if (released != null) ProcessReleased(state, released);
             if (created != null) ProcessCreated(state, created);
+            // Task123: relocation keeps the id, so order against created/released does not matter;
+            // run it last so a base registered this very tick also picks up its current transform.
+            if (relocated != null) ProcessRelocated(state, relocated);
+        }
+
+        /// <summary>Task123: re-reads the transform of bases whose building was moved (Move It!,
+        /// vanilla relocate) and writes it back into the logical base. Sim thread, _stateLock held by
+        /// the caller — the same convention as ProcessCreated, and the same single read of the CS
+        /// building buffer.</summary>
+        private static void ProcessRelocated(WarState state, List<ushort> ids)
+        {
+            Building[] buffer = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+            for (int i = 0; i < ids.Count; i++)
+            {
+                ushort id = ids[i];
+                MilitaryBase mb = FindBase(state, id);
+                if (mb == null) continue; // not one of ours
+                if (id >= buffer.Length) continue;
+                if ((buffer[id].m_flags & Building.Flags.Created) == 0) continue;
+
+                Vector3 pos = buffer[id].m_position;
+                mb.Position = new WorldPos(pos.x, pos.y, pos.z);
+                _baseAngles[id] = buffer[id].m_angle; // keep the faction-model overlay aligned too
+
+                ModConfig.Log("BasePlacementWatcher: base relocated id=" + id +
+                    " -> pos=(" + pos.x.ToString("0") + "," + pos.z.ToString("0") + ")");
+            }
         }
 
         private static void ProcessCreated(WarState state, List<ushort> ids)
@@ -407,6 +454,21 @@ namespace CSWarfront.Game
                             // id-reuse detection (the branch above) from then on.
                             isGhost = false;
                             _baseInfoNames[mb.BaseId] = b.Info.name;
+                        }
+
+                        // Task123 safety net: re-sync the transform even when no relocation event was
+                        // seen (a save made before this fix, or a mod that writes m_position directly).
+                        // The building is alive here and we already hold its struct, so this is free.
+                        if (!isGhost)
+                        {
+                            Vector3 livePos = b.m_position;
+                            if (mb.Position.HorizontalDistanceTo(new WorldPos(livePos.x, livePos.y, livePos.z)) > 1f)
+                            {
+                                mb.Position = new WorldPos(livePos.x, livePos.y, livePos.z);
+                                _baseAngles[mb.BaseId] = b.m_angle;
+                                ModConfig.Log("BasePlacementWatcher: ReconcileBases: re-synced moved base id=" +
+                                    mb.BaseId + " -> pos=(" + livePos.x.ToString("0") + "," + livePos.z.ToString("0") + ")");
+                            }
                         }
                     }
                 }
