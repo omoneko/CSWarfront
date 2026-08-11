@@ -26,7 +26,7 @@ namespace CSWarfront.Game
 
         // --- MilitaryBuildPanel: defense layout save/rebuild (Task114) ---------------------------
         public static string BuildPanel_RegisterDefenseButton = "Save Defense Layout";
-        public static string BuildPanel_RegisterDefenseTooltip = "Remember every friendly fortification currently on the map (bunkers, artillery positions, supply depots, trenches, cargo stations)";
+        public static string BuildPanel_RegisterDefenseTooltip = "Remember every friendly fortification currently on the map, with its position and orientation";
         public static string BuildPanel_RebuildDefenseButton = "Rebuild Defenses";
         public static string BuildPanel_RebuildDefenseTooltip = "Rebuild the saved fortifications that were destroyed. Intact positions are untouched; normal construction costs apply";
         public static string BuildPanel_ToastLayoutSaved = "Defense layout saved: {0} position(s)";

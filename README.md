@@ -67,6 +67,13 @@ The mod's UI text is fully localizable. Every player-facing string lives in
 3. Test locally by dropping the file into the mod folder's `Locales/` directory, then open
    a pull request adding it here.
 
+Bundled translations:
+
+| Language | File | Contributor |
+|---|---|---|
+| Japanese | `Locales/ja.txt` | omoneko |
+| Chinese (Simplified) | `Locales/zh.txt` | yylove hanhan |
+
 ## License
 
 [MIT](LICENSE). Sound effects and 3D models bundled under `src/CSWarfront/Sounds` and `src/CSWarfront/Models` are part of the project.
