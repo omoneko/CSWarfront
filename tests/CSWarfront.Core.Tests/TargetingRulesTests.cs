@@ -197,18 +197,93 @@ public class TargetingRulesTests
     }
 
     [Fact]
-    public void Land_attack_exceeding_regen_still_grinds_the_base_down()
+    public void Land_attack_grinds_the_base_down_without_regen_healing_it_mid_siege()
     {
-        // Tank_T1 siege DPS 40*0.8=32/h > regen 20/h -> keeps grinding at a net 12/h, satisfying
-        // the requirement "a base is captured only when ground forces attack faster than it regenerates".
+        // Task124: a base under fire does not repair, so the siege nets the full attack value.
+        // (Before, regen was applied unconditionally in the same tick as the attack.)
         var s = StateWithHostileBase(100f, 500f);
         s.Types.Register(MvpUnitTypes.Tank_T1());
         s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
 
+        // First tick: the base has not been hit yet, so it still repairs, then takes the hit.
         BaseCombatStep.Advance(s, 1f);
+        float afterFirst = 100f + BaseCombatStep.BaseRegenPerHour - 42f * 0.8f; // Task91: Tank Attack 42
+        Assert.Equal(afterFirst, s.Bases[0].CurrentHP, 2);
+        Assert.True(s.Bases[0].RegenSuppressedHours > 0f);
 
-        float expected = 100f + BaseCombatStep.BaseRegenPerHour - 42f * 0.8f; // Regen first, then attack (Task91: Tank Attack 42)
-        Assert.Equal(expected, s.Bases[0].CurrentHP, 2);
+        // From the second tick on the siege nets the full attack value - no more free repairs.
+        BaseCombatStep.Advance(s, 1f);
+        Assert.Equal(afterFirst - 42f * 0.8f, s.Bases[0].CurrentHP, 2);
+    }
+
+    [Fact]
+    public void Lone_infantry_can_eventually_take_an_undefended_supply_depot()
+    {
+        // Task124 (bug report): infantry siege DPS is 18*0.8 = 14.4/h, below the 20/h regen, so with
+        // unconditional regen a faction holding only a supply depot could never be beaten - the HP
+        // never moved and the attackers were eventually removed as "stuck".
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        var depot = new MilitaryBase(1, BaseType.SupplyDepot, new WorldPos(0, 0, 0));
+        depot.OwnerFactionId = 1;
+        depot.MaxHP = depot.CurrentHP = FortificationRules.DefaultMaxHP(BaseType.SupplyDepot);
+        s.Bases.Add(depot);
+        var infantry = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(10, 0, 0));
+        infantry.State = UnitState.Moving;
+        s.Units.Add(infantry);
+
+        // 400 HP at 14.4/h needs ~28 hours of firing, which outlasts an infantry ammo load (12h), so
+        // the squad is kept supplied - as ResupplyStep would inside a supply zone or via a truck.
+        for (int h = 0; h < 40; h++)
+        {
+            infantry.Ammo = 1f;
+            BaseCombatStep.Advance(s, 1f);
+            Occupation.ResolveCaptures(s); // the real tick resolves captures right after combat
+            StuckCleanupStep.Advance(s, 1f);
+        }
+
+        Assert.Equal((byte)0, depot.OwnerFactionId.Value);  // captured, not merely damaged
+        Assert.True(infantry.IsAlive);          // and the besieger was not removed as "stuck"
+    }
+
+    [Fact]
+    public void Besieging_units_are_not_despawned_as_stuck()
+    {
+        // Task124: base sieges never set State=Engaging, so the stall watchdog used to delete the
+        // attackers standing at the enemy base.
+        var s = StateWithHostileBase(100000f, 100000f); // never falls, so the siege runs long
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        tank.State = UnitState.Moving;
+        s.Units.Add(tank);
+
+        for (int h = 0; h < (int)StuckCleanupStep.DespawnAfterHours + 5; h++)
+        {
+            BaseCombatStep.Advance(s, 1f);
+            StuckCleanupStep.Advance(s, 1f);
+        }
+
+        Assert.True(tank.IsAlive);
+    }
+
+    [Fact]
+    public void Regeneration_resumes_once_the_shooting_stops()
+    {
+        var s = StateWithHostileBase(100f, 500f);
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Units.Add(new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0)));
+        BaseCombatStep.Advance(s, 1f);
+        float afterHit = s.Bases[0].CurrentHP;
+
+        s.Units.Clear(); // attackers gone
+        for (int h = 0; h < (int)BaseCombatStep.RegenSuppressedAfterHitHours; h++)
+            BaseCombatStep.Advance(s, 1f);
+        Assert.Equal(afterHit, s.Bases[0].CurrentHP, 2); // still suppressed
+
+        BaseCombatStep.Advance(s, 1f);
+        Assert.Equal(afterHit + BaseCombatStep.BaseRegenPerHour, s.Bases[0].CurrentHP, 2);
     }
 
     [Fact]

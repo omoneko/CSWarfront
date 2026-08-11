@@ -19,6 +19,15 @@ namespace CSWarfront.Core
         /// regen — see TargetingRulesTests).</summary>
         public const float BaseRegenPerHour = 20f;
 
+        /// <summary>Task124 (bug report "a faction holding only a supply depot can never be beaten: units
+        /// attack, HP never drops, and the attackers eventually vanish"): a base stops regenerating for
+        /// this long after each hit it takes. Regen was previously unconditional, so any siege whose DPS
+        /// was below BaseRegenPerHour made literally no progress — most visibly with infantry
+        /// (14.4/h &lt; 20/h) against an undefended fortification, where no unit combat ever happens to
+        /// mask it. Attacks refresh the window every tick, so a sustained siege always nets damage while
+        /// "left alone, it recovers" still holds once the shooting stops.</summary>
+        public const float RegenSuppressedAfterHitHours = 6f;
+
         public static void Advance(WarState state, float dt)
         {
             // Consume the capture grace of new bases first. Bases in grace are excluded entirely from this
@@ -31,7 +40,13 @@ namespace CSWarfront.Core
             {
                 var b = state.Bases[j];
 
-                if (b.OwnerFactionId != null && b.CurrentHP > 0f && b.CurrentHP < b.MaxHP)
+                // Task124: run down the post-hit suppression window; a base under fire does not repair.
+                if (b.RegenSuppressedHours > 0f)
+                {
+                    b.RegenSuppressedHours -= dt;
+                    if (b.RegenSuppressedHours < 0f) b.RegenSuppressedHours = 0f;
+                }
+                else if (b.OwnerFactionId != null && b.CurrentHP > 0f && b.CurrentHP < b.MaxHP)
                 {
                     b.CurrentHP += BaseRegenPerHour * dt;
                     if (b.CurrentHP > b.MaxHP) b.CurrentHP = b.MaxHP;
@@ -93,6 +108,7 @@ namespace CSWarfront.Core
                     // the AirCombat multiplier.
                     b.CurrentHP -= CombatMath.DamagePerHit(type.Attack, 0f) * dt * siegeAccuracy
                         * AirCombat.DamageMultiplier(type);
+                    b.RegenSuppressedHours = RegenSuppressedAfterHitHours; // Task124: under fire = no repairs
                     // Task85: only ground forces can grind a base to HP 0 (= capture). Air and sea attacks
                     // stop at HP 1 (the final point must always be taken by land troops).
                     float floor = TargetingRules.BaseHpFloor(type.Domain);
@@ -116,7 +132,17 @@ namespace CSWarfront.Core
                 // Task99: if at least one base was attacked this tick, consume ammo (attacking several
                 // bases at once still consumes one tick's worth = matching the anti-unit consumption
                 // rate).
-                if (firedAtAnyBase) AmmoRules.ConsumeFire(u, type, dt);
+                if (firedAtAnyBase)
+                {
+                    AmmoRules.ConsumeFire(u, type, dt);
+                    // Task124: a unit besieging a base stands still on purpose, yet nothing sets
+                    // State=Engaging for base combat (CombatStep only does that for unit targets), so
+                    // StuckCleanupStep used to silently despawn besiegers after DespawnAfterHours —
+                    // exactly the reported "attackers vanish without ever capturing". Firing at a base
+                    // is progress: clear the stall tracking.
+                    u.StuckAnchor = null;
+                    u.StuckHours = 0f;
+                }
             }
         }
     }

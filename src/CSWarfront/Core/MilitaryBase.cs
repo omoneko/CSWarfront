@@ -92,6 +92,14 @@ namespace CSWarfront.Core
             }
         }
 
+        /// <summary>Task124: in-game hours left during which this base does not regenerate HP, refreshed
+        /// every time it takes damage (BaseCombatStep). Without it, any attacking force whose siege DPS
+        /// is below BaseRegenPerHour could never reduce a base's HP at all — a lone infantry squad
+        /// (18 attack × 0.8 siege accuracy = 14.4/h vs 20/h regen) besieged forever, took the base to
+        /// zero never, and was finally deleted by StuckCleanupStep. Runtime-only: not persisted, so a
+        /// reloaded save simply starts regenerating again.</summary>
+        public float RegenSuppressedHours;
+
         // --- Task101 (Update 3): extra state for field fortifications and cargo stations ---
 
         /// <summary>Stored supplies (SupplyDepot/CargoStation only; capped by
