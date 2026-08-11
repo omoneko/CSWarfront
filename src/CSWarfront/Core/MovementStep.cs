@@ -161,6 +161,10 @@ namespace CSWarfront.Core
                 float stepLen = type.Speed * GlobalSpeedMultiplier * dt;
                 if (stepLen <= 0f) continue;
 
+                // Task125: how this unit copes with terrain off the road network. Only consumed by the
+                // land straight-line helpers below (sea/air/rail have their own movement models).
+                MobilityClass mobility = TerrainMobility.ClassOf(type.Category);
+
                 // Task101: military trains move on rails only (follow the Path waypoints laid by TrainStep
                 // verbatim; no straight-line fallback and no water/cover/road checks — rails are always
                 // considered passable. Without a Path the train does not move).
@@ -237,13 +241,13 @@ namespace CSWarfront.Core
 
                 if (u.CoverDestination.HasValue)
                 {
-                    AdvanceTowardCover(u, stepLen, dt, height, water);
+                    AdvanceTowardCover(u, stepLen, dt, height, water, mobility);
                     continue;
                 }
 
                 if (u.Order == UnitOrder.RallyHold)
                 {
-                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen, height, water);
+                    if (u.RallyPoint.HasValue) AdvanceTowardRally(u, stepLen, height, water, mobility);
                     continue;
                 }
 
@@ -266,7 +270,7 @@ namespace CSWarfront.Core
 
                 stepLen = ConsumePath(u, stepLen);
                 if (stepLen > 0f)
-                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen, height, water);
+                    AdvanceStraight(u, u.OrderTargetPos.Value, stepLen, height, water, mobility);
             }
         }
 
@@ -274,7 +278,8 @@ namespace CSWarfront.Core
         /// toward the RallyPoint by UnitCommands.ApplyRally) if present, then falls back to straight-line
         /// movement (ConsumePath/AdvanceStraight are the exact same helpers used for OrderTargetPos movement).
         /// Once within CoverArrivalDistance, does nothing further (stays put).</summary>
-        private static void AdvanceTowardRally(UnitInstance u, float stepLen, IHeightSampler height, IWaterSampler water)
+        private static void AdvanceTowardRally(UnitInstance u, float stepLen, IHeightSampler height, IWaterSampler water,
+            MobilityClass mobility)
         {
             WorldPos rally = u.RallyPoint.Value;
             float dist = u.Position.HorizontalDistanceTo(rally);
@@ -282,7 +287,7 @@ namespace CSWarfront.Core
 
             stepLen = ConsumePath(u, stepLen);
             if (stepLen > 0f)
-                AdvanceStraight(u, rally, stepLen, height, water);
+                AdvanceStraight(u, rally, stepLen, height, water, mobility);
         }
 
         /// <summary>Kinematic movement toward the CoverDestination. On entering CoverArrivalDistance the
@@ -291,7 +296,8 @@ namespace CSWarfront.Core
         /// cover evaluation from the next tick" (false, the compatibility fallback path). At any other
         /// distance it advances with the same interpolation as AdvanceStraight (keeping CoverHoldTimer at 0
         /// while travelling, so only time actually spent stationary is measured).</summary>
-        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt, IHeightSampler height, IWaterSampler water)
+        private static void AdvanceTowardCover(UnitInstance u, float stepLen, float dt, IHeightSampler height, IWaterSampler water,
+            MobilityClass mobility)
         {
             WorldPos coverPos = u.CoverDestination.Value;
             float distBefore = u.Position.HorizontalDistanceTo(coverPos);
@@ -327,7 +333,7 @@ namespace CSWarfront.Core
 
             // Not yet arrived = the hold has not started, so the timer stays 0.
             u.CoverHoldTimer = 0f;
-            AdvanceStraight(u, coverPos, stepLen, height, water);
+            AdvanceStraight(u, coverPos, stepLen, height, water, mobility);
         }
 
         /// <summary>Consumes waypoints in order while the Path lasts. Returns the leftover stepLen (for the
@@ -394,8 +400,69 @@ namespace CSWarfront.Core
         /// terrain-sampled "arrival" handling on top at dist==0 would re-introduce the surface snap the
         /// on-path logic just avoided (recurring at bridge-end destinations). The principle made explicit
         /// here: surface/water checks apply only when actually moving a positive distance.</summary>
-        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height, IWaterSampler water)
+        /// <summary>Task125: off-road terrain handling for land units. Straight-line movement here is by
+        /// definition off the road network (on-path movement is consumed by ConsumePath first), so this
+        /// is where the class's off-road penalty, the slope penalty and the maximum traversable slope
+        /// apply. A step onto ground too steep for the class is refused and deflected sideways; if no
+        /// deflection works the unit waits this tick. Returns the (possibly reduced) step length and the
+        /// direction to actually move in.
+        ///
+        /// Deliberately not applied to on-path movement: road-network geometry carries bridges and
+        /// embankments whose height must not be re-derived from the terrain sampler (Task77).</summary>
+        private static readonly float[] DeflectionDegrees = { 0f, 35f, -35f, 70f, -70f };
+
+        private static bool TryTerrainStep(UnitInstance u, WorldPos target, MobilityClass mobility,
+            IHeightSampler height, float stepLen, out WorldPos aim, out float allowedStepLen)
         {
+            aim = target;
+            allowedStepLen = stepLen;
+
+            float dist = u.Position.HorizontalDistanceTo(target);
+            if (dist <= 0.01f) return true;
+
+            float dirX = (target.X - u.Position.X) / dist;
+            float dirZ = (target.Z - u.Position.Z) / dist;
+
+            float fromHeight;
+            if (height == null || !height.TrySampleHeight(u.Position.X, u.Position.Z, out fromHeight))
+                return true; // no terrain data: behave exactly as before (never block on missing input)
+
+            float probe = TerrainMobility.SlopeSampleDistance;
+            for (int i = 0; i < DeflectionDegrees.Length; i++)
+            {
+                double rad = DeflectionDegrees[i] * System.Math.PI / 180.0;
+                float cos = (float)System.Math.Cos(rad), sin = (float)System.Math.Sin(rad);
+                float dx = dirX * cos - dirZ * sin;
+                float dz = dirX * sin + dirZ * cos;
+
+                float toHeight;
+                if (!height.TrySampleHeight(u.Position.X + dx * probe, u.Position.Z + dz * probe, out toHeight))
+                    return true; // sampling failed mid-way: fall back to unrestricted movement
+
+                float slope = TerrainMobility.SlopeDegrees(fromHeight, toHeight, probe);
+                if (!TerrainMobility.CanTraverse(mobility, slope)) continue;
+
+                allowedStepLen = stepLen * TerrainMobility.SpeedFactor(mobility, slope, false);
+                // Straight ahead: keep the real target so arrival still snaps exactly onto it.
+                if (i == 0) return true;
+                aim = new WorldPos(u.Position.X + dx * dist, target.Y, u.Position.Z + dz * dist);
+                return true;
+            }
+
+            allowedStepLen = 0f; // hemmed in by ground too steep for this class
+            return false;
+        }
+
+        private static void AdvanceStraight(UnitInstance u, WorldPos target, float stepLen, IHeightSampler height,
+            IWaterSampler water, MobilityClass mobility)
+        {
+            WorldPos aim;
+            float terrainStepLen;
+            if (!TryTerrainStep(u, target, mobility, height, stepLen, out aim, out terrainStepLen)) return;
+            target = aim;
+            stepLen = terrainStepLen;
+            if (stepLen <= 0f) return;
+
             float dist = u.Position.HorizontalDistanceTo(target);
             if (dist <= 0.01f) return; // Already there (usually ConsumePath's on-path snap): do nothing.
 

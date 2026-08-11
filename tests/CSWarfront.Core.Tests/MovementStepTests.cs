@@ -736,10 +736,11 @@ public class MovementStepTests
         MovementStep.Advance(s, 1f); // stepLen ≈ TankSpeedPerHour(5.418), a partial move that does not yet reach the target
 
         var pos = s.Units[0].Position;
-        Assert.Equal(TankSpeedPerHour, pos.X, 2);
-        Assert.Equal(0f, pos.Z, 1);
-        // Under the legacy interpolation Y would stay 0, but TrySampleHeight(X, Z) = X + 0 = X is adopted.
-        Assert.Equal(pos.X, pos.Y, 3);
+        Assert.True(pos.X > 0f, "expected partial movement toward the target");
+        // Under the legacy interpolation Y would stay 0, but TrySampleHeight(X, Z) = X + Z is adopted.
+        // Asserted as a relation, not a fixed landing spot: this test is about the height seam, and the
+        // exact step length now also depends on terrain (Task125 slope/off-road factors).
+        Assert.Equal(pos.X + pos.Z, pos.Y, 3);
     }
 
     [Fact]
@@ -757,10 +758,10 @@ public class MovementStepTests
         MovementStep.Advance(s, 1f); // partial move that does not yet reach CoverArrivalDistance
 
         var pos = s.Units[0].Position;
-        Assert.Equal(0f, pos.X, 1);
         Assert.True(pos.Z > 0f, "expected partial movement toward CoverDestination");
-        // TrySampleHeight(X, Z) = X + Z = 0 + Z = Z is adopted (under the legacy interpolation Y would stay 0).
-        Assert.Equal(pos.Z, pos.Y, 3);
+        // TrySampleHeight(X, Z) = X + Z is adopted (under the legacy interpolation Y would stay 0).
+        // Relational for the same reason as the straight-line case above (Task125).
+        Assert.Equal(pos.X + pos.Z, pos.Y, 3);
     }
 
     [Fact]
