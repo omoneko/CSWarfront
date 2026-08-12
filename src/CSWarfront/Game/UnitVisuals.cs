@@ -112,6 +112,19 @@ namespace CSWarfront.Game
             /// decide whether to play the movement sound).</summary>
             public bool MovedThisFrame;
 
+            /// <summary>Task126: the rotating turret, when this model has one (TurretMeshSplitter).
+            /// Null for every other unit, which is also the "render rigid" signal in MoveVisual.</summary>
+            public Transform Turret;
+
+            /// <summary>Task126: half a turn is added to the turret's yaw when the model's barrel was
+            /// authored pointing -Z, so such a model still aims its gun at the target rather than its
+            /// back.</summary>
+            public float TurretBarrelSign;
+
+            /// <summary>Task126: the turret's current yaw relative to the hull (degrees). Kept so the
+            /// gun traverses smoothly instead of snapping, and returns to dead ahead when idle.</summary>
+            public float TurretYaw;
+
             /// <summary>Task109: Time (Time.time based) at which to retry attaching the movement
             /// sound. Wav loading proceeds asynchronously in a coroutine, so units spawned right
             /// after a load cannot grab the clip at creation time. We retry only a few times with
@@ -377,7 +390,37 @@ namespace CSWarfront.Game
             {
                 _visuals.Clear();
                 _failedInstances.Clear();
+                TurretMeshSplitter.Reset(); // Task126: the split meshes are ours to destroy
             }
+        }
+
+        /// <summary>Task126: degrees per second the gun traverses. Deliberately unhurried — a real
+        /// turret is slower than the hull it sits on, and a snapping gun looks like a glitch.</summary>
+        private const float TurretTraverseDegreesPerSecond = 45f;
+
+        /// <summary>Task126: turns the turret toward worldAim (zero = return to dead ahead), rate
+        /// limited, in the hull's local frame. Main thread only.</summary>
+        private static void AimTurret(VisualEntry entry, Vector3 worldAim)
+        {
+            float targetYaw = 0f;
+            if (worldAim.sqrMagnitude > 1e-6f)
+            {
+                Vector3 local = entry.GameObject.transform.InverseTransformDirection(worldAim);
+                local.y = 0f;
+                if (local.sqrMagnitude > 1e-6f)
+                {
+                    targetYaw = Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg;
+                    // A barrel modelled pointing -Z aims correctly once the turret is turned around.
+                    if (entry.TurretBarrelSign < 0f) targetYaw += 180f;
+                }
+            }
+
+            float delta = Mathf.DeltaAngle(entry.TurretYaw, targetYaw);
+            float step = TurretTraverseDegreesPerSecond * Time.deltaTime;
+            if (Mathf.Abs(delta) <= step) entry.TurretYaw = targetYaw;
+            else entry.TurretYaw += Mathf.Sign(delta) * step;
+
+            entry.Turret.localRotation = Quaternion.Euler(0f, entry.TurretYaw, 0f);
         }
 
         private static VisualEntry CreateVisual(UnitVisualState s)
@@ -454,11 +497,16 @@ namespace CSWarfront.Game
                 // Add the gap to that and clamp to a safety band (same idea as muzzleOffsetY).
                 float iconLocalHeightY = Mathf.Clamp(pivotOffsetY + mesh.bounds.max.y + IconGapAboveMesh, MinIconLocalHeightY, MaxIconLocalHeightY);
 
+                // Task126: split the mesh into hull + rotating turret when the model has one. Only
+                // categories that actually traverse a gun are offered to the detector, so a lucky
+                // shape on some other unit can never take a model apart.
+                TurretParts turretParts = TurretRules.CanHaveTurret(s.TypeKey) ? TurretMeshSplitter.TryGet(mesh) : null;
+
                 GameObject model = new GameObject("Model");
                 model.transform.SetParent(go.transform, false);
                 model.transform.localPosition = new Vector3(0f, pivotOffsetY, 0f);
                 MeshFilter filter = model.AddComponent<MeshFilter>();
-                filter.sharedMesh = mesh;
+                filter.sharedMesh = turretParts != null ? turretParts.Hull : mesh;
                 MeshRenderer renderer = model.AddComponent<MeshRenderer>();
                 if (useBuiltInMaterials)
                 {
@@ -467,6 +515,22 @@ namespace CSWarfront.Game
                 else
                 {
                     renderer.sharedMaterial = material;
+                }
+
+                Transform turretTransform = null;
+                if (turretParts != null)
+                {
+                    // The turret mesh was rebuilt around its ring, so the child sits at the ring and
+                    // simply rotates in place. It is parented to the model child, inheriting the same
+                    // bottom-to-Y=0 correction as the hull.
+                    GameObject turret = new GameObject("Turret");
+                    turret.transform.SetParent(model.transform, false);
+                    turret.transform.localPosition = turretParts.Pivot;
+                    turret.AddComponent<MeshFilter>().sharedMesh = turretParts.Turret;
+                    MeshRenderer turretRenderer = turret.AddComponent<MeshRenderer>();
+                    if (useBuiltInMaterials) turretRenderer.sharedMaterials = builtInMaterials;
+                    else turretRenderer.sharedMaterial = material;
+                    turretTransform = turret.transform;
                 }
 
                 go.transform.position = s.Position;
@@ -510,7 +574,9 @@ namespace CSWarfront.Game
                     LevelFlight = IsLevelFlightType(s.TypeKey), // Task108
                     Cars = cars,
                     CarBehindHead = carBehindHead,
-                    Engine = engine // Task109
+                    Engine = engine, // Task109
+                    Turret = turretTransform, // Task126
+                    TurretBarrelSign = turretParts != null ? turretParts.BarrelSign : 1f
                 };
             }
             catch (Exception e)
@@ -636,7 +702,11 @@ namespace CSWarfront.Game
             // Task83: A unit that fired recently faces the firing direction instead of the movement
             // direction (applied every frame regardless of whether there is a movement delta, so that
             // it faces the enemy even in a stationary engagement).
-            if (Time.time < entry.FacingHoldUntil && entry.FacingDirection.sqrMagnitude > 1e-6f)
+            // Task126: a unit with a detected turret keeps its hull on the movement direction and
+            // turns the gun instead — that is the whole point of a turret. Everything else keeps the
+            // Task83 behaviour of turning the entire model toward what it is shooting at.
+            bool aiming = Time.time < entry.FacingHoldUntil && entry.FacingDirection.sqrMagnitude > 1e-6f;
+            if (aiming && entry.Turret == null)
             {
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(entry.FacingDirection);
             }
@@ -644,6 +714,14 @@ namespace CSWarfront.Game
             {
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
+
+            if (entry.Turret != null)
+                AimTurret(entry, aiming ? entry.FacingDirection : Vector3.zero);
+
+            // Task126: traverse the gun toward the target (or back to dead ahead), at a fixed rate so
+            // it reads as a turret turning rather than a snap.
+            // (AimTurret is called above, before the train cars, so the hull rotation it reads is this
+            // frame's.)
 
             // Task108: Re-place the articulated cars (military freight train) along the head's trail.
             if (entry.Cars != null)

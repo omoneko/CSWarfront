@@ -177,5 +177,50 @@ public class TurretDetectionTests
     {
         Assert.False(DetectModel(model), model + " should not be detected as turreted");
     }
+
+    [Fact]
+    public void Only_gun_traversing_categories_are_offered_to_the_detector()
+    {
+        // The gate that stops an unlucky silhouette on some other unit from being taken apart.
+        Assert.True(TurretRules.CanHaveTurret(UnitCategory.Tank));
+        Assert.True(TurretRules.CanHaveTurret(UnitCategory.Artillery));
+        Assert.True(TurretRules.CanHaveTurret(UnitCategory.AntiAir));
+
+        Assert.False(TurretRules.CanHaveTurret(UnitCategory.Apc));
+        Assert.False(TurretRules.CanHaveTurret(UnitCategory.SupplyTruck));
+        Assert.False(TurretRules.CanHaveTurret(UnitCategory.Infantry));
+        Assert.False(TurretRules.CanHaveTurret(UnitCategory.AirSuperiority));
+        Assert.False(TurretRules.CanHaveTurret(UnitCategory.MilitaryTrain));
+
+        Assert.True(TurretRules.CanHaveTurret("Tank_T3"));
+        Assert.False(TurretRules.CanHaveTurret("SupplyTruck_T1"));
+        Assert.False(TurretRules.CanHaveTurret("nonsense"));
+        Assert.False(TurretRules.CanHaveTurret(null));
+    }
+
+    [Fact]
+    public void The_split_keeps_the_barrel_with_the_turret_and_the_tracks_with_the_hull()
+    {
+        // What the renderer relies on: every triangle lands on exactly one side, the gun turns with
+        // the turret, and the running gear stays put.
+        MeshBuilder m = Tank();
+        TurretSplit split = m.Detect();
+        Assert.True(split.Found);
+
+        int hull = 0, turret = 0;
+        float barrelMaxY = float.MinValue, trackMaxY = float.MinValue;
+        for (int t = 0; t + 2 < m.T.Count; t += 3)
+        {
+            float cy = (m.V[m.T[t] * 3 + 1] + m.V[m.T[t + 1] * 3 + 1] + m.V[m.T[t + 2] * 3 + 1]) / 3f;
+            float cz = (m.V[m.T[t] * 3 + 2] + m.V[m.T[t + 1] * 3 + 2] + m.V[m.T[t + 2] * 3 + 2]) / 3f;
+            if (cy >= split.SplitY) { turret++; if (cz > 4f) barrelMaxY = cy; }
+            else { hull++; if (cy < 1.5f) trackMaxY = cy; }
+        }
+
+        Assert.True(hull > 0 && turret > 0);
+        Assert.Equal(m.T.Count / 3, hull + turret);   // nothing lost, nothing duplicated
+        Assert.True(barrelMaxY > float.MinValue, "the barrel must travel with the turret");
+        Assert.True(trackMaxY > float.MinValue, "the running gear must stay with the hull");
+    }
 }
 }
