@@ -37,8 +37,8 @@ public class TurretDetectionTests
     {
         var m = new MeshBuilder();
         m.Box(0f, 1f, 0f, 3.6f, 2f, 10f);      // hull: wide and long
-        m.Box(-1.6f, 0.6f, 0f, 0.8f, 1.2f, 9f); // tracks - what makes a tank hull wide, and most of
-        m.Box(1.6f, 0.6f, 0f, 0.8f, 1.2f, 9f);  // its geometry (the turret must not dominate)
+        m.Box(-1.4f, 0.6f, 0f, 0.8f, 1.2f, 9f); // tracks - what makes a tank hull wide, and most of
+        m.Box(1.4f, 0.6f, 0f, 0.8f, 1.2f, 9f);  // its geometry (the turret must not dominate)
         m.Box(0f, 3f, 0.5f, 2f, 2f, 4f);       // turret: clearly narrower, above
         m.Box(0f, 3f, 4.5f, 0.4f, 0.4f, 5f);   // barrel: thin, reaching forward
         return m;
@@ -61,8 +61,8 @@ public class TurretDetectionTests
     {
         var m = new MeshBuilder();
         m.Box(0f, 1f, 0f, 3.6f, 2f, 10f);
-        m.Box(-1.6f, 0.6f, 0f, 0.8f, 1.2f, 9f);
-        m.Box(1.6f, 0.6f, 0f, 0.8f, 1.2f, 9f);
+        m.Box(-1.4f, 0.6f, 0f, 0.8f, 1.2f, 9f);
+        m.Box(1.4f, 0.6f, 0f, 0.8f, 1.2f, 9f);
         m.Box(0f, 3f, -0.5f, 2f, 2f, 4f);
         m.Box(0f, 3f, -4.5f, 0.4f, 0.4f, 5f);   // barrel toward -Z
 

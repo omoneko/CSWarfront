@@ -53,8 +53,14 @@ namespace CSWarfront.Core
         /// <summary>The turret ring is a *step* in the width profile, not a fixed ratio: real turrets
         /// are wide (the bundled tank's is 74% of its hull), so any absolute threshold either misses
         /// them or cuts elsewhere. A band qualifies when the profile drops by at least this share of
-        /// the hull width from the band below it.</summary>
-        public const float MinRingDrop = 0.12f;
+        /// the hull width from the band below it.
+        ///
+        /// Calibrated against the Workshop tank assets actually installed here, not just the bundled
+        /// models: at 0.12 the K2 MBT was missed by a hair (its ring step measures 11.4%), and at 0.06
+        /// a bare "tracks" sub-mesh started qualifying. 0.08 detects every real tank tried — K2, IS-2,
+        /// Luchs, Sabrah — while still rejecting the FUCHS APC, water tanks, an anti-tank barrier and
+        /// Thomas the Tank Engine.</summary>
+        public const float MinRingDrop = 0.08f;
 
         /// <summary>Above the ring the model must never get wider again (beyond this slack) — that is
         /// what distinguishes "the hull ends here" from a mere notch or a wheel arch.</summary>
