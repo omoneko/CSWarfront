@@ -60,6 +60,11 @@ namespace CSWarfront.Core
                     MilitaryBase b = state.Bases[bi];
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
                     if (b.Type != BaseType.Army) continue;
+                    // Task128 (bug report "bases build transport helicopters even with auto-produce
+                    // off"): the toggle means "the AI does not produce at this base", and automatic
+                    // fleet upkeep is production too. Only ProductionPlanning honoured it before, so a
+                    // player who turned it off still got helicopters (and supply trucks) appearing.
+                    if (!b.AutoProduce) continue;
                     if (CountHelisNearBase(state, f.Id, b) >= HelisPerArmyBase) continue;
                     if (!UnitCosts.TryPay(f, heliType, f.Treasury)) break;
 

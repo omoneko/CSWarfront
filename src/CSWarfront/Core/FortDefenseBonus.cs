@@ -21,14 +21,32 @@ namespace CSWarfront.Core
         /// <summary>The incoming-damage divisor (1.5 = +50% defense).</summary>
         public const float DamageDivisor = 1.5f;
 
+        /// <summary>Task127: infantry holding a city building (BuildingGarrisonStep) get the same
+        /// protection as a trench. Slightly less than a purpose-built fortification would be more
+        /// realistic, but a single divisor keeps "infantry in cover" one predictable rule for the
+        /// player rather than three grades of it.</summary>
+        public const float GarrisonDamageDivisor = 1.5f;
+
         /// <summary>The incoming-damage multiplier applied to target (1/1.5 for infantry classes
-        /// inside a bonus zone, 1.0 otherwise).</summary>
+        /// inside a bonus zone or holding a building, 1.0 otherwise).</summary>
         public static float Multiplier(WarState state, UnitInstance target, UnitType targetType)
         {
             if (targetType == null) return 1f;
             if (targetType.Category != UnitCategory.Infantry &&
                 targetType.Category != UnitCategory.MechInfantry) return 1f;
-            return IsOnFortification(state, target.Position) ? 1f / DamageDivisor : 1f;
+            if (IsOnFortification(state, target.Position)) return 1f / DamageDivisor;
+            if (IsGarrisoned(state, target)) return 1f / GarrisonDamageDivisor;
+            return 1f;
+        }
+
+        /// <summary>Task127: whether this unit is currently holding a city building as cover — it was
+        /// sent to one and has arrived. Reading the hold rather than a separate flag keeps the two in
+        /// step automatically: the moment the garrison is released the bonus is gone.</summary>
+        public static bool IsGarrisoned(WarState state, UnitInstance u)
+        {
+            if (state.Cover == null || !u.CoverHold || !u.CoverDestination.HasValue) return false;
+            if (u.GarrisonHoldTimer <= 0f) return false; // only counts once actually in position
+            return u.Position.HorizontalDistanceTo(u.CoverDestination.Value) <= MovementStep.CoverArrivalDistance;
         }
 
         /// <summary>Whether pos lies inside a trench/bunker bonus zone (also used by FortSeekStep's

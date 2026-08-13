@@ -353,6 +353,11 @@ namespace CSWarfront.Game
                 // decided this tick within the same tick.
                 CoverSeekStep.Advance(State, dt);
 
+                // Task127: infantry take cover against a nearby city building while in contact, instead
+                // of fighting on the open road. Between the two so that a fortification still wins:
+                // this overrides the plain cover decision, and FortSeekStep below overrides this.
+                BuildingGarrisonStep.Advance(State, dt);
+
                 // Task101: infantry position-seeking (head for trenches/bunkers when enemies approach).
                 // Runs right after CoverSeekStep and overrides the cover decision when a fortified position
                 // is available (fortification > shadow of a building, see the FortSeekStep comment).

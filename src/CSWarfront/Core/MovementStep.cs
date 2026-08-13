@@ -411,8 +411,31 @@ namespace CSWarfront.Core
         /// embankments whose height must not be re-derived from the terrain sampler (Task77).</summary>
         private static readonly float[] DeflectionDegrees = { 0f, 35f, -35f, 70f, -70f };
 
+        /// <summary>Task129: whether the straight step from a unit's position to (nx, nz) touches water
+        /// at its landing point or anywhere along the way. Sampled every WaterSampleSpacing metres (and
+        /// always at both ends), which is finer than any shoreline a land unit can cross in one tick.
+        /// A null sampler means "no water data" and never blocks movement.</summary>
+        private const float WaterSampleSpacing = 8f;
+
+        private static bool CrossesWater(WorldPos from, float nx, float nz, IWaterSampler water)
+        {
+            if (water == null) return false;
+            if (water.IsWater(nx, nz)) return true;
+
+            float dx = nx - from.X, dz = nz - from.Z;
+            float dist = (float)System.Math.Sqrt(dx * dx + dz * dz);
+            int steps = (int)(dist / WaterSampleSpacing);
+            for (int i = 1; i <= steps; i++)
+            {
+                float t = i / (float)(steps + 1);
+                if (water.IsWater(from.X + dx * t, from.Z + dz * t)) return true;
+            }
+            return false;
+        }
+
         private static bool TryTerrainStep(UnitInstance u, WorldPos target, MobilityClass mobility,
-            IHeightSampler height, float stepLen, out WorldPos aim, out float allowedStepLen)
+            IHeightSampler height, float stepLen, out WorldPos aim, out float allowedStepLen,
+            IWaterSampler water)
         {
             aim = target;
             allowedStepLen = stepLen;
@@ -441,6 +464,8 @@ namespace CSWarfront.Core
 
                 float slope = TerrainMobility.SlopeDegrees(fromHeight, toHeight, probe);
                 if (!TerrainMobility.CanTraverse(mobility, slope)) continue;
+                // Task129: never deflect a land unit into the water to dodge a slope.
+                if (water != null && water.IsWater(u.Position.X + dx * probe, u.Position.Z + dz * probe)) continue;
 
                 allowedStepLen = stepLen * TerrainMobility.SpeedFactor(mobility, slope, false);
                 // Straight ahead: keep the real target so arrival still snaps exactly onto it.
@@ -458,7 +483,7 @@ namespace CSWarfront.Core
         {
             WorldPos aim;
             float terrainStepLen;
-            if (!TryTerrainStep(u, target, mobility, height, stepLen, out aim, out terrainStepLen)) return;
+            if (!TryTerrainStep(u, target, mobility, height, stepLen, out aim, out terrainStepLen, water)) return;
             target = aim;
             stepLen = terrainStepLen;
             if (stepLen <= 0f) return;
@@ -497,7 +522,11 @@ namespace CSWarfront.Core
             float t = stepLen / dist;
             float nx = u.Position.X + (target.X - u.Position.X) * t;
             float nz = u.Position.Z + (target.Z - u.Position.Z) * t;
-            if (water != null && water.IsWater(nx, nz)) return;
+            // Task129 (bug report "vehicles drive themselves into the water"): testing only the landing
+            // point lets a fast unit step straight over a shoreline strip and end up in the middle of
+            // the water, because nothing in between was ever sampled. Sample along the step instead —
+            // any wet point on the way halts the unit at the bank, as intended.
+            if (CrossesWater(u.Position, nx, nz, water)) return;
             float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
             u.Position = ResolvePosition(nx, ny, nz, height);
         }

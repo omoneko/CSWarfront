@@ -160,6 +160,29 @@ namespace CSWarfront.Core
         /// <summary>Computes the spot where the unit actually stands — the cover's far side as seen from
         /// the threat. When coverCentre and threatPos nearly coincide (degenerate case), escapes in the
         /// deterministic default direction (+Z).</summary>
+        /// <summary>Task127: the standing position against the building closest to from, within
+        /// maxDistance, on the side away from threatPos. Unlike TryFindBestCover this does not score
+        /// candidates for how well they screen the unit — a garrison is "get off the road into the
+        /// nearest doorway", so plain proximity is the rule. Deterministic: ties go to the earlier
+        /// entry, which is the CoverMapBuilder's stable building order.</summary>
+        public bool TryFindNearestStandingPosition(WorldPos from, WorldPos threatPos, float maxDistance,
+            out WorldPos standingPosition)
+        {
+            standingPosition = from;
+            int best = -1;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < _points.Count; i++)
+            {
+                float d = from.HorizontalDistanceTo(_points[i].Position);
+                if (d > maxDistance) continue;
+                if (d < bestDist) { bestDist = d; best = i; }
+            }
+            if (best < 0) return false;
+
+            standingPosition = StandingPosition(_points[best], threatPos);
+            return true;
+        }
+
         private static WorldPos StandingPosition(CoverPoint cover, WorldPos threatPos)
         {
             float ax = cover.Position.X - threatPos.X;

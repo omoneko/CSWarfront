@@ -164,6 +164,15 @@ namespace CSWarfront.Core
         /// is decided (CoverSeekStep).</summary>
         public float CoverHoldTimer;
 
+        /// <summary>Task127: elapsed in-game time this unit has been holding a city building as cover
+        /// (runtime-only, not persisted). Capped by BuildingGarrisonStep.MaxGarrisonHours so taking
+        /// cover can never stall an advance, exactly like entrenching.</summary>
+        public float GarrisonHoldTimer;
+
+        /// <summary>Task127: remaining in-game time during which BuildingGarrisonStep must not pick a
+        /// building for this unit (runtime-only, not persisted).</summary>
+        public float GarrisonCooldown;
+
         /// <summary>Task120: elapsed in-game time this unit has been entrenched at a fortification chosen by
         /// FortSeekStep (runtime-only, not persisted). Past FortSeekStep.MaxFortHoldHours the unit lets go
         /// and resumes its advance (so entrenching can never block an assault/capture forever), and

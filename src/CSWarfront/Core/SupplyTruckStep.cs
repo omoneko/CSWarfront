@@ -70,6 +70,7 @@ namespace CSWarfront.Core
                     MilitaryBase b = state.Bases[bi];
                     if (b.OwnerFactionId == null || b.OwnerFactionId.Value != f.Id) continue;
                     if (b.Type != BaseType.Army) continue;
+                    if (!b.AutoProduce) continue; // Task128: auto-produce off means no automatic upkeep either
                     if (CountTrucksNearBase(state, f.Id, b) >= TrucksPerArmyBase) continue;
                     if (!UnitCosts.TryPay(f, truckType, f.Treasury)) break; // out of resources: this faction is done this tick
 
