@@ -92,9 +92,15 @@ namespace CSWarfront.Core
         /// unit diverts toward it (priority over advancing on enemy bases). Once the threat despawns or is
         /// destroyed, the next call automatically returns to normal base advances (stateless re-evaluation
         /// every call — no explicit "revert" logic needed).</summary>
+        /// <summary>Task132: how many road routes may be computed per call for units halted by water.
+        /// Their own budget, so a column stuck at a river never competes with routine pathfinding — and
+        /// still bounded, because a bank with no bridge anywhere would otherwise retry every tick.</summary>
+        public const int MaxCrossingPathComputations = 4;
+
         public static void AssignAdvance(WarState state, byte factionId, float dt, int maxPathComputations = 4)
         {
             int pathComputations = 0;
+            int crossingComputations = 0; // Task132: separate budget for units halted at water
             WorldPos? divertTarget = FindNearbyThreatToOwnTerritory(state, factionId);
 
             // Task105 (aggressive rail usage): enumerate this faction's operational station pairs once
@@ -218,11 +224,28 @@ namespace CSWarfront.Core
                 if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, u.OrderTargetPos.Value, sameTargetEps))
                     u.ClearPath();
 
-                if (isLand && state.Roads != null && u.Path == null && u.PathRetryCooldown <= 0f)
-                {
-                    if (pathComputations >= maxPathComputations) continue; // budget exhausted; carry over to the next call
+                // Task132 (playtest "vehicles drive into the river instead of using the bridge"): a unit
+                // whose last step was refused by water is asking for a road route across it. Movement
+                // falls back to a straight line whenever the path is missing or spent, and that line
+                // runs into the river; the unit then waited out PathRetryFailCooldownHours at the bank.
+                // Such a unit therefore skips the cooldown, discards a spent path, and draws on its own
+                // small budget so a column stuck at a ford is never starved by the ordinary one.
+                bool needsCrossing = isLand && u.WaterBlocked;
+                if (needsCrossing && u.Path != null && u.PathIndex >= u.Path.Count) u.ClearPath();
 
-                    pathComputations++;
+                if (isLand && state.Roads != null && u.Path == null &&
+                    (u.PathRetryCooldown <= 0f || needsCrossing))
+                {
+                    if (needsCrossing)
+                    {
+                        if (crossingComputations >= MaxCrossingPathComputations) continue;
+                        crossingComputations++;
+                    }
+                    else
+                    {
+                        if (pathComputations >= maxPathComputations) continue; // budget exhausted; carry over to the next call
+                        pathComputations++;
+                    }
 
                     // Task105: when the rail detour is clearly worthwhile, redirect the road path's goal to
                     // the boarding station (OrderTargetPos itself remains the final objective — after

@@ -165,6 +165,9 @@ namespace CSWarfront.Core
                 // land straight-line helpers below (sea/air/rail have their own movement models).
                 MobilityClass mobility = TerrainMobility.ClassOf(type.Category);
 
+                // Task132: assume the way is clear; the water checks below set this again if it is not.
+                u.WaterBlocked = false;
+
                 // Task101: military trains move on rails only (follow the Path waypoints laid by TrainStep
                 // verbatim; no straight-line fallback and no water/cover/road checks — rails are always
                 // considered passable. Without a Path the train does not move).
@@ -494,7 +497,7 @@ namespace CSWarfront.Core
             if (dist <= stepLen)
             {
                 // Task77: if the landing point itself is water, do not move at all this tick (halt at the shoreline).
-                if (water != null && water.IsWater(target.X, target.Z)) return;
+                if (water != null && water.IsWater(target.X, target.Z)) { u.WaterBlocked = true; return; }
                 // Arrival: adopt the target's Y verbatim (Task37; previously u.Position.Y was kept).
                 // Task53: snap to the actual surface Y when state.Height is supplied.
                 u.Position = ResolvePosition(target.X, target.Y, target.Z, height);
@@ -526,7 +529,7 @@ namespace CSWarfront.Core
             // point lets a fast unit step straight over a shoreline strip and end up in the middle of
             // the water, because nothing in between was ever sampled. Sample along the step instead —
             // any wet point on the way halts the unit at the bank, as intended.
-            if (CrossesWater(u.Position, nx, nz, water)) return;
+            if (CrossesWater(u.Position, nx, nz, water)) { u.WaterBlocked = true; return; } // Task132
             float ny = u.Position.Y + (target.Y - u.Position.Y) * t;
             u.Position = ResolvePosition(nx, ny, nz, height);
         }

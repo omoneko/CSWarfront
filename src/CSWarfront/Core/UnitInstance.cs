@@ -164,6 +164,13 @@ namespace CSWarfront.Core
         /// is decided (CoverSeekStep).</summary>
         public float CoverHoldTimer;
 
+        /// <summary>Task132: set when this tick's movement was refused because the way ahead is water
+        /// (runtime-only, not persisted). AiTargeting treats it as "this unit needs a road route across
+        /// the river now": it gets its own pathfinding budget and skips the retry cooldown, so a column
+        /// halted at a bank looks for the bridge instead of standing there. Cleared by MovementStep the
+        /// moment the unit moves again.</summary>
+        public bool WaterBlocked;
+
         /// <summary>Task127: elapsed in-game time this unit has been holding a city building as cover
         /// (runtime-only, not persisted). Capped by BuildingGarrisonStep.MaxGarrisonHours so taking
         /// cover can never stall an advance, exactly like entrenching.</summary>
