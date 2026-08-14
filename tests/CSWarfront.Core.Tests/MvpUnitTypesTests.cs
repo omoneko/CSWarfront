@@ -17,7 +17,7 @@ public class MvpUnitTypesTests
         // Attack/Range/BuildTime/Speed match the old values (intentionally kept as-is). HP/Armor/Cost changed to the new table's values.
         Assert.Equal(140f, t.MaxHP, 3);
         Assert.Equal(42f, t.Attack, 3); // Task91: 40->42
-        Assert.Equal(60f, t.Range, 3);
+        Assert.Equal(75f, t.Range, 3); // Task131: 60->75
         Assert.Equal(10f, t.Armor, 3);
         Assert.Equal(60f, t.Cost, 3);
         Assert.Equal(8f, t.BuildTime, 3);

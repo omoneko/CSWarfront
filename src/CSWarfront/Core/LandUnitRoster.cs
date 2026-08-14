@@ -79,8 +79,8 @@ namespace CSWarfront.Core
             new BaseStats(UnitCategory.Infantry,      60f, 18f,  40f,  1f,  7.5f,0f, 20f, 4f, 0.75f, 0.30f, ShotKind.Gunfire),
             new BaseStats(UnitCategory.MechInfantry,   90f, 24f,  45f,  4f, 35f,  0f, 40f, 6f, 0.75f, 0.30f, ShotKind.Gunfire),
             new BaseStats(UnitCategory.Apc,           110f, 28f,  50f,  6f, 45f,  0f, 45f, 6f, 0.70f, 0.35f, ShotKind.Gunfire),
-            new BaseStats(UnitCategory.Tank,          140f, 42f,  60f, 10f, 40f,  0f, 60f, 8f, 0.70f, 1.20f, ShotKind.DirectFire),
-            new BaseStats(UnitCategory.Artillery,      70f, 55f, 120f,  2f, 25f, 30f, 70f, 9f, 0.35f, 2.50f, ShotKind.IndirectFire),
+            new BaseStats(UnitCategory.Tank,          140f, 42f,  75f, 10f, 40f,  0f, 60f, 8f, 0.70f, 1.20f, ShotKind.DirectFire),
+            new BaseStats(UnitCategory.Artillery,      70f, 55f, 145f,  2f, 25f, 30f, 70f, 9f, 0.35f, 2.50f, ShotKind.IndirectFire),
             new BaseStats(UnitCategory.DroneInfantry,  50f, 30f,  90f,  1f, 20f,  0f, 55f, 7f, 0.85f, 0.60f, ShotKind.Gunfire),
             new BaseStats(UnitCategory.AntiAir,        80f, 20f, 120f,  3f, 30f,  0f, 50f, 7f, 0.60f, 0.60f, ShotKind.Gunfire),
             // Task99: supply truck (unarmed, low HP, road speed. Attack/Range/Accuracy=0; never enters the

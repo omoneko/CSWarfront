@@ -17,7 +17,7 @@ public class UnitStatOverridesTests
             UnitType t1 = LandUnitRoster.Get(UnitCategory.Tank, 1);
             Assert.Equal(100f, t1.Attack, 3);
             Assert.Equal(200f, t1.MaxHP, 3);
-            Assert.Equal(60f, t1.Range, 3); // unspecified fields keep their defaults
+            Assert.Equal(75f, t1.Range, 3); // unspecified fields keep their defaults (Task131: tank range 75)
 
             UnitType t5 = LandUnitRoster.Get(UnitCategory.Tank, 5);
             Assert.Equal(TierScaling.Attack(100f, 5), t5.Attack, 3); // TierScaling is applied on top of the overridden value

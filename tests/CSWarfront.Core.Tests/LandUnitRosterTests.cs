@@ -40,7 +40,7 @@ public class LandUnitRosterTests
         Assert.Equal("Tank_T1", t.TypeKey);
         Assert.Equal(140f, t.MaxHP, 3);
         Assert.Equal(42f, t.Attack, 3); // Task91: 40->42 (recalibrated toward realism)
-        Assert.Equal(60f, t.Range, 3);
+        Assert.Equal(75f, t.Range, 3); // Task131: 60->75 (gunfights at a slightly longer distance)
         Assert.Equal(10f, t.Armor, 3);
         Assert.Equal(0f, t.SplashRadius, 3);
         Assert.Equal(60f, t.Cost, 3);
@@ -69,8 +69,10 @@ public class LandUnitRosterTests
     public void Artillery_T1_rebalanced_range_and_attack_are_lower_than_the_old_values()
     {
         // Task38: Artillery Tier1 Range 160->120, Attack 55->50 (nerf; accuracy 0.35 is the compensating buff).
+        // Task131: 120->145, moving with the tank so armour and guns engage a little further out; still
+        // below the 160 the Task38 nerf came down from.
         UnitType t = LandUnitRoster.Get(UnitCategory.Artillery, 1);
-        Assert.Equal(120f, t.Range, 3);
+        Assert.Equal(145f, t.Range, 3);
         Assert.Equal(55f, t.Attack, 3); // Task91: 50->55
         // HP/Armor/Speed/Splash/Cost/BuildTime stay as before (unaffected by the rebalance).
         Assert.Equal(70f, t.MaxHP, 3);

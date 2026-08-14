@@ -27,7 +27,7 @@ namespace CSWarfront.Core
         // --- The rule: a prepared position outranges the mobile version of the same weapon by a
         // --- modest margin (better sightlines, no need to move), never by a multiple. Unit ranges grow
         // --- +10%/tier, so tier 5 is 1.4x the tier 1 figures below:
-        // ---     infantry 40 (T5 56) | tank 60 (T5 84) | artillery 120 (T5 168) | AA 120 (T5 168)
+        // ---     infantry 40 (T5 56) | tank 75 (T5 105) | artillery 145 (T5 203) | AA 120 (T5 168)
         // --- Before this pass the AT pillbox reached 200 against a tank's 60-84: tanks were shot at
         // --- from outside any distance they could ever answer from, which is what made it feel
         // --- unbeatable rather than merely strong. Each emplacement now engages at a distance where
@@ -40,10 +40,11 @@ namespace CSWarfront.Core
         public const float BunkerFireIntervalHours = 0.3f;
 
         public const float ArtAttack = 55f;           // artillery T1
-        /// <summary>Outranges every artillery unit including tier 5 (168), which is what Task111's
-        /// Workshop request asked for — at the original 120 it was routinely outranged and never fired.
-        /// Task130 pulled it back from 250, where it reached half again as far as any gun in the game.</summary>
-        public const float ArtRange = 180f;
+        /// <summary>Outranges every artillery unit including tier 5, which is what Task111's Workshop
+        /// request asked for — at the original 120 it was routinely outranged and never fired. Task130
+        /// pulled it back from 250, where it reached half again as far as any gun in the game; Task131
+        /// then moved it with the SPG's own reach (120 -> 145, so tier 5 is 203).</summary>
+        public const float ArtRange = 215f;
         public const float ArtSplash = 30f;
         public const float ArtAccuracy = 0.35f;       // same as artillery units
         /// <summary>Task111 (Workshop request "15 shots instead of only 2 before resupply"): 4 -> 24 hours
@@ -63,9 +64,11 @@ namespace CSWarfront.Core
         /// it now lands those shots at a distance where the tank can shoot back, so the exchange is a
         /// fight rather than a firing-squad.</summary>
         public const float AtAttack = 80f;
-        /// <summary>Task130: 200 -> 100. Outranges a tier-5 tank (84) by a useful margin — the reason to
-        /// build one — without the old three-to-one advantage over the tanks it is meant to stop.</summary>
-        public const float AtRange = 100f;
+        /// <summary>Task130: 200 -> 100. Outranges a tier-5 tank by a useful margin — the reason to
+        /// build one — without the old three-to-one advantage over the tanks it is meant to stop.
+        /// Task131: 100 -> 130, alongside the direct-fire vehicles' own reach going up (tank 60 -> 75,
+        /// so tier 5 is now 105). Gunfights happen a little further out; the margin is unchanged.</summary>
+        public const float AtRange = 130f;
         public const float AtAccuracy = 0.55f;
         public const float AtAmmoHours = 24f;
         public const float AtFireIntervalHours = 3f;  // slow, weighty muzzle reports
