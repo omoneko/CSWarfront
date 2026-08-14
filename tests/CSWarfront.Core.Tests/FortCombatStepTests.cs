@@ -28,7 +28,7 @@ public class FortCombatStepTests
     public void Bunker_fires_at_hostiles_in_range_and_consumes_ammo()
     {
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
-        UnitInstance enemy = AddEnemyTank(s, 100, 0);
+        UnitInstance enemy = AddEnemyTank(s, 50, 0);
         UnitInstance farEnemy = AddEnemyTank(s, 500, 0, 101); // Out of range
 
         FortCombatStep.Advance(s, 1f);
@@ -42,9 +42,9 @@ public class FortCombatStepTests
     public void Bunker_does_not_shoot_through_buildings()
     {
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
-        UnitInstance enemy = AddEnemyTank(s, 100, 0);
+        UnitInstance enemy = AddEnemyTank(s, 50, 0);
         var cover = new CoverMap();
-        cover.Add(new WorldPos(50, 0, 0), 10f); // A building right in the middle of the line of fire
+        cover.Add(new WorldPos(25, 0, 0), 10f); // A building right in the middle of the line of fire
         s.Cover = cover;
 
         FortCombatStep.Advance(s, 1f);
@@ -72,7 +72,7 @@ public class FortCombatStepTests
     public void Dry_or_neutralized_forts_do_not_fire()
     {
         var s = StateWithFort(BaseType.Bunker, out MilitaryBase bunker);
-        UnitInstance enemy = AddEnemyTank(s, 100, 0);
+        UnitInstance enemy = AddEnemyTank(s, 50, 0);
 
         bunker.FortAmmo = 0f; // Out of ammo
         FortCombatStep.Advance(s, 1f);
@@ -169,5 +169,36 @@ public class FortCombatStepTests
             Assert.Equal(ResupplyStep.RefillPerHour, fort.FortAmmo, 3);
             Assert.True(depot.StoredSupplies < 100f);
         }
+    }
+
+    /// <summary>Task130 (playtest "the AT pillbox is too strong"): emplacement ranges are tied to the
+    /// weapon class each one represents. A prepared position outranges the mobile version by a modest
+    /// margin - never by a multiple, which is what let the pillbox shoot tanks that could not reply.
+    /// Encoded as a test so the relationship cannot drift the next time a number is tuned.</summary>
+    [Fact]
+    public void Emplacement_ranges_stay_tied_to_the_units_they_face()
+    {
+        var types = new UnitTypeRegistry();
+        LandUnitRoster.RegisterAll(types);
+        float infantryT5 = types.Get("Infantry_T5").Range;
+        float tankT5 = types.Get("Tank_T5").Range;
+        float artilleryT5 = types.Get("Artillery_T5").Range;
+        float aaT5 = types.Get("AntiAir_T5").Range;
+
+        // Each emplacement reaches past the best mobile version of its own weapon...
+        Assert.True(FortCombatStep.BunkerRange > infantryT5);
+        Assert.True(FortCombatStep.AtRange > tankT5);
+        Assert.True(FortCombatStep.ArtRange > artilleryT5);
+        Assert.True(FortCombatStep.AaRange > aaT5);
+
+        // ...but never runs away with it: the target must be able to close and fight back.
+        Assert.True(FortCombatStep.BunkerRange <= infantryT5 * 1.5f);
+        Assert.True(FortCombatStep.AtRange <= tankT5 * 1.5f);
+        Assert.True(FortCombatStep.ArtRange <= artilleryT5 * 1.5f);
+        Assert.True(FortCombatStep.AaRange <= aaT5 * 1.5f);
+
+        // The anti-tank gun still hits hardest of anything on the field - that is its role.
+        Assert.True(FortCombatStep.AtAttack > types.Get("Tank_T1").Attack);
+        Assert.True(FortCombatStep.AtAttack > FortCombatStep.ArtAttack);
     }
 }

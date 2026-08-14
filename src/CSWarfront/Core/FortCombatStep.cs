@@ -21,16 +21,29 @@ namespace CSWarfront.Core
     /// </summary>
     public static class FortCombatStep
     {
+        // --- Task130 (playtest: "the AT pillbox is too strong"): fortification ranges are derived from
+        // --- the weapon class each emplacement represents, instead of being picked in isolation.
+        // ---
+        // --- The rule: a prepared position outranges the mobile version of the same weapon by a
+        // --- modest margin (better sightlines, no need to move), never by a multiple. Unit ranges grow
+        // --- +10%/tier, so tier 5 is 1.4x the tier 1 figures below:
+        // ---     infantry 40 (T5 56) | tank 60 (T5 84) | artillery 120 (T5 168) | AA 120 (T5 168)
+        // --- Before this pass the AT pillbox reached 200 against a tank's 60-84: tanks were shot at
+        // --- from outside any distance they could ever answer from, which is what made it feel
+        // --- unbeatable rather than merely strong. Each emplacement now engages at a distance where
+        // --- the target can fight back.
         public const float BunkerAttack = 54f;        // infantry T1 (18) × 3
-        public const float BunkerRange = 120f;
+        /// <summary>Infantry-class engagement: a little beyond a tier-5 rifle squad (56).</summary>
+        public const float BunkerRange = 60f;
         public const float BunkerAccuracy = 0.75f;    // same as infantry
         public const float BunkerAmmoHours = 12f;     // same as infantry
         public const float BunkerFireIntervalHours = 0.3f;
 
         public const float ArtAttack = 55f;           // artillery T1
-        /// <summary>Task111 (Workshop request): 120 -> 250. A static emplacement should outrange the mobile
-        /// artillery it is built from; at 120 it was routinely outranged and never got to fire.</summary>
-        public const float ArtRange = 250f;
+        /// <summary>Outranges every artillery unit including tier 5 (168), which is what Task111's
+        /// Workshop request asked for — at the original 120 it was routinely outranged and never fired.
+        /// Task130 pulled it back from 250, where it reached half again as far as any gun in the game.</summary>
+        public const float ArtRange = 180f;
         public const float ArtSplash = 30f;
         public const float ArtAccuracy = 0.35f;       // same as artillery units
         /// <summary>Task111 (Workshop request "15 shots instead of only 2 before resupply"): 4 -> 24 hours
@@ -46,8 +59,13 @@ namespace CSWarfront.Core
         // --- Task117 (Workshop request): AT pillbox — anti-armor direct fire. "Artillery with less
         // --- fire rate, higher damage, a little less range": heavy single shots, building-blocked
         // --- line of sight like the bunker, and the Tank matchup profile (strong vs armor). ---
-        public const float AtAttack = 110f;
-        public const float AtRange = 200f;            // a little less than the artillery position's 250
+        /// <summary>Task130: 110 -> 80. Still the hardest-hitting emplacement (a tank musters 42), but
+        /// it now lands those shots at a distance where the tank can shoot back, so the exchange is a
+        /// fight rather than a firing-squad.</summary>
+        public const float AtAttack = 80f;
+        /// <summary>Task130: 200 -> 100. Outranges a tier-5 tank (84) by a useful margin — the reason to
+        /// build one — without the old three-to-one advantage over the tanks it is meant to stop.</summary>
+        public const float AtRange = 100f;
         public const float AtAccuracy = 0.55f;
         public const float AtAmmoHours = 24f;
         public const float AtFireIntervalHours = 3f;  // slow, weighty muzzle reports
@@ -56,7 +74,9 @@ namespace CSWarfront.Core
         // --- per-shot scheme (AntiAirCombat): every AaFireIntervalHours one shot at the nearest
         // --- hostile aircraft rolls hit/miss deterministically; only hits deal the lump damage. ---
         public const float AaAttack = 45f;
-        public const float AaRange = 250f;
+        /// <summary>Task130: 250 -> 180, matching the artillery position and staying above a tier-5
+        /// SPAAG (168).</summary>
+        public const float AaRange = 180f;
         /// <summary>The AntiAir tier whose hit-chance table the emplacement borrows
         /// (AntiAirCombat.HitChanceFor).</summary>
         public const byte AaTier = 3;
