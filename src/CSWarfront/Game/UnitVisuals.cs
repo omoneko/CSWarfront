@@ -271,6 +271,7 @@ namespace CSWarfront.Game
             Camera mainCamera = Camera.main;
             Vector3? cameraPos = mainCamera != null ? (Vector3?)mainCamera.transform.position : null;
             UnitEngineAudio.BeginFrame(); // Task109: reset the concurrent movement-sound counter
+            _simulationPaused = IsGamePaused(); // Task135: hold the turrets still while the game is paused
 
             _seenIds.Clear();
             for (int i = 0; i < snapshot.Count; i++)
@@ -398,10 +399,29 @@ namespace CSWarfront.Game
         /// turret is slower than the hull it sits on, and a snapping gun looks like a glitch.</summary>
         private const float TurretTraverseDegreesPerSecond = 45f;
 
+        /// <summary>Task135 (user request "stop the turrets while the game is paused"): this runs on the
+        /// main thread every frame, which keeps ticking while the simulation is stopped — so a paused
+        /// battle had guns still swinging around over motionless tanks. The traverse is the one piece of
+        /// unit animation driven by frame time rather than by state, so it is the only one that needs to
+        /// be told the game is paused. Same check the engine audio uses.</summary>
+        private static bool IsGamePaused()
+        {
+            try { return SimulationManager.instance.SimulationPaused; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>Task135: whether the simulation was paused when this frame's Sync began. Sampled
+        /// once per frame rather than once per turret.</summary>
+        private static bool _simulationPaused;
+
         /// <summary>Task126: turns the turret toward worldAim (zero = return to dead ahead), rate
         /// limited, in the hull's local frame. Main thread only.</summary>
         private static void AimTurret(VisualEntry entry, Vector3 worldAim)
         {
+            // Task135: freeze mid-traverse rather than snapping to the target — resuming continues from
+            // exactly where the gun was pointing.
+            if (_simulationPaused) return;
+
             float targetYaw = 0f;
             if (worldAim.sqrMagnitude > 1e-6f)
             {

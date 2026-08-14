@@ -1,5 +1,7 @@
 # CSWarfront UI strings — 简体中文 (Chinese Simplified)
 # Translated by yylove hanhan (Steam Workshop). Thank you!
+# 此后新增功能的条目由作者补充翻译，可能不够地道，欢迎指正。
+# (Entries added after that contribution were translated by the mod author; corrections welcome.)
 # 键名（等号左边）、{0}/{1} 占位符和 \n 换行转义符请保持原样。
 # 缺失的键会自动回退到英文。
 # 欢迎贡献: https://github.com/omoneko/CSWarfront
@@ -71,6 +73,13 @@ BuildPanel_ToastNoLayout = 尚未保存防御布局 - 请先点击“保存防�
 BuildPanel_ToastNothingMissing = 所有已保存的防御阵地都完好无损
 BuildPanel_ToastRebuilt = 已重建{1}处缺失阵地中的{0}处
 BuildPanel_ToastRebuiltOutOfMoney = 已重建{1}处缺失阵地中的{0}处 - 资金不足，已中断
+BuildPanel_DisbandButton = 解散所有单位
+BuildPanel_DisbandTooltip = 一次性清除地图上所有势力的单位。开启了自动生产的基地会立即开始补充
+BuildPanel_DisbandConfirmTitle = 解散所有单位
+BuildPanel_DisbandConfirmFormat = 确定要清除地图上现有的{0}个单位吗？\n\n它们不经战斗直接消失，不计入任何一方的损失。开启了自动生产的基地会开始补充。
+BuildPanel_ToastDisbanded = 已解散{0}个单位
+BuildPanel_ToastNoUnitsToDisband = 地图上没有单位
+BuildPanel_ToastConfirmUnavailable = 无法打开确认对话框 - 未执行解散
 BaseInfo_Title = CSWarfront 军事基地
 BaseInfo_SectionFaction = 势力
 BaseInfo_Unaffiliated = 无所属
