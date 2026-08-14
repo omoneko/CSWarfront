@@ -91,9 +91,18 @@ namespace CSWarfront.Game
                     segmentsAccepted++;
                 }
 
+                // Task133 (playtest question "can a standalone bridge be crossed?"): join road fragments that
+                // are cut off from the network but reachable over dry land — above all a bridge whose ends
+                // were never wired to a road. Without this the bridge is its own connected component and A*
+                // reports the far bank as unreachable, so units fall back to the straight line and stop at
+                // the water. Uses the very same water definition as land movement (WaterSampler), so a
+                // connector is passable by exactly the rule that decides whether a unit may drive there.
+                int linked = graph.LinkStrandedComponents(new WaterSampler());
+
                 ModConfig.Log("RoadGraphBuilder: built nodes=" + graph.NodeCount +
                     " segmentsAccepted=" + segmentsAccepted +
-                    " segmentsSkippedNonRoad=" + segmentsSkippedNonRoad);
+                    " segmentsSkippedNonRoad=" + segmentsSkippedNonRoad +
+                    " strandedLinks=" + linked);
                 _failureAlreadyLogged = false; // Success, so the next failure will again be logged once
                 return graph;
             }

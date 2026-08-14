@@ -138,6 +138,180 @@ namespace CSWarfront.Core
             return added;
         }
 
+        // --- Task133: making a bridge that is not wired into the road network usable ---
+        //
+        // Playtest question: "can a standalone bridge, not connected to any road, be crossed?" It could not.
+        // Such a bridge forms its own connected component, so A* from a bank road to the far side always
+        // returned null (unreachable), the unit fell back to the straight line and stopped at the water
+        // (Task129/132). Land units, however, drive off-road perfectly well - the only thing they cannot do
+        // is enter water. So the gap between a stranded fragment and the rest of the network is passable
+        // whenever the ground between them is dry.
+        //
+        // LinkStrandedComponents adds exactly those "drive across the gap" edges: from nodes of a stranded
+        // component to the nearest node of another component, provided the straight line between them stays
+        // out of the water and is not a cliff. A* then treats the bridge as an ordinary part of the network
+        // and routes over it. The main network itself is never given shortcuts (only non-largest components
+        // are used as a source), so no route through the city changes.
+
+        /// <summary>Task133: how far a stranded road fragment may reach for the rest of the network.
+        /// Roughly "how far off-road a column will detour to get onto a bridge".</summary>
+        public const float StrandedLinkRadius = 150f;
+
+        /// <summary>Task133: a link steeper than this is rejected. On-path movement skips the terrain checks
+        /// (Task77/125), so a connector must not be allowed to run up a cliff face.</summary>
+        public const float StrandedLinkMaxSlopeDegrees = 25f;
+
+        /// <summary>Task133: spacing of the water samples along a candidate link. Any wet sample rejects it.</summary>
+        private const float StrandedLinkWaterSampleSpacing = 8f;
+
+        /// <summary>Task133: edges added per stranded component. One or two are enough to join it to the
+        /// network; the rest would only be redundant parallel gaps.</summary>
+        private const int MaxLinksPerComponent = 3;
+
+        /// <summary>Task133: nodes examined per stranded component before giving up on it. Bounds the work of
+        /// a component that simply has no dry neighbour (an island), which would otherwise be re-scanned in
+        /// full on every road-graph rebuild.</summary>
+        private const int MaxAttemptsPerComponent = 64;
+
+        /// <summary>Task133: connects road fragments that are separated from the main network but reachable
+        /// across dry land - most importantly a bridge the player built without wiring roads to its ends.
+        /// A null water sampler means "no water data", in which case nothing is linked (a connector may only
+        /// be added when it can be *proven* dry; guessing would hand units a route straight through a river).
+        /// Returns the number of edges added. Scanning in ascending node-id order keeps the result
+        /// deterministic.</summary>
+        public int LinkStrandedComponents(IWaterSampler water)
+        {
+            return LinkStrandedComponents(StrandedLinkRadius, StrandedLinkMaxSlopeDegrees, water);
+        }
+
+        public int LinkStrandedComponents(float radius, float maxSlopeDegrees, IWaterSampler water)
+        {
+            if (water == null || radius <= 0f) return 0;
+
+            // Snapshot the component ids up front: AddEdge invalidates the cache, and re-deriving them mid-pass
+            // would make the outcome depend on the order edges happened to be added.
+            Dictionary<ushort, int> components = ComputeComponentIds();
+            int largest;
+            if (!TryGetLargestComponent(components, out largest)) return 0;
+
+            var ordered = new List<ushort>(_nodes.Keys);
+            ordered.Sort();
+
+            var buckets = new Dictionary<long, List<ushort>>();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                Node n = _nodes[ordered[i]];
+                long key = BucketKey(n.Position, radius);
+                List<ushort> bucket;
+                if (!buckets.TryGetValue(key, out bucket)) { bucket = new List<ushort>(); buckets[key] = bucket; }
+                bucket.Add(n.Id);
+            }
+
+            var linksPerComponent = new Dictionary<int, int>();
+            var attemptsPerComponent = new Dictionary<int, int>();
+            int added = 0;
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                Node a = _nodes[ordered[i]];
+                int component;
+                if (!components.TryGetValue(a.Id, out component)) continue;
+                if (component == largest) continue; // the main network is never given shortcuts
+
+                int links;
+                linksPerComponent.TryGetValue(component, out links);
+                if (links >= MaxLinksPerComponent) continue;
+                int attempts;
+                attemptsPerComponent.TryGetValue(component, out attempts);
+                if (attempts >= MaxAttemptsPerComponent) continue;
+                attemptsPerComponent[component] = attempts + 1;
+
+                ushort partner;
+                if (!TryFindLinkPartner(a, component, components, buckets, radius, maxSlopeDegrees, water, out partner))
+                    continue;
+
+                AddEdge(a.Id, partner);
+                linksPerComponent[component] = links + 1;
+                added++;
+            }
+
+            return added;
+        }
+
+        /// <summary>Task133: nearest node of a different component that this node can reach across dry,
+        /// climbable ground. Candidates are tried nearest-first, so a blocked closest neighbour does not hide
+        /// a usable one slightly further away.</summary>
+        private bool TryFindLinkPartner(Node a, int ownComponent, Dictionary<ushort, int> components,
+            Dictionary<long, List<ushort>> buckets, float radius, float maxSlopeDegrees, IWaterSampler water,
+            out ushort partner)
+        {
+            partner = 0;
+            var candidates = new List<ushort>();
+            int cx = (int)System.Math.Floor(a.Position.X / radius);
+            int cz = (int)System.Math.Floor(a.Position.Z / radius);
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    List<ushort> bucket;
+                    if (!buckets.TryGetValue(((long)(cx + dx) << 32) ^ (uint)(cz + dz), out bucket)) continue;
+                    for (int k = 0; k < bucket.Count; k++)
+                    {
+                        ushort otherId = bucket[k];
+                        int otherComponent;
+                        if (!components.TryGetValue(otherId, out otherComponent)) continue;
+                        if (otherComponent == ownComponent) continue; // already the same fragment
+                        // The component ids are a snapshot taken before any edge was added, so two nodes an
+                        // earlier iteration already joined still look separate here.
+                        if (a.Neighbors.Contains(otherId)) continue;
+                        if (a.Position.HorizontalDistanceTo(_nodes[otherId].Position) > radius) continue;
+                        candidates.Add(otherId);
+                    }
+                }
+            }
+            if (candidates.Count == 0) return false;
+
+            // Nearest first; ties resolve to the lower id so the pass stays deterministic.
+            candidates.Sort((x, y) =>
+            {
+                float dx2 = a.Position.HorizontalDistanceTo(_nodes[x].Position);
+                float dy2 = a.Position.HorizontalDistanceTo(_nodes[y].Position);
+                if (dx2 < dy2) return -1;
+                if (dx2 > dy2) return 1;
+                return x.CompareTo(y);
+            });
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (!IsLinkPassable(a.Position, _nodes[candidates[i]].Position, maxSlopeDegrees, water)) continue;
+                partner = candidates[i];
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Task133: whether a land unit could actually drive the gap between two nodes - dry the
+        /// whole way, and not a cliff. Both endpoints are sampled as well as the interior, because a node can
+        /// sit right at the waterline.</summary>
+        private static bool IsLinkPassable(WorldPos from, WorldPos to, float maxSlopeDegrees, IWaterSampler water)
+        {
+            float dist = from.HorizontalDistanceTo(to);
+            if (dist <= 0.01f) return true; // coincident nodes: nothing to drive across
+
+            float dy = to.Y - from.Y;
+            if (dy < 0f) dy = -dy;
+            double slope = System.Math.Atan(dy / dist) * 180.0 / System.Math.PI;
+            if (slope > maxSlopeDegrees) return false;
+
+            int steps = (int)(dist / StrandedLinkWaterSampleSpacing);
+            for (int i = 0; i <= steps + 1; i++)
+            {
+                float t = i / (float)(steps + 1);
+                if (water.IsWater(from.X + (to.X - from.X) * t, from.Z + (to.Z - from.Z) * t)) return false;
+            }
+            return true;
+        }
+
         private static long BucketKey(WorldPos p, float cellSize)
         {
             int cx = (int)System.Math.Floor(p.X / cellSize);
