@@ -120,6 +120,10 @@ namespace CSWarfront.Game
                 // buildings are registered as logical facilities by BasePlacementWatcher as usual).
                 ProcessDefenseLayoutRequests();
 
+                // Task134: clear every unit off the map on request (construction panel's Disband All
+                // Units button). Done on the sim thread like every other unit mutation.
+                ProcessDisbandRequest();
+
                 // Task106: clear problem icons (no road connection, electricity, water, etc.) on
                 // fortification-type buildings (field fortifications are treated as not needing city
                 // infrastructure).

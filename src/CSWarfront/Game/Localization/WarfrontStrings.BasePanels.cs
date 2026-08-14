@@ -35,6 +35,15 @@ namespace CSWarfront.Game
         public static string BuildPanel_ToastRebuilt = "Rebuilt {0} of {1} missing position(s)";
         public static string BuildPanel_ToastRebuiltOutOfMoney = "Rebuilt {0} of {1} missing position(s) - out of money";
 
+        // --- MilitaryBuildPanel: disband all units (Task134) --------------------------------------
+        public static string BuildPanel_DisbandButton = "Disband All Units";
+        public static string BuildPanel_DisbandTooltip = "Remove every unit of every faction from the map at once. Bases with auto-production on will start building replacements";
+        public static string BuildPanel_DisbandConfirmTitle = "Disband all units";
+        public static string BuildPanel_DisbandConfirmFormat = "Remove all {0} unit(s) currently on the map?\n\nThey disappear without a fight and count as no one's losses. Bases with auto-production enabled will begin replacing them.";
+        public static string BuildPanel_ToastDisbanded = "Disbanded {0} unit(s)";
+        public static string BuildPanel_ToastNoUnitsToDisband = "There are no units on the map";
+        public static string BuildPanel_ToastConfirmUnavailable = "Could not open the confirmation dialog - nothing was disbanded";
+
         // --- BaseInfoPanel: title / faction section / model button -------------------------------
         public static string BaseInfo_Title = "CSWarfront Military Base";
         public static string BaseInfo_SectionFaction = "Faction";

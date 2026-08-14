@@ -48,6 +48,9 @@ namespace CSWarfront.Game.UI
         /// <summary>Extra height for the defense-layout button row at the bottom (Task114).</summary>
         private const float DefenseRowHeight = 26f;
 
+        /// <summary>Task134: extra height for the Disband All Units row below the defense row.</summary>
+        private const float DisbandRowHeight = 26f;
+
         private static UIPanel _panel;
         private static UIButton[] _rowButtons;
         private static UIButton _toggleButton;
@@ -145,7 +148,8 @@ namespace CSWarfront.Game.UI
                 _panel.name = "WarfrontBuildPanel";
                 _panel.backgroundSprite = "MenuPanel2";
                 _panel.width = PanelWidth;
-                _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f) + DefenseRowHeight + 4f + Pad;
+                _panel.height = Pad + 28f + RowTypes.Length * (RowHeight + 4f)
+                    + DefenseRowHeight + 4f + DisbandRowHeight + 4f + Pad;
                 _panel.relativePosition = new Vector3(150f, 55f); // Task110: opens directly below the top-row button
                 _panel.isVisible = false;
 
@@ -216,7 +220,49 @@ namespace CSWarfront.Game.UI
                 rebuild.relativePosition = new Vector3(Pad + halfWidth + 4f, defenseRowY);
                 rebuild.eventClick += (c, e) => MilitaryManager.RequestRebuildDefenses();
 
+                // Task134 (Workshop request): clear every unit off the map in one click, for players
+                // whose frame rate suffers once hundreds of troops are in the field. Behind a
+                // confirmation prompt — it is not undoable and there is no reason to ever hit it by
+                // accident while reaching for the build buttons above.
+                UIButton disband = _panel.AddUIComponent<UIButton>();
+                disband.text = WarfrontStrings.BuildPanel_DisbandButton;
+                disband.tooltip = WarfrontStrings.BuildPanel_DisbandTooltip;
+                disband.textScale = 0.7f;
+                disband.size = new Vector2(PanelWidth - Pad * 2f, DisbandRowHeight);
+                disband.normalBgSprite = "ButtonMenu";
+                disband.hoveredBgSprite = "ButtonMenuHovered";
+                disband.pressedBgSprite = "ButtonMenuPressed";
+                disband.relativePosition = new Vector3(Pad, defenseRowY + DefenseRowHeight + 4f);
+                disband.eventClick += (c, e) => ConfirmDisbandAll();
+
                 RefreshRows();
+            }
+        }
+
+        /// <summary>Task134: asks before clearing the map. With nothing deployed there is nothing to
+        /// confirm, so the toast goes straight out instead of opening a dialog over an empty request.
+        /// The vanilla ConfirmPanel returns 1 for the affirmative button.</summary>
+        private static void ConfirmDisbandAll()
+        {
+            int count = MilitaryManager.CountLivingUnits();
+            if (count == 0)
+            {
+                CommandToast.Show(WarfrontStrings.BuildPanel_ToastNoUnitsToDisband);
+                return;
+            }
+
+            try
+            {
+                ConfirmPanel.ShowModal(
+                    WarfrontStrings.BuildPanel_DisbandConfirmTitle,
+                    string.Format(WarfrontStrings.BuildPanel_DisbandConfirmFormat, count),
+                    (component, result) => { if (result == 1) MilitaryManager.RequestDisbandAllUnits(); });
+            }
+            catch (Exception)
+            {
+                // If the vanilla dialog is unavailable for any reason, do not silently swallow the
+                // click — but do not disband without asking either.
+                CommandToast.Show(WarfrontStrings.BuildPanel_ToastConfirmUnavailable);
             }
         }
 
