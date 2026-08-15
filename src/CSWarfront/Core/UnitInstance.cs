@@ -82,6 +82,17 @@ namespace CSWarfront.Core
         /// units at the front (SupplyTruckStep). Always 0 and unused for non-truck units.</summary>
         public float SupplyLoad;
 
+        /// <summary>Task136: the friendly unit this supply truck is currently delivering to (runtime-only,
+        /// not persisted). The delivery target used to be re-derived every tick as "whoever has the least
+        /// ammo right now", and that ranking changes for reasons that have nothing to do with the truck —
+        /// every shot fired anywhere on the map reorders it — so a truck between two dry units turned round
+        /// every few ticks and delivered to neither. Held until the target is full or gone.</summary>
+        public uint? SupplyTargetUnitId;
+
+        /// <summary>Task136: the fortification this supply truck is currently delivering to (runtime-only,
+        /// not persisted). Same reasoning as <see cref="SupplyTargetUnitId"/>.</summary>
+        public ushort? SupplyTargetFortId;
+
         /// <summary>Task101: InstanceId of the unit carrying this one (transport helicopter / military
         /// train). Non-null = being carried (persisted in v10). While carried the unit is excluded from
         /// every step (movement/combat/supply/stuck/AI advance) and cannot be targeted

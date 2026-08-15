@@ -125,6 +125,10 @@ namespace CSWarfront.Core
         /// supported).</summary>
         private static void AdvanceEmptyTruck(WarState state, UnitInstance u, MilitaryBase home, ref int pathComputations)
         {
+            // Task136: an empty truck owes nobody a delivery — the next load starts from a fresh choice.
+            u.SupplyTargetUnitId = null;
+            u.SupplyTargetFortId = null;
+
             Faction f = state.FindFaction(u.FactionId);
             MilitaryBase source = FindNearestLoadSource(state, u, f);
             if (source == null)
@@ -191,12 +195,26 @@ namespace CSWarfront.Core
         private static void AdvanceLoadedTruck(WarState state, UnitInstance u, UnitType type, MilitaryBase home,
             float dt, ref int pathComputations)
         {
-            UnitInstance target = FindNeediestLandUnit(state, u);
-            MilitaryBase fortTarget = FindNeediestFort(state, u);
+            // Task136: stay with the delivery already under way. The two rankings below are recomputed
+            // from scratch every tick and are ordered by ammo, which every shot fired anywhere on the map
+            // reshuffles — so a truck placed between two dry recipients was sent at the other one every
+            // few ticks and reached neither. A commitment is dropped only when the recipient is full or
+            // gone (see ResumeDelivery), which is a strictly wider condition than the one that acquired
+            // it, so a truck always finishes what it started.
+            UnitInstance target;
+            MilitaryBase fortTarget;
+            if (!ResumeDelivery(state, u, out target, out fortTarget))
+            {
+                target = FindNeediestLandUnit(state, u);
+                fortTarget = FindNeediestFort(state, u);
 
-            // With both a unit and a fort in need, serve whichever ammo fraction is lower (deterministic;
-            // ties go to the unit).
-            if (target != null && fortTarget != null && fortTarget.FortAmmo < target.Ammo) target = null;
+                // With both a unit and a fort in need, serve whichever ammo fraction is lower
+                // (deterministic; ties go to the unit).
+                if (target != null && fortTarget != null && fortTarget.FortAmmo < target.Ammo) target = null;
+
+                u.SupplyTargetUnitId = target != null ? (uint?)target.InstanceId : null;
+                u.SupplyTargetFortId = target == null && fortTarget != null ? (ushort?)fortTarget.BaseId : null;
+            }
             if (target == null && fortTarget != null)
             {
                 if (u.Position.HorizontalDistanceTo(fortTarget.Position) > TransferRadius)
@@ -282,6 +300,44 @@ namespace CSWarfront.Core
                 u.SupplyLoad -= loadCost;
             }
             if (u.SupplyLoad < 0.001f) u.SupplyLoad = 0f; // trim the remainder so "empty → return" transitions reliably
+        }
+
+        /// <summary>Task136: returns the delivery this truck is already committed to, if that recipient is
+        /// still worth the trip. "Still worth it" is deliberately looser than the rule that picked it: a
+        /// recipient is kept until it is full (1f) rather than until it climbs back over NeedThreshold, so
+        /// the acquire and release conditions cannot chase each other. False = nothing committed (or the
+        /// recipient died, was captured or filled up), and the caller picks afresh.</summary>
+        private static bool ResumeDelivery(WarState state, UnitInstance truck, out UnitInstance target,
+            out MilitaryBase fortTarget)
+        {
+            target = null;
+            fortTarget = null;
+
+            if (truck.SupplyTargetUnitId.HasValue)
+            {
+                UnitInstance ally = state.FindUnit(truck.SupplyTargetUnitId.Value);
+                if (ally != null && IsResupplyCandidate(state, truck, ally, 1f)) { target = ally; return true; }
+                truck.SupplyTargetUnitId = null;
+            }
+
+            if (truck.SupplyTargetFortId.HasValue)
+            {
+                MilitaryBase fort = FindFort(state, truck.SupplyTargetFortId.Value);
+                if (fort != null && FortificationRules.IsArmedFortification(fort.Type)
+                    && fort.OwnerFactionId != null && fort.OwnerFactionId.Value == truck.FactionId
+                    && fort.CurrentHP > 0f && fort.FortAmmo < 1f)
+                { fortTarget = fort; return true; }
+                truck.SupplyTargetFortId = null;
+            }
+
+            return false;
+        }
+
+        private static MilitaryBase FindFort(WarState state, ushort baseId)
+        {
+            for (int b = 0; b < state.Bases.Count; b++)
+                if (state.Bases[b].BaseId == baseId) return state.Bases[b];
+            return null;
         }
 
         /// <summary>The delivery target with the least ammo (a friendly land unit below NeedThreshold).

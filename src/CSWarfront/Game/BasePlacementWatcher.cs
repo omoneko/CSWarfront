@@ -504,6 +504,12 @@ namespace CSWarfront.Game
         {
             state.Bases.Remove(mb);
 
+            // Task136: the rail route cache holds the station objects themselves, and a removed object
+            // still reports an owner and positive HP — so a demolished cargo station would pass the
+            // ownership re-check in TrainStep.RoutesOf and stay on the timetable. Removal is the one
+            // change that cannot be detected from the object, so it is announced from here.
+            if (mb.Type == BaseType.CargoStation) TrainStep.InvalidateRoutes(state);
+
             if (mb.OwnerFactionId == null) return;
             ReassignHqIfCleared(state, mb.OwnerFactionId.Value, mb.BaseId);
         }

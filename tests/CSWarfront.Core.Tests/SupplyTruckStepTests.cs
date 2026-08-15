@@ -280,4 +280,91 @@ public class SupplyTruckStepTests
 
         Assert.Equal(0f, truck.SupplyLoad, 3); // Not touched at all
     }
+
+    // --- Task136: delivery commitment (playtest class of bug: per-tick re-ranking makes carriers oscillate) ---
+
+    private static UnitInstance AddDryInfantry(WarState s, WorldPos pos, float ammo)
+    {
+        var u = new UnitInstance(s.AllocInstanceId(), LandUnitRoster.TypeKey(UnitCategory.Infantry, 1),
+            0, 100f, pos);
+        u.Ammo = ammo;
+        s.Units.Add(u);
+        return u;
+    }
+
+    /// <summary>The delivery target used to be "whoever has the least ammo right now", recomputed every
+    /// tick. Every shot fired anywhere reorders that list, so a truck between two dry recipients was sent
+    /// at the other one over and over and delivered to neither.</summary>
+    [Fact]
+    public void A_truck_finishes_the_delivery_it_started_when_someone_else_becomes_needier()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase armyBase);
+        var truck = AddTruck(s, new WorldPos(0, 0, 0), 1f);
+        UnitInstance east = AddDryInfantry(s, new WorldPos(Far, 0, 0), 0.20f);
+        UnitInstance west = AddDryInfantry(s, new WorldPos(-Far, 0, 0), 0.30f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+        Assert.Equal(east.InstanceId, truck.SupplyTargetUnitId);
+        Assert.True(truck.OrderTargetPos.Value.X > 0f);
+
+        // The other one fires a few rounds and is now the driest.
+        west.Ammo = 0.05f;
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(east.InstanceId, truck.SupplyTargetUnitId);
+        Assert.True(truck.OrderTargetPos.Value.X > 0f, "the truck turned round mid-delivery");
+    }
+
+    /// <summary>Releasing is looser than acquiring (full, not merely back above the need threshold), so the
+    /// two conditions cannot chase each other.</summary>
+    [Fact]
+    public void The_commitment_ends_once_the_recipient_is_full()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase armyBase);
+        var truck = AddTruck(s, new WorldPos(0, 0, 0), 1f);
+        UnitInstance east = AddDryInfantry(s, new WorldPos(Far, 0, 0), 0.20f);
+        UnitInstance west = AddDryInfantry(s, new WorldPos(-Far, 0, 0), 0.30f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+        Assert.Equal(east.InstanceId, truck.SupplyTargetUnitId);
+
+        east.Ammo = 1f;
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(west.InstanceId, truck.SupplyTargetUnitId);
+    }
+
+    [Fact]
+    public void A_recipient_that_dies_releases_the_commitment()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase armyBase);
+        var truck = AddTruck(s, new WorldPos(0, 0, 0), 1f);
+        UnitInstance east = AddDryInfantry(s, new WorldPos(Far, 0, 0), 0.20f);
+        UnitInstance west = AddDryInfantry(s, new WorldPos(-Far, 0, 0), 0.30f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+        Assert.Equal(east.InstanceId, truck.SupplyTargetUnitId);
+
+        east.State = UnitState.Dead;
+        east.CurrentHP = 0f;
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.Equal(west.InstanceId, truck.SupplyTargetUnitId);
+    }
+
+    [Fact]
+    public void An_empty_truck_owes_nobody_a_delivery()
+    {
+        var s = BaseState(out Faction f, out MilitaryBase armyBase);
+        var truck = AddTruck(s, new WorldPos(0, 0, 0), 1f);
+        AddDryInfantry(s, new WorldPos(Far, 0, 0), 0.20f);
+
+        SupplyTruckStep.Advance(s, 0.1f);
+        Assert.True(truck.SupplyTargetUnitId.HasValue);
+
+        truck.SupplyLoad = 0f;
+        SupplyTruckStep.Advance(s, 0.1f);
+
+        Assert.False(truck.SupplyTargetUnitId.HasValue);
+    }
 }
