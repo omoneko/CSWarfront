@@ -410,7 +410,16 @@ namespace CSWarfront.Core
         /// <summary>Task78: returns the base owned by factionId nearest to from (null when it owns none).
         /// On a near-tie (within TargetChangeEpsilon) the headquarters (IsHeadquarters) wins — a
         /// deterministic tie-break so the same base is chosen on every call even in the rare case of several
-        /// own bases at equal distance (no randomness, per the core-wide policy).</summary>
+        /// own bases at equal distance (no randomness, per the core-wide policy).
+        ///
+        /// Task136 (playtest report "with no objective left, crowds of units pile onto our own bunkers and
+        /// artillery positions and then disappear"): fortifications are not somewhere an army withdraws to.
+        /// They are 16×16 emplacements holding three men (FortSeekStep.GarrisonCapacity), and one of them
+        /// is almost always the nearest owned thing on the map — so every unit of the faction converged on
+        /// a single pillbox, could not all reach the arrival distance that ends the withdrawal, and kept
+        /// milling about as State==Moving until the stall watchdog tidied them away. A withdrawal now
+        /// targets a real base only; a faction that holds nothing but emplacements has nowhere to fall back
+        /// to, and the caller stands its units down where they are instead.</summary>
         private static MilitaryBase FindNearestOwnedBase(WarState state, byte factionId, WorldPos from)
         {
             MilitaryBase best = null; float bestDist = float.MaxValue;
@@ -418,6 +427,7 @@ namespace CSWarfront.Core
             {
                 var mb = state.Bases[b];
                 if (mb.OwnerFactionId != factionId) continue;
+                if (FortificationRules.IsFortification(mb.Type)) continue; // Task136
                 float d = from.HorizontalDistanceTo(mb.Position);
                 if (best == null || d < bestDist - TargetChangeEpsilon)
                 {

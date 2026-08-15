@@ -207,6 +207,56 @@ public class InvasionOrdersWithdrawTests
         Assert.Equal(UnitOrder.FreeAdvance, s.FindUnit(1).Order);
     }
 
+    /// <summary>Task136 (playtest report "with no objective left, crowds pile onto our own bunkers and
+    /// artillery positions and then disappear"): a fortification is an emplacement for three men, not
+    /// somewhere an army falls back to — and being small and numerous, one was almost always the nearest
+    /// owned thing on the map.</summary>
+    [Fact]
+    public void Withdraw_ignores_fortifications_even_when_one_is_much_closer()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        var realBase = new MilitaryBase(1, BaseType.Army, new WorldPos(1000, 0, 0)) { OwnerFactionId = 0 };
+        s.Bases.Add(realBase);
+        foreach (BaseType fortType in new[]
+        {
+            BaseType.Bunker, BaseType.ArtilleryPost, BaseType.AtPillbox,
+            BaseType.AaPosition, BaseType.SupplyDepot, BaseType.CargoStation
+        })
+        {
+            s.Bases.Add(new MilitaryBase((ushort)(10 + (int)fortType), fortType, new WorldPos(20, 0, 0))
+            { OwnerFactionId = 0 });
+        }
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0f, 0f, 0f));
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        Assert.Equal(1000f, s.FindUnit(1).OrderTargetPos.Value.X, 3);
+    }
+
+    /// <summary>Task136: a faction reduced to emplacements alone has nowhere to fall back to. Standing
+    /// still is right; converging on a pillbox is what produced the reported pile-up.</summary>
+    [Fact]
+    public void A_faction_holding_only_fortifications_stands_down_where_it_is()
+    {
+        var s = new WarState();
+        s.Factions.Add(new Faction(0, "Red"));
+        s.Types.Register(MvpUnitTypes.Tank_T1());
+        s.Bases.Add(new MilitaryBase(1, BaseType.Bunker, new WorldPos(20, 0, 0)) { OwnerFactionId = 0 });
+        var u = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(500f, 0f, 0f));
+        u.State = UnitState.Moving;
+        u.OrderTargetPos = new WorldPos(9999f, 0f, 0f);
+        s.Units.Add(u);
+
+        InvasionOrders.AssignAdvance(s, 0, 0f);
+
+        var after = s.FindUnit(1);
+        Assert.Equal(UnitState.Idle, after.State);
+        Assert.False(after.OrderTargetPos.HasValue);
+    }
+
     [Fact]
     public void Hold_units_are_never_pulled_into_a_withdraw()
     {

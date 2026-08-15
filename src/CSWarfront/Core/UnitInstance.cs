@@ -191,6 +191,13 @@ namespace CSWarfront.Core
         /// MaxFortHoldHours.</summary>
         public float FortSeekCooldown;
 
+        /// <summary>Task136: elapsed in-game time this unit has been marching to a fortification without
+        /// reaching it (runtime-only, not persisted). FortHoldTimer only measures time actually spent in a
+        /// position, so a unit that can never arrive was measured by nothing at all and kept walking toward
+        /// it forever. Past FortSeekStep.MaxFortApproachHours the assignment is dropped and the unit gets
+        /// on with its advance.</summary>
+        public float FortApproachTimer;
+
         /// <summary>Elapsed in-game time during which State==Engaging and TargetId has kept pointing at the
         /// same opponent (runtime-only, not persisted; Task52). Incremented/reset by CoverSeekStep each
         /// tick; past CoverSeekStep.MaxEngageHoldHours, MovementStep allows movement toward

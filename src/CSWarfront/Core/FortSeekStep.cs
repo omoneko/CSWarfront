@@ -62,6 +62,21 @@ namespace CSWarfront.Core
         /// in nearby.</summary>
         public const float ObjectiveLockRadius = 200f;
 
+        /// <summary>Task136 (playtest report "troops shuttle back and forth between the enemy and an enemy
+        /// trench and get stuck"): how long a unit may march toward a fortification without arriving before
+        /// the assignment is abandoned. FortHoldTimer only counts time spent standing in a position, so
+        /// nothing measured a unit that never got there — it walked at the trench indefinitely and was
+        /// eventually tidied away by the stall watchdog. Longer than a normal approach across SeekRadius,
+        /// short enough that a hopeless one does not cost an assault.</summary>
+        public const float MaxFortApproachHours = 6f;
+
+        /// <summary>Task136: extra radius used when deciding whether the trench a unit is *already*
+        /// assaulting still counts as enemy-held. Acquiring a target uses the true garrison radius; only
+        /// letting go is damped, so defenders stepping a few metres out of their trench no longer flips it
+        /// to "free" and sends the attacking squad somewhere else. Cleared trenches (defenders actually
+        /// dead) fall out at any radius, so Task122's roll-up-the-line behaviour is untouched.</summary>
+        public const float AssaultReleaseMargin = 60f;
+
         public static void Advance(WarState state, float dt)
         {
             state.UnitGrid.Build(state.Units);
@@ -101,18 +116,19 @@ namespace CSWarfront.Core
 
                 UnitInstance enemy = TargetSearch.FindNearestHostile(u, state.UnitGrid, state.Relations,
                     EnemyRadius, DomainMask.All, state.Types);
-                if (enemy == null) { u.FortHoldTimer = 0f; ReleaseGarrison(u, garrison, assignedFort); continue; }
+                if (enemy == null) { ClearFortTimers(u); ReleaseGarrison(u, garrison, assignedFort); continue; }
 
                 ushort currentFortId;
                 bool hasCurrent = assignedFort.TryGetValue(u.InstanceId, out currentFortId);
                 MilitaryBase fort = FindBestFort(state, u, enemy.Position, garrison,
                     hasCurrent ? (ushort?)currentFortId : null);
-                if (fort == null) { u.FortHoldTimer = 0f; ReleaseGarrison(u, garrison, assignedFort); continue; }
+                if (fort == null) { ClearFortTimers(u); ReleaseGarrison(u, garrison, assignedFort); continue; }
 
                 // Task120: only count time actually spent entrenched (arrived), not the approach march.
                 bool arrived = u.Position.HorizontalDistanceTo(fort.Position) <= MovementStep.CoverArrivalDistance;
                 if (arrived)
                 {
+                    u.FortApproachTimer = 0f; // Task136: made it — the approach clock is done
                     u.FortHoldTimer += dt;
                     if (u.FortHoldTimer > MaxFortHoldHours)
                     {
@@ -123,6 +139,24 @@ namespace CSWarfront.Core
                         u.CoverHold = false;
                         u.CoverHoldTimer = 0f;
                         ReleaseGarrison(u, garrison, assignedFort); // Task121: frees the slot for someone else
+                        continue;
+                    }
+                }
+                else
+                {
+                    // Task136: measure the march itself. A unit that cannot reach the position it was sent
+                    // to (blocked ground, a trench the enemy keeps contesting, a target that flips between
+                    // two positions) would otherwise walk at it forever.
+                    u.FortApproachTimer += dt;
+                    if (u.FortApproachTimer > MaxFortApproachHours)
+                    {
+                        u.FortApproachTimer = 0f;
+                        u.FortHoldTimer = 0f;
+                        u.FortSeekCooldown = ReseekCooldownHours;
+                        u.CoverDestination = null;
+                        u.CoverHold = false;
+                        u.CoverHoldTimer = 0f;
+                        ReleaseGarrison(u, garrison, assignedFort);
                         continue;
                     }
                 }
@@ -227,6 +261,13 @@ namespace CSWarfront.Core
             }
         }
 
+        /// <summary>Task136: resets both fortification clocks (no fortification is in play for this unit).</summary>
+        private static void ClearFortTimers(UnitInstance u)
+        {
+            u.FortHoldTimer = 0f;
+            u.FortApproachTimer = 0f;
+        }
+
         /// <summary>Task121: gives up this unit's garrison slot (it is no longer heading for a fort).</summary>
         private static void ReleaseGarrison(UnitInstance u, Dictionary<long, int> garrison,
             Dictionary<uint, ushort> assignedFort)
@@ -270,7 +311,16 @@ namespace CSWarfront.Core
                 if (occupants >= GarrisonCapacity) continue;
 
                 // Task122: an enemy-held trench is an assault target rather than something to avoid.
-                if (mb.Type == BaseType.Trench && IsHeldByEnemyInfantry(state, mb, u.FactionId, radius))
+                // Task136: for the trench this unit is already assaulting, "held" is tested against a
+                // wider radius. Defenders shuffle in and out of a trench constantly, and on the bare
+                // radius that flipped the trench between assault target and free position every few
+                // ticks — each flip re-sent the squad somewhere else, which is the reported shuttling
+                // back and forth. The wider radius only decides whether to *keep* going; acquiring a new
+                // assault target still uses the true radius, so a trench whose defenders are actually
+                // dead is released at once and the squad rolls on to the next one (Task122).
+                bool committedHere = currentFortId.HasValue && currentFortId.Value == mb.BaseId;
+                float heldRadius = committedHere ? radius + AssaultReleaseMargin : radius;
+                if (mb.Type == BaseType.Trench && IsHeldByEnemyInfantry(state, mb, u.FactionId, heldRadius))
                 {
                     float da = u.Position.HorizontalDistanceTo(mb.Position);
                     // Deterministic tie-break on BaseId (equal distances must not depend on list order).

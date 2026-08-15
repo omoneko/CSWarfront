@@ -330,4 +330,43 @@ public class TrainStepTests
         Assert.Equal(UnitState.Moving, train.State);
         Assert.NotNull(train.Path); // deadheads along the rails and waits at the station
     }
+
+    /// <summary>Task136 (playtest report "military freight trains stop at enemy stations"): the route
+    /// cache holds the station objects themselves and was only discarded when the rail network was
+    /// rebuilt. Capturing a station changes its owner without touching a single rail, so the captured
+    /// station stayed on the timetable and the train kept shuttling into enemy hands.</summary>
+    [Fact]
+    public void A_captured_station_drops_off_the_timetable()
+    {
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        s.Factions.Add(new Faction(1, "Blue"));
+        Assert.Single(TrainStep.RoutesOf(s, 0)); // cached
+
+        b.OwnerFactionId = 1; // the enemy takes the far station
+
+        Assert.Empty(TrainStep.RoutesOf(s, 0));
+    }
+
+    /// <summary>Task136: the same must hold when a station is knocked out rather than captured.</summary>
+    [Fact]
+    public void A_destroyed_station_drops_off_the_timetable()
+    {
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        Assert.Single(TrainStep.RoutesOf(s, 0));
+
+        b.CurrentHP = 0f;
+
+        Assert.Empty(TrainStep.RoutesOf(s, 0));
+    }
+
+    /// <summary>Task136: an unchanged network must still be served from the cache — the validity check
+    /// exists to catch ownership changes, not to defeat the caching that Task109 added.</summary>
+    [Fact]
+    public void An_unchanged_network_still_returns_the_cached_list()
+    {
+        var s = RailState(out Faction f, out MilitaryBase a, out MilitaryBase b);
+        var first = TrainStep.RoutesOf(s, 0);
+
+        Assert.Same(first, TrainStep.RoutesOf(s, 0));
+    }
 }

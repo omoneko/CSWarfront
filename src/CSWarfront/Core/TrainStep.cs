@@ -408,11 +408,36 @@ namespace CSWarfront.Core
         public static List<StationPair> RoutesOf(WarState state, byte factionId)
         {
             List<StationPair> cached;
-            if (state.RailRoutes.TryGetValue(factionId, out cached) && cached != null) return cached;
+            if (state.RailRoutes.TryGetValue(factionId, out cached) && cached != null
+                && IsStillValid(cached, factionId))
+                return cached;
 
             cached = FindStationPairs(state, factionId);
             state.RailRoutes[factionId] = cached;
             return cached;
+        }
+
+        /// <summary>Task136 (playtest report "military freight trains stop at enemy stations"): the cache
+        /// holds direct references to the station objects, and it was only ever discarded when the *rail
+        /// network* was rebuilt. Capturing a cargo station changes its owner without touching a single
+        /// rail, so a captured station stayed on the timetable and the train kept shuttling into enemy
+        /// hands. Re-checking ownership is a handful of field reads — cheap enough to do on every lookup,
+        /// and it needs no cooperation from whatever code changes an owner (capture, demolition, HP
+        /// reaching zero), which is what makes it reliable.</summary>
+        private static bool IsStillValid(List<StationPair> pairs, byte factionId)
+        {
+            for (int i = 0; i < pairs.Count; i++)
+            {
+                if (!IsStillOurs(pairs[i].A, factionId)) return false;
+                if (!IsStillOurs(pairs[i].B, factionId)) return false;
+            }
+            return true;
+        }
+
+        private static bool IsStillOurs(MilitaryBase station, byte factionId)
+        {
+            return CargoStationRules.IsOperational(station)
+                && station.OwnerFactionId.Value == factionId;
         }
 
         /// <summary>Discards the route cache (called by the Game layer when the rail network is rebuilt).</summary>
