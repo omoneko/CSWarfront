@@ -109,7 +109,8 @@ namespace CSWarfront.Game
                 return null;
             }
 
-            TurretSplit split = TurretDetection.Detect(flat, all.ToArray());
+            int[] allTriangles = all.ToArray();
+            TurretSplit split = TurretDetection.Detect(flat, allTriangles);
             if (!split.Found)
             {
                 ModConfig.Log("TurretMeshSplitter: '" + label + "' verts=" + verts.Length
@@ -130,8 +131,32 @@ namespace CSWarfront.Game
             hull.subMeshCount = subMeshCount;
             turret.subMeshCount = subMeshCount;
 
+            // Task143 (playtest "parts of the hull come away with the turret"): the cut is a single
+            // horizontal plane, so anything else standing above it — fenders, the engine deck, stowage on
+            // the rear — is swept up with the turret. Classify by height first, then let MeshIslands drop
+            // the pieces that are hull structure poking through the plane. Whatever it drops goes back to
+            // the hull, so no triangle is ever lost from the model.
+            var above = new bool[allTriangles.Length / 3];
+            for (int t = 0; t < above.Length; t++)
+            {
+                float cy = (verts[allTriangles[t * 3]].y
+                          + verts[allTriangles[t * 3 + 1]].y
+                          + verts[allTriangles[t * 3 + 2]].y) / 3f;
+                above[t] = cy >= split.SplitY;
+            }
+            bool[] island = MeshIslands.SelectTurretPieces(flat, allTriangles, above);
+
+            int returnedToHull = 0;
+            for (int t = 0; t < above.Length; t++) if (above[t] && !island[t]) returnedToHull++;
+            if (returnedToHull > 0)
+                ModConfig.Log("TurretMeshSplitter: '" + label + "' returned " + returnedToHull
+                    + " loose triangle(s) above the cut to the hull (not part of the turret)");
+
+            // The island mask is indexed over the flattened triangle list, in the order the submeshes
+            // were concatenated, so walk them in that same order.
             var hullTris = new List<int>();
             var turretTris = new List<int>();
+            int flatIndex = 0;
             for (int sm = 0; sm < subMeshCount; sm++)
             {
                 int[] tris = subTriangles[sm];
@@ -139,10 +164,9 @@ namespace CSWarfront.Game
                 turretTris.Clear();
                 if (tris != null)
                 {
-                    for (int t = 0; t + 2 < tris.Length; t += 3)
+                    for (int t = 0; t + 2 < tris.Length; t += 3, flatIndex++)
                     {
-                        float cy = (verts[tris[t]].y + verts[tris[t + 1]].y + verts[tris[t + 2]].y) / 3f;
-                        List<int> target = cy >= split.SplitY ? turretTris : hullTris;
+                        List<int> target = island[flatIndex] ? turretTris : hullTris;
                         target.Add(tris[t]); target.Add(tris[t + 1]); target.Add(tris[t + 2]);
                     }
                 }

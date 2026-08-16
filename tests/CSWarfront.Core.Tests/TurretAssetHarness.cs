@@ -61,14 +61,26 @@ public class TurretAssetHarness
 
     private static void WriteHalves(string outDir, string name, float[] v, int[] t, TurretSplit split)
     {
+        // Exactly what TurretMeshSplitter does: classify by height, then keep only the largest
+        // connected island of that set and hand the rest back to the hull (Task143).
+        var above = new bool[t.Length / 3];
+        for (int i = 0; i < above.Length; i++)
+        {
+            float cy = (v[t[i * 3] * 3 + 1] + v[t[i * 3 + 1] * 3 + 1] + v[t[i * 3 + 2] * 3 + 1]) / 3f;
+            above[i] = cy >= split.SplitY;
+        }
+        bool[] island = MeshIslands.SelectTurretPieces(v, t, above);
+
         var hull = new List<int>();
         var turret = new List<int>();
-        for (int i = 0; i + 2 < t.Length; i += 3)
+        int loose = 0;
+        for (int i = 0; i < above.Length; i++)
         {
-            float cy = (v[t[i] * 3 + 1] + v[t[i + 1] * 3 + 1] + v[t[i + 2] * 3 + 1]) / 3f;
-            List<int> target = cy >= split.SplitY ? turret : hull;
-            target.Add(t[i]); target.Add(t[i + 1]); target.Add(t[i + 2]);
+            List<int> target = island[i] ? turret : hull;
+            target.Add(t[i * 3]); target.Add(t[i * 3 + 1]); target.Add(t[i * 3 + 2]);
+            if (above[i] && !island[i]) loose++;
         }
+        Console.WriteLine(name + ": returned " + loose + " loose triangle(s) above the cut to the hull");
 
         WriteObj(Path.Combine(outDir, name + ".hull.obj"), v, hull, 0f, 0f, 0f);
         WriteObj(Path.Combine(outDir, name + ".turret.obj"), v, turret,
