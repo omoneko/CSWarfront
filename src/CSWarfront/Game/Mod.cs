@@ -50,6 +50,7 @@ namespace CSWarfront.Game
                     WarfrontSettings.BuildFactionId,
                     i => WarfrontSettings.SetBuildFactionId(i));
                 AddInvasionEventsUI(helper); // Task94: external invasion events (Workshop comment request)
+                AddBattlefieldUI(helper);    // Task139: how the city reacts to fighting in it
 
                 OptionsTabs.Page(WarfrontStrings.OptionsTab_Factions);
                 OptionsRelationsPage.Build(helper);
@@ -96,6 +97,18 @@ namespace CSWarfront.Game
         /// array). WarfrontSettings is memory-only (see the comment at the top of that class), so here
         /// we bypass GameSettings/SavedInt entirely and just assign the chosen KeyCode straight to the
         /// property.</summary>
+        /// <summary>Task139 (Workshop request from lilMobStick: "civilian buildings should probably
+        /// become abandoned... whenever fighting starts in their proximity"): while infantry hold a city
+        /// building, it is shown as abandoned — the residents have fled. It goes back to normal when they
+        /// leave, and the state is never written into the save, so this is a purely visual consequence of
+        /// the battle. Offered as a toggle because it does change how the player's city looks.</summary>
+        private static void AddBattlefieldUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_BattlefieldGroup);
+            group.AddCheckbox(WarfrontStrings.Options_GarrisonAbandons, WarfrontSettings.GarrisonAbandonsBuildings,
+                v => WarfrontSettings.GarrisonAbandonsBuildings = v);
+        }
+
         private static void AddUnitCommandHotkeyUI(UIHelperBase helper)
         {
             UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_UnitCommandsGroup);

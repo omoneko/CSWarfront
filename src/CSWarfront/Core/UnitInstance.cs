@@ -191,6 +191,12 @@ namespace CSWarfront.Core
         /// building for this unit (runtime-only, not persisted).</summary>
         public float GarrisonCooldown;
 
+        /// <summary>Task139: the city building this unit is holding, or 0 for none (runtime-only, not
+        /// persisted). Set only once the unit has actually reached the building — a squad still crossing
+        /// the street has not occupied anything yet. The Game layer shows these buildings as abandoned
+        /// for as long as they are held.</summary>
+        public ushort GarrisonBuildingId;
+
         /// <summary>Task120: elapsed in-game time this unit has been entrenched at a fortification chosen by
         /// FortSeekStep (runtime-only, not persisted). Past FortSeekStep.MaxFortHoldHours the unit lets go
         /// and resumes its advance (so entrenching can never block an assault/capture forever), and

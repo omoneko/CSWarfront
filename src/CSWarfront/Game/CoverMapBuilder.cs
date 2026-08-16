@@ -115,7 +115,7 @@ namespace CSWarfront.Game
 
                     float radius = RadiusFor(info);
                     var pos = b.m_position;
-                    map.Add(new WorldPos(pos.x, pos.y, pos.z), radius);
+                    map.Add(new WorldPos(pos.x, pos.y, pos.z), radius, (ushort)i); // Task139: id carried for the garrison flag
                     accepted++;
                 }
 

@@ -24,6 +24,10 @@ namespace CSWarfront.Game
         public static string Options_HoldKey = "Hold (stop in place, still fires at anything in range)";
         public static string Options_RallyKey = "Rally (then right-click a destination; units move there, stop, and fight defensively only)";
 
+        // Task139: how the city itself reacts to a battle fought inside it.
+        public static string Options_BattlefieldGroup = "Battle damage";
+        public static string Options_GarrisonAbandons = "Buildings held by infantry look abandoned while occupied (the residents have fled)";
+
         public static string Options_InvasionGroup = "Invasion events (waves attack from outside the city)";
         public static string Options_InvasionEnable = "Enable invasion events";
         public static string Options_InvasionFrequency = "Invasion frequency";

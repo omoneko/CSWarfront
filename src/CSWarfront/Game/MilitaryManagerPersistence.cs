@@ -54,6 +54,7 @@ namespace CSWarfront.Game
 
                 CombatRoadBlocker.UnblockAllForSave();
                 BaseHiddenSync.UnhideAllForSave();
+                GarrisonAbandonSync.ClearAllForSave(); // Task139: never bake a battlefield into the city
                 try
                 {
                     return CSWarfront.Core.WarStateSerializer.Serialize(State);
@@ -85,12 +86,15 @@ namespace CSWarfront.Game
                     catch (Exception e) { ModConfig.LogError("CSWarfront.ReapplySaveFlags (road): " + e); }
                     try { BaseHiddenSync.ReapplyAfterSave(); }
                     catch (Exception e) { ModConfig.LogError("CSWarfront.ReapplySaveFlags (base hidden): " + e); }
+                    try { GarrisonAbandonSync.ReapplyAfterSave(); }
+                    catch (Exception e) { ModConfig.LogError("CSWarfront.ReapplySaveFlags (garrison): " + e); }
                 });
             }
             else
             {
                 CombatRoadBlocker.ReblockAfterSave();
                 BaseHiddenSync.ReapplyAfterSave();
+                GarrisonAbandonSync.ReapplyAfterSave();
             }
         }
 

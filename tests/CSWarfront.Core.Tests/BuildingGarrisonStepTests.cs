@@ -161,5 +161,96 @@ public class BuildingGarrisonStepTests
 
         Assert.True(s.Units[0].Position.X <= 1f, "the tank drove into the water");
     }
+
+    /// <summary>Task139: a squad, a hostile within EnemyRadius, and a caller-supplied cover map.</summary>
+    private static WarState StateWithEnemyNearby(out UnitInstance squad, out UnitInstance enemy)
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+
+        squad = new UnitInstance(1, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        squad.OrderTargetPos = new WorldPos(3000, 0, 0); // far away: no objective lock
+        s.Units.Add(squad);
+        enemy = new UnitInstance(2, "Tank_T1", 1, 100f, new WorldPos(300, 0, 0));
+        s.Units.Add(enemy);
+        return s;
+    }
+
+    // --- Task139: naming the building a squad holds, so the engine side can show it abandoned ---
+
+    /// <summary>The building is only claimed once the troops are actually in it. Flagging it the moment
+    /// it was chosen would flicker buildings abandoned for squads that never arrive.</summary>
+    [Fact]
+    public void The_held_building_is_claimed_on_arrival_not_on_the_way()
+    {
+        var s = StateWithEnemyNearby(out UnitInstance squad, out UnitInstance enemy);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(40, 0, 0), 8f, 4242);
+        s.Cover = cover;
+
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        Assert.True(squad.CoverDestination.HasValue);
+        Assert.Equal(0, squad.GarrisonBuildingId); // still crossing the street
+
+        squad.Position = squad.CoverDestination.Value;
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        Assert.Equal(4242, squad.GarrisonBuildingId);
+    }
+
+    [Fact]
+    public void The_building_is_released_when_the_fight_is_over()
+    {
+        var s = StateWithEnemyNearby(out UnitInstance squad, out UnitInstance enemy);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(40, 0, 0), 8f, 4242);
+        s.Cover = cover;
+
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        squad.Position = squad.CoverDestination.Value;
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        Assert.Equal(4242, squad.GarrisonBuildingId);
+
+        enemy.State = UnitState.Dead;
+        enemy.CurrentHP = 0f;
+        BuildingGarrisonStep.Advance(s, 0.1f);
+
+        Assert.Equal(0, squad.GarrisonBuildingId);
+    }
+
+    [Fact]
+    public void The_building_is_released_when_the_hold_times_out()
+    {
+        var s = StateWithEnemyNearby(out UnitInstance squad, out UnitInstance enemy);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(40, 0, 0), 8f, 4242);
+        s.Cover = cover;
+
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        squad.Position = squad.CoverDestination.Value;
+        for (float t = 0f; t <= BuildingGarrisonStep.MaxGarrisonHours + 1f; t += 0.5f)
+            BuildingGarrisonStep.Advance(s, 0.5f);
+
+        Assert.Equal(0, squad.GarrisonBuildingId);
+        Assert.True(squad.GarrisonCooldown > 0f);
+    }
+
+    /// <summary>Cover the Game layer did not name (props, or the plain two-argument Add) must not claim
+    /// building 0 - that is a real building id in the CS buffer.</summary>
+    [Fact]
+    public void Unnamed_cover_claims_no_building()
+    {
+        var s = StateWithEnemyNearby(out UnitInstance squad, out UnitInstance enemy);
+        var cover = new CoverMap();
+        cover.Add(new WorldPos(40, 0, 0), 8f);
+        s.Cover = cover;
+
+        BuildingGarrisonStep.Advance(s, 0.1f);
+        squad.Position = squad.CoverDestination.Value;
+        BuildingGarrisonStep.Advance(s, 0.1f);
+
+        Assert.Equal(0, squad.GarrisonBuildingId);
+    }
 }
 }

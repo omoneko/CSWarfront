@@ -8,10 +8,19 @@ namespace CSWarfront.Core
         public readonly WorldPos Position;
         public readonly float Radius;
 
-        public CoverPoint(WorldPos position, float radius)
+        /// <summary>Task139: the city building this cover point came from, or 0 when the Game layer did
+        /// not supply one (tests, props). Carried so that a unit garrisoning a building can name it —
+        /// the engine side needs the id to show the place as abandoned while it is occupied. The Core
+        /// itself never interprets the value; it is an opaque handle.</summary>
+        public readonly ushort BuildingId;
+
+        public CoverPoint(WorldPos position, float radius) : this(position, radius, 0) { }
+
+        public CoverPoint(WorldPos position, float radius, ushort buildingId)
         {
             Position = position;
             Radius = radius;
+            BuildingId = buildingId;
         }
     }
 
@@ -48,6 +57,12 @@ namespace CSWarfront.Core
         public void Add(WorldPos position, float radius)
         {
             _points.Add(new CoverPoint(position, radius));
+        }
+
+        /// <summary>Task139: as above, naming the city building this cover is (see CoverPoint.BuildingId).</summary>
+        public void Add(WorldPos position, float radius, ushort buildingId)
+        {
+            _points.Add(new CoverPoint(position, radius, buildingId));
         }
 
         /// <summary>Task101: whether the line of fire from from to to (a horizontal segment) is blocked
@@ -168,7 +183,18 @@ namespace CSWarfront.Core
         public bool TryFindNearestStandingPosition(WorldPos from, WorldPos threatPos, float maxDistance,
             out WorldPos standingPosition)
         {
+            ushort ignored;
+            return TryFindNearestStandingPosition(from, threatPos, maxDistance, out standingPosition, out ignored);
+        }
+
+        /// <summary>Task139: as above, also naming the building the unit ends up holding (0 when the
+        /// Game layer supplied no id). The engine side uses it to show an occupied building as
+        /// abandoned for as long as the troops are in it.</summary>
+        public bool TryFindNearestStandingPosition(WorldPos from, WorldPos threatPos, float maxDistance,
+            out WorldPos standingPosition, out ushort buildingId)
+        {
             standingPosition = from;
+            buildingId = 0;
             int best = -1;
             float bestDist = float.MaxValue;
             for (int i = 0; i < _points.Count; i++)
@@ -180,6 +206,7 @@ namespace CSWarfront.Core
             if (best < 0) return false;
 
             standingPosition = StandingPosition(_points[best], threatPos);
+            buildingId = _points[best].BuildingId;
             return true;
         }
 

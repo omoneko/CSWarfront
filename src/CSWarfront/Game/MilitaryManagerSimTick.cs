@@ -362,6 +362,10 @@ namespace CSWarfront.Game
                 // this overrides the plain cover decision, and FortSeekStep below overrides this.
                 BuildingGarrisonStep.Advance(State, dt);
 
+                // Task139 (Workshop request): a city building held by troops is shown as abandoned for
+                // as long as they are in it. Runs straight after the step that decides who holds what.
+                GarrisonAbandonSync.Apply(State);
+
                 // Task101: infantry position-seeking (head for trenches/bunkers when enemies approach).
                 // Runs right after CoverSeekStep and overrides the cover decision when a fortified position
                 // is available (fortification > shadow of a building, see the FortSeekStep comment).

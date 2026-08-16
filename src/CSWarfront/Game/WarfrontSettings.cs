@@ -48,6 +48,17 @@ namespace CSWarfront.Game
         /// <summary>Invasion frequency (0=Low/1=Medium/2=High, index into Core.InvasionEvents.ChancePerCheck).</summary>
         public static int InvasionFrequencyIndex = 1;
 
+        // --- Task139: civilian buildings held by troops are shown as abandoned ---
+
+        /// <summary>While ON, a city building infantry are holding (BuildingGarrisonStep) carries
+        /// Building.Flags.Abandoned for as long as they are in it — the residents have fled the fighting.
+        /// The flag is this mod's alone and is handed back when the troops leave, on save and on level
+        /// unload (GarrisonAbandonSync), so nothing permanent happens to the city. Default ON: it is the
+        /// behaviour that was asked for, and it reverts by itself. Turn it off to keep the city looking
+        /// untouched while the fighting goes on around it.
+        /// Like the other WarfrontSettings, memory-only (reverts to this default each session).</summary>
+        public static bool GarrisonAbandonsBuildings = true;
+
         // --- Task49: toggle for the faction icons above units (small spheres, Game/UnitVisuals) ---
 
         private static bool _showFactionIcons = true; // default ON

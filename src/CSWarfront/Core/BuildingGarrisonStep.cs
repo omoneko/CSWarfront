@@ -70,7 +70,7 @@ namespace CSWarfront.Core
                 if (u.GarrisonCooldown > 0f)
                 {
                     u.GarrisonCooldown -= dt;
-                    if (u.GarrisonCooldown > 0f) continue;
+                    if (u.GarrisonCooldown > 0f) { Vacate(u); continue; }
                     u.GarrisonCooldown = 0f;
                 }
 
@@ -79,6 +79,7 @@ namespace CSWarfront.Core
                     u.Position.HorizontalDistanceTo(u.OrderTargetPos.Value) <= ObjectiveLockRadius)
                 {
                     u.GarrisonHoldTimer = 0f;
+                    Vacate(u);
                     continue;
                 }
 
@@ -88,13 +89,16 @@ namespace CSWarfront.Core
                 {
                     // The fight is over: leave the building and get moving again.
                     u.GarrisonHoldTimer = 0f;
+                    Vacate(u);
                     continue;
                 }
 
                 WorldPos stand;
-                if (!TryFindGarrison(state, u, enemy.Position, out stand))
+                ushort buildingId;
+                if (!TryFindGarrison(state, u, enemy.Position, out stand, out buildingId))
                 {
                     u.GarrisonHoldTimer = 0f;
+                    Vacate(u);
                     continue;
                 }
 
@@ -109,6 +113,7 @@ namespace CSWarfront.Core
                         u.CoverDestination = null;
                         u.CoverHold = false;
                         u.CoverHoldTimer = 0f;
+                        Vacate(u);
                         continue;
                     }
                 }
@@ -116,14 +121,28 @@ namespace CSWarfront.Core
                 u.CoverDestination = stand;
                 u.CoverHold = true;
                 u.CoverHoldTimer = 0f; // the garrison hold has its own cap (MaxGarrisonHours)
+
+                // Task139: the building counts as occupied only once the troops are actually in it. A
+                // squad still crossing the street has taken nothing, and flagging the place the moment
+                // it was chosen would flicker buildings abandoned for units that never arrive.
+                u.GarrisonBuildingId = arrived ? buildingId : (ushort)0;
             }
         }
 
-        /// <summary>The standing position against the building nearest to the unit, on the side away
-        /// from the enemy. False when no building is within GarrisonRadius.</summary>
-        private static bool TryFindGarrison(WarState state, UnitInstance u, WorldPos enemyPos, out WorldPos stand)
+        /// <summary>Task139: this unit is no longer holding a building.</summary>
+        private static void Vacate(UnitInstance u)
         {
-            return state.Cover.TryFindNearestStandingPosition(u.Position, enemyPos, GarrisonRadius, out stand);
+            u.GarrisonBuildingId = 0;
+        }
+
+        /// <summary>The standing position against the building nearest to the unit, on the side away
+        /// from the enemy, and which building that is (Task139). False when no building is within
+        /// GarrisonRadius.</summary>
+        private static bool TryFindGarrison(WarState state, UnitInstance u, WorldPos enemyPos, out WorldPos stand,
+            out ushort buildingId)
+        {
+            return state.Cover.TryFindNearestStandingPosition(u.Position, enemyPos, GarrisonRadius, out stand,
+                out buildingId);
         }
     }
 }

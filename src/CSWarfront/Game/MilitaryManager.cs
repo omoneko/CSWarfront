@@ -180,6 +180,7 @@ namespace CSWarfront.Game
             // buildingId) — an omission. Restore it reliably in the same "write directly to the CS
             // buffer from the main thread" style as CombatRoadBlocker.Reset.
             BaseHiddenSync.Reset();
+            GarrisonAbandonSync.Reset(); // Task139: hand back every building held by troops
             CombatCollateral.Reset(); // Task65: also clear the internal state used for lottery throttling on level unload.
 
             lock (_stateLock)
