@@ -93,6 +93,30 @@ public class TurretDetectionTests
         Assert.Equal(1f, split.BarrelSign, 3);
     }
 
+    /// <summary>Task142 (playtest "the main gun does not look separated", confirmed by rendering the
+    /// split): a modern MBT's turret is nearly as wide as its hull, so the real ring is a tiny step,
+    /// while the hatches and sights on the turret roof make a clean one. The detector took the roof and
+    /// left the entire turret and gun on the hull - the model came apart, but nothing that mattered
+    /// moved. A cut above the gun is wrong by definition, so the gun is found first and bounds how high
+    /// the model may be cut.</summary>
+    [Fact]
+    public void The_cut_stays_below_the_gun_even_when_the_turret_roof_offers_a_cleaner_step()
+    {
+        var m = new MeshBuilder();
+        m.Box(0f, 0.7f, 0f, 3.6f, 1.4f, 10f);     // hull and tracks
+        m.Box(0f, 2.2f, 0.5f, 3.2f, 1.4f, 6f);    // turret: 89% of the hull width - barely a step
+        m.Box(0f, 2.2f, 5.5f, 0.35f, 0.35f, 5f);  // main gun, out of the turret face
+        m.Box(0f, 3.1f, 0f, 1.2f, 0.4f, 2f);      // roof clutter: a clean, narrow step ABOVE the gun
+
+        TurretSplit split = m.Detect();
+
+        Assert.True(split.Found);
+        // The gun's lowest point is 2.2 - 0.35/2 = 2.025; cutting above that would strand it on the hull.
+        Assert.True(split.SplitY < 2.02f,
+            "cut at y=" + split.SplitY + ", which leaves the main gun on the hull");
+        Assert.Equal(1f, split.BarrelSign, 3);
+    }
+
     [Fact]
     public void Rejects_a_hull_without_a_barrel()
     {

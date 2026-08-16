@@ -88,6 +88,34 @@ namespace CSWarfront.Core
         /// turret.</summary>
         public const float MinBarrelReach = 0.12f;
 
+        // --- Task142: finding the main gun before deciding where to cut ---
+        //
+        // Rendering the split offline exposed the real defect behind "the main gun does not rotate": on
+        // the M1A2 the cut landed on the turret ROOF. A modern MBT's turret is nearly as wide as its
+        // hull, so the true ring is a tiny step in the width profile, while the hatches and sights on the
+        // roof make a clean one - and the roof clutter even contains something thin and protruding, so
+        // the barrel check passed. The model came apart with the whole turret and gun left on the hull.
+        //
+        // The fix is the obvious statement of intent: a cut that leaves the main gun behind is wrong,
+        // whatever the width profile says. The gun is found first, over the whole upper model, and only
+        // cuts at or below it are considered.
+
+        /// <summary>Task142: how wide and how tall the far tip of the gun may be, as a fraction of hull
+        /// width. A gun is thin seen from above AND from the side; a stowage box on the roof is not.</summary>
+        public const float GunTipMaxWidth = 0.22f;
+        public const float GunTipMaxHeight = 0.22f;
+
+        /// <summary>Task142: how far the gun must reach past the bulk it grows out of, as a fraction of
+        /// the model's length. Stricter than MinBarrelReach: this one carries the whole decision.</summary>
+        public const float GunMinReach = 0.18f;
+
+        /// <summary>Task142: the body checks are relaxed for a cut taken below the gun on a step too small
+        /// to qualify as a ring. Finding a real gun is already strong evidence of a turret, and on an MBT
+        /// the turret genuinely is most of the vehicle and as wide as the hull - the ordinary bounds
+        /// assume a turret is a minority of the model, which is what rejected every M1A2.</summary>
+        public const float UnderGunMaxTurretTriangleShare = 0.75f;
+        public const float UnderGunMaxTurretWidth = 1.00f;
+
         /// <summary>
         /// vertices: x,y,z triplets (length = 3 × vertex count). triangles: vertex indices, 3 per
         /// triangle. Returns Found=false for any mesh that does not clearly read as turreted.
@@ -163,31 +191,130 @@ namespace CSWarfront.Core
             // whose first band works still takes it first.
             int lowBand = (int)(Slices * MinSplitFraction), highBand = (int)(Slices * MaxSplitFraction);
             if (lowBand < 1) lowBand = 1;
+
+            // Task142: the gun decides how high we may cut. Everything at or below its lowest point is
+            // fair game; a cut above it would leave the gun on the hull, which is the one outcome that
+            // makes the whole feature pointless.
+            float gunLowestY;
+            bool hasGun = TryFindGun(vertices, vertexCount, minY, height, length, hullWidth, out gunLowestY);
+            if (hasGun)
+            {
+                int gunBand = (int)((gunLowestY - minY) / height * Slices) + 1;
+                if (gunBand < highBand) highBand = gunBand;
+            }
+
             for (int b = lowBand; b < highBand; b++)
             {
-                if (!sliceHas[b] || !sliceHas[b - 1]) continue;
-                float here = sliceMax[b] - sliceMin[b];
-                float below = sliceMax[b - 1] - sliceMin[b - 1];
-                if (below - here < hullWidth * MinRingDrop) continue;
-
-                float widestAbove = 0f;
-                for (int a = b; a < Slices; a++)
-                    if (sliceHas[a] && sliceMax[a] - sliceMin[a] > widestAbove) widestAbove = sliceMax[a] - sliceMin[a];
-                if (widestAbove > here * AboveRingTolerance) continue; // the turret widens again: not a ring
+                if (!IsRingCandidate(sliceHas, sliceMin, sliceMax, b, hullWidth, true)) continue;
 
                 TurretSplit candidate;
                 if (TryTurretAbove(vertices, vertexCount, triangles, triangleCount,
-                        minY + height * b / Slices, hullWidth, length, out candidate))
+                        minY + height * b / Slices, hullWidth, length,
+                        MaxTurretTriangleShare, MaxTurretWidth, out candidate))
                     return candidate;
             }
+
+            // Task142: no band showed a proper ring below the gun - the normal case for an MBT, whose
+            // turret is barely narrower than its hull. The gun is proof enough that a turret is there, so
+            // take the clearest narrowing available and judge the result on looser bounds.
+            if (!hasGun) return none;
+            int bestBand = -1;
+            float bestDrop = 0f;
+            for (int b = lowBand; b < highBand; b++)
+            {
+                if (!IsRingCandidate(sliceHas, sliceMin, sliceMax, b, hullWidth, false)) continue;
+                float drop = (sliceMax[b - 1] - sliceMin[b - 1]) - (sliceMax[b] - sliceMin[b]);
+                if (drop > bestDrop) { bestDrop = drop; bestBand = b; }
+            }
+            if (bestBand < 0) return none;
+
+            TurretSplit underGun;
+            if (TryTurretAbove(vertices, vertexCount, triangles, triangleCount,
+                    minY + height * bestBand / Slices, hullWidth, length,
+                    UnderGunMaxTurretTriangleShare, UnderGunMaxTurretWidth, out underGun))
+                return underGun;
             return none;
+        }
+
+        /// <summary>Task142: whether band b is a place the model narrows and stays narrow. With
+        /// requireRingDrop the step must clear MinRingDrop; without it any narrowing counts, because the
+        /// caller has already established that a gun is present.</summary>
+        private static bool IsRingCandidate(bool[] sliceHas, float[] sliceMin, float[] sliceMax, int b,
+            float hullWidth, bool requireRingDrop)
+        {
+            if (!sliceHas[b] || !sliceHas[b - 1]) return false;
+            float here = sliceMax[b] - sliceMin[b];
+            float below = sliceMax[b - 1] - sliceMin[b - 1];
+            float drop = below - here;
+            if (requireRingDrop ? drop < hullWidth * MinRingDrop : drop <= 0f) return false;
+
+            float widestAbove = 0f;
+            for (int a = b; a < sliceHas.Length; a++)
+                if (sliceHas[a] && sliceMax[a] - sliceMin[a] > widestAbove) widestAbove = sliceMax[a] - sliceMin[a];
+            return widestAbove <= here * AboveRingTolerance; // it must not widen again above the cut
+        }
+
+        /// <summary>Task142: the main gun, looked for without any split in hand - the far tip of whatever
+        /// sits in the upper part of the model, required to be thin in both cross-sections and to reach
+        /// well past the bulk behind it. Reports the lowest point of that tip, which is as high as the
+        /// model may be cut.</summary>
+        private static bool TryFindGun(float[] vertices, int vertexCount, float minY, float height,
+            float length, float hullWidth, out float gunLowestY)
+        {
+            gunLowestY = 0f;
+            float floor = minY + height * MinSplitFraction; // a gun is never down in the running gear
+
+            float upperMinZ = float.MaxValue, upperMaxZ = float.MinValue;
+            int upperCount = 0;
+            for (int i = 0; i < vertexCount; i++)
+            {
+                if (vertices[i * 3 + 1] < floor) continue;
+                upperCount++;
+                float z = vertices[i * 3 + 2];
+                if (z < upperMinZ) upperMinZ = z;
+                if (z > upperMaxZ) upperMaxZ = z;
+            }
+            if (upperCount < 8) return false;
+            float medianZ = MedianTurretZ(vertices, vertexCount, floor);
+
+            float bestReach = 0f;
+            bool found = false;
+            for (int s = 0; s < 2; s++)
+            {
+                float sign = s == 0 ? 1f : -1f;
+                float cut = sign > 0f ? upperMaxZ - length * BarrelTipFraction
+                                      : upperMinZ + length * BarrelTipFraction;
+                float tipMinX = float.MaxValue, tipMaxX = float.MinValue;
+                float tipMinY = float.MaxValue, tipMaxY = float.MinValue;
+                int tipCount = 0;
+                for (int i = 0; i < vertexCount; i++)
+                {
+                    if (vertices[i * 3 + 1] < floor) continue;
+                    float z = vertices[i * 3 + 2];
+                    if (sign > 0f ? z < cut : z > cut) continue;
+                    tipCount++;
+                    float x = vertices[i * 3], y = vertices[i * 3 + 1];
+                    if (x < tipMinX) tipMinX = x;
+                    if (x > tipMaxX) tipMaxX = x;
+                    if (y < tipMinY) tipMinY = y;
+                    if (y > tipMaxY) tipMaxY = y;
+                }
+                if (tipCount < 3) continue;
+                if (tipMaxX - tipMinX > hullWidth * GunTipMaxWidth) continue;
+                if (tipMaxY - tipMinY > hullWidth * GunTipMaxHeight) continue;
+                float reach = sign > 0f ? upperMaxZ - medianZ : medianZ - upperMinZ;
+                if (reach < length * GunMinReach) continue;
+                if (reach > bestReach) { bestReach = reach; gunLowestY = tipMinY; found = true; }
+            }
+            return found;
         }
 
         /// <summary>Task141: everything that decides whether the geometry above splitY is a turret with a
         /// gun on it. Split out of Detect so each candidate ring can be tried in turn; the checks
         /// themselves are unchanged.</summary>
         private static bool TryTurretAbove(float[] vertices, int vertexCount, int[] triangles,
-            int triangleCount, float splitY, float hullWidth, float length, out TurretSplit result)
+            int triangleCount, float splitY, float hullWidth, float length,
+            float maxTurretShare, float maxTurretWidth, out TurretSplit result)
         {
             result = new TurretSplit();
 
@@ -201,7 +328,7 @@ namespace CSWarfront.Core
                 if (cy >= splitY) turretTris++;
             }
             float share = (float)turretTris / triangleCount;
-            if (share < MinTurretTriangleShare || share > MaxTurretTriangleShare) return false;
+            if (share < MinTurretTriangleShare || share > maxTurretShare) return false;
 
             float tMinX = float.MaxValue, tMaxX = float.MinValue, tMinZ = float.MaxValue, tMaxZ = float.MinValue;
             int turretVerts = 0;
@@ -217,7 +344,7 @@ namespace CSWarfront.Core
             }
             if (turretVerts < 4) return false;
             float turretWidth = tMaxX - tMinX;
-            if (turretWidth < hullWidth * MinTurretWidth || turretWidth > hullWidth * MaxTurretWidth) return false;
+            if (turretWidth < hullWidth * MinTurretWidth || turretWidth > hullWidth * maxTurretWidth) return false;
 
             // 4. the barrel: a thin protrusion along Z, reaching beyond the turret's bulk
             float medianZ = MedianTurretZ(vertices, vertexCount, splitY);
