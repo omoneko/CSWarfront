@@ -72,6 +72,27 @@ public class TurretDetectionTests
         Assert.Equal(-1f, split.BarrelSign);
     }
 
+    /// <summary>Task141 (playtest "the turret does not come apart on some assets"): a step in the width
+    /// profile is not proof of a turret ring. Side skirts and stowage racks make one low on the hull, and
+    /// the detector used to commit to the lowest step it saw and give up when the "turret" above it turned
+    /// out to be most of the vehicle. It now keeps looking further up.</summary>
+    [Fact]
+    public void A_skirt_step_low_on_the_hull_does_not_hide_the_real_ring_above_it()
+    {
+        var m = new MeshBuilder();
+        m.Box(0f, 0.35f, 0f, 4.2f, 0.7f, 10f);   // skirts: the widest thing on the vehicle
+        m.Box(0f, 1.4f, 0f, 3.6f, 1.4f, 10f);    // hull proper, a clear step in from the skirts
+        m.Box(0f, 3.1f, 0.5f, 2f, 2f, 4f);       // turret: the real ring, higher up
+        m.Box(0f, 3.1f, 4.5f, 0.4f, 0.4f, 5f);   // barrel
+    
+        TurretSplit split = m.Detect();
+    
+        Assert.True(split.Found, "the skirt step swallowed the model again");
+        // Cut at the turret ring, not down at the skirts.
+        Assert.True(split.SplitY > 1.8f, "split at y=" + split.SplitY + ", which is the skirt, not the ring");
+        Assert.Equal(1f, split.BarrelSign, 3);
+    }
+
     [Fact]
     public void Rejects_a_hull_without_a_barrel()
     {

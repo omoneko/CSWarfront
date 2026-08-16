@@ -151,8 +151,16 @@ namespace CSWarfront.Core
                 if (sliceHas[b] && sliceMax[b] - sliceMin[b] > hullWidth) hullWidth = sliceMax[b] - sliceMin[b];
             if (hullWidth <= 0.001f) return none;
 
-            // 2. the ring: the lowest lasting step down in the width profile
-            int splitBand = -1;
+            // 2-4. the ring, then the turret it implies. Every band showing a lasting step down is
+            // a candidate; the first one whose turret survives the checks below wins.
+            //
+            // Task141 (playtest "the turret does not come apart on some assets"): this used to commit
+            // to the lowest band with a step and give up if the turret above it did not hold up - even
+            // when a perfectly good ring sat a few bands higher. A tank with a stowage rack or a skirt
+            // has a step low on the hull that is not the ring at all, and that one step was enough to
+            // lose the model. Measured over the subscribed armour collection, trying the rest of the
+            // bands is what recovers them; nothing that was detected before changes, because a model
+            // whose first band works still takes it first.
             int lowBand = (int)(Slices * MinSplitFraction), highBand = (int)(Slices * MaxSplitFraction);
             if (lowBand < 1) lowBand = 1;
             for (int b = lowBand; b < highBand; b++)
@@ -165,22 +173,35 @@ namespace CSWarfront.Core
                 float widestAbove = 0f;
                 for (int a = b; a < Slices; a++)
                     if (sliceHas[a] && sliceMax[a] - sliceMin[a] > widestAbove) widestAbove = sliceMax[a] - sliceMin[a];
-                if (widestAbove <= here * AboveRingTolerance) { splitBand = b; break; }
+                if (widestAbove > here * AboveRingTolerance) continue; // the turret widens again: not a ring
+
+                TurretSplit candidate;
+                if (TryTurretAbove(vertices, vertexCount, triangles, triangleCount,
+                        minY + height * b / Slices, hullWidth, length, out candidate))
+                    return candidate;
             }
-            if (splitBand < 0) return none;
-            float splitY = minY + height * splitBand / Slices;
+            return none;
+        }
+
+        /// <summary>Task141: everything that decides whether the geometry above splitY is a turret with a
+        /// gun on it. Split out of Detect so each candidate ring can be tried in turn; the checks
+        /// themselves are unchanged.</summary>
+        private static bool TryTurretAbove(float[] vertices, int vertexCount, int[] triangles,
+            int triangleCount, float splitY, float hullWidth, float length, out TurretSplit result)
+        {
+            result = new TurretSplit();
 
             // 3. the turret must be a real body
-            int turretTris = 0, triCount = triangleCount;
-            for (int t = 0; t < triCount; t++)
+            int turretTris = 0;
+            for (int t = 0; t < triangleCount; t++)
             {
                 float cy = (vertices[triangles[t * 3] * 3 + 1]
                           + vertices[triangles[t * 3 + 1] * 3 + 1]
                           + vertices[triangles[t * 3 + 2] * 3 + 1]) / 3f;
                 if (cy >= splitY) turretTris++;
             }
-            float share = (float)turretTris / triCount;
-            if (share < MinTurretTriangleShare || share > MaxTurretTriangleShare) return none;
+            float share = (float)turretTris / triangleCount;
+            if (share < MinTurretTriangleShare || share > MaxTurretTriangleShare) return false;
 
             float tMinX = float.MaxValue, tMaxX = float.MinValue, tMinZ = float.MaxValue, tMaxZ = float.MinValue;
             int turretVerts = 0;
@@ -194,9 +215,9 @@ namespace CSWarfront.Core
                 if (z < tMinZ) tMinZ = z;
                 if (z > tMaxZ) tMaxZ = z;
             }
-            if (turretVerts < 4) return none;
+            if (turretVerts < 4) return false;
             float turretWidth = tMaxX - tMinX;
-            if (turretWidth < hullWidth * MinTurretWidth || turretWidth > hullWidth * MaxTurretWidth) return none;
+            if (turretWidth < hullWidth * MinTurretWidth || turretWidth > hullWidth * MaxTurretWidth) return false;
 
             // 4. the barrel: a thin protrusion along Z, reaching beyond the turret's bulk
             float medianZ = MedianTurretZ(vertices, vertexCount, splitY);
@@ -225,9 +246,9 @@ namespace CSWarfront.Core
                 if (reach < length * MinBarrelReach) continue;
                 if (reach > bestReach) { bestReach = reach; barrelSign = sign; }
             }
-            if (barrelSign == 0f) return none;
+            if (barrelSign == 0f) return false;
 
-            return new TurretSplit
+            result = new TurretSplit
             {
                 Found = true,
                 SplitY = splitY,
@@ -235,6 +256,7 @@ namespace CSWarfront.Core
                 PivotZ = medianZ,
                 BarrelSign = barrelSign
             };
+            return true;
         }
 
         // Medians (not means): the barrel is a long thin tail of vertices that would drag a mean
