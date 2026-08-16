@@ -70,8 +70,21 @@ namespace CSWarfront.Game
 
         private static TurretParts Build(Mesh source)
         {
+            // Task140 (playtest "the turret does not rotate on some assets"): the outcome of this was
+            // invisible from outside — a model with no turret and a model whose geometry could not be
+            // read look exactly the same on screen. One line per model, once (results are cached), says
+            // which of the two happened and where the gun was cut.
+            string label = source.name != null ? source.name : "(unnamed)";
+
             Vector3[] verts = source.vertices;
-            if (verts == null || verts.Length == 0) return null;
+            if (verts == null || verts.Length == 0)
+            {
+                // Almost always a mesh Unity will not let us read back. Nothing can be done with it here,
+                // but knowing that is the difference between "this model has no turret" and "we never got
+                // to look at this model".
+                ModConfig.Log("TurretMeshSplitter: '" + label + "' exposes no vertices (unreadable mesh); rendered as one piece");
+                return null;
+            }
 
             var flat = new float[verts.Length * 3];
             for (int i = 0; i < verts.Length; i++)
@@ -89,10 +102,24 @@ namespace CSWarfront.Game
                 subTriangles[sm] = source.GetTriangles(sm);
                 if (subTriangles[sm] != null) all.AddRange(subTriangles[sm]);
             }
-            if (all.Count < 12) return null;
+            if (all.Count < 12)
+            {
+                ModConfig.Log("TurretMeshSplitter: '" + label + "' has only " + all.Count
+                    + " triangle indices; rendered as one piece");
+                return null;
+            }
 
             TurretSplit split = TurretDetection.Detect(flat, all.ToArray());
-            if (!split.Found) return null;
+            if (!split.Found)
+            {
+                ModConfig.Log("TurretMeshSplitter: '" + label + "' verts=" + verts.Length
+                    + " tris=" + (all.Count / 3) + " -> no turret found; rendered as one piece");
+                return null;
+            }
+            ModConfig.Log("TurretMeshSplitter: '" + label + "' verts=" + verts.Length
+                + " tris=" + (all.Count / 3) + " -> turret at y=" + split.SplitY.ToString("F2")
+                + " pivot=(" + split.PivotX.ToString("F2") + "," + split.PivotZ.ToString("F2")
+                + ") barrel=" + (split.BarrelSign < 0f ? "-Z" : "+Z"));
 
             var pivot = new Vector3(split.PivotX, split.SplitY, split.PivotZ);
 
