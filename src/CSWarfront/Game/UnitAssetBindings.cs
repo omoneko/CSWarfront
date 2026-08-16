@@ -150,14 +150,16 @@ namespace CSWarfront.Game
 
             try
             {
-                if (string.IsNullOrEmpty(modDirectory))
+                // Task137: bindings live in the player's own settings directory. In the mod folder a
+                // Workshop update replaced them with whatever the payload happened to contain.
+                _filePath = WarfrontUserData.ResolvePath(FileName, modDirectory);
+                if (string.IsNullOrEmpty(_filePath))
                 {
-                    ModConfig.LogError("UnitAssetBindings.Load: modDirectory is empty, running in-memory only (bindings will not be saved)");
+                    ModConfig.LogError("UnitAssetBindings.Load: no writable settings directory, running in-memory only (bindings will not be saved)");
                     return;
                 }
 
-                _modDirectory = modDirectory; // Task70: kept for building preset slot paths
-                _filePath = Path.Combine(modDirectory, FileName);
+                _modDirectory = modDirectory; // Task70/137: preset slots resolve through WarfrontUserData too
                 if (!File.Exists(_filePath))
                 {
                     ModConfig.Log("UnitAssetBindings.Load: '" + _filePath + "' not found, starting with 0 bindings");

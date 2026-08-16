@@ -83,13 +83,15 @@ namespace CSWarfront.Game
 
             try
             {
-                if (string.IsNullOrEmpty(modDirectory))
+                // Task137: kept in the player's own settings directory, not the mod folder — a Workshop
+                // update replaces the mod folder wholesale and used to wipe these designations with it.
+                _filePath = WarfrontUserData.ResolvePath(FileName, modDirectory);
+                if (string.IsNullOrEmpty(_filePath))
                 {
-                    ModConfig.LogError("BaseBuildingDesignation.Load: modDirectory is empty, running in-memory only (designations will not be saved)");
+                    ModConfig.LogError("BaseBuildingDesignation.Load: no writable settings directory, running in-memory only (designations will not be saved)");
                     return;
                 }
 
-                _filePath = Path.Combine(modDirectory, FileName);
                 if (!File.Exists(_filePath))
                 {
                     ModConfig.Log("BaseBuildingDesignation.Load: '" + _filePath + "' not found, starting with 0 designations");

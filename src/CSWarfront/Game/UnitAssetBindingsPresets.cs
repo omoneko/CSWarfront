@@ -189,9 +189,12 @@ namespace CSWarfront.Game
             return slot >= MinSlot && slot <= MaxSlot;
         }
 
+        /// <summary>Task137: preset slots follow the main bindings file into the player's settings
+        /// directory, for the same reason — a Workshop update overwrites anything left in the mod
+        /// folder.</summary>
         private static string SlotPath(int slot)
         {
-            return Path.Combine(_modDirectory, SlotFileNamePrefix + slot + SlotFileNameSuffix);
+            return WarfrontUserData.ResolvePath(SlotFileNamePrefix + slot + SlotFileNameSuffix, _modDirectory);
         }
     }
 }

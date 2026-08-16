@@ -45,14 +45,15 @@ namespace CSWarfront.Game
 
             try
             {
-                string modPath = ResolveModPath();
-                if (string.IsNullOrEmpty(modPath))
+                // Task137: the tuning file lives in the player's settings directory. Kept in the mod
+                // folder, a Workshop update replaced the player's tuning with the published copy.
+                string path = WarfrontUserData.ResolvePath(FileName, ResolveModPath());
+                if (string.IsNullOrEmpty(path))
                 {
-                    ModConfig.Log("UnitStatsFile: mod path unavailable; using built-in stats.");
+                    ModConfig.Log("UnitStatsFile: no writable settings directory; using built-in stats.");
                     return;
                 }
 
-                string path = Path.Combine(modPath, FileName);
                 if (!File.Exists(path))
                 {
                     WriteTemplate(path);
