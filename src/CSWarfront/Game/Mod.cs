@@ -34,26 +34,40 @@ namespace CSWarfront.Game
             {
                 LocaleLoader.EnsureLoaded(); // Task113: apply the locale before any label is built
 
+                // Task138 (Workshop request: "split the mod settings into multiple pages, it's pretty
+                // cluttered"): the eight groups are dealt onto tabbed pages. The two asset selectors get
+                // a page each, because those are where players actually spend time and they used to sit
+                // at the bottom of a long scroll. Grouping otherwise follows what a player is trying to
+                // do — set up a game, arrange the factions, choose buildings, choose models, bind keys,
+                // adjust sound — not which class happens to build the controls.
+                OptionsTabs.Begin(helper);
+
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_General);
                 UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_BasePlacementGroup);
                 group.AddDropdown(
                     WarfrontStrings.Options_BuildFactionDropdown,
                     WarfrontSettings.FactionNames,
                     WarfrontSettings.BuildFactionId,
                     i => WarfrontSettings.SetBuildFactionId(i));
-
-                AddUnitCommandHotkeyUI(helper);
-
                 AddInvasionEventsUI(helper); // Task94: external invasion events (Workshop comment request)
 
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_Factions);
                 OptionsRelationsPage.Build(helper);
-
                 AddFactionIconUI(helper);
 
-                AddSoundUI(helper);
-
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_Buildings);
                 OptionsBaseBuildingPage.Build(helper); // Task74: scheme where building the designated building makes it function as a base of that kind
 
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_Models);
                 OptionsModelAssignPage.Build(helper);
+
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_Controls);
+                AddUnitCommandHotkeyUI(helper);
+
+                OptionsTabs.Page(WarfrontStrings.OptionsTab_Audio);
+                AddSoundUI(helper);
+
+                OptionsTabs.End();
             }
             catch (Exception e)
             {

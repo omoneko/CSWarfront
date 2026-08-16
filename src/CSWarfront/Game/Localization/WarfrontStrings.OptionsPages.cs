@@ -12,7 +12,7 @@ namespace CSWarfront.Game
         public static string OptionsModel_UnitTypeDropdown = "Unit Type";
         public static string OptionsModel_AssetKindDropdown = "Asset Type";
         public static string OptionsModel_SubscribedOnlyCheckbox = "Subscribed only";
-        public static string OptionsModel_SearchField = "Search (partial match)";
+        public static string OptionsModel_SearchField = "Search: type part of an asset name, then pick it below";
         public static string OptionsModel_AssetDropdown = "Asset";
         public static string OptionsModel_CopyScopeDropdown = "Apply to Multiple - Scope";
         public static string OptionsModel_ApplyButton = "Apply";
@@ -65,7 +65,7 @@ namespace CSWarfront.Game
         public static string OptionsBaseBuilding_AtPillboxRow = "AT Pillbox";     // Task117
         public static string OptionsBaseBuilding_AaPositionRow = "AA Position";   // Task117
         public static string OptionsBaseBuilding_SubscribedOnlyCheckbox = "Subscribed only";
-        public static string OptionsBaseBuilding_SearchField = "Search (partial match)";
+        public static string OptionsBaseBuilding_SearchField = "Search: type part of an asset name, then pick it below";
         public static string OptionsBaseBuilding_ResetButton = "Reset to Default";
         public static string OptionsBaseBuilding_NoAssetsHint = "No building assets are currently available (e.g. opened from the main menu). Open this again after loading a city to see subscribed buildings in the list.";
         public static string OptionsBaseBuilding_ListTruncatedFormat = "* Showing {0} of {1} (narrow your search)";
