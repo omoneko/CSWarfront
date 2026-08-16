@@ -56,6 +56,48 @@ namespace CSWarfront.Game
         /// happens after the lock is released (avoiding heavy/blocking work while holding the lock so
         /// the sim thread never has to wait).
         /// </summary>
+        /// <summary>Task140 (playtest "the main gun does not look separated"): the horizontal direction
+        /// from a unit to whatever it is engaging, or zero for nothing. The detector and the mesh split
+        /// were confirmed working on the reported model; what was missing is that a turret only had a
+        /// direction to point in for the few seconds after each shot, so between shots it returned to
+        /// dead ahead and the tank looked rigid. Targets are checked in the order combat resolves them:
+        /// a unit, then an external threat, then a base under fire.
+        /// Called with _stateLock held (the caller is building the snapshot).</summary>
+        private static Vector3 ResolveAimDirection(UnitInstance u)
+        {
+            WorldPos? target = null;
+
+            if (u.TargetId.HasValue)
+            {
+                UnitInstance other = State.FindUnit(u.TargetId.Value);
+                if (other != null && other.IsAlive) target = other.Position;
+            }
+            if (!target.HasValue && u.TargetThreatId.HasValue)
+            {
+                for (int i = 0; i < State.Threats.Count; i++)
+                {
+                    if (State.Threats[i].Id != u.TargetThreatId.Value) continue;
+                    target = State.Threats[i].Position;
+                    break;
+                }
+            }
+            if (!target.HasValue && u.TargetBaseId.HasValue)
+            {
+                for (int i = 0; i < State.Bases.Count; i++)
+                {
+                    if (State.Bases[i].BaseId != u.TargetBaseId.Value) continue;
+                    target = State.Bases[i].Position;
+                    break;
+                }
+            }
+            if (!target.HasValue) return Vector3.zero;
+
+            float dx = target.Value.X - u.Position.X;
+            float dz = target.Value.Z - u.Position.Z;
+            if (dx * dx + dz * dz < 0.0001f) return Vector3.zero; // on top of it: no meaningful bearing
+            return new Vector3(dx, 0f, dz).normalized;
+        }
+
         public static void OnMainVisualUpdate()
         {
             if (State == null) return;
@@ -88,7 +130,8 @@ namespace CSWarfront.Game
                         TypeKey = u.TypeKey,
                         FactionId = u.FactionId,
                         Position = new Vector3(u.Position.X, u.Position.Y, u.Position.Z),
-                        AssetPrefabName = type != null ? type.AssetPrefabName : ""
+                        AssetPrefabName = type != null ? type.AssetPrefabName : "",
+                        AimDirection = ResolveAimDirection(u) // Task140: keeps a turret on its target
                     });
                 }
 

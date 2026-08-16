@@ -18,6 +18,13 @@ namespace CSWarfront.Game
         /// <summary>Core-side UnitType.AssetPrefabName (Workshop asset etc.). If empty, the default
         /// fallback is used.</summary>
         public string AssetPrefabName;
+
+        /// <summary>Task140: horizontal direction to whatever this unit is currently engaging, or zero
+        /// when it is engaging nothing. A turret tracks this continuously. Without it the gun only knew
+        /// where to point in the moments just after a shot (the Task83 firing-direction hold), so between
+        /// shots it swung back to dead ahead and the model read as one rigid piece - which is exactly how
+        /// it was reported.</summary>
+        public Vector3 AimDirection;
     }
 
     /// <summary>
@@ -300,7 +307,7 @@ namespace CSWarfront.Game
                     }
                     else
                     {
-                        MoveVisual(entry, s.Position);
+                        MoveVisual(entry, s.Position, s.AimDirection);
                     }
 
                     // Task49: Called every frame after this point on both the create and move paths
@@ -687,7 +694,7 @@ namespace CSWarfront.Game
                 || category == UnitCategory.TransportHelicopter;
         }
 
-        private static void MoveVisual(VisualEntry entry, Vector3 newPosition)
+        private static void MoveVisual(VisualEntry entry, Vector3 newPosition, Vector3 aimDirection)
         {
             if (entry == null || entry.GameObject == null) return;
             Vector3 delta = newPosition - entry.LastPosition;
@@ -735,8 +742,18 @@ namespace CSWarfront.Game
                 entry.GameObject.transform.rotation = Quaternion.LookRotation(delta);
             }
 
+            // Task140: a turret tracks whatever the unit is engaging for as long as it is engaging it,
+            // not just for the few seconds after each shot. Between shots the old rule swung the gun back
+            // to dead ahead, which is why a correctly split model still read as one rigid piece. The
+            // firing direction remains the fallback, so a unit that shoots at something the snapshot has
+            // no bearing for still points the right way.
             if (entry.Turret != null)
-                AimTurret(entry, aiming ? entry.FacingDirection : Vector3.zero);
+            {
+                Vector3 turretAim = aimDirection.sqrMagnitude > 1e-6f
+                    ? aimDirection
+                    : (aiming ? entry.FacingDirection : Vector3.zero);
+                AimTurret(entry, turretAim);
+            }
 
             // Task126: traverse the gun toward the target (or back to dead ahead), at a fixed rate so
             // it reads as a turret turning rather than a snap.
