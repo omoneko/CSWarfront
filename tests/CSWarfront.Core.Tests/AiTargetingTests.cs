@@ -273,11 +273,16 @@ public class AiTargetingTests
             if (u.Path != null) withPath++;
 
         Assert.Equal(1, withPath);
-        // all units still receive orders/state even if path computation was throttled
+        // Every unit is still given a posture even when path computation was throttled: an objective to
+        // advance on, or - since Task149 - a post at home, stood down with nothing to march to.
         foreach (var u in s.Units)
         {
-            Assert.Equal(UnitState.Moving, u.State);
-            Assert.True(u.OrderTargetPos.HasValue);
+            if (u.State == UnitState.Idle) Assert.False(u.OrderTargetPos.HasValue);
+            else
+            {
+                Assert.Equal(UnitState.Moving, u.State);
+                Assert.True(u.OrderTargetPos.HasValue);
+            }
         }
     }
 

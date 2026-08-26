@@ -112,12 +112,49 @@ namespace CSWarfront.Core
             // targets second only to external threats (KAIJU/Alien) — prioritized over advancing on enemy
             // bases. See FindInvaderToIntercept for details.
             if (!divertTarget.HasValue) divertTarget = FindInvaderToIntercept(state, factionId);
+
+            // Task149: part of the faction stays home. Recomputed each call rather than remembered: the
+            // set of bases and units changes constantly, and the selection is deterministic and stable
+            // enough (nearest units to each base, which are the ones already standing there) that
+            // recomputing does not make anyone change their mind.
+            //
+            // While a threat is loose in the faction's territory the garrison is stood down and everyone
+            // goes after it - a defence that ignores the thing attacking the city is not a defence.
+            System.Collections.Generic.Dictionary<uint, ushort> posts = divertTarget.HasValue
+                ? EmptyPosts : GarrisonPlanning.Assign(state, factionId);
+
             for (int i = 0; i < state.Units.Count; i++)
             {
                 var u = state.Units[i];
                 if (u.FactionId != factionId || !u.IsAlive) continue;
                 if (u.Order != UnitOrder.AiControlled && u.Order != UnitOrder.FreeAdvance) continue;
                 if (u.State == UnitState.Engaging) continue;
+
+                // Task149: a unit posted to a base heads there and then stands down. Standing down is
+                // what earns it the dug-in bonus (Task148), and CombatStep fires regardless of state, so
+                // a stood-down garrison is a defending garrison rather than a passenger.
+                ushort postId;
+                if (posts.TryGetValue(u.InstanceId, out postId))
+                {
+                    MilitaryBase post = FindBase(state, postId);
+                    if (post != null)
+                    {
+                        if (u.Position.HorizontalDistanceTo(post.Position) <= GarrisonPlanning.PostRadius)
+                        {
+                            u.OrderTargetPos = null;
+                            u.ClearPath();
+                            u.State = UnitState.Idle;
+                        }
+                        else
+                        {
+                            u.OrderTargetPos = post.Position;
+                            u.State = UnitState.Moving;
+                            if (u.PathTarget.HasValue && !IsSameTarget(u.PathTarget.Value, post.Position))
+                                u.ClearPath();
+                        }
+                        continue;
+                    }
+                }
 
                 u.PathRetryCooldown -= dt;
                 if (u.PathRetryCooldown < 0f) u.PathRetryCooldown = 0f;
@@ -400,6 +437,18 @@ namespace CSWarfront.Core
         private static bool IsSameTarget(WorldPos a, WorldPos b)
         {
             return IsSameTarget(a, b, TargetChangeEpsilon);
+        }
+
+        /// <summary>Task149: reused for every call that finds no garrison to post, so the common case
+        /// allocates nothing.</summary>
+        private static readonly System.Collections.Generic.Dictionary<uint, ushort> EmptyPosts =
+            new System.Collections.Generic.Dictionary<uint, ushort>();
+
+        private static MilitaryBase FindBase(WarState state, ushort baseId)
+        {
+            for (int b = 0; b < state.Bases.Count; b++)
+                if (state.Bases[b].BaseId == baseId) return state.Bases[b];
+            return null;
         }
 
         private static bool IsSameTarget(WorldPos a, WorldPos b, float epsilon)
