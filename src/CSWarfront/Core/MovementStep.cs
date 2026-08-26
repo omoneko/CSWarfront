@@ -153,7 +153,11 @@ namespace CSWarfront.Core
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
                 if (u.IsCarried) continue; // Task101: while carried, the carrier (helicopter/train) manages position
-                if (u.Order == UnitOrder.Hold) continue; // Task48: hold order = never move.
+                // Task48: hold order = never move. Task147: and the longer it holds, the better dug in
+                // it is (FortDefenseBonus). Measured here because this is the step that knows the unit is
+                // standing still by order rather than by circumstance.
+                if (u.Order == UnitOrder.Hold) { u.HoldDugInHours += dt; continue; }
+                u.HoldDugInHours = 0f;
 
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;

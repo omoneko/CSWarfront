@@ -27,15 +27,36 @@ namespace CSWarfront.Core
         /// player rather than three grades of it.</summary>
         public const float GarrisonDamageDivisor = 1.5f;
 
+        /// <summary>Task147 (Workshop request from siddyskylines1989: "maybe add stationary tanks too,
+        /// like a bunker but in a tank format"): a vehicle left under a Hold order long enough to prepare
+        /// its position takes reduced damage. Deliberately less than a purpose-built emplacement - a berm
+        /// and a hull-down position is not a concrete pillbox - but it is what turns "a tank parked in the
+        /// way" into "a dug-in tank".
+        ///
+        /// Unlike the two divisors above this one is not limited to infantry: it exists precisely for
+        /// armour. Infantry get theirs from trenches and buildings, which are better and easier to reach.</summary>
+        public const float DugInDamageDivisor = 1.25f;
+
+        /// <summary>Task147: how long a Hold order must stand before it counts as prepared. Long enough
+        /// that it cannot be claimed by tapping Hold as the shooting starts.</summary>
+        public const float HoursToDigIn = 4f;
+
         /// <summary>The incoming-damage multiplier applied to target (1/1.5 for infantry classes
         /// inside a bonus zone or holding a building, 1.0 otherwise).</summary>
         public static float Multiplier(WarState state, UnitInstance target, UnitType targetType)
         {
             if (targetType == null) return 1f;
-            if (targetType.Category != UnitCategory.Infantry &&
-                targetType.Category != UnitCategory.MechInfantry) return 1f;
-            if (IsOnFortification(state, target.Position)) return 1f / DamageDivisor;
-            if (IsGarrisoned(state, target)) return 1f / GarrisonDamageDivisor;
+
+            bool isInfantry = targetType.Category == UnitCategory.Infantry
+                || targetType.Category == UnitCategory.MechInfantry;
+            if (isInfantry)
+            {
+                if (IsOnFortification(state, target.Position)) return 1f / DamageDivisor;
+                if (IsGarrisoned(state, target)) return 1f / GarrisonDamageDivisor;
+            }
+
+            // Task147: anything that has been holding its ground long enough to prepare the position.
+            if (IsDugIn(target)) return 1f / DugInDamageDivisor;
             return 1f;
         }
 
@@ -47,6 +68,13 @@ namespace CSWarfront.Core
             if (state.Cover == null || !u.CoverHold || !u.CoverDestination.HasValue) return false;
             if (u.GarrisonHoldTimer <= 0f) return false; // only counts once actually in position
             return u.Position.HorizontalDistanceTo(u.CoverDestination.Value) <= MovementStep.CoverArrivalDistance;
+        }
+
+        /// <summary>Task147: whether this unit has been standing on a Hold order long enough to count as
+        /// dug in. Read straight off the timer, so the bonus appears and disappears with the order.</summary>
+        public static bool IsDugIn(UnitInstance u)
+        {
+            return u != null && u.Order == UnitOrder.Hold && u.HoldDugInHours >= HoursToDigIn;
         }
 
         /// <summary>Whether pos lies inside a trench/bunker bonus zone (also used by FortSeekStep's

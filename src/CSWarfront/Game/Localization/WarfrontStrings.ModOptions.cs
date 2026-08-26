@@ -21,7 +21,7 @@ namespace CSWarfront.Game
         public static string Options_SelectionModeKey = "Toggle unit selection mode (drag-box select; single click always works)";
         public static string Options_BuildPanelKey = "Toggle military construction panel";
         public static string Options_FreeAdvanceKey = "Free advance (march at full speed toward the nearest hostile base)";
-        public static string Options_HoldKey = "Hold (stop in place, still fires at anything in range)";
+        public static string Options_HoldKey = "Hold (stop in place, keep firing; digs in after a while and takes less damage)";
         public static string Options_RallyKey = "Rally (then right-click a destination; units move there, stop, and fight defensively only)";
 
         // Task139: how the city itself reacts to a battle fought inside it.

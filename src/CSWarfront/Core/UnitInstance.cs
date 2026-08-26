@@ -191,6 +191,12 @@ namespace CSWarfront.Core
         /// building for this unit (runtime-only, not persisted).</summary>
         public float GarrisonCooldown;
 
+        /// <summary>Task147: how long this unit has been sitting under a Hold order (runtime-only, not
+        /// persisted). Past FortDefenseBonus.HoursToDigIn it counts as dug in and takes reduced damage:
+        /// a tank told to hold a crossroads has had time to find a berm and a hull-down position. Reset
+        /// the moment the order changes, so the bonus can never be bought by tapping Hold mid-firefight.</summary>
+        public float HoldDugInHours;
+
         /// <summary>Task139: the city building this unit is holding, or 0 for none (runtime-only, not
         /// persisted). Set only once the unit has actually reached the building — a squad still crossing
         /// the street has not occupied anything yet. The Game layer shows these buildings as abandoned

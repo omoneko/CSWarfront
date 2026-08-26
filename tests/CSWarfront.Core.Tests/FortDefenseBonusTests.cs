@@ -295,4 +295,74 @@ public class FortDefenseBonusTests
         Assert.False(infantry.CoverHold);
         Assert.Null(infantry.CoverDestination);
     }
+
+    // --- Task147: a vehicle told to hold its ground digs in ---
+
+    private static WarState HeldTank(out UnitInstance tank)
+    {
+        var s = new WarState();
+        for (byte i = 0; i < 2; i++) s.Factions.Add(new Faction(i, "F" + i));
+        RelationPresets.ApplyAllHostile(s.Relations, 2);
+        LandUnitRoster.RegisterAll(s.Types);
+        tank = new UnitInstance(1, "Tank_T1", 0, 100f, new WorldPos(0, 0, 0));
+        tank.Order = UnitOrder.Hold;
+        s.Units.Add(tank);
+        return s;
+    }
+
+    /// <summary>Workshop request: "maybe add stationary tanks too, like a bunker but in a tank format".
+    /// A tank left holding a position long enough to prepare it takes less damage - the answer to that
+    /// request is an actual tank you place and hold, not a pillbox wearing a tank model.</summary>
+    [Fact]
+    public void A_tank_that_has_held_its_ground_takes_less_damage()
+    {
+        UnitInstance tank;
+        WarState s = HeldTank(out tank);
+        UnitType type = s.Types.Get("Tank_T1");
+
+        Assert.Equal(1f, FortDefenseBonus.Multiplier(s, tank, type), 3); // just ordered: no credit yet
+
+        for (float h = 0f; h <= FortDefenseBonus.HoursToDigIn + 1f; h += 1f)
+            MovementStep.Advance(s, 1f);
+
+        Assert.True(FortDefenseBonus.IsDugIn(tank));
+        Assert.Equal(1f / FortDefenseBonus.DugInDamageDivisor,
+            FortDefenseBonus.Multiplier(s, tank, type), 3);
+    }
+
+    /// <summary>The bonus cannot be bought by tapping Hold as the shooting starts, and it is gone the
+    /// moment the unit is told to do anything else.</summary>
+    [Fact]
+    public void Releasing_the_hold_gives_up_the_dug_in_position()
+    {
+        UnitInstance tank;
+        WarState s = HeldTank(out tank);
+        for (float h = 0f; h <= FortDefenseBonus.HoursToDigIn + 1f; h += 1f)
+            MovementStep.Advance(s, 1f);
+        Assert.True(FortDefenseBonus.IsDugIn(tank));
+
+        tank.Order = UnitOrder.AiControlled;
+        MovementStep.Advance(s, 1f);
+
+        Assert.False(FortDefenseBonus.IsDugIn(tank));
+        Assert.Equal(0f, tank.HoldDugInHours, 3);
+    }
+
+    /// <summary>Infantry keep the better protection a trench gives them; the dug-in rule must not quietly
+    /// replace it with a weaker one.</summary>
+    [Fact]
+    public void A_trench_still_beats_digging_in()
+    {
+        UnitInstance tank;
+        WarState s = HeldTank(out tank);
+        s.Bases.Add(new MilitaryBase(1, BaseType.Trench, new WorldPos(0, 0, 0)));
+        var squad = new UnitInstance(2, "Infantry_T1", 0, 100f, new WorldPos(0, 0, 0));
+        squad.Order = UnitOrder.Hold;
+        s.Units.Add(squad);
+        for (float h = 0f; h <= FortDefenseBonus.HoursToDigIn + 1f; h += 1f)
+            MovementStep.Advance(s, 1f);
+
+        Assert.Equal(1f / FortDefenseBonus.DamageDivisor,
+            FortDefenseBonus.Multiplier(s, squad, s.Types.Get("Infantry_T1")), 3);
+    }
 }
