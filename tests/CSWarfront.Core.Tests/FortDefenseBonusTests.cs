@@ -330,10 +330,10 @@ public class FortDefenseBonusTests
             FortDefenseBonus.Multiplier(s, tank, type), 3);
     }
 
-    /// <summary>The bonus cannot be bought by tapping Hold as the shooting starts, and it is gone the
-    /// moment the unit is told to do anything else.</summary>
+    /// <summary>The bonus is for standing your ground, so it is gone the moment the unit has somewhere
+    /// to be - which is also why it cannot be bought by tapping Hold as the shooting starts.</summary>
     [Fact]
-    public void Releasing_the_hold_gives_up_the_dug_in_position()
+    public void Being_given_somewhere_to_be_gives_up_the_dug_in_position()
     {
         UnitInstance tank;
         WarState s = HeldTank(out tank);
@@ -342,10 +342,57 @@ public class FortDefenseBonusTests
         Assert.True(FortDefenseBonus.IsDugIn(tank));
 
         tank.Order = UnitOrder.AiControlled;
+        tank.State = UnitState.Moving;
+        tank.OrderTargetPos = new WorldPos(500, 0, 0); // ordered somewhere
         MovementStep.Advance(s, 1f);
 
         Assert.False(FortDefenseBonus.IsDugIn(tank));
-        Assert.Equal(0f, tank.HoldDugInHours, 3);
+        Assert.Equal(0f, tank.DugInHours, 3);
+    }
+
+    /// <summary>Task148: the AI never issues a Hold order - Hold is a player command. Crediting only Hold
+    /// would have given the player a defensive bonus its opponents could never earn, so a unit the AI has
+    /// stood down with nowhere to attack counts as holding its position too.</summary>
+    [Fact]
+    public void Ai_troops_standing_down_dig_in_as_well()
+    {
+        UnitInstance tank;
+        WarState s = HeldTank(out tank);
+        tank.Order = UnitOrder.AiControlled; // never Hold: exactly what the AI leaves behind
+        tank.State = UnitState.Idle;
+        tank.OrderTargetPos = null;
+
+        for (float h = 0f; h <= FortDefenseBonus.HoursToDigIn + 1f; h += 1f)
+            MovementStep.Advance(s, 1f);
+
+        Assert.True(FortDefenseBonus.IsDugIn(tank), "the AI can never earn what the player gets for free");
+    }
+
+    /// <summary>A unit that has simply been stopped by terrain is not dug in - it is stuck. It stays
+    /// State==Moving with an objective, which earns nothing.</summary>
+    [Fact]
+    public void A_unit_halted_by_circumstance_is_not_dug_in()
+    {
+        UnitInstance tank;
+        WarState s = HeldTank(out tank);
+        tank.Order = UnitOrder.AiControlled;
+        tank.State = UnitState.Moving;
+        tank.OrderTargetPos = new WorldPos(500, 0, 0);
+        s.Water = new AllWater(); // the way ahead is a lake: it will not move an inch
+
+        for (float h = 0f; h <= FortDefenseBonus.HoursToDigIn + 4f; h += 1f)
+            MovementStep.Advance(s, 1f);
+
+        Assert.Equal(0f, tank.Position.X, 3);           // genuinely went nowhere
+        Assert.False(FortDugInOrThrow(tank));
+    }
+
+    private static bool FortDugInOrThrow(UnitInstance u) { return FortDefenseBonus.IsDugIn(u); }
+
+    private class AllWater : IWaterSampler
+    {
+        public bool TrySampleWaterLevel(float x, float z, out float level) { level = 0f; return true; }
+        public bool IsWater(float x, float z) { return true; }
     }
 
     /// <summary>Infantry keep the better protection a trench gives them; the dug-in rule must not quietly

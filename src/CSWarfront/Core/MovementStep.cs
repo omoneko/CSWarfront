@@ -153,14 +153,24 @@ namespace CSWarfront.Core
                 UnitInstance u = state.Units[i];
                 if (!u.IsAlive) continue;
                 if (u.IsCarried) continue; // Task101: while carried, the carrier (helicopter/train) manages position
-                // Task48: hold order = never move. Task147: and the longer it holds, the better dug in
-                // it is (FortDefenseBonus). Measured here because this is the step that knows the unit is
-                // standing still by order rather than by circumstance.
-                if (u.Order == UnitOrder.Hold) { u.HoldDugInHours += dt; continue; }
-                u.HoldDugInHours = 0f;
-
                 UnitType type = state.Types.Get(u.TypeKey);
                 if (type == null) continue;
+
+                // Task147/148: credit for holding a position (FortDefenseBonus.IsDugIn). Measured here
+                // because this is the step that knows whether a unit is standing still by intent or by
+                // circumstance - a unit halted at a river bank is State==Moving and earns nothing.
+                //
+                // Task148: the AI never issues a Hold order - Hold is a player command and nothing else
+                // sets it - so crediting only Hold would have handed the player a defensive bonus its
+                // opponents could never earn. The AI's equivalent posture is a unit that has been stood
+                // down with no objective: Idle with no OrderTargetPos, which is what AssignAdvance
+                // leaves behind once a faction has withdrawn and has nowhere to attack. Both count.
+                bool standingDown = u.Order == UnitOrder.Hold
+                    || (u.State == UnitState.Idle && !u.OrderTargetPos.HasValue);
+                if (standingDown && type.Domain == Domain.Land) u.DugInHours += dt;
+                else u.DugInHours = 0f;
+
+                if (u.Order == UnitOrder.Hold) continue; // Task48: hold order = never move.
 
                 float stepLen = type.Speed * GlobalSpeedMultiplier * dt;
                 if (stepLen <= 0f) continue;

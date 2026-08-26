@@ -28,8 +28,8 @@ namespace CSWarfront.Core
         public const float GarrisonDamageDivisor = 1.5f;
 
         /// <summary>Task147 (Workshop request from siddyskylines1989: "maybe add stationary tanks too,
-        /// like a bunker but in a tank format"): a vehicle left under a Hold order long enough to prepare
-        /// its position takes reduced damage. Deliberately less than a purpose-built emplacement - a berm
+        /// like a bunker but in a tank format"): a vehicle left holding a position long enough to prepare
+        /// it takes reduced damage. Deliberately less than a purpose-built emplacement - a berm
         /// and a hull-down position is not a concrete pillbox - but it is what turns "a tank parked in the
         /// way" into "a dug-in tank".
         ///
@@ -37,7 +37,7 @@ namespace CSWarfront.Core
         /// armour. Infantry get theirs from trenches and buildings, which are better and easier to reach.</summary>
         public const float DugInDamageDivisor = 1.25f;
 
-        /// <summary>Task147: how long a Hold order must stand before it counts as prepared. Long enough
+        /// <summary>Task147: how long a position must be held before it counts as prepared. Long enough
         /// that it cannot be claimed by tapping Hold as the shooting starts.</summary>
         public const float HoursToDigIn = 4f;
 
@@ -70,11 +70,13 @@ namespace CSWarfront.Core
             return u.Position.HorizontalDistanceTo(u.CoverDestination.Value) <= MovementStep.CoverArrivalDistance;
         }
 
-        /// <summary>Task147: whether this unit has been standing on a Hold order long enough to count as
-        /// dug in. Read straight off the timer, so the bonus appears and disappears with the order.</summary>
+        /// <summary>Task147/148: whether this unit has held a position long enough to count as dug in.
+        /// Read straight off the timer, which MovementStep only advances while the unit is deliberately
+        /// standing its ground - so there is one rule here, and it applies to the AI's troops exactly as
+        /// it does to the player's.</summary>
         public static bool IsDugIn(UnitInstance u)
         {
-            return u != null && u.Order == UnitOrder.Hold && u.HoldDugInHours >= HoursToDigIn;
+            return u != null && u.DugInHours >= HoursToDigIn;
         }
 
         /// <summary>Whether pos lies inside a trench/bunker bonus zone (also used by FortSeekStep's
