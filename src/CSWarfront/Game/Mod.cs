@@ -107,6 +107,9 @@ namespace CSWarfront.Game
             UIHelperBase group = helper.AddGroup(WarfrontStrings.Options_BattlefieldGroup);
             group.AddCheckbox(WarfrontStrings.Options_GarrisonAbandons, WarfrontSettings.GarrisonAbandonsBuildings,
                 v => WarfrontSettings.GarrisonAbandonsBuildings = v);
+            group.AddDropdown(WarfrontStrings.Options_BattleDamageDropdown,
+                WarfrontSettings.BattleDamageNames(), WarfrontSettings.BattleDamageIndex,
+                i => WarfrontSettings.BattleDamageIndex = i); // Task146
         }
 
         private static void AddUnitCommandHotkeyUI(UIHelperBase helper)

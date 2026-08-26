@@ -59,6 +59,39 @@ namespace CSWarfront.Game
         /// Like the other WarfrontSettings, memory-only (reverts to this default each session).</summary>
         public static bool GarrisonAbandonsBuildings = true;
 
+        /// <summary>Task146 (Workshop feedback from bob: "the explosions do no damage, and the city is
+        /// undamaged by war"): how heavily fighting marks the city. The collateral system has been there
+        /// since Task65, but it was tuned to "rare" on request and at that setting a battle can pass
+        /// through a district leaving nothing behind - which reads as nothing being implemented at all.
+        /// The rate is now the player's to choose. Index into <see cref="BattleDamageNames"/>:
+        /// 0 = none, 1 = the old rare setting, 2 = damage you will actually notice.
+        /// Memory-only, like the rest of WarfrontSettings.</summary>
+        public static int BattleDamageIndex = 1;
+
+        /// <summary>Multiplier on collateral fire/collapse chance and on the daily cap, by index.</summary>
+        public static float BattleDamageScale
+        {
+            get
+            {
+                switch (BattleDamageIndex)
+                {
+                    case 0: return 0f;
+                    case 2: return 5f;
+                    default: return 1f;
+                }
+            }
+        }
+
+        public static string[] BattleDamageNames()
+        {
+            return new[]
+            {
+                WarfrontStrings.Options_BattleDamageNone,
+                WarfrontStrings.Options_BattleDamageLight,
+                WarfrontStrings.Options_BattleDamageHeavy
+            };
+        }
+
         // --- Task49: toggle for the faction icons above units (small spheres, Game/UnitVisuals) ---
 
         private static bool _showFactionIcons = true; // default ON

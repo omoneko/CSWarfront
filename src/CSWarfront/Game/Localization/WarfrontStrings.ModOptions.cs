@@ -27,6 +27,10 @@ namespace CSWarfront.Game
         // Task139: how the city itself reacts to a battle fought inside it.
         public static string Options_BattlefieldGroup = "Battle damage";
         public static string Options_GarrisonAbandons = "Buildings held by infantry look abandoned while occupied (the residents have fled)";
+        public static string Options_BattleDamageDropdown = "Collateral damage from fighting (fires and collapses near a battle)";
+        public static string Options_BattleDamageNone = "None - the city is never touched";
+        public static string Options_BattleDamageLight = "Light - the occasional fire";
+        public static string Options_BattleDamageHeavy = "Heavy - a battle wrecks the district it is fought in";
 
         public static string Options_InvasionGroup = "Invasion events (waves attack from outside the city)";
         public static string Options_InvasionEnable = "Enable invasion events";

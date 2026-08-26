@@ -95,6 +95,16 @@ namespace CSWarfront.Game
                 _checkAccum -= CollateralCheckIntervalHours;
                 if (_checkAccum < 0f) _checkAccum = 0f;
 
+                // Task146: the player's chosen intensity. At 0 the whole system is off; the shipped
+                // default is the historical rate, and the heavy setting is what makes a battle visibly
+                // wreck the place it is fought in.
+                float scale = WarfrontSettings.BattleDamageScale;
+                if (scale <= 0f) return;
+                float fireChance = FireChancePerCheck * scale;
+                float collapseChance = CollapseChancePerCheck * scale;
+                int dailyCap = (int)(MaxEventsPerDay * scale);
+                if (dailyCap < 1) dailyCap = 1;
+
                 var zones = state.CombatZones.Zones;
                 if (zones.Count == 0) return;
 
@@ -102,21 +112,21 @@ namespace CSWarfront.Game
 
                 for (int i = 0; i < zones.Count; i++)
                 {
-                    if (_eventsToday >= MaxEventsPerDay) return;
+                    if (_eventsToday >= dailyCap) return;
 
                     CombatZone zone = zones[i];
 
                     // Fire roll (a hash mixing zoneIndex+checkCounter+salt, no System.Random).
-                    if (Roll(i, _checkCounter, 1u) < FireChancePerCheck)
+                    if (Roll(i, _checkCounter, 1u) < fireChance)
                     {
                         Vector3 pos = RandomPointIn(zone, i, _checkCounter, 2u);
                         IgniteFire(pos);
                         _eventsToday++;
-                        if (_eventsToday >= MaxEventsPerDay) return;
+                        if (_eventsToday >= dailyCap) return;
                     }
 
                     // Building collapse roll (independent of fire; hash separated via a different salt).
-                    if (Roll(i, _checkCounter, 3u) < CollapseChancePerCheck)
+                    if (Roll(i, _checkCounter, 3u) < collapseChance)
                     {
                         Vector3 pos = RandomPointIn(zone, i, _checkCounter, 4u);
                         CollapseBuilding(pos);

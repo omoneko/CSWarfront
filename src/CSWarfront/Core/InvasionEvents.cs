@@ -129,6 +129,7 @@ namespace CSWarfront.Core
             for (int extra = 1; extra < tier; extra++) composition.Add(UnitCategory.Tank);
 
             int spawned = 0;
+            spawned += SpawnAirEscort(state, attacker, tier, spawn.Value);
             for (int i = 0; i < composition.Count; i++)
             {
                 string key = LandUnitRoster.TypeKey(composition[i], tier);
@@ -141,6 +142,46 @@ namespace CSWarfront.Core
                 var u = new UnitInstance(state.AllocInstanceId(), key, attacker.Id, type.MaxHP,
                     new WorldPos(spawn.Value.X + ox, spawn.Value.Y, spawn.Value.Z + oz));
                 u.State = UnitState.Moving; // the next AssignAdvance assigns a target base and a route
+                state.Units.Add(u);
+                spawned++;
+            }
+            return spawned;
+        }
+
+        /// <summary>Task145 (Workshop request from siddyskylines1989: "the invasion forces should also
+        /// spawn with a couple of aerial units"): the air component of a raiding force.
+        ///
+        /// A gunship and a bomber, plus a fighter escort once the defenders have the tier to field
+        /// interceptors of their own - by then an unescorted bomber is just a delivery of free kills. They
+        /// spawn at cruise altitude rather than on the deck, because a wave that begins by climbing from
+        /// the map edge spends its first minutes as target practice for the AA the wave also brought.
+        ///
+        /// Separate from the ground composition because air units come from a different roster and need a
+        /// height; the wave tier and spawn point are shared, so they arrive together.</summary>
+        private static int SpawnAirEscort(WarState state, Faction attacker, byte tier, WorldPos spawn)
+        {
+            var air = new List<UnitCategory>
+            {
+                UnitCategory.AttackHelicopter,
+                UnitCategory.TacticalBomber
+            };
+            if (tier >= 3) air.Add(UnitCategory.AirSuperiority);
+
+            int spawned = 0;
+            for (int i = 0; i < air.Count; i++)
+            {
+                string key = AirUnitRoster.TypeKey(air[i], tier);
+                UnitType type = state.Types.Get(key);
+                if (type == null) continue; // air roster not registered (some tests): the wave is ground-only
+
+                float ox = (Hash01(state.TickCounter, (uint)(100 + i * 2)) - 0.5f) * 120f;
+                float oz = (Hash01(state.TickCounter, (uint)(101 + i * 2)) - 0.5f) * 120f;
+                float altitude = TargetingRules.IsHelicopter(air[i])
+                    ? MovementStep.HeliCruiseAltitude : MovementStep.CruiseAltitude;
+
+                var u = new UnitInstance(state.AllocInstanceId(), key, attacker.Id, type.MaxHP,
+                    new WorldPos(spawn.X + ox, spawn.Y + altitude, spawn.Z + oz));
+                u.State = UnitState.Moving; // the next AssignAdvance gives it an objective
                 state.Units.Add(u);
                 spawned++;
             }

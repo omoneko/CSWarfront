@@ -253,4 +253,43 @@ public class InvasionEventsTests
         }
         Assert.Empty(s.Units);
     }
+
+    /// <summary>Task145 (Workshop request from siddyskylines1989: "the invasion forces should also spawn
+    /// with a couple of aerial units"). They arrive at altitude with the ground force, not climbing from
+    /// the deck under the wave's own AA.</summary>
+    [Fact]
+    public void A_wave_arrives_with_air_support()
+    {
+        WarState s = DefendedState();
+        AirUnitRoster.RegisterAll(s.Types);
+
+        InvasionEvents.SpawnWave(s);
+
+        int air = 0;
+        foreach (UnitInstance u in s.Units)
+        {
+            UnitType type = s.Types.Get(u.TypeKey);
+            if (type == null || type.Domain != Domain.Air) continue;
+            air++;
+            Assert.True(u.Position.Y > 10f, "the escort spawned on the ground and has to climb out under fire");
+        }
+        Assert.True(air >= 2, "expected a couple of aircraft with the wave, got " + air);
+    }
+
+    /// <summary>The air roster is not always registered (older saves, focused tests). A wave must still
+    /// turn up rather than throwing or arriving empty.</summary>
+    [Fact]
+    public void Without_an_air_roster_the_wave_is_ground_only()
+    {
+        WarState s = DefendedState(); // land roster only
+
+        int spawned = InvasionEvents.SpawnWave(s);
+
+        Assert.True(spawned > 0);
+        foreach (UnitInstance u in s.Units)
+        {
+            UnitType type = s.Types.Get(u.TypeKey);
+            if (type != null) Assert.NotEqual(Domain.Air, type.Domain);
+        }
+    }
 }
