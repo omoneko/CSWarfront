@@ -140,5 +140,109 @@ public class MeshIslandsTests
         var empty = new bool[0];
         Assert.Same(empty, MeshIslands.SelectTurretPieces(new float[0], new int[0], empty));
     }
+
+    // --- Task152: the bundled models, whose turrets are welded to their hulls ---
+
+    /// <summary>The regression this file was missing. Every vehicle the mod ships has its turret welded
+    /// to the hull as one surface, so "a piece that continues below the cut is hull" handed the turret
+    /// shell back and left only the separately-modelled fittings turning - the gun, the hatches, the
+    /// stowage - which in game looked like a gun floating off a stationary tank.
+    ///
+    /// Measured on Unit_Tank: the turret shell is twenty-one triangles carrying half the area above the
+    /// cut, which is why the first attempt at a safety net - counting triangles - never noticed.
+    /// Asserted on area for the same reason.</summary>
+    [Theory]
+    [InlineData("Unit_Tank")]
+    [InlineData("Unit_Artillery")]
+    public void A_turret_welded_to_its_hull_still_comes_away_with_the_cut(string model)
+    {
+        float[] v;
+        int[] t;
+        if (!TryLoadModel(model, out v, out t)) return; // models not present: nothing to check
+
+        TurretSplit split = TurretDetection.Detect(v, t);
+        Assert.True(split.Found, model + ": the detector no longer finds a turret at all");
+
+        var above = new bool[t.Length / 3];
+        for (int i = 0; i < above.Length; i++)
+        {
+            float cy = (v[t[i * 3] * 3 + 1] + v[t[i * 3 + 1] * 3 + 1] + v[t[i * 3 + 2] * 3 + 1]) / 3f;
+            above[i] = cy >= split.SplitY;
+        }
+        bool[] kept = MeshIslands.SelectTurretPieces(v, t, above);
+
+        float aboveArea = 0f, keptArea = 0f;
+        for (int i = 0; i < above.Length; i++)
+        {
+            if (!above[i]) continue;
+            float area = Area(v, t, i);
+            aboveArea += area;
+            if (kept[i]) keptArea += area;
+        }
+
+        Assert.True(aboveArea > 0f);
+        Assert.True(keptArea >= aboveArea * 0.8f,
+            model + ": only " + (100f * keptArea / aboveArea) + "% of the area above the cut turns - the "
+            + "turret shell is being handed back to the hull again");
+    }
+
+    private static float Area(float[] v, int[] t, int tri)
+    {
+        int a = t[tri * 3] * 3, b = t[tri * 3 + 1] * 3, c = t[tri * 3 + 2] * 3;
+        float abx = v[b] - v[a], aby = v[b + 1] - v[a + 1], abz = v[b + 2] - v[a + 2];
+        float acx = v[c] - v[a], acy = v[c + 1] - v[a + 1], acz = v[c + 2] - v[a + 2];
+        float cx = aby * acz - abz * acy, cy = abz * acx - abx * acz, cz = abx * acy - aby * acx;
+        return 0.5f * (float)System.Math.Sqrt(cx * cx + cy * cy + cz * cz);
+    }
+
+    private static bool TryLoadModel(string name, out float[] vertices, out int[] triangles)
+    {
+        vertices = null;
+        triangles = null;
+        string dir = ModelsDir();
+        if (dir == null) return false;
+        string path = System.IO.Path.Combine(dir, name + ".obj");
+        if (!System.IO.File.Exists(path)) return false;
+
+        var v = new List<float>();
+        var t = new List<int>();
+        foreach (string line in System.IO.File.ReadAllLines(path))
+        {
+            string[] p = line.Split(new[] { ' ', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length == 0) continue;
+            if (p[0] == "v" && p.Length >= 4)
+            {
+                v.Add(float.Parse(p[1], System.Globalization.CultureInfo.InvariantCulture));
+                v.Add(float.Parse(p[2], System.Globalization.CultureInfo.InvariantCulture));
+                v.Add(float.Parse(p[3], System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else if (p[0] == "f" && p.Length >= 4)
+            {
+                var idx = new List<int>();
+                for (int i = 1; i < p.Length; i++)
+                    idx.Add(int.Parse(p[i].Split('/')[0], System.Globalization.CultureInfo.InvariantCulture) - 1);
+                for (int i = 1; i < idx.Count - 1; i++)
+                {
+                    t.Add(idx[0]); t.Add(idx[i]); t.Add(idx[i + 1]);
+                }
+            }
+        }
+        if (v.Count < 24 || t.Count < 12) return false;
+        vertices = v.ToArray();
+        triangles = t.ToArray();
+        return true;
+    }
+
+    private static string ModelsDir()
+    {
+        var dir = new System.IO.DirectoryInfo(System.IO.Directory.GetCurrentDirectory());
+        for (int i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
+        {
+            string candidate = System.IO.Path.Combine(dir.FullName,
+                System.IO.Path.Combine("src", System.IO.Path.Combine("CSWarfront", "Models")));
+            if (System.IO.Directory.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
 }
 }
