@@ -248,7 +248,7 @@ namespace CSWarfront.Game
                 byte[] fallbackTiers = TypeKeyParser.FallbackTierOrder(tier);
                 for (int i = 0; i < fallbackTiers.Length; i++)
                 {
-                    string fallbackKey = LandUnitRoster.TypeKey(category, fallbackTiers[i]);
+                    string fallbackKey = UnitRosters.TypeKey(category, fallbackTiers[i]);
                     if (TryGetExact(factionId, fallbackKey, out kind, out assetName)) return true;
                 }
             }
@@ -327,7 +327,7 @@ namespace CSWarfront.Game
         {
             // Task66: If the copy source is a base-type key (Army/Navy/Air/MissileBaseTypeKey), branch
             // into the dedicated copy routine. The unit-oriented logic below, which linearly scans
-            // LandUnitRoster.All(), never contains this virtual "type", so passing it through would
+            // UnitRosters.All(), never contains this virtual "type", so passing it through would
             // always yield 0 entries (TryGetCategory failure).
             // So that the same effective value shown by the "current assignment" display (TryGetForBase,
             // including the fallback to the old unified key) can be copied, the copy source is also
@@ -363,7 +363,9 @@ namespace CSWarfront.Game
             bool allFactions = scope == CopyScope.AllFactionsSameType || scope == CopyScope.AllFactionsAllTypes;
 
             int written = 0;
-            foreach (UnitType t in LandUnitRoster.All())
+            // Task157: every unit type, not just the ground ones - copying to "all types" used to stop
+            // at the land roster, so aircraft and ships were quietly left out of it.
+            foreach (UnitType t in UnitRosters.All())
             {
                 if (!allTypes)
                 {
@@ -400,12 +402,16 @@ namespace CSWarfront.Game
         // limit. _bindings/MakeKey/Save are private static, but partial class members are shared across
         // all parts, so they can be called from there without issue.
 
-        /// <summary>Reverse-looks up the UnitCategory from a TypeKey (linear scan of
-        /// LandUnitRoster.All(); only 35 entries, so the cost is negligible). Returns false if not
-        /// found.</summary>
+        /// <summary>Reverse-looks up the UnitCategory from a TypeKey (linear scan of UnitRosters.All();
+        /// 80 entries, so the cost is negligible). Returns false if not found.
+        ///
+        /// Task157: this scanned the land roster alone, so every aircraft and ship key came back
+        /// unknown - which made CopyTo log "skipped, unknown TypeKey" and return without writing
+        /// anything. Selecting an aircraft in the model list worked; copying its model to another type
+        /// did nothing at all.</summary>
         private static bool TryGetCategory(string typeKey, out UnitCategory category)
         {
-            foreach (UnitType t in LandUnitRoster.All())
+            foreach (UnitType t in UnitRosters.All())
             {
                 if (t.TypeKey == typeKey)
                 {

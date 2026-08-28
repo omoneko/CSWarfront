@@ -205,7 +205,8 @@ namespace CSWarfront.Game.UI
 
         /// <summary>Task66: prepends the 4 per-base-type keys (army/navy/air/missile,
         /// UnitAssetBindings.ArmyBaseTypeKey etc.) and then builds the 35 TypeKeys from
-        /// LandUnitRoster.All() (category declaration order, then Tier1-5), for 39 entries total. Same
+        /// UnitRosters.All() (land, then air, then sea; each in declaration order, Tier1-5), for 84
+        /// entries total. Same
         /// policy as AssetAssignPanelControls.BuildTypeKeys (both the floating panel and the Options
         /// subpage show the same 4 entries; as of Task60 there was a single key).</summary>
         private static void BuildTypeKeys()
@@ -217,13 +218,11 @@ namespace CSWarfront.Game.UI
                 UnitAssetBindings.AirBaseTypeKey,
                 UnitAssetBindings.MissileBaseTypeKey
             };
-            foreach (UnitType t in LandUnitRoster.All()) keys.Add(t.TypeKey);
             // Task155 (tea32: "is it possible to add an option to also change the models for
             // aircraft?"). The list was ground vehicles only, for no reason beyond the order things
             // were built in - a binding is resolved by type key alone (UnitMeshSource.TryResolve), so
             // aircraft and ships work through exactly the same path.
-            foreach (UnitType t in AirUnitRoster.All()) keys.Add(t.TypeKey);
-            foreach (UnitType t in NavalUnitRoster.All()) keys.Add(t.TypeKey);
+            foreach (UnitType t in UnitRosters.All()) keys.Add(t.TypeKey);
             _typeKeys = keys.ToArray();
         }
 
