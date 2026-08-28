@@ -234,6 +234,9 @@ namespace CSWarfront.Core
                         // and no home to fly to = already inside the home area (air base/carrier), or a
                         // transport helicopter waiting at its home base. Land instead of hovering
                         // (MovementStepReturnHome.cs).
+                        // Task153: out of ammo with nowhere to rearm - fly off the map rather than
+                        // hang over the city forever (see AdvanceAirDeparture).
+                        if (AdvanceAirDeparture(state, u, type, stepLen, height)) continue;
                         if (type.Domain == Domain.Air) AdvanceAirLanding(state, u, stepLen, height);
                         continue;
                     }

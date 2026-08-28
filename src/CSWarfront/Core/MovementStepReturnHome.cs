@@ -39,6 +39,75 @@ namespace CSWarfront.Core
         /// gently rather than dropping straight down).</summary>
         public const float LandingDescentRate = 0.35f;
 
+        /// <summary>Task153: how far outside the playable area a departing aircraft is released. Far
+        /// enough to be off screen and out of every zone that might still notice it.</summary>
+        public const float DepartureDistance = 5000f;
+
+        /// <summary>Task153 (playtest: "bombers still do not repeat hit and run, the invasion ones
+        /// especially"): an aircraft that is out of ammo and has no base to rearm at flies off the map
+        /// and is released.
+        ///
+        /// Bombers carry about three hours of firing - two or three passes - and the design is that they
+        /// then go home and rearm. An invasion wave has no home: the Invader faction owns nothing, and
+        /// Task100 deliberately bars it from the supply network, so its aircraft can only recover by
+        /// killing units. A bomber sent to attack a base kills nothing, goes dry after its second pass,
+        /// and had nowhere to be - so it simply stopped, hanging in the sky over the city for the rest of
+        /// the game. Measured: distance to target frozen to the metre, ammo zero, state Idle, forever.
+        ///
+        /// Flying off the map is what a raid does when it is out of bombs. It also covers the same dead
+        /// end for a normal faction that has lost its last air base, which used to park its aircraft in
+        /// mid-air just as permanently.</summary>
+        private static bool AdvanceAirDeparture(WarState state, UnitInstance u, UnitType type, float stepLen,
+            IHeightSampler height)
+        {
+            if (type.Domain != Domain.Air) return false;
+            if (type.Category == UnitCategory.TransportHelicopter) return false; // its own step owns it
+            if (type.AmmoCombatHours <= 0f) return false;                        // never runs dry
+            if (AmmoRules.HasAmmo(u, type)) return false;                        // still has something to drop
+            if (HasAnyRearmPoint(state, u, type)) return false;                  // somewhere to go: return home instead
+
+            // Straight out the nearest edge, held at cruise altitude so it does not fly into a hillside on
+            // the way. Released once clear.
+            float x = u.Position.X, z = u.Position.Z;
+            WorldPos exit = System.Math.Abs(x) >= System.Math.Abs(z)
+                ? new WorldPos(x >= 0f ? DepartureDistance : -DepartureDistance, u.Position.Y, z)
+                : new WorldPos(x, u.Position.Y, z >= 0f ? DepartureDistance : -DepartureDistance);
+
+            AdvanceAir(u, stepLen, exit, height);
+            if (System.Math.Abs(u.Position.X) >= DepartureDistance - 1f
+                || System.Math.Abs(u.Position.Z) >= DepartureDistance - 1f)
+            {
+                // Silent release, as the stall watchdog does: no explosion, no losses for anyone.
+                u.State = UnitState.Dead;
+                u.CurrentHP = 0f;
+            }
+            return true;
+        }
+
+        /// <summary>Task153: whether this unit has anywhere at all it could rearm - a base of its own kind
+        /// or, for aircraft, a friendly carrier. Deliberately ignores distance: the question is whether
+        /// going home is a plan, not whether it is a short trip.</summary>
+        private static bool HasAnyRearmPoint(WarState state, UnitInstance u, UnitType type)
+        {
+            BaseType homeBaseType = type.Domain == Domain.Air ? BaseType.AirForce : BaseType.Navy;
+            for (int j = 0; j < state.Bases.Count; j++)
+            {
+                MilitaryBase b = state.Bases[j];
+                if (b.OwnerFactionId == null || b.OwnerFactionId.Value != u.FactionId) continue;
+                if (b.Type == homeBaseType) return true;
+            }
+
+            if (type.Domain != Domain.Air) return false;
+            for (int i = 0; i < state.Units.Count; i++)
+            {
+                UnitInstance other = state.Units[i];
+                if (!other.IsAlive || other.FactionId != u.FactionId) continue;
+                UnitType otherType = state.Types.Get(other.TypeKey);
+                if (otherType != null && otherType.Category == UnitCategory.Carrier) return true;
+            }
+            return false;
+        }
+
         /// <summary>Resolves an Idle air/sea unit's home. Null when exempt, no home exists, or already
         /// arrived.</summary>
         private static WorldPos? ResolveHomeObjective(WarState state, UnitInstance u, UnitType type)
