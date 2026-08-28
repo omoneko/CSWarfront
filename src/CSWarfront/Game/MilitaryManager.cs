@@ -181,6 +181,7 @@ namespace CSWarfront.Game
             // buffer from the main thread" style as CombatRoadBlocker.Reset.
             BaseHiddenSync.Reset();
             GarrisonAbandonSync.Reset(); // Task139: hand back every building held by troops
+            CombatEvacuation.Reset();   // Task150
             CombatCollateral.Reset(); // Task65: also clear the internal state used for lottery throttling on level unload.
 
             lock (_stateLock)

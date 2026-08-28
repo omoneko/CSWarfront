@@ -173,6 +173,7 @@ Options_BattleDamageDropdown = 战斗造成的附带损害（战场附近的火�
 Options_BattleDamageNone = 无 - 城市完全不受影响
 Options_BattleDamageLight = 轻微 - 偶尔起火
 Options_BattleDamageHeavy = 严重 - 交战的街区会明显被破坏
+Options_EvacuateCivilians = 附近爆发战斗时，市民疏散到最近的避难所（城市中需要有避难所）
 Options_InvasionGroup = 入侵事件（从城市外袭来的攻击部队）
 Options_InvasionEnable = 启用入侵事件
 Options_InvasionFrequency = 入侵频率

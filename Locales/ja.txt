@@ -170,6 +170,7 @@ Options_BattleDamageDropdown = 戦闘による巻き添え被害（戦闘地点�
 Options_BattleDamageNone = なし - 都市は一切傷つかない
 Options_BattleDamageLight = 小 - たまに火災が起きる程度
 Options_BattleDamageHeavy = 大 - 戦闘が起きた地区は目に見えて荒れる
+Options_EvacuateCivilians = 近くで戦闘が始まったら市民を最寄りのシェルターへ避難させる（都市にシェルターが必要）
 Options_InvasionGroup = 侵攻イベント（都市外から攻撃部隊が来襲）
 Options_InvasionEnable = 侵攻イベントを有効化
 Options_InvasionFrequency = 侵攻頻度

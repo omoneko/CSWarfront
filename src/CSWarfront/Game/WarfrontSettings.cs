@@ -68,6 +68,15 @@ namespace CSWarfront.Game
         /// Memory-only, like the rest of WarfrontSettings.</summary>
         public static int BattleDamageIndex = 1;
 
+        /// <summary>Task150 (Workshop feedback from bob: "people just walk and drive like normal even
+        /// though there are tanks and explosions right next to them"): while ON, each combat zone is
+        /// declared an evacuation area and civilians head for the city's shelters - the game's own
+        /// evacuation, so it works with the Natural Disasters shelters and any custom ShelterAI asset.
+        /// Does nothing in a city with no shelter. Default ON: standing around in a firefight is not
+        /// behaviour anyone was defending, and it costs nothing where there is nowhere to evacuate to.
+        /// Memory-only, like the rest of WarfrontSettings.</summary>
+        public static bool EvacuateCiviliansFromCombat = true;
+
         /// <summary>Multiplier on collateral fire/collapse chance and on the daily cap, by index.</summary>
         public static float BattleDamageScale
         {

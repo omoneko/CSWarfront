@@ -110,6 +110,9 @@ namespace CSWarfront.Game
             group.AddDropdown(WarfrontStrings.Options_BattleDamageDropdown,
                 WarfrontSettings.BattleDamageNames(), WarfrontSettings.BattleDamageIndex,
                 i => WarfrontSettings.BattleDamageIndex = i); // Task146
+            group.AddCheckbox(WarfrontStrings.Options_EvacuateCivilians,
+                WarfrontSettings.EvacuateCiviliansFromCombat,
+                v => WarfrontSettings.EvacuateCiviliansFromCombat = v); // Task150
         }
 
         private static void AddUnitCommandHotkeyUI(UIHelperBase helper)

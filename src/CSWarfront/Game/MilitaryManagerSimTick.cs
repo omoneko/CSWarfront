@@ -445,6 +445,10 @@ namespace CSWarfront.Game
                 // the two are independent operations with no dependency on each other).
                 CombatCollateral.Advance(State, dt);
 
+                // Task150: and the people living there get out. Declares each combat zone an evacuation
+                // area and lets the game's own shelter logic do the rest.
+                CombatEvacuation.Advance(State, dt);
+
                 // Economy (low frequency, based on in-game time). Subtract by the interval so no time is
                 // lost (zero-clearing would discard the fractional part of dt every time, effectively
                 // lowering the frequency).

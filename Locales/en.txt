@@ -171,6 +171,7 @@ Options_BattleDamageDropdown = Collateral damage from fighting (fires and collap
 Options_BattleDamageNone = None - the city is never touched
 Options_BattleDamageLight = Light - the occasional fire
 Options_BattleDamageHeavy = Heavy - a battle wrecks the district it is fought in
+Options_EvacuateCivilians = Civilians evacuate to the nearest shelter when fighting starts nearby (needs a shelter in the city)
 Options_InvasionGroup = Invasion events (waves attack from outside the city)
 Options_InvasionEnable = Enable invasion events
 Options_InvasionFrequency = Invasion frequency

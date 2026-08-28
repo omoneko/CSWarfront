@@ -31,6 +31,7 @@ namespace CSWarfront.Game
         public static string Options_BattleDamageNone = "None - the city is never touched";
         public static string Options_BattleDamageLight = "Light - the occasional fire";
         public static string Options_BattleDamageHeavy = "Heavy - a battle wrecks the district it is fought in";
+        public static string Options_EvacuateCivilians = "Civilians evacuate to the nearest shelter when fighting starts nearby (needs a shelter in the city)";
 
         public static string Options_InvasionGroup = "Invasion events (waves attack from outside the city)";
         public static string Options_InvasionEnable = "Enable invasion events";
