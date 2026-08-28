@@ -50,6 +50,11 @@ namespace CSWarfront.Core
         /// dithering at the boundary). Always null and ignored for non-air categories.</summary>
         public WorldPos? AirPassEgress;
 
+        /// <summary>Task154: which way a fixed-wing aircraft is pointing, in radians (0 is +Z, increasing
+        /// toward +X). Runtime-only, not persisted - on load the first movement tick faces it at whatever
+        /// it is being sent toward. Unused by helicopters, which have no turn radius to respect.</summary>
+        public float? AirHeading;
+
         /// <summary>The player's command (Task48). Defaults to AiControlled.
         /// Task92: persisted since v8 together with RallyPoint (fixes "orders revert to AI control on load").</summary>
         public UnitOrder Order;

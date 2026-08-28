@@ -209,7 +209,9 @@ public class ReturnHomeTests
     }
 
     [Fact]
-    public void Idle_fighter_over_open_water_keeps_hovering_rather_than_ditching()
+    /// <summary>Task154: it circles above the water rather than hovering over it, but the point of the
+    /// test is unchanged - with no deck to land on it must not put itself in the sea.</summary>
+    public void Idle_fighter_over_open_water_stays_up_rather_than_ditching()
     {
         var s = BaseState();
         s.Height = new FlatGroundSampler(-30f);
@@ -219,9 +221,19 @@ public class ReturnHomeTests
         fighter.State = UnitState.Idle;
         s.Units.Add(fighter); // no return destination and no carrier = nowhere to land
 
-        MovementStep.Advance(s, 1f);
+        WorldPos previous = fighter.Position;
+        float lowest = float.MaxValue, shortest = float.MaxValue;
+        for (int i = 0; i < 20; i++)
+        {
+            MovementStep.Advance(s, 1f);
+            float moved = fighter.Position.HorizontalDistanceTo(previous);
+            if (moved < shortest) shortest = moved;
+            if (fighter.Position.Y < lowest) lowest = fighter.Position.Y;
+            previous = fighter.Position;
+        }
 
-        Assert.Equal(MovementStep.CruiseAltitude, fighter.Position.Y, 3);
+        Assert.True(lowest > 0f, "the fighter went into the sea (lowest Y " + lowest + ")");
+        Assert.True(shortest > 0f, "the fighter stopped in mid-air over the water");
     }
 
     [Fact]

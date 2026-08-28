@@ -73,7 +73,7 @@ namespace CSWarfront.Core
                 ? new WorldPos(x >= 0f ? DepartureDistance : -DepartureDistance, u.Position.Y, z)
                 : new WorldPos(x, u.Position.Y, z >= 0f ? DepartureDistance : -DepartureDistance);
 
-            AdvanceAir(u, stepLen, exit, height);
+            AdvanceAir(u, type, stepLen, exit, height);
             if (System.Math.Abs(u.Position.X) >= DepartureDistance - 1f
                 || System.Math.Abs(u.Position.Z) >= DepartureDistance - 1f)
             {
@@ -120,10 +120,26 @@ namespace CSWarfront.Core
             if (type.Category == UnitCategory.TransportHelicopter
                 || type.Category == UnitCategory.MilitaryTrain) return null;
 
+            WorldPos home;
+            float dist;
+            if (!TryFindHome(state, u, type, out home, out dist)) return null;
+            if (dist <= HomeArrivalDistance) return null; // arrived: land in place (AdvanceAirLanding)
+            return home;
+        }
+
+        /// <summary>The nearest place this unit could call home, and how far away it is. False when it has
+        /// none. Task154 split this out of ResolveHomeObjective so IsAtHome can ask the same question
+        /// without the "already arrived" answer being folded into a null.</summary>
+        private static bool TryFindHome(WarState state, UnitInstance u, UnitType type, out WorldPos home,
+            out float distance)
+        {
+            home = default(WorldPos);
+            distance = float.MaxValue;
+
             BaseType homeBaseType;
             if (type.Domain == Domain.Air) homeBaseType = BaseType.AirForce;
             else if (type.Domain == Domain.Sea) homeBaseType = BaseType.Navy;
-            else return null; // land units do not return home
+            else return false; // land units do not return home
 
             WorldPos? best = null;
             float bestDist = float.MaxValue;
@@ -151,9 +167,10 @@ namespace CSWarfront.Core
                 }
             }
 
-            if (!best.HasValue) return null;
-            if (bestDist <= HomeArrivalDistance) return null; // arrived: land in place (AdvanceAirLanding)
-            return best;
+            if (!best.HasValue) return false;
+            home = best.Value;
+            distance = bestDist;
+            return true;
         }
 
         /// <summary>Task107: target altitude during the return approach. At or beyond

@@ -29,6 +29,12 @@ namespace CSWarfront.Core
         /// starts next tick.</summary>
         public const float PassArrivalDistance = 20f;
 
+        /// <summary>Task154: an aircraft that now has to bank to reach the anchor cannot always thread the
+        /// PassTriggerDistance eye. Within this distance, once the anchor has slid behind the wing, the
+        /// run counts as flown and the egress arms. Comfortably inside the turn radii, so an aircraft
+        /// coming back round after an egress never mistakes the outbound leg for a completed run.</summary>
+        public const float PassAbeamDistance = 160f;
+
         /// <summary>Pass movement cuts in-range time to roughly a quarter (in-range window ≈ 2×range vs
         /// circuit length ≈ 2×PassEgressDistance), so the dt-scaled damage of air units (suicide drones
         /// excluded) is multiplied by this to compensate. Effective DPS lands at ~60–75% of the old

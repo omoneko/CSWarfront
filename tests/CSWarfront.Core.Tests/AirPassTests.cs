@@ -11,6 +11,9 @@ using Xunit;
 /// </summary>
 public class AirPassTests
 {
+    /// <summary>Task154: the target here is a land unit, which stands still. An idle aircraft now flies
+    /// a holding circle rather than hovering, so it is no longer a fixed point to measure pass geometry
+    /// against.</summary>
     private static WarState FighterVsTargetState(out UnitInstance fighter, string targetTypeKey, float targetX)
     {
         var s = new WarState();
@@ -35,7 +38,7 @@ public class AirPassTests
     public void Engaging_fighter_flies_through_its_locked_target_and_sets_egress_beyond_it()
     {
         UnitInstance fighter;
-        var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 100f);
+        var s = FighterVsTargetState(out fighter, "Tank_T1", 100f);
         fighter.TargetId = 2; // Assumes CombatStep has already locked the target
         fighter.State = UnitState.Engaging;
 
@@ -53,7 +56,7 @@ public class AirPassTests
     public void Fighter_completes_the_egress_leg_and_then_turns_back_for_another_pass()
     {
         UnitInstance fighter;
-        var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 100f);
+        var s = FighterVsTargetState(out fighter, "Tank_T1", 100f);
         fighter.TargetId = 2;
         fighter.State = UnitState.Engaging;
 
@@ -74,8 +77,15 @@ public class AirPassTests
             "expected the fighter to fly well past the target before turning (maxX=" + maxX + ")");
 
         // Turns around and heads back toward the target (the -X side) = the racetrack.
+        // Task154: on an arc, not on the spot. A half circle at the fighter's turn radius is about 530
+        // metres of flying, so it is still heading outbound for the first several ticks and needs the
+        // best part of a hundred to come round - the wide sweep the flight model exists to produce.
         float xAfterEgress = fighter.Position.X;
-        for (int i = 0; i < 40; i++) MovementStep.Advance(s, 0.05f);
+        for (int i = 0; i < 10; i++) MovementStep.Advance(s, 0.05f);
+        Assert.True(fighter.Position.X > xAfterEgress,
+            "the fighter reversed on the spot instead of banking round");
+
+        for (int i = 0; i < 140; i++) MovementStep.Advance(s, 0.05f);
         Assert.True(fighter.Position.X < xAfterEgress,
             "expected the fighter to turn back toward the target for another pass");
     }
@@ -84,7 +94,7 @@ public class AirPassTests
     public void Egress_leg_persists_even_if_the_target_dies_mid_leg()
     {
         UnitInstance fighter;
-        var s = FighterVsTargetState(out fighter, "TacticalBomber_T1", 100f);
+        var s = FighterVsTargetState(out fighter, "Tank_T1", 100f);
         fighter.TargetId = 2;
         fighter.State = UnitState.Engaging;
 
@@ -154,7 +164,11 @@ public class AirPassTests
         for (int i = 0; i < 300; i++) MovementStep.Advance(s, 0.05f);
 
         Assert.False(bomber.AirPassEgress.HasValue); // No pass occurs
-        Assert.Equal(100f, bomber.Position.X, 0);    // Hovers at the objective (the previous arrival behaviour)
+        // Task154: it holds station over the objective instead of stopping dead on it - a bomber cannot
+        // hover. A holding circle is two turn radii across.
+        Assert.True(bomber.Position.HorizontalDistanceTo(new WorldPos(100, 0, 0))
+            <= MovementStep.BomberTurnRadius * 2.5f,
+            "the bomber left the objective it disengaged over (x=" + bomber.Position.X + ")");
     }
 
     [Fact]
@@ -178,13 +192,16 @@ public class AirPassTests
 
         for (int i = 0; i < 300; i++) MovementStep.Advance(s, 0.05f);
 
-        // Fighters cannot attack bases (Task85), so no pass occurs even over the base; the fighter hovers at the objective.
+        // Fighters cannot attack bases (Task85), so no pass occurs even over the base; the fighter holds
+        // station over its objective (Task154: it circles rather than hovering).
         Assert.False(fighter.AirPassEgress.HasValue);
-        Assert.Equal(100f, fighter.Position.X, 0);
+        Assert.True(fighter.Position.HorizontalDistanceTo(new WorldPos(100, 0, 0))
+            <= MovementStep.FighterTurnRadius * 2.5f,
+            "the fighter left its objective (x=" + fighter.Position.X + ")");
     }
 
     [Fact]
-    public void Plane_with_no_combat_anchor_advances_to_objective_as_before()
+    public void Plane_with_no_combat_anchor_advances_to_its_objective_and_holds_over_it()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -194,9 +211,19 @@ public class AirPassTests
         bomber.OrderTargetPos = new WorldPos(50, 0, 0);
         s.Units.Add(bomber);
 
-        for (int i = 0; i < 100; i++) MovementStep.Advance(s, 0.05f);
+        float closest = float.MaxValue;
+        var objective = new WorldPos(50, 0, 0);
+        for (int i = 0; i < 100; i++)
+        {
+            MovementStep.Advance(s, 0.05f);
+            float d = bomber.Position.HorizontalDistanceTo(objective);
+            if (d < closest) closest = d;
+        }
 
-        Assert.Equal(50f, bomber.Position.X, 1); // Reaches the objective and stops, as before
+        Assert.True(closest < 5f, "the bomber never reached its objective (closest " + closest + ")");
+        // Task154: having arrived it circles rather than parking on the spot.
+        Assert.True(bomber.Position.HorizontalDistanceTo(objective)
+            <= MovementStep.BomberTurnRadius * 2.5f, "the bomber flew away from its objective");
         Assert.False(bomber.AirPassEgress.HasValue);
     }
 

@@ -939,16 +939,22 @@ public class MovementStepTests
     }
 
     [Fact]
-    public void Air_unit_snaps_exactly_to_objective_on_arrival()
+    /// <summary>Task154: it used to snap onto the objective and sit on it. An aeroplane cannot stop in
+    /// the air, so it flies on through and comes back round (MovementStepAirFlight). Helicopters still
+    /// arrive and hold - see AirFlightModelTests.</summary>
+    public void Air_unit_flies_on_past_its_objective_instead_of_stopping_on_it()
     {
         var s = OneAirUnit(0f, 0f, 3f); // well within one tick's travel distance for a fast fighter
         MovementStep.Advance(s, 1f);
-        Assert.Equal(3f, s.Units[0].Position.X, 2);
-        Assert.Equal(0f, s.Units[0].Position.Z, 2);
+        Assert.True(s.Units[0].Position.X > 3f,
+            "the fighter stopped on its objective (x=" + s.Units[0].Position.X + ")");
+        Assert.Equal(0f, s.Units[0].Position.Z, 2); // still flying the same line
     }
 
     [Fact]
-    public void Air_unit_does_not_move_when_Idle_with_no_order()
+    /// <summary>Task154: an idle fighter holds a circle rather than freezing - only a helicopter may stop
+    /// in the air. Where that circle sits is covered by AirFlightModelTests.</summary>
+    public void Idle_fixed_wing_with_no_order_keeps_flying()
     {
         var s = new WarState();
         s.Factions.Add(new Faction(0, "Red"));
@@ -958,7 +964,8 @@ public class MovementStepTests
 
         MovementStep.Advance(s, 1f);
 
-        Assert.Equal(0f, s.Units[0].Position.X, 3);
+        Assert.True(s.Units[0].Position.HorizontalDistanceTo(new WorldPos(0f, 0f, 0f)) > 0f,
+            "the idle fighter froze in the air");
     }
 
     [Fact]

@@ -237,7 +237,16 @@ namespace CSWarfront.Core
                         // Task153: out of ammo with nowhere to rearm - fly off the map rather than
                         // hang over the city forever (see AdvanceAirDeparture).
                         if (AdvanceAirDeparture(state, u, type, stepLen, height)) continue;
-                        if (type.Domain == Domain.Air) AdvanceAirLanding(state, u, stepLen, height);
+                        if (type.Domain == Domain.Air)
+                        {
+                            // Task154: settling straight down onto whatever is underneath is a helicopter
+                            // move. A fixed-wing aircraft may only come to rest on its own apron or deck;
+                            // anywhere else it holds a circle until it is given something to do.
+                            if (IsFixedWing(type) && !IsAtHome(state, u, type))
+                                AdvanceAirLoiter(u, type, stepLen, height);
+                            else
+                                AdvanceAirLanding(state, u, stepLen, height);
+                        }
                         continue;
                     }
 
@@ -250,7 +259,7 @@ namespace CSWarfront.Core
                         float altitude = returningHome
                             ? ApproachAltitude(u.Position.HorizontalDistanceTo(objective.Value), cruise)
                             : cruise;
-                        AdvanceAir(u, stepLen, objective.Value, height, altitude);
+                        AdvanceAir(u, type, stepLen, objective.Value, height, altitude);
                     }
                     else // Domain.Sea
                     {
@@ -599,9 +608,17 @@ namespace CSWarfront.Core
         /// succeeds, otherwise the previous Y is kept (the same safe fallback as the IHeightSampler pattern
         /// in the class comment). The altitude is re-derived relative to the surface every tick, so flying
         /// over mountains naturally moves Y up and down.</summary>
-        private static void AdvanceAir(UnitInstance u, float stepLen, WorldPos objective, IHeightSampler height,
-            float altitude = CruiseAltitude)
+        private static void AdvanceAir(UnitInstance u, UnitType type, float stepLen, WorldPos objective,
+            IHeightSampler height, float altitude = CruiseAltitude)
         {
+            // Task154: a bomber or a fighter flies - it holds a heading, turns on an arc and never stops.
+            // Only helicopters take the direct route below, which is also what lets them hover on arrival.
+            if (IsFixedWing(type))
+            {
+                AdvanceAirFixedWing(u, type, stepLen, objective, height, altitude);
+                return;
+            }
+
             float dist = u.Position.HorizontalDistanceTo(objective);
             float nx, nz;
             if (dist <= stepLen || dist <= 0.01f) { nx = objective.X; nz = objective.Z; }
@@ -612,6 +629,15 @@ namespace CSWarfront.Core
                 nz = u.Position.Z + (objective.Z - u.Position.Z) * t;
             }
 
+            u.Position = ResolveAirPosition(u, nx, nz, stepLen, height, altitude);
+        }
+
+        /// <summary>The position an air unit takes after moving to nx/nz: the requested altitude above the
+        /// surface there, or the previous Y when the surface cannot be sampled (the safe fallback used
+        /// throughout this class).</summary>
+        private static WorldPos ResolveAirPosition(UnitInstance u, float nx, float nz, float stepLen,
+            IHeightSampler height, float altitude)
+        {
             float ny = u.Position.Y; // On sampling failure keep the previous Y (fallback).
             float groundY;
             if (height != null && height.TrySampleHeight(nx, nz, out groundY))
@@ -623,8 +649,7 @@ namespace CSWarfront.Core
                 if (targetY - ny > stepLen) targetY = ny + stepLen;
                 ny = targetY;
             }
-
-            u.Position = new WorldPos(nx, ny, nz);
+            return new WorldPos(nx, ny, nz);
         }
 
         /// <summary>Task101: rail-only movement for military trains. Simply follows the Path (the rail
