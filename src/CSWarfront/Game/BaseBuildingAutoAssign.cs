@@ -63,7 +63,9 @@ namespace CSWarfront.Game
         {
             "3791623137", // AAPosition (NoDLC)
             "3791623651", // ATPillbox (NoDLC)
-            "3791624027"  // MilitaryBase_Navy (NoDLC)
+            "3791624027", // MilitaryBase_Navy (NoDLC)
+            "3791645632", // Bunker (NoDLC)
+            "3791645910"  // Trench (NoDLC)
         };
 
         /// <summary>Scans the loaded building prefabs and returns the auto-assignment of base type to
