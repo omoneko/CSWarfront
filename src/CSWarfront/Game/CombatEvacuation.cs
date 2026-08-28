@@ -39,9 +39,14 @@ namespace CSWarfront.Game
         /// already under fire.</summary>
         public const float RadiusScale = 1.5f;
 
+        /// <summary>Task151: how many shelter names one log line will carry. Enough to see that a
+        /// hand-built asset was recognised, short of printing a hundred of them.</summary>
+        private const int MaxSheltersLogged = 8;
+
         private static float _accum;
         private static bool _noShelterLogged;
         private static bool _activeLogged;
+        private static int _lastShelterCount = -1;
 
         public static void Advance(WarState state, float dt)
         {
@@ -95,9 +100,20 @@ namespace CSWarfront.Game
             }
         }
 
-        /// <summary>Whether the city has anything citizens could be evacuated to. Shelters are Disaster
-        /// service buildings running ShelterAI — the same test DisasterManager.EvacuateAll uses to find
-        /// them, so a custom asset that works for a disaster works here too.</summary>
+        /// <summary>Whether the city has anything citizens could be evacuated to, naming what it found
+        /// the first time and whenever the count changes.
+        ///
+        /// Shelters are recognised by what they ARE, not by what they are called: a Disaster-service
+        /// building running ShelterAI. That is the same test the game's own DisasterManager.EvacuateAll
+        /// uses, which is why a shelter built in the Asset Editor on top of a vanilla one needs nothing
+        /// from this mod - it inherits the service and the AI, so the game already routes citizens to it
+        /// and this class already counts it. Task151 adds only the log line that lets a builder confirm
+        /// their asset was picked up, because "is my shelter recognised?" was otherwise unanswerable
+        /// without starting a war next to it.
+        ///
+        /// The one case name matching could not rescue is a building based on something that is not a
+        /// shelter: with no ShelterAI it has no capacity, no evacuation range and nowhere to put anyone,
+        /// and no amount of matching its name would give it those.</summary>
         private static bool HasAnyShelter()
         {
             if (!Singleton<BuildingManager>.exists) return false;
@@ -105,14 +121,33 @@ namespace CSWarfront.Game
             FastList<ushort> shelters = bm.GetServiceBuildings(ItemClass.Service.Disaster);
             if (shelters == null) return false;
 
+            int found = 0;
+            var names = new System.Text.StringBuilder();
             for (int i = 0; i < shelters.m_size; i++)
             {
                 ushort id = shelters.m_buffer[i];
                 if (id == 0) continue;
                 BuildingInfo info = bm.m_buildings.m_buffer[id].Info;
-                if (info != null && info.m_buildingAI is ShelterAI) return true;
+                if (info == null || !(info.m_buildingAI is ShelterAI)) continue;
+
+                found++;
+                if (found <= MaxSheltersLogged)
+                {
+                    if (names.Length > 0) names.Append(", ");
+                    names.Append(info.name);
+                }
             }
-            return false;
+
+            if (found != _lastShelterCount)
+            {
+                _lastShelterCount = found;
+                if (found > 0)
+                {
+                    ModConfig.Log("CombatEvacuation: " + found + " shelter(s) available for evacuation: "
+                        + names + (found > MaxSheltersLogged ? ", ..." : ""));
+                }
+            }
+            return found > 0;
         }
 
         /// <summary>Level unload: nothing to hand back (the evacuation map fades on its own), only the
@@ -122,6 +157,7 @@ namespace CSWarfront.Game
             _accum = 0f;
             _noShelterLogged = false;
             _activeLogged = false;
+            _lastShelterCount = -1;
         }
     }
 }
