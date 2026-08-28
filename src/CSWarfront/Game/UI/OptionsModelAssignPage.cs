@@ -218,6 +218,12 @@ namespace CSWarfront.Game.UI
                 UnitAssetBindings.MissileBaseTypeKey
             };
             foreach (UnitType t in LandUnitRoster.All()) keys.Add(t.TypeKey);
+            // Task155 (tea32: "is it possible to add an option to also change the models for
+            // aircraft?"). The list was ground vehicles only, for no reason beyond the order things
+            // were built in - a binding is resolved by type key alone (UnitMeshSource.TryResolve), so
+            // aircraft and ships work through exactly the same path.
+            foreach (UnitType t in AirUnitRoster.All()) keys.Add(t.TypeKey);
+            foreach (UnitType t in NavalUnitRoster.All()) keys.Add(t.TypeKey);
             _typeKeys = keys.ToArray();
         }
 

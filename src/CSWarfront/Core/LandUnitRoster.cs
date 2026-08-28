@@ -98,7 +98,7 @@ namespace CSWarfront.Core
             return category + "_T" + tier;
         }
 
-        /// <summary>Yields the 35 UnitTypes: 7 categories × tiers 1–5.</summary>
+        /// <summary>Yields the 45 UnitTypes: 9 categories × tiers 1–5.</summary>
         public static IEnumerable<UnitType> All()
         {
             for (int i = 0; i < Bases.Length; i++)
