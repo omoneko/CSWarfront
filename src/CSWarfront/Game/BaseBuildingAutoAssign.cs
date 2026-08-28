@@ -53,11 +53,26 @@ namespace CSWarfront.Game
                 new[] { "aaposition", "antiairposition", "aadefenseposition", "warfrontaaposition" })
         };
 
+        /// <summary>Task156: Workshop ids of the DLC-free rebuilds. The originals were built in the
+        /// asset editor on top of a Natural Disasters building and a Mass Transit ferry depot, so they
+        /// never appeared for anyone who did not own those (Workshop report by siddyskylines1989: "no
+        /// wonder why i havent been able to see them at all"). The rebuilds carry the same asset names,
+        /// so a player with both subscribed would otherwise get whichever the game happened to load
+        /// first. The rebuild wins: it is the one that works for everybody.</summary>
+        private static readonly string[] PreferredWorkshopIds =
+        {
+            "3791623137", // AAPosition (NoDLC)
+            "3791623651", // ATPillbox (NoDLC)
+            "3791624027"  // MilitaryBase_Navy (NoDLC)
+        };
+
         /// <summary>Scans the loaded building prefabs and returns the auto-assignment of base type to
         /// prefab name (empty if nothing is found). Main thread only (called from OnLevelLoaded).</summary>
         public static Dictionary<BaseType, string> Detect()
         {
             var found = new Dictionary<BaseType, string>();
+            // Task156: how good the match already held for each type is - lower is better. See Rank.
+            var bestRank = new Dictionary<BaseType, int>();
 
             try
             {
@@ -73,13 +88,22 @@ namespace CSWarfront.Game
                     for (int c = 0; c < Candidates.Length; c++)
                     {
                         BaseType type = Candidates[c].Key;
-                        if (found.ContainsKey(type)) continue; // first match wins (deterministic)
-
                         string[] names = Candidates[c].Value;
                         for (int n = 0; n < names.Length; n++)
                         {
                             if (key != names[n]) continue;
-                            found[type] = info.name;
+
+                            // Task156: pick the best match rather than the first one the game happens
+                            // to hand us. Prefab order used to decide, which is fine while only one
+                            // asset can match but not once a DLC-free rebuild shares its name with the
+                            // original. Ties keep the earlier prefab, exactly as before.
+                            int rank = Rank(info.name, n);
+                            int held;
+                            if (!bestRank.TryGetValue(type, out held) || rank < held)
+                            {
+                                found[type] = info.name;
+                                bestRank[type] = rank;
+                            }
                             break;
                         }
                     }
@@ -104,6 +128,27 @@ namespace CSWarfront.Game
             }
 
             return found;
+        }
+
+        /// <summary>Task156: how good a match is - lower wins. A preferred Workshop id beats every
+        /// ordinary asset; within each of those two bands, the earlier candidate name wins.</summary>
+        private static int Rank(string prefabName, int nameIndex)
+        {
+            return (IsPreferred(prefabName) ? 0 : 1000) + nameIndex;
+        }
+
+        /// <summary>Whether this prefab came from one of the PreferredWorkshopIds. Workshop prefabs are
+        /// named "&lt;itemId&gt;.&lt;asset name&gt;_Data"; anything without an id prefix (a local asset
+        /// in the Addons folder) is simply not one of them.</summary>
+        private static bool IsPreferred(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return false;
+            int dot = prefabName.IndexOf('.');
+            if (dot <= 0) return false;
+            string id = prefabName.Substring(0, dot);
+            for (int i = 0; i < PreferredWorkshopIds.Length; i++)
+                if (id == PreferredWorkshopIds[i]) return true;
+            return false;
         }
 
         /// <summary>"1234567890.Bunker_Data" → "bunker". Absorbs the Workshop id prefix, the "_Data"
